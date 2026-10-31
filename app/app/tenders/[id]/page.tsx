@@ -669,7 +669,16 @@ export default async function TenderWorkspacePage({
                         ? "Ready to submit"
                         : `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`}
                     </div>
-                    <div className="text-[11px] text-muted-foreground">Readiness score</div>
+                    {/* Sarel's own brief, 2026-10-31: "{confirmedCount}/{totalCount}
+                        Returnables Ready" - the exact confirmedCount/totalCount
+                        computeTenderReadiness() already carries (same numbers
+                        the score pill above is built from, not a new count) -
+                        recomputed fresh on every render, so this already
+                        updates the moment a Server Action redirects back here
+                        (a soft client-side navigation, never a hard reload). */}
+                    <div className="text-[11px] text-muted-foreground">
+                      Readiness score &middot; {tenderReadiness.confirmedCount}/{tenderReadiness.totalCount} returnables ready
+                    </div>
                   </div>
                 </div>
               )}
@@ -733,6 +742,27 @@ export default async function TenderWorkspacePage({
                   mutation path - one real "generate" action per tender, not
                   two that could disagree. Disabled (with why) until there is
                   a pack to generate from and nothing still blocking it. */}
+              {/* Prominent, tab-independent download CTA (Sarel's own brief,
+                  2026-10-31) - sits ABOVE the generate/regenerate link below
+                  so a pack that already exists is never harder to find than
+                  the button to make another one. Only the general family has
+                  readyDownload wired (SANRAL's own equivalent download link
+                  already lives inside submission-pack.tsx, unchanged here -
+                  out of scope for this brief, which named the general-family
+                  113-page pack specifically). */}
+              {isGeneralFamily && generalSections?.readyDownload && (
+                <div className="mt-3.5 border-t border-border pt-3.5">
+                  <a
+                    href={generalSections.readyDownload.signedUrl}
+                    className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-accent-foreground no-underline"
+                  >
+                    Download Submission Pack{generalSections.readyDownload.pageCount ? ` (${generalSections.readyDownload.pageCount} pages)` : ""}
+                  </a>
+                  <div className="mt-1.5 text-center text-[11px] text-muted-foreground">
+                    Ready{generalSections.readyDownload.completedAt ? ` · completed ${(formatDateTime(generalSections.readyDownload.completedAt) ?? "—")}` : ""}
+                  </div>
+                </div>
+              )}
               {(showSubmissionPack || isGeneralFamily) && (
                 <div className="mt-3.5 border-t border-border pt-3.5">
                   <PrimaryPackActionLink

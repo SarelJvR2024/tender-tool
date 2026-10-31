@@ -34,6 +34,7 @@ import { formatDate, formatDateTime, type StatusChip } from "@/lib/dates";
 import { RequirementRow } from "@/components/tt/requirement-row";
 import { QuickBlockerDrawer } from "./quick-blocker-drawer";
 import { VAULT_DRAWER_CONFIG } from "./quick-fix-config";
+import { SubmitButton } from "./submit-button";
 
 /**
  * Non-SANRAL tender preparation (Sarel, 2026-10-16: "keep working on
@@ -92,7 +93,7 @@ const JOB_BADGE_CLASS: Record<string, string> = {
   failed: "bg-destructive/10 text-destructive",
 };
 
-type Person = PersonCredentialFields & { id: string; name: string; signatory_capacity: string | null; role: string | null };
+type Person = PersonCredentialFields & { id: string; name: string; signatory_capacity: string | null; role: string | null; created_at: string };
 
 /**
  * One section per returned key, so the Tender Workspace's top-level tabs
@@ -113,6 +114,12 @@ export type GeneralWorkspaceSections = {
   people: React.ReactNode | null;
   pack: React.ReactNode;
   badges: { docsMissing: number; needAnswer: number; peopleGaps: number; generalFixCount: number };
+  /** The latest ready pack's download info, for the tab-independent CTA at
+   * the top of the Tender Workspace (page.tsx) - null until a pack has
+   * actually finished. Signed from THIS same render (general-workspace.tsx
+   * already signs every job's storage path here) rather than page.tsx
+   * running a second, duplicate storage call. */
+  readyDownload: { signedUrl: string; pageCount: number | null; requestedAt: string; completedAt: string | null } | null;
 };
 
 export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tenderId: string; saved?: string | null }): Promise<GeneralWorkspaceSections | null> {
@@ -145,7 +152,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
       supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
       supabase.from(JOBS_TABLE).select(JOB_COLUMNS).eq("engine", GENERAL_ENGINE).eq("tender_id", tenderId).order("requested_at", { ascending: false }).limit(10),
-      supabase.from("people").select("id, name, signatory_capacity, role, sacnasp_category, sacnasp_number, sacnasp_expiry, sagc_category, sagc_number, sagc_expiry").order("name"),
+      supabase.from("people").select("id, name, signatory_capacity, role, created_at, sacnasp_category, sacnasp_number, sacnasp_expiry, sagc_category, sagc_number, sagc_expiry").order("name"),
       supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
       supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
       supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
@@ -154,6 +161,14 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const answers = (answerRows ?? []) as TenderAnswer[];
   const jobs = (jobRows ?? []) as EngineJob[];
   const people = (peopleRows ?? []) as Person[];
+  // Mirrors engine/general/process_general_jobs.py's own fallback exactly
+  // (gather_pack_inputs(): "first person given a signatory capacity, oldest
+  // created_at" once nobody is explicitly chosen for this tender) - shown as
+  // the dropdown's pre-selection so what the engine would silently default
+  // to is visible and overridable, never a silent guess (Sarel's own brief,
+  // 2026-10-31: "the engine must not guess - it should default to the
+  // designated primary member but allow picking who signs").
+  const primarySignatoryId = [...people].filter((p) => p.signatory_capacity).sort((a, b) => a.created_at.localeCompare(b.created_at))[0]?.id ?? null;
   const roles = (roleRows ?? []) as TenderRole[];
   const tags = (tagRows ?? []) as RoleTag[];
   const offices = (officeRows ?? []) as CompanyOffice[];
@@ -229,7 +244,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         </div>
       </div>
     );
-    return { overview, documents: null, questions: null, people: peopleBlocked, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 } };
+    return { overview, documents: null, questions: null, people: peopleBlocked, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 }, readyDownload: null };
   }
 
   // ----- supporting documents -----
@@ -310,6 +325,14 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
     const res = await Promise.all(paths.map((p) => supabase.storage.from(PACK_BUCKET).createSignedUrl(p, 600)));
     res.forEach((r, i) => { if (r.data?.signedUrl) signed[paths[i]] = r.data.signedUrl; });
   }
+  // For the prominent, tab-independent download CTA at the top of the Tender
+  // Workspace (page.tsx) - the most recently COMPLETED ready job's own PDF,
+  // not necessarily packJobs[0] (latestPack can be a newer "generating"/
+  // "failed" one requested after the last success).
+  const readyPack = packJobs.find((j) => j.status === "ready" && j.storage_path_pdf) ?? null;
+  const readyDownload = readyPack && signed[readyPack.storage_path_pdf as string]
+    ? { signedUrl: signed[readyPack.storage_path_pdf as string], pageCount: readyPack.page_count, requestedAt: readyPack.requested_at, completedAt: readyPack.completed_at }
+    : null;
   const answerByKey = new Map(answers.map((a) => [a.field_key, a]));
 
   // Per-section "still outstanding" counts for the tab bar itself - Sarel's
@@ -503,7 +526,16 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                 <div key={q.key} style={{ borderTop: "1px solid var(--border)", padding: "9px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
                     <div style={{ minWidth: 0, flex: "1 1 300px" }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{q.label}</div>
+                      {/* "Authorised Signatory for this Tender" is a fixed app
+                          concept, not this tender's own extracted wording -
+                          shown in place of q.label (which varies per buyer's
+                          documents) only for this one question type, per
+                          Sarel's own brief, 2026-10-31. q.help still shows
+                          underneath, unchanged - it's genuinely tender-
+                          specific guidance (e.g. which SBD needs it). */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
+                        {q.type === "person" ? "Authorised Signatory for this Tender" : q.label}
+                      </div>
                       <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{q.help}</div>
                     </div>
                     {answered ? <Chip label="Answered" className="bg-success/10 text-success" /> : q.optional ? <Chip label="Optional" className="bg-muted text-muted-foreground" /> : <Chip label="Needs your answer" className="bg-warning/10 text-warning" />}
@@ -521,14 +553,21 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                     )}
                     {q.type === "text" && <input name={`q:${q.key}`} defaultValue={value ?? ""} style={{ ...input, maxWidth: 420 }} />}
                     {q.type === "person" && (
-                      <select name={`q:${q.key}`} defaultValue={value ?? ""} style={{ ...input, maxWidth: 420 }}>
-                        <option value="">Choose who signs…</option>
-                        {people.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}{p.signatory_capacity ? ` - ${p.signatory_capacity}` : " - no signatory capacity on file"}
-                          </option>
-                        ))}
-                      </select>
+                      <>
+                        <select name={`q:${q.key}`} defaultValue={value ?? primarySignatoryId ?? ""} style={{ ...input, maxWidth: 420 }}>
+                          <option value="">Choose who signs…</option>
+                          {people.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}{p.signatory_capacity ? ` - ${p.signatory_capacity}` : " - no signatory capacity on file"}
+                            </option>
+                          ))}
+                        </select>
+                        {!answered && primarySignatoryId && (
+                          <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>
+                            Defaulted to {people.find((p) => p.id === primarySignatoryId)?.name} (your company&apos;s designated signatory) - not saved until you click &quot;Save answers&quot;. Pick someone else if this tender needs a different signatory.
+                          </div>
+                        )}
+                      </>
                     )}
                     {q.type === "person" && value && !people.find((p) => p.id === value)?.signatory_capacity && (
                       <form action={saveSignatoryCapacity} style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
@@ -543,9 +582,12 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                           placeholder="e.g. Director"
                           style={{ ...input, maxWidth: 200 }}
                         />
-                        <button type="submit" style={{ minHeight: 32, padding: "0 12px", borderRadius: 8, background: "var(--accent)", color: "var(--accent-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer" }}>
+                        <SubmitButton
+                          pendingLabel="Saving…"
+                          style={{ minHeight: 32, padding: "0 12px", borderRadius: 8, background: "var(--accent)", color: "var(--accent-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer" }}
+                        >
                           Save
-                        </button>
+                        </SubmitButton>
                       </form>
                     )}
                   </div>
@@ -910,6 +952,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
     people: peopleSectionVisible ? peopleTabContent : null,
     pack: packTabContent,
     badges: { docsMissing, needAnswer, peopleGaps, generalFixCount },
+    readyDownload,
   };
 }
 
