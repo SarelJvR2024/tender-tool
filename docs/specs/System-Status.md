@@ -14,6 +14,46 @@
 
 ---
 
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-ninth run): clean sweep - intake (classify_tender.py/scenario_driver.py/process_general_jobs.py's run_extraction()); one lead investigated and ruled out
+
+Oriented from `2ab5fb1`; `git fetch origin main` found two new commits since - a DIFFERENT sibling
+QA/robustness session's own real fixes (`5a3c5f5`/`dee58cc`, "briefing_shortlisted tenders dropped
+from active-pursuit tracking" - `app/lib/opportunityInsights.ts` plus `engine/discovery/
+discovery_downgrades.py`/`watch_tender_updates.py`, session `011NLr419YmLS44xgf1YM6n3`, a different
+session from this one). Confirmed no overlap (discovery-area Python files, not touched this pass) and
+fast-forwarded cleanly. Open PRs re-checked: `#174`/`#165`/`#164` unchanged, none touch `engine/`.
+
+intake rotation (non-SANRAL pack was last cycle - clean sweep, logged above). Read
+`engine/intake/classify_tender.py` end to end again with fresh eyes (already heavily audited across
+many prior passes - came up clean again), `engine/intake/scenario_driver.py` (a dev-only scratch-
+Postgres scenario harness, not exposed to untrusted input in a meaningful sense), and
+`process_general_jobs.py`'s `run_extraction()` (the real intake job handler every tender's documents
+go through) - already well-guarded (`JobRefusal` raised cleanly for "no documents downloaded",
+"nothing readable", private-document handling all defensive).
+
+Empirically fuzzed `classify_documents()` (missing/`None` document fields, nonexistent local paths)
+and the regex-extraction helpers (`find_nra_reference`/`find_closing_time`/`find_delivery_address`)
+with pathological/boundary text (very long repeated matches, invalid times, oversized pseudo-tables) -
+all degraded cleanly, no crashes.
+
+One lead investigated and ruled out: `discrepancies()`'s `contract_no` comparison calls `.upper()`
+directly on `user["contract_no"]` with no type guard, while its own sibling `closing_date` comparison
+two lines below defensively wraps with `str(...)` first - an asymmetry that looked exactly like this
+session's own recurring "one guards, the sibling doesn't" bug shape. Reproduced the crash in isolation
+(`discrepancies({"contract_no": 123, ...}, ...)` -> `AttributeError`), then traced its one real call
+site (`process_general_jobs.py:467`): both `tender.get("contract_no")` (a `text` column, always str or
+`None`) and `setup["contract_no"]` (`classify_tender.read_setup()`'s own `str(contract_no).strip() if
+contract_no else None`) are guaranteed strings before this call. Not a confirmed, reachable bug via
+any real call site found by grep - not fixed, per the standing instruction's own "genuinely clean, not
+a weak finding" allowance.
+
+**No code bug found - a genuine clean sweep**, reached by actually running the code against
+adversarial input and tracing one suspicious lead to ground rather than reporting it unverified.
+Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): Finding 112 - two Python ACTIVE_STAGES tuples also missed briefing_shortlisted (0105/PR #173); related TS+SQL gap flagged, not fixed
 
 Oriented from `5a3c5f5`; `git fetch origin main` found nothing new since, local matched `origin/main`
