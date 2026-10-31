@@ -136,6 +136,18 @@ describe("cidbGradingStep", () => {
     const s = cidbGradingStep(cidb, null);
     expect(s.quote).toBe("CIDB grading 6CE or higher");
   });
+  it("ambiguous grading (requirements.py found more than one across the documents) surfaces the real warning, not just the plain grading note", () => {
+    const ambiguousCidb = { ...cidb, ambiguous: true };
+    const have = cidbGradingStep(ambiguousCidb, "9CE");
+    expect(have.note).toContain("More than one different CIDB grading was found");
+    expect(have.note).toContain("check the tender notice and any addenda");
+    const missing = cidbGradingStep(ambiguousCidb, null);
+    expect(missing.note).toContain("More than one different CIDB grading was found");
+  });
+  it("non-ambiguous grading (the normal case) never mentions the ambiguity warning", () => {
+    const s = cidbGradingStep(cidb, "9CE");
+    expect(s.note).not.toContain("More than one different CIDB grading");
+  });
 });
 
 describe("briefingStep", () => {

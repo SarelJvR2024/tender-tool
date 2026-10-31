@@ -14,6 +14,178 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): fixed a real gap - the Submission Plan screen's TypeScript CIDB-grading step silently dropped `requirements.py`'s own `cidb.ambiguous` warning
+
+Oriented from `8a50a17`; `git fetch origin main` found one new sibling commit (`7abd9bc`, a different
+QA/robustness review session's own clean sweep of `watch_deadlines.py`/`registration_reminders.py`,
+docs-only, no overlap) and fast-forwarded cleanly (`git pull --ff-only`). Open PRs re-checked via the
+GitHub API: new `#175` ("Add signatory-capacity nudge to new-company setup checklist") is open/draft on
+the same reused branch as the earlier merged `#172`/`#173`/`#174`, already shows `mergeable_state:
+"dirty"` (its own cross-session conflict to resolve, not this pass's), and its stated file list
+(dashboard/notification/people/tender-workspace files) doesn't touch anything this pass changed - no
+collision. `#164`/`#165` unchanged.
+
+Reviewed the admin area (`app/app/admin/`) and the onboarding flow first - both came up clean
+(`discovered-opportunities/actions.ts`, `requirement-extractions/actions.ts`,
+`customers/impersonation-actions.ts`, `taxonomy/actions.ts` are all correctly admin-gated;
+`onboarding/actions.ts`'s own ignored `buildCompanyUpdate().error` return is real but not reachable
+today - Screen 1's form only ever submits two TEXT fields, which that function can never return an
+error for, so not flagged). Pivoted to `engine/general/submission_plan.py` (the "assessment engine"'s
+Python reference implementation) and its TypeScript port, `app/app/tenders/[id]/submission-plan-logic.ts`
+- a genuine side-by-side comparison of two independent implementations of the same logic, the exact
+shape this session has repeatedly found real bugs in.
+
+**Found and fixed a real gap**: `requirements.py` sets `cidb.ambiguous = true` on the stored manifest
+when more than one different CIDB grading is found across the documents read (e.g. an addendum
+correcting the original notice) - a real Finding from 2026-10-24, with its own warning text in the
+Python reference's `compile_plan()`. `process_general_jobs.py` writes this flag verbatim into
+`tenders.document_requirements`/`tender_packs.document_requirements`. But the TypeScript
+`RequirementManifest["cidb"]` type (`app/lib/generalTender.ts`) never declared an `ambiguous` field at
+all, and `cidbGradingStep()` (the TS port's own CIDB-grading classifier, the only call site, from
+`submission-plan-data.ts`) never read or surfaced it - so the live Submission Plan screen silently
+dropped a real, already-identified compliance warning the Python reference still carries for the exact
+same stored data. A company relying on the live screen for a tender with a genuinely conflicting CIDB
+grading across its documents would never see that warning at all.
+
+Fixed by adding `ambiguous?: boolean` to the `cidb` type and appending the same warning text
+`submission_plan.py`'s own `compile_plan()` uses when `cidbGradingStep()` sees `cidb.ambiguous`.
+Reproduced first with a `git stash` of just the two source files (keeping the new test): the new
+assertions failed exactly as expected against the unfixed code (`have.note` contained the plain
+grading note with no ambiguity warning at all); restored the fix, same test passed. Added 2 new
+regression tests to the existing `submission-plan-logic.spec.ts` (ambiguous case surfaces the warning
+for both the "have a grading" and "no grading" branches; the ordinary non-ambiguous case never mentions
+it, guarding against the warning leaking into every CIDB step by mistake).
+
+Verification: `npx vitest run app/tenders/[id]/submission-plan-logic.spec.ts` -> 37/37 (up from 35);
+full `npx vitest run` -> 335/335 (up from 333, unaffected elsewhere); `node --experimental-strip-types
+--test lib/*.test.ts` -> 215/215 unaffected (this file isn't under `lib/`); `npx tsc --noEmit` and
+`npx eslint` on all 3 touched files -> clean.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access needed):
+- `app/lib/generalTender.ts`
+- `app/app/tenders/[id]/submission-plan-logic.ts`
+- `app/app/tenders/[id]/submission-plan-logic.spec.ts`
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item - this finding was standalone (a real bug, now fixed), not a judgment call for
+Sarel. Backlog unchanged at **18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply
+to the live DB, `narrative_documents` PostgREST schema-cache reload, PayFast idempotency design
+question, "missing ISO 9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix disagreement,
+Dashboard "Decision needed" over-triggering finding, impersonation-feature token-refresh gap, the
+SANRAL fingerprint baseline-mismatch heads-up (FYI only, no action needed), the dangling
+`signatory_person_id` fallback design question (Finding 96), no reconciliation for a silently-lapsed
+`active` subscription (Finding 97), the low-severity seat-limit TOCTOU race (`team/actions.ts`), no
+storage-level size/type limit on any of the 9 upload buckets (Finding 105), and the pack-generation
+quota TOCTOU race (`company_can_request_pack()`'s two callers).
+
+---
+
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-fortieth run): clean sweep - compliance/reminders re-confirmed exhausted (watch_deadlines.py/registration_reminders.py)
+
+Oriented from `4536c2d`; `git fetch origin main` found two new commits since - PR #174 merged
+(`8623d38`, app/-only: split-recipient notifications, the migration-collision renumbering, the
+coordinated `briefing_shortlisted` fix) and a solution-architect follow-up independently verifying it
+(`8a50a17`, docs-only). Neither touches `engine/`, no overlap. Fast-forwarded cleanly. Open PRs
+re-checked: new `#175` ("signatory-capacity nudge", app/-only) plus unchanged `#165`/`#164` - none
+touch `engine/compliance/`.
+
+compliance/reminders rotation - this area was already marked exhausted earlier in this session (and
+again by a sibling's own independent pass). Given the sibling session's concurrent `briefing_shortlisted`
+fixes this window specifically targeted a "which tenders still count as active" filtering gap, checked
+first whether `watch_deadlines.py`/`registration_reminders.py` have the same `pipeline_stage`/
+`ACTIVE_STAGES` filtering concept at all - grepped both files for `pipeline_stage`/`ACTIVE_STAGES`/
+`briefing_shortlisted`/`submitted` and found zero matches: these two files are about document/
+registration EXPIRY reminders, an entirely different concern from "is this tender still being
+pursued", so that specific bug class doesn't apply here. Re-checked for this session's two other
+established bug shapes (the null-vs-missing `.get(key, [])`/`.get(key, {})` pattern, and the
+backslash-replacement `.sub(f"..."` pattern) - found two `.get(id, {})` lookups (`watch_deadlines.py`'s
+`tenders_by_id.get(...)`, `registration_reminders.py`'s `types.get(...)`), but both are ID-keyed
+lookup-dict patterns (missing KEY in a dict of rows), not the "value present but null" shape - a
+different, already-safe pattern.
+
+Investigated one lead to ground: `registration_reminders.py`'s `_names()`/`find_due_registrations()`
+build `{r["company_id"] for r in rows}`/`{r["registration_type_id"] for r in rows}` sets with no
+truthy filter, then `sorted()` them - a `None` mixed with real UUID strings in that set would raise
+`TypeError` in `sorted()`. Checked migration `0050`'s own schema: `held_registrations.company_id` and
+`.registration_type_id` are both `not null` (the second also `on delete restrict`), and
+`property_documents.company_id`/`.property_id` are both `not null` too - the DB itself guarantees
+this can never happen. Not a reachable bug; not fixed.
+
+**No code bug found - a genuine clean sweep**, reached by re-deriving "exhausted" from first
+principles (checking for this session's own newly-established bug shapes specifically, not just
+re-reading) rather than assuming the earlier conclusion still holds. Re-ran `engine/compliance/
+test_watch_deadlines_urgency.py` and `test_watch_person_credentials.py` - both still green. Committed
+docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
+## This pass (2026-10-31, standing solution-architect review): PR #174 merged - independently verified it closes 3 backlog items (submitted-tender nagging gap, the duplicate-`0105` migration collision, the coordinated `briefing_shortlisted` fix); no new code bug found
+
+Oriented from `dee58cc`; `git fetch origin main` showed 2 new commits: `4536c2d` (a sibling pass's
+clean sweep of `classify_tender.py`/`run_extraction()`, docs-only, no overlap) and `8623d38` - PR #174
+("Split-recipient architecture + migration-collision fix (backlog item 16) + briefing_shortlisted
+coordinated fix") merging. Fast-forwarded local `main` cleanly (`git pull --ff-only`). Open PRs
+re-checked via GitHub API: only `#164`/`#165` remain, unchanged, no collision. `#174` independently
+confirmed **merged by Sarel himself** (`merged_by: SarelJvR2024`), not a self-merge.
+
+Per the standing instruction to never trust another session's (or a merged PR's own) self-report
+unverified, read `#174`'s real diff end to end rather than its description alone, and confirmed three
+things it claims, concretely:
+
+1. **Submitted-tender nagging gap (backlog item, long open) - genuinely resolved.** `app/lib/
+   deadlineReminders.ts`'s new `DEADLINE_REMINDER_EXCLUDED_STAGES` and `app/lib/
+   returnablesDigestCandidates.ts`'s new `RETURNABLES_EXCLUDED_STAGES` both now read
+   `["submitted", "briefing_shortlisted", "won", "lost"]` and are actually applied in each file's own
+   filter loop (`send-deadline-reminders.ts`/`send-returnables-digest.ts`) - confirmed by reading the
+   real `.ts` source, not the PR body. This item is closed.
+2. **Duplicate `0105_*.sql` migration-numbering collision - genuinely resolved.** `ls app/supabase/
+   migrations/` now shows exactly one file prefixed `0105` (`0105_tender_pipeline_stage_v2.sql`); the
+   PayFast fix this session's own earlier pass wrote was renamed (filename only, confirmed via
+   `git show` on the rename commit - no SQL content changed) to `0110_payfast_itn_failed_payment_
+   period_end.sql`, the real next-free slot once `0107`/`0108`/`0109` (also this session's own prior
+   fixes) are accounted for. This item is closed.
+3. **Coordinated `briefing_shortlisted` fix across `discoveryReassessment.ts`/`tender-updates.tsx`/
+   `accept_tender_update_date()` - genuinely resolved.** All three now read/check `briefing_shortlisted`
+   alongside the other active-pursuit stages, confirmed by grepping the real source files and the new
+   `0111_tender_update_resolution_v3.sql` migration's own `pipeline_stage in (...)` clauses (not just
+   its header comment). The TS gate (`tender-updates.tsx`'s `ACTIVE_STAGES`, controlling whether the
+   "Accept" button even renders) and the SQL side landed in the same commit, as the backlog item itself
+   required - verified they're not split across two separate, independently-timed changes.
+
+Also spot-read the new `criticalBidRecipients()` function (`notificationRecipients.ts`) this PR adds -
+reuses the already-audited, correctly `service_role`-scoped `company_notification_recipients()` RPC,
+just without the opt-in filter, with a clearly reasoned "these are bid-critical alerts, not the generic
+digest the opt-in flag was ever about" justification and an explicit note that it's deliberately NOT
+sourced from `people.email` (would leak internal bid state to external roster contacts). No concern.
+
+QA re-confirmed independently, not just trusted from the PR's own claim: `node --experimental-strip-
+types --test lib/*.test.ts` -> 215/215; `npx vitest run` -> 333/333; `npx tsc --noEmit` -> clean. All
+three numbers match the PR body's own claims exactly.
+
+No new code bug found this pass beyond what the merge itself already fixed - the bulk of this pass's
+value was independently verifying a significant merge's real-diff claims rather than relaying them.
+Migrations `0110`/`0111` are written and merged but **not yet applied to the live database** - same
+status as `0096`/`0107`/`0108`/`0109`, all still needing Sarel's run via Supabase's SQL Editor.
+
+**Backlog count correction, said plainly rather than quietly carried forward:** the prior pass's own
+report rounded the running backlog to 20 items; recounting the actual list it itemized gives 19, not
+20 (no item was missing - just an off-by-one in that pass's own arithmetic). Using the correct 19 as
+the base: 19 - 3 resolved (submitted-tender nagging gap; the duplicate-`0105` migration collision; the
+`briefing_shortlisted`-missing coordinated-fix item) + 2 new (migrations `0110`/`0111` themselves now
+need Sarel's live-DB run, distinct from the already-tracked `0096`/`0107`/`0108`/`0109` apply-items) =
+**18 remaining**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply to live DB (6 separate
+migrations, one bucketed concern), `narrative_documents` PostgREST schema-cache reload, PayFast
+idempotency design question, "missing ISO 9001 flagged as urgent" UX question, Form B7
+compulsory-vs-matrix disagreement, Dashboard "Decision needed" over-triggering finding,
+impersonation-feature token-refresh gap, the SANRAL fingerprint baseline-mismatch heads-up (no action
+needed, FYI only), the dangling `signatory_person_id` fallback design question (Finding 96), no
+reconciliation for a silently-lapsed `active` subscription (Finding 97), the low-severity seat-limit
+TOCTOU race (`team/actions.ts`), no storage-level size/type limit on any of the 9 upload buckets
+(Finding 105), and the pack-generation quota TOCTOU race (`company_can_request_pack()`'s two callers).
+
+---
+
 ## This pass (2026-10-31): backlog item 16 cleared - migration-numbering collision resolved; coordinated fix for the `briefing_shortlisted` gap in `accept_tender_update_date()` + its own TS gate
 
 Oriented from `4536c2d` (`git fetch origin main` showed nothing new at the time; one sibling commit,

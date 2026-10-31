@@ -150,9 +150,21 @@ export function buyerFormStep(b: ManifestBuyerForm): PlanStep {
 export function cidbGradingStep(cidb: NonNullable<RequirementManifest["cidb"]>, companyCidbGrading: string | null): PlanStep {
   const have = !!companyCidbGrading;
   const reviewStatus: ReviewStatus = have ? "needs_input" : "missing";
-  const note = have
+  let note = have
     ? `Company's own grading on file is ${companyCidbGrading} - confirm this actually meets or exceeds ${cidb.grading} (Tender Tool doesn't compare grading levels for you).`
     : `Company has no CIDB grading on file - confirm it meets ${cidb.grading} before bidding.`;
+  // Found 2026-10-31: engine/general/submission_plan.py's own cidbGradingStep
+  // equivalent appends this exact warning when requirements.py's cidb.ambiguous
+  // is true (more than one different grading found across the documents read,
+  // e.g. an addendum correcting the original notice) - the real, stored
+  // manifest carries this flag (process_general_jobs.py writes it verbatim),
+  // but this TS port never read it at all, so the live Submission Plan screen
+  // silently dropped a real, already-fixed-once compliance warning the Python
+  // reference still shows on the exact same data.
+  if (cidb.ambiguous) {
+    note += ` More than one different CIDB grading was found across the documents read - ${cidb.grading} is shown, ` +
+      "but check the tender notice and any addenda for the actual, current requirement before relying on this.";
+  }
   return step("cidb_grading", "cidb_grading", `CIDB grading ${cidb.grading} required`, reviewStatus, note, null, cidb.quote);
 }
 
