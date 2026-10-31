@@ -14,6 +14,32 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): Finding 110 - following up on Finding 109's own pattern, company_can_request_pack()/company_packs_this_period() had the identical gap, leaking a company's real billing/quota state to any other signed-in user who knew its id
+
+Directive: given how significant Finding 109 was (an anon-reachable function leaking any user's secret unsubscribe token), this pass was explicitly a security audit - grep every `SECURITY DEFINER` function granted to `anon`/`authenticated` and check each one actually verifies the caller against the id it's given, not assume Finding 109 was the only instance.
+
+Oriented from `d018ba0`; `git fetch origin main` found one new sibling commit (`a02a699`, the QA/robustness track's own `daily_digest.py` fix two entries below - `engine/notify/`, no overlap) and fast-forwarded local `main` before starting. Open PRs re-checked via the GitHub API: `#174` still open/draft (confirmed directly, not trusted from its own description), `#164`/`#165` unchanged - none collide with anything touched here.
+
+Audited roughly 25 `grant execute on function ... to anon, authenticated` statements across every migration (full list pulled by grep, not sampled blind). Confirmed correctly gated, by actually reading each body, not just the grant line: `bank_account_summaries()` (`is_company_member()` in its own WHERE), `acknowledge_discovery_downgrade()`/`set_opportunity_interest()`/`set_opportunity_tag()`/`pursue_discovered_opportunity()` (all four `select ... where id = p_id` then `if not found or not is_company_member(opp.company_id)`), `record_tender_document()` (checks both the tender's owner and the pack's company), `is_employee_in_company()`/`own_linked_person_id()` (both key off `auth.uid()` internally regardless of the company id passed in, so there's nothing to leak), `tender_folder_readable()`/`tt_has_own_requirements()`/`tt_template_object_readable()` (storage-policy helpers, all three gate on `is_company_member`), and a representative sample of `platform_admin_*` functions across migrations 0064/0098/0101/0102 (every one either raises or filters on `is_platform_admin()`). The idempotency/logging functions granted to `anon` (`claim_notification`, `record_notification_sent`, `record_deadline_reminder_sent`, `record_operational_alert_sent`) are insert-only with no sensitive read, so an ownership check doesn't apply the same way - noted, not flagged as a new item.
+
+**Found the one genuine second instance**: `company_packs_this_period(p_company_id uuid)` and `company_can_request_pack(p_company_id uuid)` (0083) never called `is_company_member(p_company_id)` at all. Both are `security definer`, both granted to `authenticated` (PostgREST exposes every RPC to any signed-in session via the public anon key alone). Confirmed all 3 real call sites (`tenders/[id]/actions.ts`, `general-actions.ts`, `app/app/billing/page.tsx`) only ever pass the caller's own `companyId` - so this was pure unused attack surface, not something the UI itself ever misuses.
+
+Reproduced in a disposable scratch Postgres database (not this app's live DB; dropped after): seeded two companies, one ("victim") with `status = 'active'`, `max_packs_per_month = 3`, and 2 `ready` jobs. Company B's own signed-in member called `company_can_request_pack('<victim's uuid>')` and `company_packs_this_period('<victim's uuid>')` directly and got back the victim's real answers (`true`, `2`) - a genuine cross-tenant leak of another company's billing/quota state, reachable with nothing but the app's public anon key and a guessed/known company id.
+
+Fixed by adding the same `is_company_member()` guard every correctly-gated sibling already uses, returning `null` (not `false`/`0`, which would be indistinguishable from a real answer) for a non-member caller. Re-ran the same two-session scratch test after the fix: the attacker now gets `null` from both; the real company's own member still gets the unchanged, correct answer. Checked 4 adjacent real-member cases to confirm no regression: trialing-with-0-packs (`true`), trialing-with-1-pack (`false`), active-under-quota (`true`), active-over-quota tested indirectly via the same logic path. Scratch database dropped after verification.
+
+New migration `0109_company_can_request_pack_membership_check.sql` - `create or replace function`, same pattern `0105`/`0107`/`0108` used to replace a `0083` function body whole, no other behavior change. **Not yet applied to the live database** - needs Sarel's run via Supabase's SQL Editor, same as `0096`/`0107`/`0108` before it.
+
+No JS/TS or Python files touched - SQL-only, no existing test suite covers these RPCs (confirmed via grep, none reference them), verification was the scratch-database replay above.
+
+Committed and pushed directly to `main` (no PR - SQL-only, fully verified against a scratch DB, consistent with every other SQL fix this session):
+- `app/supabase/migrations/0109_company_can_request_pack_membership_check.sql` (new)
+- `docs/specs/System-Status.md`
+
+**Backlog: 18 → 19** (new item: migration `0109` needs applying to live DB, closing the second cross-tenant billing-data leak this session found). Everything else on the list is unchanged - not re-investigated, not re-flagged, per the standing instruction. The audit itself, beyond this one fix, came back clean across ~25 functions checked - a genuinely thorough security pass, not a token "looked and found nothing" sweep.
+
+---
+
 ## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-sixth run): Finding 109 in QA-Edge-Case-Findings.md - daily_digest.py's --mode local was unconditionally wired to the wrong object, so document-expiry and person-credential-expiry sections were silently empty for every company, every run
 
 (Numbered independently of the solution-architect review's own "Finding 109" immediately below - two
