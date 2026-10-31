@@ -565,7 +565,20 @@ def fill_dotted_paragraph_count(doc, label_substr, value):
             continue
         if not re.search(r"^\s*(?:" + re.escape(label_substr) + r"|\S.{0,60}\t)", t, re.IGNORECASE) and "\t" not in t:
             continue
-        new = pattern.sub(f"{label_substr} {value}   ", t, count=1)
+        # A callable replacement, not an f-string: re.sub() treats a STRING
+        # replacement's own backslashes specially (\1 is a backreference,
+        # \9/\g<bad> raise re.error outright) - a company/signatory value
+        # containing a literal backslash (a pasted Windows path fragment, an
+        # OCR artefact, a typo) silently corrupted the filled text with no
+        # error, or crashed this whole SBD form fill outright, depending on
+        # what followed the backslash. Confirmed directly: "Smith\1
+        # Construction" as a bidder name raised re.error (no group 1 in this
+        # pattern) straight out of this function, uncaught. Same bug class,
+        # independently found in engine/fill_a_forms.py's own identical
+        # f-string-replacement shape (also fixed this pass) - a callable's
+        # return value is used verbatim, with no backslash processing.
+        # QA pass, 2026-10-31.
+        new = pattern.sub(lambda m: f"{label_substr} {value}   ", t, count=1)
         if new != t:
             _replace_paragraph_text(p, new)
             n += 1

@@ -6227,3 +6227,66 @@ test_watch_deadlines_urgency.py` - all pass.
 calls in `local_document_expiry()`/`local_person_credential_expiry()`), `engine/compliance/
 test_watch_person_credentials.py` (5 new checks in the existing digest-routing section). No schema
 or other call-site changes - `--mode live` (the real scheduled run) was never exposed to this bug.
+
+### Finding 110 (CONFIRMED, FIXED, severe - a signatory's name or company's own legal name containing a literal backslash silently corrupted a signed SANRAL declaration, or crashed the whole SANRAL/non-SANRAL pack build outright, via re.sub()'s own backreference syntax)
+
+**Where:** SANRAL pack rotation this cycle. `engine/fill_a_forms.py`'s `fill_declaration_blanks()`
+(the real SANRAL pack build path, via `assemble_pack.py` -> `run_forms_pipeline.py` -> `fill_a_forms.
+main()`), and independently, `engine/general/fill_sbd_docx.py`'s `fill_dotted_paragraph_count()` (the
+non-SANRAL/general pack's own Treasury SBD form filler, called from `fill_sbd_document()` for every
+SBD1/4/6.1/7/8/9 free-text field across every general-tender submission).
+
+**What was tested:** both functions passed an f-string built from a free-text company/signatory value
+(the person's own name, the company's legal name) straight to `re.sub()`/`re.subn()` as the
+**replacement** argument. Python's `re.sub`/`subn` treat a STRING replacement's own backslashes
+specially - `\1` is a backreference to a captured group, `\9`/`\g<bad>` raise `re.error` outright for
+an invalid or malformed group reference - a well-known but easy-to-miss gotcha with this exact shape
+(`pattern.sub(f"...{value}...", text)`). Checked what happens when a signatory's name or a company's
+legal name - both plain free text any company member can set, and in the signatory name's case also a
+field the CV AI-extraction pipeline can propose a value into - contains a literal backslash (a pasted
+Windows file-path fragment, an OCR misread, a plain typo).
+
+**Finding (CONFIRMED, severe).** Reproduced directly in both files:
+- `fill_a_forms.py`: a signatory name of `"John\1 Doe"` (a backslash followed by an EXISTING group
+  number in the pattern) silently corrupted the output to `"I, the undersigned, JOHNI, the undersigned,
+  DOE hereby declare"` - the regex's own matched `"I, the undersigned,"` text spliced straight into the
+  middle of the name, in a document meant to be signed and submitted to SANRAL, with **no error at
+  all**. A name of `"John\9 Doe"` (no group 9 in this pattern) instead raised a raw, uncaught
+  `re.error`/`PatternError: invalid group reference 9`, aborting `fill_declaration_blanks()` - and
+  therefore the entire SANRAL pack build for that company - with no indication of the real cause.
+- `fill_sbd_docx.py`: a bidder/company name of `"Smith\1 Construction"` raised the same `re.error`
+  (this pattern has no capture groups at all, so any `\<digit>` is automatically invalid) straight out
+  of `fill_dotted_paragraph_count()`, aborting the whole non-SANRAL SBD form fill.
+
+Scored severe rather than moderate specifically for the silent-corruption case in `fill_a_forms.py`:
+unlike every other bug this session found that corrupts internal data or crashes a build loudly, this
+one can put fabricated text directly into a document meant to be wet-signed and submitted to a
+government buyer, with nothing anywhere - not a log line, not a warning, not a crash - to indicate it
+happened. The crash case in both files is also real and would abort an entire pack build with a
+confusing, unrelated-looking `re.error` traceback instead of this codebase's own established
+"name the field, degrade honestly" discipline.
+
+**Fix:** both call sites now pass a **callable** (`lambda m: f"..."`) as the replacement instead of a
+literal f-string - a callable's return value is used by `re.sub`/`subn` completely verbatim, with
+zero backslash processing, exactly the convention this same `fill_a_forms.py` file's own `fill_footer()`
+already correctly uses for the identical name/position/company values two functions below the fixed
+one (confirmed by reading it: it was never vulnerable, which is how this specific function's own gap
+stood out against it).
+
+**Verified red-then-green.** New file `engine/test_fill_a_forms.py` (no dedicated test for this module
+existed at all before this pass, confirmed by a repo-wide search) - 3 test functions, 5 checks: an
+ordinary name still fills exactly as before (control); a name with a backslash-digit backreference is
+placed verbatim, not spliced with the regex's own matched text; a name with an unresolvable backslash
+escape doesn't raise and abort the fill. Extended `engine/general/test_fill_sbd_docx.py` with 1 new
+test function, 6 checks (3 value shapes x 2 checks each: a backreference-shaped value, a named-group-
+shaped value, and a plain control value with no backslash). Revert-and-confirm-red on both files:
+reverting reproduced the exact predicted `re.error`/corrupted-output failures (2 failures in each
+file's new test, matching the two distinct failure modes - corruption and crash), with every other
+check in both files staying green; restored, `0 failure(s)` in both. Regression-checked
+`engine/pack/test_assemble_pack.py` and `engine/general/test_requirements.py` - all pass.
+
+**Regression:** `engine/fill_a_forms.py` (one `.subn()` call, f-string -> lambda), `engine/general/
+fill_sbd_docx.py` (one `.sub()` call, f-string -> lambda), `engine/test_fill_a_forms.py` (new file, 3
+test functions, 5 checks), `engine/general/test_fill_sbd_docx.py` (1 new test function, 6 checks). No
+schema or other call-site changes - both fixes are return-value-identical for every input that didn't
+already trigger the bug.

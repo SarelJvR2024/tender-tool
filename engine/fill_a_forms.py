@@ -122,7 +122,21 @@ def fill_declaration_blanks(doc, name, position, company, log):
         text = p.text
         if not text.strip():
             continue
-        new_text, n = undersigned_re.subn(f"I, the undersigned, {name.upper()} ", text, count=1)
+        # A callable replacement, not an f-string: re.sub()/subn() treat a
+        # STRING replacement's own backslashes specially (\1 is a
+        # backreference to group 1, \9/\g<bad> raise re.error outright) - a
+        # signatory's name containing a literal backslash (a pasted Windows
+        # path fragment, an OCR artefact, a typo) silently spliced this
+        # regex's own matched label text into the declaration instead of the
+        # real name, or crashed the whole A-Forms fill outright, depending on
+        # what followed the backslash. Confirmed directly: "John\1 Doe"
+        # corrupted the sentence with no error at all; "John\9 Doe" raised
+        # re.error and aborted fill_declaration_blanks() - and therefore this
+        # company's whole SANRAL pack build - uncaught. A callable return
+        # value is used verbatim, with no backslash processing, same
+        # convention fill_footer() already uses two functions below for the
+        # identical name/position/company values. QA pass, 2026-10-31.
+        new_text, n = undersigned_re.subn(lambda m: f"I, the undersigned, {name.upper()} ", text, count=1)
         if n:
             set_paragraph_text(p, new_text)
             any_match = True

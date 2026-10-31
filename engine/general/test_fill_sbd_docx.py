@@ -267,6 +267,31 @@ def test_whitespace_only_value_is_never_placed_or_confirmed():
           _entry(log, "sbd1.name_of_bidder")["status"] == "confirmed", _entry(log, "sbd1.name_of_bidder"))
 
 
+def test_a_value_with_a_literal_backslash_is_placed_verbatim_not_corrupted_or_crashed():
+    print("fill_dotted_paragraph_count(): a value containing a literal backslash (a pasted Windows "
+          "path fragment, an OCR artefact, a typo) is placed exactly as given, not silently "
+          "corrupted via re.sub()'s own backreference syntax or crashed with re.error")
+    # '\1' is a real backreference in a replacement STRING (even though this
+    # pattern has no capture group at all, so the real failure here is
+    # re.error - "invalid group reference 1" - not silent corruption; see
+    # engine/fill_a_forms.py's own sibling bug/fix for the silent-corruption
+    # shape, where the pattern DOES have a group 1 to splice in).
+    for bad_value, label in (("Smith\\1 Construction", "backslash-digit (backreference syntax)"),
+                              ("Acme\\g<bad> Ltd", "backslash-g (named-group syntax)"),
+                              ("O'Brien & Sons", "control: an ordinary value with no backslash")):
+        d = docx.Document()
+        d.add_paragraph("Name of bidder ....................")
+        try:
+            n = sbd.fill_dotted_paragraph_count(d, "Name of bidder", bad_value)
+        except Exception as e:
+            check(f"[{label}] fill_dotted_paragraph_count() does not raise", False, f"{type(e).__name__}: {e}")
+            continue
+        check(f"[{label}] fill_dotted_paragraph_count() filled exactly one paragraph", n == 1,
+              f"expected n=1, got n={n}")
+        check(f"[{label}] the value is placed verbatim, not corrupted",
+              bad_value in d.paragraphs[0].text, repr(d.paragraphs[0].text))
+
+
 def main():
     test_separate_yes_no_cells()
     test_yes_slash_no_cell()
@@ -280,6 +305,7 @@ def main():
     test_sbd8_real_answer_is_confirmed()
     test_fill_cells_prefill_ok_lets_a_known_prefix_through()
     test_whitespace_only_value_is_never_placed_or_confirmed()
+    test_a_value_with_a_literal_backslash_is_placed_verbatim_not_corrupted_or_crashed()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

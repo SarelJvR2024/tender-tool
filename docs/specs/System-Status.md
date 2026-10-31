@@ -14,6 +14,65 @@
 
 ---
 
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-seventh run): Finding 110 in QA-Edge-Case-Findings.md (severe) - a signatory name or company legal name containing a literal backslash silently corrupted a signed SANRAL declaration, or crashed the whole pack build, via re.sub()'s own backreference syntax
+
+(Numbered independently of the solution-architect review's own "Finding 110" immediately below - two
+separate tracks, same number by coincidence, no relation; see this file's own standing note on that.)
+
+Oriented from `a02a699` (fast-forwarded past two new solution-architect commits - `863ba9b` a real
+cross-tenant privacy fix, `bb6f39c` a follow-up audit finding nothing further - neither touches
+`engine/`). Open PRs re-checked via the GitHub API: `#174`/`#165`/`#164` unchanged, none touch
+`engine/fill_a_forms.py`, `engine/general/fill_sbd_docx.py`, or anything else below.
+
+SANRAL pack rotation (notify was last cycle - see the entry below). Surveyed every SANRAL filler file
+for QA-pass-comment density to find the least-reviewed ones: `engine/fill_a_forms.py` (527 lines, the
+full A2-A23 returnable-declarations bundle) and `engine/fill_docx_forms.py` had zero QA-pass markers
+at all, unlike `engine/pack/assemble_pack.py`/`engine/general/fill_sbd_docx.py` (both already fixed
+this session - Findings 100/101).
+
+Found a real, well-known Python gotcha nobody had hit before: `fill_declaration_blanks()`'s "I, the
+undersigned, ...." substitution passed an f-string straight to `re.subn()` as the REPLACEMENT
+argument. `re.sub`/`subn` treat a STRING replacement's own backslashes specially (`\1` is a
+backreference to a captured group; `\9`/`\g<bad>` raise `re.error` for an invalid one) - a
+signatory's name containing a literal backslash (a pasted Windows path fragment, an OCR artefact from
+the CV-extraction pipeline, a plain typo) either silently spliced this regex's OWN matched "I, the
+undersigned," text into the middle of the name with zero error (`"John\1 Doe"` -> `"I, the
+undersigned, JOHNI, the undersigned, DOE hereby declare"` - fabricated text in a document meant to be
+wet-signed and submitted to SANRAL), or raised a raw, uncaught `re.error` that aborted the whole
+company's SANRAL pack build (`"John\9 Doe"`, no group 9 in this pattern). Grepped every `fill_*.py`
+file for the same `.sub(f"..."`/`.subn(f"..."` shape and found exactly one more real instance:
+`engine/general/fill_sbd_docx.py`'s `fill_dotted_paragraph_count()` (the non-SANRAL/general pack's
+own Treasury SBD form filler, used for every free-text field across every SBD1/4/6.1/7/8/9 form) -
+same crash, confirmed with `"Smith\1 Construction"` as a bidder name.
+
+Scored severe (not moderate) specifically for the silent-corruption half of this: every other bug this
+session found either corrupts internal data with some trace of what happened, or crashes loudly; this
+one can put fabricated text directly into a document meant to be submitted to a government buyer with
+nothing anywhere - no log line, no warning, no crash - to show it happened.
+
+Fixed both call sites by changing the replacement from a literal f-string to a callable
+(`lambda m: f"..."`) - a callable's return value is used by `re.sub`/`subn` completely verbatim, no
+backslash processing at all. This is exactly the convention `fill_a_forms.py`'s own `fill_footer()`
+(two functions below the fixed one, for the identical name/position/company values) already uses -
+it was never vulnerable, which is how the fixed function's own gap stood out by contrast.
+
+Verified red-then-green: new file `engine/test_fill_a_forms.py` (no dedicated test for this module
+existed at all before this pass - 3 test functions, 5 checks) and 1 new test function (6 checks) in
+`engine/general/test_fill_sbd_docx.py`. Reverting both fixes reproduced the exact predicted
+corruption/crash failures with every other check staying green; restored, `0 failure(s)` in both.
+Regression-checked `engine/pack/test_assemble_pack.py` and `engine/general/test_requirements.py` -
+all pass.
+
+Committed and pushed directly to `main` (contained, well-verified, no PR):
+- `engine/fill_a_forms.py` (one `.subn()` call, f-string -> lambda)
+- `engine/general/fill_sbd_docx.py` (one `.sub()` call, f-string -> lambda)
+- `engine/test_fill_a_forms.py` (new file, 3 test functions, 5 checks)
+- `engine/general/test_fill_sbd_docx.py` (1 new test function, 6 checks)
+- `docs/specs/QA-Edge-Case-Findings.md` (Finding 110)
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): follow-up security audit after Findings 109/110 - no third instance found, a genuinely clean result
 
 Directive: following up on the last two passes' real cross-tenant/privacy leaks (Finding 109 -
