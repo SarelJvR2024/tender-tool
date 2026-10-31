@@ -104,7 +104,17 @@ sys.path.insert(0, os.path.join(HERE, "..", "alerts"))
 import system_alerts  # noqa: E402
 import tender_updates  # noqa: E402
 
-ACTIVE_STAGES = ("found", "assessing", "building", "bidding", "submitted")  # 0105 widened the stage set; 'bidding' is the pre-0105 legacy value, kept so a not-yet-backfilled row doesn't drop out
+# briefing_shortlisted (0105) sits between submitted and an outcome (won/lost) -
+# a tender there is awaiting an outcome exactly like 'submitted' already is, for
+# the same reason 'submitted' is kept here despite being past the point of
+# bidding: the company still needs buyer-issued updates (a briefing date, an
+# amendment) while waiting. Found 2026-10-31: PR #173's own 0105 migration
+# widened this tuple for assessing/building but missed this one, so a tender
+# silently stopped being watched for updates the moment it reached
+# briefing_shortlisted - the active_pursuits() docstring below says "tenders
+# still worth watching", and a tender awaiting a buyer's briefing/shortlist
+# decision is exactly that.
+ACTIVE_STAGES = ("found", "assessing", "building", "bidding", "submitted", "briefing_shortlisted")
 WATCH_DAYS_AFTER_CLOSING = 7
 RECENT_DAYS = 3
 WALK_BACK_DAYS = 21

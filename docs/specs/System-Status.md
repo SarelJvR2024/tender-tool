@@ -14,6 +14,55 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): Finding 112 - two Python ACTIVE_STAGES tuples also missed briefing_shortlisted (0105/PR #173); related TS+SQL gap flagged, not fixed
+
+Oriented from `5a3c5f5`; `git fetch origin main` found nothing new since, local matched `origin/main`
+exactly. Open PRs re-checked via the GitHub API: `#174` ("Split-recipient architecture") confirmed
+still **open/draft, not merged** - the "submitted-tender nagging gap" backlog item stays open. `#164`/
+`#165` unchanged. No collision with anything touched below.
+
+Following directly on the prior pass's Finding 111 (a TS `["found", ...]`-shaped allow-list that
+missed the new `briefing_shortlisted` stage migration `0105`/PR #173 introduced), this pass swept the
+Python/engine side for the same gap - every `pipeline_stage` reference outside test files
+(`engine/discovery/watch_tender_updates.py`, `engine/discovery/discovery_downgrades.py`,
+`engine/seed_demo_company.py` - the last already correctly seeds `'building'`, not touched).
+
+**Found and fixed two real, reachable instances**, both the identical `ACTIVE_STAGES = ("found",
+"assessing", "building", "bidding", "submitted")` tuple, missing `briefing_shortlisted`:
+- `watch_tender_updates.py`'s `active_pursuits()` - its own docstring says this is "tenders still
+  worth watching" for buyer-issued updates (corrigenda, briefing date changes). A tender reaching
+  `briefing_shortlisted` is awaiting an outcome exactly like `submitted` already is (which this tuple
+  deliberately keeps for this reason) - with the gap, it silently stopped being watched for updates
+  the moment it reached that stage.
+- `discovery_downgrades.py`'s `_pursuit()`/`pending_digest_downgrades()` - prioritizes `ACTIVE_STAGES`
+  tenders in the downgrade digest "because real work may already have gone into those." A tender at
+  `briefing_shortlisted` has had *more* work put into it than one merely `submitted`, but was treated
+  as not-actively-pursued by this check.
+
+Reproduced first (`'briefing_shortlisted' in ACTIVE_STAGES` -> `False` on the unfixed tuple in both
+files), then fixed by adding it to both. Verified: `python3 engine/discovery/test_tender_updates.py` ->
+ALL PASSED (imports and exercises `watch_tender_updates.py` directly); `python3
+engine/discovery/test_discovery_downgrades.py` Part 1 -> 0 failures (Part 2 needs a scratch Postgres,
+skipped, same as always); `py_compile` clean on both touched files.
+
+**Related gap found, deliberately NOT fixed this pass**: the same tuple also appears, unfixed, in
+`app/lib/discoveryReassessment.ts`'s `ACTIVE_PURSUIT_STAGES` and `app/app/tenders/[id]/tender-updates.tsx`'s
+`ACTIVE_STAGES` (the latter gates whether the "Accept" button even shows for a buyer's date change) -
+*and*, critically, migration `0106`'s own `accept_tender_update_date()` SQL function has the identical
+`pipeline_stage in ('found', 'assessing', 'building', 'bidding', 'submitted')` check, twice, with the
+same gap. Fixing the TS side alone would show the "Accept" button for a `briefing_shortlisted` tender
+whose click would then fail server-side ("Only a company working on this tender can accept a date..."),
+a worse, visible bug than the current silent one - the TS and SQL sides have to move together. That
+needs a new migration (next available number is `0110` - `0109` is taken) touching a `SECURITY DEFINER`
+function, which is a bigger, riskier change than this pass's "small, safe, direct push" bar. Flagged as
+its own backlog item rather than guessed at or silently left for the next pass to rediscover.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `engine/discovery/watch_tender_updates.py`
+- `engine/discovery/discovery_downgrades.py`
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): Finding 111 - the Bids pipeline's briefing_shortlisted stage (0105/PR #173) was silently dropped from "Done N similar tenders before"
 
 Oriented from `d3b7dd7`; `git fetch origin main` found one new commit (`2ab5fb1`, a sibling pass's own

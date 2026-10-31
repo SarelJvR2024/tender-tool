@@ -43,7 +43,13 @@ VERDICT_LABEL = {"strong_fit": "Strong fit", "possible": "Possible", "needs_revi
 TABLE = "discovered_opportunities"
 FLAG_COLUMNS = ("downgraded_from", "downgraded_at", "downgrade_cause", "reasons_before",
                 "downgrade_acknowledged_at", "downgrade_acknowledged_by", "downgrade_digested_at")
-ACTIVE_STAGES = ("found", "assessing", "building", "bidding", "submitted")  # tender_packs.pipeline_stage = actively pursuing (0021/0039/0105) - 'bidding' is the pre-0105 legacy value, kept so a not-yet-backfilled row doesn't drop out
+# briefing_shortlisted (0105) is the same "awaiting outcome, still real work
+# already gone into it" bucket 'submitted' is in - pending_digest_downgrades()
+# below prioritizes ACTIVE_STAGES tenders specifically because real work may
+# already have gone into them. Found 2026-10-31: missing here, same gap as
+# watch_tender_updates.py's identical tuple (PR #173's own 0105 migration
+# widened this for assessing/building but missed this stage).
+ACTIVE_STAGES = ("found", "assessing", "building", "bidding", "submitted", "briefing_shortlisted")  # tender_packs.pipeline_stage = actively pursuing (0021/0039/0105)
 
 
 def is_downgrade(old, new):
