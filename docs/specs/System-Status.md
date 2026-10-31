@@ -14,6 +14,59 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): follow-up security audit after Findings 109/110 - no third instance found, a genuinely clean result
+
+Directive: following up on the last two passes' real cross-tenant/privacy leaks (Finding 109 -
+`lifecycle_unsubscribe_token_for()`; Finding 110 - `company_can_request_pack()`/
+`company_packs_this_period()`), do a fresh, broader re-check specifically for (a) any
+`SECURITY DEFINER` function granted to `anon`/`authenticated` not already in the prior pass's own
+~25-function sample, and (b) functions taking a `person_id`/`tender_id`-shaped identifier rather than
+a `company_id` - the prior two findings were both company_id-shaped, so a different identifier type
+would be a genuinely new instance, not a re-check of the same two.
+
+Oriented from `863ba9b`; `git fetch origin main` found nothing new, local already matched exactly.
+Open PRs re-checked via the GitHub API: `#174` ("Split-recipient architecture") confirmed still
+**open and draft, not merged** - so the "submitted-tender nagging gap" backlog item stays open, not
+resolved (its own diff would fix it once it lands, already confirmed by an earlier pass, but it hasn't
+landed). `#164`/`#165` unchanged. None collide with anything checked here (SQL migrations only,
+`#174` touches `app/lib`/`app/scripts`/`app/components` only).
+
+Re-ran a fresh, broad grep for `grant execute on function ... to anon, authenticated` across every
+migration file (not trusting the prior pass's own list was exhaustive) - found ~57 grant statements
+(a superset of the prior ~25, since several functions are granted more than once across migrations as
+their signatures evolved). Individually read the body of every genuinely new candidate and every
+person_id/tender_id-shaped one not explicitly named in the prior pass's own write-up:
+
+- `bank_account_summaries(p_company uuid)` - `is_company_member(p_company)` in the WHERE clause. Correct.
+- `load_manual_tender(p_company_id uuid, p_tender_id uuid, ...)` - `if not is_company_member(p_company_id) then raise exception`. Correct.
+- `add_manual_tender_documents(p_tender_id uuid, ...)` - resolves the tender's REAL owner (`select * into t from tenders where id = p_tender_id`) and checks `is_company_member(t.owner_company_id)` against that, never trusting a caller-supplied company id. Correct - this is the pattern Finding 109/110 were missing.
+- `tender_document_uploads(p_tender_id uuid)` - every sensitive field (`uploaded_by`, `original_filename`) is wrapped in its own `case when is_company_member(...)` per-row; a public (no-owner) tender's non-sensitive fields are visible to anyone, which is the deliberate, documented design (shared government-tender data). Correct.
+- `submit_requirement_extraction_review(p_tender_id uuid, ...)` - `if not is_platform_admin() then raise exception`, admin-gated regardless of tender id. Correct.
+- `platform_admin_company_members(p_company_id uuid)`, `platform_admin_company_readiness_data(p_company_id uuid)`, `platform_admin_start_impersonation(p_company_id uuid, ...)`, `platform_admin_override_opportunity_confidence(p_opportunity_id uuid, ...)`, `platform_admin_reprocess_requirement_extraction(p_company_id uuid, p_tender_id uuid)` - every one has its own explicit `is_platform_admin()`/`where is_platform_admin() and ...` gate, admin-only regardless of what id is passed. Correct.
+- `invite_preview(p_token text)` - keyed by the token itself (an unguessable secret, the same bearer-credential model `unsubscribe_lifecycle_email(p_token)` already correctly uses) - the token IS the ownership proof by design, nothing to add. Correct.
+- `company_member_labels()` - takes no id param at all; returns labels only for companies `is_company_member()` already confirms the caller belongs to. Correct.
+- `start_payfast_checkout(p_plan_tier text, p_billing_interval text)` - takes no id param; derives `v_company_id` purely from `select company_id from company_members where user_id = auth.uid()`, never from caller input. Correct.
+- `accept_tender_update_date(p_watched_document_id uuid, p_change text)` (0048/0106, already reviewed by an earlier pass) - re-verified directly: resolves the real document/tender, then checks membership via `company_members cm ... where cm.user_id = v_uid` (the CALLER's own `auth.uid()`, not any caller-supplied id). Correct.
+
+**No new finding - a genuinely clean result.** Every person_id/tender_id-shaped and every
+previously-unchecked function in this fresh, broader sweep already resolves ownership from either
+`auth.uid()` directly or from the REAL row the supplied id points to (never from a caller-asserted
+company/person id taken at face value) - exactly the discipline Findings 109 and 110 were missing.
+Combined with the prior pass's own ~25-function sample, this session has now read the body of every
+`SECURITY DEFINER` function granted to `anon`/`authenticated` in this codebase at least once. This is
+a genuine, valuable confirmation, not a token "looked and found nothing" sweep - worth recording as
+such rather than treated as a non-event.
+
+No code changed this pass - QA tooling not re-run (nothing to verify). Committed and pushed
+(docs-only):
+- `docs/specs/System-Status.md`
+
+**Backlog unchanged at 19 items** - nothing resolved (PR #174 still unmerged), nothing new added. The
+security-audit thread opened by Finding 109 is now closed out with a clean second pass; no further
+dedicated audit pass of this kind is planned unless a new function of this shape is added later.
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): Finding 110 - following up on Finding 109's own pattern, company_can_request_pack()/company_packs_this_period() had the identical gap, leaking a company's real billing/quota state to any other signed-in user who knew its id
 
 Directive: given how significant Finding 109 was (an anon-reachable function leaking any user's secret unsubscribe token), this pass was explicitly a security audit - grep every `SECURITY DEFINER` function granted to `anon`/`authenticated` and check each one actually verifies the caller against the id it's given, not assume Finding 109 was the only instance.
