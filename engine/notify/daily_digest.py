@@ -640,8 +640,35 @@ def main():
         profile = assess_tender.load_company_profile(args.profile)
         roster = load_roster_local(args.roster)
         companies = [{"company_id": None, "legal_name": None, "key": LOCAL_COMPANY_KEY, "profile": profile}]
-        document_expiry = (local_document_expiry(profile, today, args.doc_lead_days)
-                           + local_person_credential_expiry(profile, today, args.doc_lead_days))
+        # local_document_expiry()/local_person_credential_expiry() read the
+        # profile JSON's own top-level "company"/"key_people" (the same raw
+        # shape suggest_pack.py/generate_cv.py read for the identical file) -
+        # NOT assess_tender.load_company_profile()'s own return value above,
+        # which is a DIFFERENT, already-transformed dict (disciplines/
+        # bee_level/black_ownership_pct/has_cidb_grading/offices only - no
+        # "company" or "key_people" key at all). Passing that transformed
+        # `profile` here instead of the raw file meant `profile.get("company",
+        # {})` and `profile.get("key_people", [])` always silently returned
+        # {}/[] regardless of what was really in the file - document_expiry
+        # and person_credential_expiry signals were unconditionally empty in
+        # --mode local, for every company, with no error. QA pass, 2026-10-31
+        # (the dedicated test for these two functions masked it: it hand-built
+        # a {"key_people": [...]} fixture directly, bypassing this exact
+        # wiring). --mode local is dev/offline-only - the real scheduled run
+        # (.github/workflows/daily-digest.yml) always passes --mode live,
+        # which reads Supabase directly and was never exposed to this.
+        try:
+            raw_profile = json.load(open(args.profile))
+        except (OSError, json.JSONDecodeError) as e:
+            # Same graceful degrade as assess_tender.load_company_profile()'s
+            # own read of this exact file, moments earlier - that call already
+            # printed its own WARNING and fell back silently; this one must
+            # not newly turn the same bad file into an unhandled crash.
+            print(f"  WARNING: could not re-read {args.profile!r} for document/person-credential expiry ({e}) - "
+                  "those two sections will be empty this run.")
+            raw_profile = {}
+        document_expiry = (local_document_expiry(raw_profile, today, args.doc_lead_days)
+                           + local_person_credential_expiry(raw_profile, today, args.doc_lead_days))
         tender_tasks = []  # Supabase-only, no local fixture (see module docstring)
         readiness_changes = []  # Supabase-only
         tender_updates, updates_client = [], None  # Supabase-only (0039)
@@ -826,7 +853,12 @@ def local_document_expiry(profile, today, lead_days):
     columns exist in Supabase - this is not a second schema to keep in sync
     by hand forever, it's scaffolding until that migration lands.
     """
-    company = profile.get("company", {})
+    # `profile.get("company", {})` only substitutes {} when the key is
+    # ABSENT, not when it's present with None - a real profile.json shape
+    # (same "null present, not missing" distinction already fixed for the
+    # identical file's "key_people"/"projects" keys in generate_cv.py/
+    # suggest_pack.py). "or {}" degrades null the same as missing.
+    company = profile.get("company") or {}
     fields = [
         ("coid_letter_of_good_standing_expiry", "COID Letter of Good Standing"),
         ("sars_tcs_pin_expiry", "SARS Tax Compliance Status PIN"),
@@ -868,7 +900,9 @@ def local_person_credential_expiry(profile, today, lead_days):
     same TRACKED_PERSON_EXPIRY_FIELDS columns (imported, not re-declared).
     No seen-store, same as local_document_expiry()."""
     due = []
-    for person in profile.get("key_people", []):
+    # Same null-vs-missing fix as local_document_expiry()'s own "company"
+    # read just above - "key_people": null is a real shape, not just absent.
+    for person in profile.get("key_people") or []:
         q = person.get("qualifications") or {}
         for col, label, lead_override, num_col in watch_deadlines.TRACKED_PERSON_EXPIRY_FIELDS:
             expiry = q.get(col)

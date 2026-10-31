@@ -6164,3 +6164,66 @@ and `engine/intake/test_classify_tender.py` - all pass.
 read, ~15 lines, no other behavior change), `engine/discovery/test_assess_tender.py` (new file, 4
 test functions, 5 checks). No schema or other call-site changes - the live Discovery fan-out's own
 `company_profiles.py` was never exposed to this bug in the first place.
+
+### Finding 109 (CONFIRMED, FIXED, moderate - daily_digest.py's own --mode local was unconditionally wired to the wrong object, so document-expiry and person-credential-expiry sections were silently empty for every company, every run, no matter what was really on file)
+
+**Where:** notify rotation this cycle. `engine/notify/daily_digest.py`'s `main()` (`--mode local` setup
+block), feeding `local_document_expiry()`/`local_person_credential_expiry()` (same file).
+
+**What was tested:** `main()`'s local-mode block does `profile = assess_tender.load_company_profile
+(args.profile)` then passes that SAME `profile` straight into `local_document_expiry(profile, ...)`
+and `local_person_credential_expiry(profile, ...)`. Those two functions read `profile.get("company",
+{})` / `profile.get("key_people", [])` - the RAW profile.json's own top-level shape (the same one
+`suggest_pack.py`/`generate_cv.py` read directly from the same file). But `assess_tender.
+load_company_profile()` is a TRANSFORMING function: it returns a completely different, flatter dict
+(`disciplines`/`bee_level`/`black_ownership_pct`/`has_cidb_grading`/`offices` only) - confirmed by
+reading its own `return` statement - with no `"company"` or `"key_people"` key at all.
+
+**Finding (CONFIRMED).** Reproduced directly: `assess_tender.load_company_profile()`'s real output,
+fed into `local_document_expiry()`, returns `[]` regardless of what the underlying profile.json
+actually contains, because `profile.get("company", {})` always hits the "absent" default (that key
+genuinely never exists on the transformed dict) - same for `key_people`. This means `--mode local`'s
+document-expiry and person-credential-expiry digest sections are unconditionally empty, silently, for
+every company, every run - not a rare edge case, the ONLY possible outcome via this wiring. The
+existing dedicated test for `local_person_credential_expiry()` (`engine/compliance/
+test_watch_person_credentials.py`) masked this completely: it hand-builds a `{"key_people": [...]}`
+fixture directly and calls the function with it, which exercises the function's OWN logic correctly
+but never exercises `main()`'s actual wiring that feeds it the wrong object in a real run. Confirmed
+`--mode live` (the only mode the real scheduled workflow, `.github/workflows/daily-digest.yml`, ever
+runs) was never exposed to this at all - it reads these two sections straight from Supabase via
+`watch_deadlines.find_due_documents()`/`find_due_person_credentials()`, a completely separate code
+path. `--mode local` is explicitly the dev/offline-only convenience path (also the one `mode` falls
+back to automatically whenever the Supabase env vars aren't set) - not what runs in production, but
+exactly the path a developer would reach for to verify a change to either of these two sections
+offline, and it silently couldn't.
+
+While fixing this, also found and fixed the identical "null present, not missing" gap this session's
+dominant bug class has already hit repeatedly (Finding 107's `suggest_pack.py`): `profile.get
+("company", {})`/`profile.get("key_people", [])` only substitute the default when the key is ABSENT,
+not when it's present with `None` - a real profile.json shape (the same file's `"key_people"`/
+`"projects"` keys already needed this exact fix elsewhere). Once the wiring fix makes these two
+functions receive the REAL raw profile for the first time, this gap becomes newly reachable too, so
+fixed both together.
+
+**Fix:** `main()` now re-reads the raw profile JSON directly (with the same graceful OSError/
+JSONDecodeError degrade `assess_tender.load_company_profile()`'s own read already has) and passes
+THAT to `local_document_expiry()`/`local_person_credential_expiry()`, instead of the already-
+transformed `assess_tender.load_company_profile()` result (which is still used for the fit-assessment
+profile, unchanged). Both functions' own `"company"`/`"key_people"` reads changed from `.get(key, {})`/
+`.get(key, [])` to `.get(key) or {}`/`.get(key) or []`, degrading an explicit `null` the same as absent.
+
+**Verified red-then-green.** Extended `engine/compliance/test_watch_person_credentials.py`'s existing
+digest-routing section with 5 new checks: a control case (the TRANSFORMED profile correctly finds
+nothing, demonstrating the bug's premise), the RAW profile.json shape finding both the company
+document and the key person's registration (demonstrating the fix), and `"company"`/`"key_people"`
+explicitly `null` degrading to empty rather than crashing. Revert-and-confirm-red: reverting reproduced
+the exact predicted `AttributeError: 'NoneType' object has no attribute 'get'` at the exact predicted
+line, with every pre-existing check in the file (including the two checks that don't exercise the
+null-safety guard) still green; restored, `0 failure(s)`. Regression-checked `engine/notify/
+test_digest_live.py`, `engine/notify/test_digest_opt_in.py`, and `engine/compliance/
+test_watch_deadlines_urgency.py` - all pass.
+
+**Regression:** `engine/notify/daily_digest.py` (`main()`'s local-mode profile read, plus two `.get()`
+calls in `local_document_expiry()`/`local_person_credential_expiry()`), `engine/compliance/
+test_watch_person_credentials.py` (5 new checks in the existing digest-routing section). No schema
+or other call-site changes - `--mode live` (the real scheduled run) was never exposed to this bug.

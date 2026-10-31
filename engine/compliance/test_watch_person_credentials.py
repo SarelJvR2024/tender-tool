@@ -122,6 +122,55 @@ def main():
     check([(i["person_name"], i["status"]) for i in local] == [("Pat Engineer", "renew_soon")],
           "digest --mode local reads the same columns from the profile JSON")
 
+    # QA pass, 2026-10-31: main()'s own --mode local wiring passed
+    # assess_tender.load_company_profile()'s TRANSFORMED profile (disciplines/
+    # bee_level/offices only - no "company" or "key_people" key at all) into
+    # local_document_expiry()/local_person_credential_expiry(), instead of the
+    # RAW profile.json (the shape both functions actually read, and the shape
+    # this test file's own fixture just above already uses). That meant
+    # profile.get("company", {})/profile.get("key_people", []) always
+    # silently returned {}/[] in real runs, regardless of what was really on
+    # file - document_expiry and person_credential_expiry were
+    # unconditionally empty in --mode local. Confirmed directly: a profile
+    # shaped exactly like the one a real company's profile.json export would
+    # produce still surfaces both sections once the real wiring is used, not
+    # just when a test hand-builds the already-correct shape.
+    import json
+    import tempfile
+    import assess_tender  # noqa: E402
+    real_profile = {
+        "company": {"coid_letter_of_good_standing_expiry": D(10)},
+        "key_people": [{"name": "Pat Engineer", "qualifications": {"ecsa_number": "20150155", "ecsa_expiry": D(10)}}],
+    }
+    fd, profile_path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(real_profile, f)
+    try:
+        transformed = assess_tender.load_company_profile(profile_path)
+    finally:
+        os.unlink(profile_path)
+    wrong_doc = daily_digest.local_document_expiry(transformed, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    check(wrong_doc == [], "control: the TRANSFORMED (assess_tender.load_company_profile()) shape correctly "
+          "finds nothing here - it never carries 'company' at all, which is exactly what main() used to pass")
+    right_doc = daily_digest.local_document_expiry(real_profile, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    right_person = daily_digest.local_person_credential_expiry(real_profile, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    check(len(right_doc) == 1 and right_doc[0]["field"] == "coid_letter_of_good_standing_expiry",
+          f"the RAW profile.json shape (what main() must actually pass) finds the company document ({right_doc})")
+    check(len(right_person) == 1 and right_person[0]["person_name"] == "Pat Engineer",
+          f"...and the key person's own registration ({right_person})")
+
+    # "company"/"key_people" PRESENT but explicitly null (a real profile.json
+    # shape, not just absent - same distinction already fixed for the
+    # identical file's "projects" key in suggest_pack.py, Finding 107) must
+    # degrade to empty, not crash.
+    null_profile = {"company": None, "key_people": None}
+    try:
+        null_doc = daily_digest.local_document_expiry(null_profile, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+        null_person = daily_digest.local_person_credential_expiry(null_profile, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+        check(null_doc == [] and null_person == [], f"'company'/'key_people' explicitly null degrades to empty ({null_doc}, {null_person})")
+    except TypeError as e:
+        check(False, f"'company'/'key_people' explicitly null crashed instead of degrading to empty: {e}")
+
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -14,6 +14,66 @@
 
 ---
 
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-sixth run): Finding 109 in QA-Edge-Case-Findings.md - daily_digest.py's --mode local was unconditionally wired to the wrong object, so document-expiry and person-credential-expiry sections were silently empty for every company, every run
+
+(Numbered independently of the solution-architect review's own "Finding 109" immediately below - two
+separate tracks, same number by coincidence, no relation; see this file's own standing note on that.)
+
+Oriented from `2115727` (fast-forwarded cleanly before the architect review's own `d018ba0` landed;
+re-fetched again before pushing - no collision, confirmed below). Open PRs re-checked via the GitHub
+API: `#174` (still open/draft, `app/lib`/`scripts` only), `#164`/`#165` (unchanged) - none touch
+`engine/notify/` or `engine/compliance/`.
+
+notify rotation (discovery was last cycle - see the entry below). `record_heartbeat.py` and
+`send_digest_emails.py` came up clean on direct reading and reasoning (both already correctly never
+raise, already have the per-item "one bad entry doesn't abort the batch" guard from an earlier
+"Enterprise-readiness audit round 2, 2026-10-20" pass). `daily_digest.py` itself is large (898 lines)
+and extremely well-guarded everywhere else (every independent sub-system - tender updates,
+re-assessed tenders, listing changes, the per-roster-entry digest-build loop - already has its own
+isolated try/except from prior passes), so read it function-by-function looking for the one area not
+already covered that way.
+
+Found it in `main()`'s own `--mode local` wiring: `local_document_expiry()`/
+`local_person_credential_expiry()` read a profile's `"company"`/`"key_people"` keys (the RAW
+profile.json shape `suggest_pack.py`/`generate_cv.py` also read directly) - but `main()` was feeding
+them `assess_tender.load_company_profile()`'s own return value, which is a DIFFERENT, already-
+transformed dict (`disciplines`/`bee_level`/`black_ownership_pct`/`has_cidb_grading`/`offices` only -
+confirmed by reading that function's own `return` statement, no `"company"`/`"key_people"` key at
+all). Reproduced directly: feeding the transformed dict into `local_document_expiry()` always returns
+`[]`, regardless of what the real profile.json contains - not a rare edge case, the ONLY possible
+outcome through this wiring. The existing dedicated test for `local_person_credential_expiry()` masked
+this completely, because it hand-builds a `{"key_people": [...]}` fixture directly rather than going
+through `main()`'s own wiring. Confirmed `--mode live` (the only mode the real scheduled workflow,
+`.github/workflows/daily-digest.yml`, ever runs) reads these two sections from Supabase through a
+completely separate path and was never exposed to this - `--mode local` is the dev/offline-only
+convenience path (also what `main()` falls back to automatically whenever the Supabase env vars
+aren't set), not what runs in production, but exactly the path a developer verifying a change to
+either section offline would reach for, and it silently couldn't do that at all.
+
+While fixing the wiring, also fixed the same "null present, not missing" gap this session has hit
+repeatedly elsewhere (`suggest_pack.py`, Finding 107 above): `profile.get("company", {})`/`profile.get
+("key_people", [])` only substitute the default when the key is ABSENT, not when it's `null` - a real
+profile.json shape for the identical file's own `"key_people"`/`"projects"` keys. Fixing the wiring
+alone would have made this newly reachable (these two functions had never actually received a real
+profile before), so fixed both in the same pass.
+
+Fixed: `main()` now re-reads the raw profile JSON directly (same graceful OSError/JSONDecodeError
+degrade as `assess_tender.load_company_profile()`'s own read) and passes that to both functions;
+`profile.get(key, default)` changed to `profile.get(key) or default` in both. Verified red-then-
+green: extended `engine/compliance/test_watch_person_credentials.py` with 5 new checks (a control
+case proving the bug's premise, the real fix finding both sections, explicit-null degrading safely);
+reverting reproduced the exact predicted `AttributeError` at the exact line, every other check (old
+and new) stayed green; restored, `0 failure(s)`. Regression-checked `engine/notify/test_digest_live.py`,
+`engine/notify/test_digest_opt_in.py`, `engine/compliance/test_watch_deadlines_urgency.py` - all pass.
+
+Committed and pushed directly to `main` (contained, well-verified, no PR):
+- `engine/notify/daily_digest.py` (`main()`'s local-mode profile read, two `.get()` calls)
+- `engine/compliance/test_watch_person_credentials.py` (5 new checks)
+- `docs/specs/QA-Edge-Case-Findings.md` (Finding 109)
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): Finding 109 - lifecycle_unsubscribe_token_for() granted the public anon role the power to fetch ANY user's secret unsubscribe token by uuid
 
 Oriented from `2115727`; `git fetch origin main` found one new commit (`e1de394`, a sibling QA-
