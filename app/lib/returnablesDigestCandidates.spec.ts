@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { returnablesWindowCandidates, RETURNABLES_DIGEST_MIN_BUSINESS_DAYS, RETURNABLES_DIGEST_MAX_BUSINESS_DAYS, type ReturnablesWindowTenderRow } from "./returnablesDigestCandidates";
+import { returnablesWindowCandidates, RETURNABLES_DIGEST_MIN_BUSINESS_DAYS, RETURNABLES_DIGEST_MAX_BUSINESS_DAYS, RETURNABLES_EXCLUDED_STAGES, type ReturnablesWindowTenderRow } from "./returnablesDigestCandidates";
 
 describe("returnablesWindowCandidates", () => {
   // Same QA-fix shape as deadlineReminderCandidates()'s own test (2026-10-22
@@ -13,7 +13,10 @@ describe("returnablesWindowCandidates", () => {
     closing_date: "2026-11-01",
     family: "Conventional Consultant Tender",
     document_requirements: null,
-    tender_packs: [{ company_id: "company-a" }, { company_id: "company-b" }],
+    tender_packs: [
+      { company_id: "company-a", pipeline_stage: "assessing" },
+      { company_id: "company-b", pipeline_stage: "building" },
+    ],
   };
   const businessDaysBetweenFn = () => 4; // inside the 3-5 window for every call below
 
@@ -42,5 +45,27 @@ describe("returnablesWindowCandidates", () => {
     expect(returnablesWindowCandidates([tender], "2026-10-27", () => 6)).toEqual([]);
     expect(returnablesWindowCandidates([tender], "2026-10-27", () => 0)).toEqual([]);
     expect(returnablesWindowCandidates([tender], "2026-10-27", () => -1)).toEqual([]); // already closed
+  });
+
+  // Sarel, 2026-10-30: a submitted (or later) bid must never get a "missing
+  // returnables" nudge - the whole point was prompting action before hand-in.
+  it("submission-suppression: excludes submitted/briefing_shortlisted/won/lost for that one company, keeps a still-active co-pursuer", () => {
+    expect(RETURNABLES_EXCLUDED_STAGES).toEqual(["submitted", "briefing_shortlisted", "won", "lost"]);
+    for (const stage of RETURNABLES_EXCLUDED_STAGES) {
+      const mixed: ReturnablesWindowTenderRow = {
+        ...tender,
+        id: `tender-${stage}`,
+        tender_packs: [{ company_id: "company-a", pipeline_stage: stage }, { company_id: "company-b", pipeline_stage: "assessing" }],
+      };
+      const candidates = returnablesWindowCandidates([mixed], "2026-10-27", businessDaysBetweenFn);
+      expect(candidates.map((c) => c.companyId)).toEqual(["company-b"]);
+    }
+  });
+
+  it("keeps found/assessing/building - still-active stages, not suppressed", () => {
+    for (const stage of ["found", "assessing", "building"]) {
+      const active: ReturnablesWindowTenderRow = { ...tender, id: `tender-${stage}`, tender_packs: [{ company_id: "company-a", pipeline_stage: stage }] };
+      expect(returnablesWindowCandidates([active], "2026-10-27", businessDaysBetweenFn)).toHaveLength(1);
+    }
   });
 });

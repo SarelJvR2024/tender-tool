@@ -32,17 +32,25 @@
 // comment is explicit that an addendum before closing can still require a
 // resubmission even after a company has submitted, so stopping alerts at
 // 'submitted' would reintroduce the exact gap this feature was built to
-// close. (This app's real pipeline_stage enum - found/bidding/submitted/
-// won/lost, migration 0021 - has no 'dispatched'/'awarded'/'declined'
-// value; a literal filter against those strings would silently match
-// nothing.)
+// close. (This app's real pipeline_stage enum - found/assessing/building/
+// submitted/briefing_shortlisted/won/lost, migrations 0021/0105 - has no
+// 'dispatched'/'awarded'/'declined' value; a literal filter against those
+// strings would silently match nothing.)
+//
+// Consent: bypasses company_members.daily_digest_opt_in on purpose (Sarel,
+// 2026-10-30) - an addendum on a tender this company is actively pursuing
+// is critical, bid-protecting information, not a discretionary digest.
+// Recipients resolved via lib/notificationRecipients.ts's
+// criticalBidRecipients() - every registered company_members email,
+// unconditionally. Stage filtering (keeps everything except won/lost, see
+// above) is UNCHANGED from before this - only the recipient gate moved.
 //
 // Run: node --experimental-strip-types scripts/send-corrigendum-alerts.ts
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
 import { createClient } from "@supabase/supabase-js";
 import { corrigendumAlertEmail } from "../lib/emailTemplatesTier1.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
-import { operationalRecipients } from "../lib/notificationRecipients.ts";
+import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 import { changesForDoc, isCorrigendumCandidate, type WatchedDocRow } from "../lib/corrigendumAlerts.ts";
 import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
 
@@ -110,7 +118,7 @@ async function main() {
     }
     const { data: company } = await supabase.from("companies").select("legal_name").eq("id", row.company_id).maybeSingle();
 
-    const recipients = await operationalRecipients(supabase, row.company_id);
+    const recipients = await criticalBidRecipients(supabase, row.company_id);
     const companyName = company?.legal_name || "your company";
 
     const { subject, html, text } = corrigendumAlertEmail({
@@ -130,7 +138,7 @@ async function main() {
         recipients,
         targetItems: tender.contract_no || tender.id,
         subject,
-        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+        status: recipients.length === 0 ? "Skipped (no recipients)" : "Simulated OK",
       });
       continue;
     }
@@ -181,7 +189,7 @@ async function main() {
     return;
   }
 
-  console.log(`Corrigendum alerts: ${sent} sent, ${skippedAlreadySent} already sent before, ${skippedNoRecipients} skipped (no opted-in recipients).`);
+  console.log(`Corrigendum alerts: ${sent} sent, ${skippedAlreadySent} already sent before, ${skippedNoRecipients} skipped (no recipients).`);
 }
 
 main();

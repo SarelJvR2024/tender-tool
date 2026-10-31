@@ -16,14 +16,22 @@
 // TypeScript equivalent of that same rule for this one job, run outside
 // the deployed app, same as the Python digest sender.
 //
-// Consent: reuses company_members.daily_digest_opt_in (migration 0073) -
-// Sarel's own existing "opt-in, never opt-out" email preference - rather
-// than inventing a second opt-in flag for a second notification type (the
-// task's own instruction: "reuse this existing infrastructure... rather
-// than building a second, parallel email-sending mechanism").
+// Consent: a closing deadline on a tender this company is still actively
+// pursuing is critical, bid-protecting information, not a discretionary
+// digest - Sarel's own call (2026-10-30) after finding that gating it on
+// company_members.daily_digest_opt_in (migration 0073, "opt-in, never
+// opt-out") meant 32 of 33 real companies in production had never seen one,
+// because that flag's own UI frames it as a generic "daily digest" nobody
+// had a reason to turn on. Recipients resolved via
+// lib/notificationRecipients.ts's criticalBidRecipients() instead -
+// EVERY registered company_members email, unconditionally, deliberately
+// bypassing that flag. Candidate selection (deadlineReminderCandidates(),
+// lib/deadlineReminders.ts) excludes submitted/briefing_shortlisted/won/lost
+// so this never fires once the deadline it's warning about no longer
+// applies.
 //
 // Recipient emails resolved via lib/notificationRecipients.ts's
-// operationalRecipients() (company_notification_recipients() RPC, migration
+// criticalBidRecipients() (company_notification_recipients() RPC, migration
 // 0094/0095) - NOT company_member_labels() (0033), which this script called
 // until 2026-10-24: that RPC gates on auth.uid(), NULL for this script's
 // service-role caller, so it silently returned zero rows every run - this
@@ -41,7 +49,7 @@ import { daysUntil } from "../lib/dates.ts";
 import { deadlineReminderCandidates, type DeadlineReminderTenderRow } from "../lib/deadlineReminders.ts";
 import { deadlineReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
-import { operationalRecipients } from "../lib/notificationRecipients.ts";
+import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -69,7 +77,7 @@ async function main() {
 
   const { data: tenderRows, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, description, closing_date, tender_packs!inner(company_id)")
+    .select("id, contract_no, description, closing_date, tender_packs!inner(company_id, pipeline_stage)")
     .not("closing_date", "is", null);
   if (tenderError) {
     console.error("Could not read tenders", tenderError);
@@ -90,7 +98,7 @@ async function main() {
 
   let sent = 0;
   let skippedAlreadySent = 0;
-  let skippedNoOptedInMembers = 0;
+  let skippedNoMembers = 0;
 
   for (const { tender, companyId, daysLeft, threshold } of candidates) {
     const { data: claimed, error: claimError } = await supabase.rpc("record_deadline_reminder_sent", {
@@ -107,9 +115,9 @@ async function main() {
       continue;
     }
 
-    const recipients = await operationalRecipients(supabase, companyId);
+    const recipients = await criticalBidRecipients(supabase, companyId);
     if (recipients.length === 0) {
-      skippedNoOptedInMembers++;
+      skippedNoMembers++;
       continue;
     }
 
@@ -142,7 +150,7 @@ async function main() {
   }
 
   console.log(
-    `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoOptedInMembers} with no opted-in member, out of ${candidates.length} candidate tender/company/threshold pair(s).`
+    `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoMembers} with no registered company member, out of ${candidates.length} candidate tender/company/threshold pair(s).`
   );
 }
 

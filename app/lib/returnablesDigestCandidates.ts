@@ -47,8 +47,22 @@ export type ReturnablesWindowTenderRow = {
   closing_date: string | null;
   family: string | null;
   document_requirements: unknown;
-  tender_packs: { company_id: string }[];
+  tender_packs: { company_id: string; pipeline_stage: string }[];
 };
+
+// A submitted (or later) bid must never get a "missing returnables" nudge -
+// the whole point was prompting action before hand-in, same reasoning
+// lib/clarificationWindowReminders.ts's own submission-suppression already
+// documents for a different digest. briefing_shortlisted only ever follows
+// submitted (lib/pipeline.ts's NEXT_STAGES), so it's excluded for the same
+// reason, not a separate rule. Sarel's own brief (2026-10-30) also named
+// 'archived' and 'disqualified' - neither is a real stored pipeline_stage
+// value in this schema (lib/pipeline.ts's PIPELINE_STAGES has 7: found/
+// assessing/building/submitted/briefing_shortlisted/won/lost) and this list
+// is a plain `includes()` check, not a check constraint - including values
+// that can never match would be dead weight, not a bug, so they're left out
+// rather than copied in for a schema this app doesn't have.
+export const RETURNABLES_EXCLUDED_STAGES = ["submitted", "briefing_shortlisted", "won", "lost"] as const;
 
 export type ReturnablesWindowCandidate = {
   tender: ReturnablesWindowTenderRow;
@@ -80,8 +94,10 @@ export function returnablesWindowCandidates(
     if (!tender.closing_date) continue;
     const businessDaysLeft = businessDaysBetweenFn(todayStr, tender.closing_date.slice(0, 10));
     if (businessDaysLeft < RETURNABLES_DIGEST_MIN_BUSINESS_DAYS || businessDaysLeft > RETURNABLES_DIGEST_MAX_BUSINESS_DAYS) continue;
-    for (const companyId of (tender.tender_packs ?? []).map((p) => p.company_id).filter(Boolean)) {
-      out.push({ tender, companyId, businessDaysLeft });
+    for (const pack of tender.tender_packs ?? []) {
+      if (!pack.company_id) continue;
+      if ((RETURNABLES_EXCLUDED_STAGES as readonly string[]).includes(pack.pipeline_stage)) continue;
+      out.push({ tender, companyId: pack.company_id, businessDaysLeft });
     }
   }
   return out;

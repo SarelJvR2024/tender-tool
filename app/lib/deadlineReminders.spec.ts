@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deadlineReminderCandidates, reminderThresholdFor, type DeadlineReminderTenderRow } from "./deadlineReminders";
+import { deadlineReminderCandidates, reminderThresholdFor, DEADLINE_REMINDER_EXCLUDED_STAGES, type DeadlineReminderTenderRow } from "./deadlineReminders";
 
 describe("reminderThresholdFor", () => {
   it("matches exactly 3 days and 1 day (24 hours), nothing else", () => {
@@ -23,7 +23,10 @@ describe("deadlineReminderCandidates", () => {
     contract_no: "SANRAL/1234",
     description: null,
     closing_date: "2026-11-01",
-    tender_packs: [{ company_id: "company-a" }, { company_id: "company-b" }],
+    tender_packs: [
+      { company_id: "company-a", pipeline_stage: "assessing" },
+      { company_id: "company-b", pipeline_stage: "building" },
+    ],
   };
   const daysUntilFn = () => 3; // inside the 3-day threshold for every call below
 
@@ -41,5 +44,27 @@ describe("deadlineReminderCandidates", () => {
   it("outside the window or off-threshold still yields nothing, for every tracking company", () => {
     expect(deadlineReminderCandidates([tender], () => 14)).toEqual([]); // inside DEADLINE_WINDOW_DAYS, not a threshold day
     expect(deadlineReminderCandidates([tender], () => null)).toEqual([]); // no closing date on file
+  });
+
+  // Sarel, 2026-10-30: a submitted (or later) bid's own closing deadline has
+  // already been met - reminding about it again is pointless, not helpful.
+  it("submission-suppression: excludes submitted/briefing_shortlisted/won/lost for that one company, keeps a still-active co-pursuer", () => {
+    expect(DEADLINE_REMINDER_EXCLUDED_STAGES).toEqual(["submitted", "briefing_shortlisted", "won", "lost"]);
+    for (const stage of DEADLINE_REMINDER_EXCLUDED_STAGES) {
+      const mixed: DeadlineReminderTenderRow = {
+        ...tender,
+        id: `tender-${stage}`,
+        tender_packs: [{ company_id: "company-a", pipeline_stage: stage }, { company_id: "company-b", pipeline_stage: "assessing" }],
+      };
+      const candidates = deadlineReminderCandidates([mixed], daysUntilFn);
+      expect(candidates.map((c) => c.companyId)).toEqual(["company-b"]);
+    }
+  });
+
+  it("keeps found/assessing/building - still-active stages, not suppressed", () => {
+    for (const stage of ["found", "assessing", "building"]) {
+      const active: DeadlineReminderTenderRow = { ...tender, id: `tender-${stage}`, tender_packs: [{ company_id: "company-a", pipeline_stage: stage }] };
+      expect(deadlineReminderCandidates([active], daysUntilFn)).toHaveLength(1);
+    }
   });
 });

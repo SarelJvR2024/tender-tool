@@ -13,6 +13,17 @@
 // data in one run, which needs the Supabase SERVICE ROLE key, and the
 // deployed app itself never holds that key.
 //
+// Consent: bypasses company_members.daily_digest_opt_in on purpose (Sarel,
+// 2026-10-30) - a mandatory returnable missing days before closing is
+// critical, bid-protecting information, not a discretionary digest; gating
+// it the same way as the opt-in discovered-tenders digest meant 32 of 33
+// real companies had never seen one. Recipients resolved via
+// lib/notificationRecipients.ts's criticalBidRecipients() - every
+// registered company_members email, unconditionally. Candidate selection
+// (returnablesWindowCandidates(), lib/returnablesDigestCandidates.ts)
+// excludes submitted/briefing_shortlisted/won/lost, so this never fires on
+// a bid that's already handed in or decided.
+//
 // Idempotency: claim_notification()/record_notification_sent() (migration
 // 0093) - the GENERALISED engine every notification type since Tier 0-3
 // uses, not a new one-off claim table (that migration's own header warns
@@ -32,7 +43,7 @@ import { businessDaysBetween } from "../lib/publicHolidays.ts";
 import { returnablesWindowCandidates, returnablesMissingMandatoryItems, type ReturnablesWindowTenderRow } from "../lib/returnablesDigestCandidates.ts";
 import { returnablesDigestEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
-import { operationalRecipients } from "../lib/notificationRecipients.ts";
+import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 
 const NOTIFICATION_TYPE = "returnables_digest";
 
@@ -59,7 +70,7 @@ async function main() {
 
   const { data: tenderRows, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, description, title, closing_date, family, document_requirements, tender_packs!inner(company_id)")
+    .select("id, contract_no, description, title, closing_date, family, document_requirements, tender_packs!inner(company_id, pipeline_stage)")
     .not("closing_date", "is", null);
   if (tenderError) {
     console.error("Could not read tenders", tenderError);
@@ -77,7 +88,7 @@ async function main() {
   let skippedNotMapped = 0;
   let skippedNothingMissing = 0;
   let skippedAlreadyClaimed = 0;
-  let skippedNoOptedInMembers = 0;
+  let skippedNoMembers = 0;
 
   for (const { tender, companyId, businessDaysLeft } of candidates) {
     const result = await returnablesMissingMandatoryItems(supabase, tender, companyId);
@@ -90,9 +101,9 @@ async function main() {
       continue;
     }
 
-    const recipients = await operationalRecipients(supabase, companyId);
+    const recipients = await criticalBidRecipients(supabase, companyId);
     if (recipients.length === 0) {
-      skippedNoOptedInMembers++;
+      skippedNoMembers++;
       continue;
     }
 
@@ -158,7 +169,7 @@ async function main() {
 
   console.log(
     `Returnables digest: ${sent} sent, ${skippedNotMapped} not mapped for this family yet, ${skippedNothingMissing} with nothing mandatory missing, ` +
-      `${skippedAlreadyClaimed} already sent for this tender/company, ${skippedNoOptedInMembers} with no opted-in member, out of ${candidates.length} candidate tender/company pair(s).`
+      `${skippedAlreadyClaimed} already sent for this tender/company, ${skippedNoMembers} with no registered company member, out of ${candidates.length} candidate tender/company pair(s).`
   );
 }
 

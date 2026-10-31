@@ -44,7 +44,16 @@ const BASIS_LABEL: Record<string, string> = {
 // allows. 'bidding' is the pre-0105 legacy value (lib/pipeline.ts's
 // LEGACY_BIDDING_STAGE) - kept so a not-yet-backfilled row doesn't lose
 // accept-a-date access; harmless, unreachable once 0105 has run.
-const ACTIVE_STAGES = ["found", "assessing", "building", "bidding", "submitted"];
+//
+// 'briefing_shortlisted' is deliberately included here even though
+// accept_tender_update_date() (0106) does NOT yet accept it server-side
+// (Finding 111/112, a sibling QA pass, 2026-10-31, flagged not fixed) - a
+// correct candidate list fix here would otherwise still fail server-side
+// on click. This component only shows the "Accept" button;
+// canAccept()/accept_tender_update_date() need to widen together before
+// either is actually correct - see docs/specs/System-Status.md's own
+// backlog entry for the coordinated 0106 companion fix this still needs.
+const ACTIVE_STAGES = ["found", "assessing", "building", "bidding", "submitted", "briefing_shortlisted"];
 
 export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();
