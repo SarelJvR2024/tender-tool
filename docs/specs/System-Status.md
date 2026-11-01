@@ -14,6 +14,44 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): the key_person_minimums.py lead from the prior pass - independently verified, already fixed by a sibling QA/robustness pass
+
+Oriented from `f30c15d`; `git fetch origin main` surfaced one new commit (`0df7616`) that, on inspection,
+turned out to be exactly the fix for the lead the immediately-prior pass left open and honestly
+unconfirmed (a narrow page-layout shape in `engine/discovery/key_person_minimums.py` where a band's
+years-minimum could fall through to `None` even with readable numeric text present). My local checkout
+was one commit behind `origin/main` at orient time - fast-forwarded before doing anything else, per this
+session's own standing discipline about never trusting a stale "nothing changed" read.
+
+Rather than taking the commit message at face value, read the real diff and independently re-verified it:
+confirmed `extract_key_person_minimums()`'s `alternatives` branch genuinely stays empty on the documented
+dangling-connector/all-lowercase qualification-column shapes, confirmed the fix's `elif len(numeric) > 1`
+branch correctly falls back to the lowest of the individually-parsed numeric fragments (the same
+lower-bound-is-binding rule the branch immediately above it already applies), and re-ran
+`engine/discovery/test_key_person_minimums.py` myself - 0 failures, including the new `part1b()` checks -
+plus a fresh `py_compile` of the touched module. The fix is real and correct; this specific lead is now
+**resolved**, not still open.
+
+Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+With the directive's main target already closed by a sibling pass, used the remaining time for a fresh
+"read a whole module end to end" pass per this session's own established technique:
+`engine/discovery/boq_extraction.py` (285 lines, the BOQ/priced-schedule .xlsx parser, zero prior QA
+attention this session) - read start to end. The header-detection/ambiguous-column handling, the
+lump-sum-vs-coincidental-header numeric-ratio guard, and the `#DIV/0!`-never-fabricated-as-zero discipline
+are all already careful and well-reasoned; re-ran its own test suite (`test_boq_extraction.py`) as a
+sanity check - 0 failures, including the lump-sum and `#DIV/0!` edge cases. No bug found - a genuine
+clean sweep.
+
+Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item, nothing resolved on the standing backlog (the key_person_minimums lead was never a
+tracked backlog item - it was always framed as this session's own open investigation, not a judgment call
+for Sarel). Backlog unchanged at **18 items**.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-fourth run): Finding 111 in QA-Edge-Case-Findings.md - a tender's own real minimum-years requirement for a key position silently disappeared whenever the C3.1.11 alternatives table's qualification column couldn't be phrase-split, picked up from the standing solution-architect review's own honestly-unconfirmed lead
 
 Oriented from `8b451a0`; `git fetch origin main` found one new sibling commit (`f30c15d`, the
