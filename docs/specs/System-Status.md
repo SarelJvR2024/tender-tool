@@ -14,6 +14,65 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): fix - lephalale.py's TNUM_RE dropped a real T-number to None when it wrapped across two physical PDF table rows
+
+Oriented from `79b8d69`; `git fetch origin main` found nothing new - local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Continuing this session's "test a discovery scraper's regex against its real live source site"
+technique (which has now found real bugs in `sars_procurement.py` and `vaal_central_water.py`,
+and confirmed `capetown_procurement.py`/`kouga.py` clean): `randwater.co.za` was unreachable this
+pass (a TLS cert-chain problem on their own server, confirmed via the agent proxy's own status
+endpoint showing no relay-level rejection - not pursued further per the standing rule against
+disabling TLS verification). `lephalale.gov.za` was reachable; fetched its real live listing page
+(332,919 bytes) and tested `ROW_RE` against it directly: 1117/1117 real `<tr>` rows matched
+correctly, the other 6 `<tr>` blocks confirmed as legitimate header rows - that regex is clean.
+
+Downloaded and `pdftotext -layout`'d the real, live "OCTOBER BATCH 23102026.pdf" (2 real tenders,
+closing 09/11/2026 and 23/11/2026) and ran `parse_batch()` against the real extracted text.
+**Found a real bug**: the second tender's own T-number, "T42/2025-2026(Re-Advert)" on the real PDF,
+wraps across two physical table rows - `pdftotext -layout` emits "T42/2025-" at the end of one
+output line (with that same row's OWN other column text, e.g. the description and enquiry-phone
+columns, interleaved right after it on that same line), then "2026(Re-Advert)" at the very start of
+the next output line. `TNUM_RE`'s old `-\s*(\d{4})` could only bridge whitespace, not the real words
+sitting in between, so it matched nothing at all and this live, real tender's T-number silently came
+back `None` - the exact "regex only tested against the one layout it happened to be written for"
+shape this session has now found 3 times (`sars_procurement.py`'s attribute order,
+`tender_enrichment.py`'s single-digit amounts, this).
+
+Fixed by widening `TNUM_RE` with a second alternative that matches this exact wrap shape (end of
+line, then the continuation at the very start of the next) without changing the first alternative at
+all. Re-ran the new regex against the 3 existing real fixture PDFs (September/August/March) before
+touching the source file - byte-for-byte identical T-numbers to the old regex in every case, so this
+is additive, not a behavior change for anything already working. Saved the real October PDF as a new
+fixture (`fixtures/lephalale/October Batch 2026.pdf`, same size class as the existing 3) and added
+2 regression checks to `test_lephalale.py`. Revert-and-confirm-red performed on the source file alone
+(via `git stash`, keeping the new test): the new wrap-case check failed exactly as expected
+(`['T15/2026-2027', None]`) against the unfixed regex, with the same-line case still passing; restored,
+both pass.
+
+Verification: `python3 engine/discovery/test_lephalale.py` → ALL PASSED (35 checks, up from 32);
+`test_gov_sources.py` sanity sweep → ALL PASSED, unaffected; `py_compile` clean on both touched files.
+
+Committed and pushed directly to `main` (no PR - small, fully verified against the real live site
+and real live document, no DB access):
+- `engine/discovery/lephalale.py`
+- `engine/discovery/test_lephalale.py`
+- `engine/discovery/fixtures/lephalale/October Batch 2026.pdf` (new)
+- `docs/specs/System-Status.md`
+
+No new backlog item - standalone, now-fixed data-quality bug, not a judgment call for Sarel. The
+18-item backlog is otherwise unchanged (migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` still
+need applying to the live DB; `narrative_documents` PostgREST schema-cache reload; PayFast
+idempotency design question; "missing ISO 9001 flagged as urgent" UX question; Form B7
+compulsory-vs-matrix disagreement; Dashboard "Decision needed" over-triggering; impersonation
+token-refresh gap; SANRAL fingerprint heads-up; dangling `signatory_person_id` fallback design
+question; active-subscription reconciliation gap; team seat-limit TOCTOU race; no storage-level
+size/type limit on the 9 upload buckets; pack-generation quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): fix - vaal_central_water.py's parser silently mangled a real "extension of validity" notice into a bogus tender with a reference number as its title, dropping 4 referenced tenders
 
 Oriented from `ba3ac75`; `git fetch origin main` found nothing new since - local already matched

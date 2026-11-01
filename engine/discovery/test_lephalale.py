@@ -87,6 +87,20 @@ check("the real data-quality issue is reproduced, not hidden: 'T46/2025-2026' re
       "across two different tenders in the real document",
       mar_tnumbers.count("T46/2025-2026") == 2, mar_tnumbers)
 
+# --- parse_batch() against a real T-number that wraps across two PDF rows --
+# Found 2026-11-01, live site: "T42/2025-" ends one pdftotext -layout output
+# line (with that row's own other column text interleaved right after it on
+# that same line), and the continuation "2026(Re-Advert)" starts the very
+# next output line - a real, live tender (8/2/817, closing 23/11/2026) whose
+# T-number used to come back None because of it.
+
+oct_rows = lephalale.parse_batch(_text("October Batch 2026.pdf"))
+check("October batch: exactly 2 tenders", len(oct_rows) == 2, oct_rows)
+oct_tnumbers = [r[1] for r in oct_rows]
+check("a normal, same-line T-number still reads correctly", oct_tnumbers[0] == "T15/2026-2027", oct_tnumbers)
+check("a T-number that wraps across two physical PDF rows is still read correctly, not dropped to None",
+      oct_tnumbers[1] == "T42/2025-2026 (Re-advert)", oct_tnumbers)
+
 # --- normalize() -> the shared release shape --------------------------------
 
 rel = lephalale.normalize(*sept_rows[0], "https://example.org/batch.pdf", "September Batch 2026")

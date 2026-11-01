@@ -71,7 +71,22 @@ FETCH_CUTOFF_DAYS = 45
 ROW_RE = re.compile(
     r"<tr><td><a href='([^']+)'[^>]*>([^<]*)</a></td><td>([\d-]+)</td><td>([\d-]+)</td></tr>")
 REF_SPLIT = re.compile(r"Ref\s*no\s*:\s*")
-TNUM_RE = re.compile(r"T\s*(\d{1,3})\s*/\s*(\d{4})\s*-\s*(\d{4})\s*(\(Re-?advert\))?", re.IGNORECASE)
+# Found 2026-11-01, against the real live site (October Batch, closing
+# 23/11/2026): a T-number that itself wraps across two physical PDF table
+# rows - "T42/2025-" ends one pdftotext -layout output line, with that same
+# row's OWN other columns (description/enquiry-phone text) interleaved
+# after it on that line, and the continuation "2026(Re-Advert)" starting the
+# very next output line - used to make the simple "-\s*(\d{4})" gap
+# unbridgeable (real words, not whitespace, sit in between), so TNUM_RE
+# matched nothing at all and a real, live tender's own T-number silently
+# came back None. The second alternative below handles exactly that one
+# wrap shape (end of line, then the continuation at the very start of the
+# next); the first alternative is unchanged and still covers every normal,
+# same-line case - confirmed byte-for-byte identical against the 3 existing
+# real fixture PDFs (September/August/March), none of which wrap this way.
+TNUM_RE = re.compile(
+    r"T\s*(\d{1,3})\s*/\s*(\d{4})\s*-(?:\s*(\d{4})|[^\n]*\n\s*(\d{4}))\s*(\(Re-?advert\))?",
+    re.IGNORECASE)
 DATE_RE = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b")
 # Noise this reader deliberately strips from the description text - the DOC
 # fee, evaluation-ratio and enquiry-phone columns, which pdftotext -layout
@@ -160,7 +175,7 @@ def parse_batch(text):
         except ValueError:
             continue
         tm = TNUM_RE.search(chunk)
-        tnumber = f"T{tm.group(1)}/{tm.group(2)}-{tm.group(3)}" + (" (Re-advert)" if tm.group(4) else "") if tm else None
+        tnumber = f"T{tm.group(1)}/{tm.group(2)}-{tm.group(3) or tm.group(4)}" + (" (Re-advert)" if tm.group(5) else "") if tm else None
         desc = sh.clean(NOISE_RE.sub(" ", chunk))
         out.append((internal_ref, tnumber, desc, closing_dt))
     return out
