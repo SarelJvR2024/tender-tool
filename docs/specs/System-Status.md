@@ -14,6 +14,57 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): clean sweep - engine/ocr/scan_ocr.py read end to end, no bug found
+
+Oriented from `8762bda`; `git fetch origin main` found nothing new, local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Per this session's own judgment call on where to look next (the last two passes found real bugs by
+reading a whole module end to end for the first time - `engine/narrative/` clean,
+`engine/cv/extract_cv_fields.py` a real bug fixed), picked `engine/ocr/scan_ocr.py` (435 lines, added
+2026-10-30, a relatively thin 132-line test file for its size) - the experimental OCR fallback used by
+both `engine/general/requirements.py` and `engine/cv/extract_cv_fields.py` for a page with no text
+layer.
+
+Read it end to end. Specifically chased two things that looked like real candidates before ruling
+them out:
+- `_render_pdf_page()` only catches `(subprocess.TimeoutExpired, FileNotFoundError)`, narrower than
+  `pages_with_images()`'s `(subprocess.TimeoutExpired, OSError)` for the same kind of subprocess call -
+  a real inconsistency, but not a reachable crash: both of this function's own real callers
+  (`extract_cv_fields.py`'s `read_cv_text()`, and the equivalent in `requirements.py`) already wrap
+  their `scan_ocr.ocr_pdf_pages()` call in a broad `except Exception`, so any OSError this narrower
+  catch missed would still be caught one level up, logged to `system_alerts`, and degrade to the
+  pre-OCR refusal exactly as designed - never an uncaught crash in practice.
+- `extract_from_file()`'s empty-pages warning text decides whether to say "and OCR couldn't read them
+  clearly" by checking `read.get("ocr") or scan_ocr.available()[0]` rather than directly threading
+  through whether OCR was actually attempted. Traced every path into this line (PDF branch only -
+  docx/doc/txt never set `empty_pages` at all, so this code is unreachable for them): whenever
+  `read["empty_pages"]` is still truthy here, OCR was unconditionally already attempted on those exact
+  pages (`if empty_pages: try: scan_ocr.ocr_pdf_pages(...)`), so re-checking `available()` as a stand-in
+  for "was it attempted" happens to always agree with reality on the same worker process - convoluted,
+  but not actually wrong in any reachable case.
+
+Also re-confirmed the email-whitespace bug class the immediately-prior pass fixed is now the only such
+occurrence in this file - grepped for any other raw `.lower() not in`/`in .lower()` substring check and
+found none left unguarded.
+
+**No code bug found - a genuine clean sweep.** Re-ran the module's own test suite as a sanity check:
+`python3 engine/ocr/test_scan_ocr.py` - 0 failures. Committed:
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item, nothing resolved. Backlog unchanged at **18 items**: migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply to the live DB, `narrative_documents` PostgREST
+schema-cache reload, PayFast idempotency design question, "missing ISO 9001 flagged as urgent" UX
+question, Form B7 compulsory-vs-matrix disagreement, Dashboard "Decision needed" over-triggering
+finding, impersonation-feature token-refresh gap, the SANRAL fingerprint baseline-mismatch heads-up
+(FYI only), the dangling `signatory_person_id` fallback design question (Finding 96), no reconciliation
+for a silently-lapsed `active` subscription (Finding 97), the low-severity seat-limit TOCTOU race
+(`team/actions.ts`), no storage-level size/type limit on any of the 9 upload buckets (Finding 105), and
+the pack-generation quota TOCTOU race.
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): fix - CV email verification falsely flagged a correctly-extracted, line-wrapped email address as unverified
 
 Oriented from `b0117c0`; `git fetch origin main` found one new commit since - a sibling QA/robustness
