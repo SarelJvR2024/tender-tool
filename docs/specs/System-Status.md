@@ -14,6 +14,65 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): clean sweep - the last unchecked real LLM call site, engine/company_documents.py, read against AI-Call-Quality-Standard.md; the "prompt promises a check, no code backs it" audit is now exhausted across all 5 sites
+
+Oriented from `b9417b5`; `git fetch origin main` found one new sibling commit (`fc773af`, docs-only -
+a QA/robustness pass's own clean sweep of `fill_flat_pdf.py` and `engine/onboarding/classify_documents.py`
+against this same standard) and fast-forwarded cleanly (local was one commit behind at orient time, per
+this session's own standing discipline about never trusting a stale "nothing changed" read). Open PRs
+re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Following up directly on the prior pass's own technique (reading an LLM-calling file's system prompt
+for a promise the code doesn't actually keep, which found the real `scope_llm.py` gap, Finding 112):
+grepped the whole `engine/` tree again for `messages.create`/`beta.messages.create` and confirmed the
+full real-call-site list is exactly five - `scope_llm.py` (fixed), `generate_narrative.py` (already
+confirmed clean), `extract_cv_fields.py` (the original, proven implementation), `classify_documents.py`
+(confirmed clean by the sibling pass noted above - already reuses `extract_cv_fields.py`'s own
+`evidence_in_text()` directly), and `engine/company_documents.py` - mentioned in two earlier System-
+Status entries but, by its own words, "read, not modified, so `AI-Call-Quality-Standard.md` wasn't
+triggered" at the time. Read it end to end against the standard now, closing that gap.
+
+**Genuinely clean, not an unfulfilled promise**: `LLM_SYSTEM`'s instruction ("use the company's words
+exactly; do not add, remove, rephrase, summarise or polish any wording") is backed by a real,
+deterministic, code-side check - `guard_only_company_wording()` - which `render_guideline()` always
+calls on the model's output before trusting it: any word not found in the company's own guideline or a
+supplied fact value is treated as invented, and the whole AI step is rejected (falling back to the
+guideline verbatim, with the rejection logged) rather than silently shipped. This is exactly the
+deterministic backstop `scope_llm.py` was missing - the difference being `company_documents.py` already
+had it. Independently confirmed the rejection path is for real, not just asserted: `engine/
+test_company_documents.py`'s own part 5 feeds a stub LLM response with invented boilerplate
+("We are committed to excellence and world-class service delivery...") and verifies it is rejected,
+the invented wording never reaches the output document, and the rejection is logged with the exact
+words that triggered it.
+
+The one real gap here - this call site is single-pass, no generate -> review -> revise loop - is not a
+new finding: `AI-Call-Quality-Standard.md`'s own opening paragraph names `company_documents.py` by file
+path as one of exactly three call sites built before the standard existed and explicitly says
+retrofitting them is separate, already-acknowledged follow-up work, not something this pass's own
+contained-robustness charter covers (same already-documented status `classify_documents.py`'s own
+single-pass gap has, confirmed by the sibling pass above).
+
+**No code bug found and fixed this pass - a genuine clean sweep**, and a meaningful one: with this,
+every one of the 5 real LLM call sites in this codebase has now been explicitly read against
+`AI-Call-Quality-Standard.md` by name this session, not assumed compliant from a docstring. Re-ran
+`engine/test_company_documents.py` myself (not trusted from a prior pass's own claim) - all checks
+pass, including part 5's rejection-path assertions. Committed and pushed docs-only (no code touched,
+nothing to re-test beyond the suite already re-run):
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item - a clean audit result, not a judgment call for Sarel. Backlog unchanged at **18
+items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` (none yet applied to the live DB),
+`narrative_documents` PostgREST schema-cache reload, the PayFast idempotency design question, the
+"missing ISO 9001 flagged as urgent" UX question, the Form B7 compulsory-vs-matrix disagreement, the
+Dashboard "Decision needed" over-triggering finding, the impersonation token-refresh gap, the SANRAL
+fingerprint heads-up (informational only), the dangling `signatory_person_id` fallback design question
+(Finding 96), the missing reconciliation for a silently-lapsed active subscription (Finding 97), the
+seat-limit TOCTOU race in `team/actions.ts`, the missing storage-level size/type limit on the 9 upload
+buckets (Finding 105), and the pack-generation quota TOCTOU race in `company_can_request_pack()`'s two
+callers.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-fifth run): clean sweep - non-SANRAL pack's flat-PDF overlay engine (fill_flat_pdf.py), plus engine/onboarding/classify_documents.py read against the AI-Call-Quality-Standard following up on a sibling's own scope_llm.py fix
 
 Oriented from `0df7616`; `git fetch origin main` found two new sibling commits - a follow-up pass
