@@ -163,6 +163,37 @@ def test_render_text_names_the_person_on_a_person_credential_item():
           and "Sipho Director - ECSA professional registration" in two_body)
 
 
+def test_render_text_shows_what_actually_changed_on_a_listing_change():
+    print("render_text(): a listing_changes line shows WHAT changed, not just the tender's own title")
+    # Real bug found 2026-11-01: listing_change_signals() items (tender_
+    # changes.py) carry both "title" (the tender's own title - already
+    # shown in every other section of the same email) and "summary" (the
+    # actual change: "Closing date extended: ... -> ...", "Cancelled by the
+    # buyer ...") - but the bit-selection chain checked "title" first,
+    # unconditionally, so a cancellation, a closing-date move and a new
+    # addendum all rendered as the exact same line, with the one fact this
+    # section exists to report never reaching the sent email at all.
+    items = [
+        {"contract_number": "R.396-010-2025/1F", "title": "Conventional consulting engineering services R.396",
+         "change_type": "cancelled", "summary": "Cancelled by the buyer (R.396-010-2025/1F, 2026-10-30)"},
+        {"contract_number": "RFQ/2026/55", "title": "Supply and delivery of office furniture",
+         "change_type": "closing_date_changed", "summary": "Closing date extended: 2026-10-20 -> 2026-11-05"},
+    ]
+    body = sde.render_text(_digest(listing_changes=items))
+    check("the cancellation line names the real tender AND the actual change",
+          "Conventional consulting engineering services R.396: Cancelled by the buyer" in body)
+    check("the closing-date-move line is distinguishable from the cancellation line (not identical generic text)",
+          "Supply and delivery of office furniture: Closing date extended: 2026-10-20 -> 2026-11-05" in body)
+
+    # tender_updates items also happen to carry a "summary" key (a different
+    # meaning - doc.get("summary"), the watched document's own summary) but
+    # never "change_type" - must be completely unaffected by this fix.
+    update_items = [{"type": "tender_update", "title": "Addendum 3.pdf", "summary": "unrelated document summary text"}]
+    update_body = sde.render_text(_digest(tender_updates=update_items))
+    check("a tender_updates item with its own unrelated 'summary' key is unaffected (no change_type -> no append)",
+          "  - Addendum 3.pdf" in update_body and "unrelated document summary text" not in update_body)
+
+
 # --- send_one(): every status path, no real network -------------------------
 
 def test_send_one_skips_cleanly_without_email_or_content():
@@ -328,6 +359,7 @@ def main():
     test_render_text_includes_real_content_and_caps_at_ten()
     test_render_text_uses_document_expiry_label_not_raw_field()
     test_render_text_names_the_person_on_a_person_credential_item()
+    test_render_text_shows_what_actually_changed_on_a_listing_change()
     test_send_one_skips_cleanly_without_email_or_content()
     test_send_one_dry_run_never_touches_the_network()
     test_send_one_reports_sent_on_a_real_looking_success()

@@ -176,6 +176,21 @@ def render_text(digest):
                 # unaffected.
                 if item.get("person_name"):
                     bit = f"{item['person_name']} - {bit}"
+                # listing_changes items (tender_changes.py, keyed uniquely by
+                # "change_type" - confirmed by grep, no other section sets
+                # it) carry the actual change as "summary" (e.g. "Closing
+                # date extended: 2026-10-20 -> 2026-11-05", "Cancelled by the
+                # buyer ...") alongside "title" (just the tender's own
+                # title, already shown in every other section of this same
+                # email). "title" wins the chain above unconditionally, so
+                # every listing_changes line used to show only the generic
+                # tender title - a cancellation, a closing-date move and a
+                # new addendum all rendered identically, with the one fact
+                # this section exists to report never appearing in the sent
+                # email at all. Found 2026-11-01 following up on this
+                # module's own disclosed "not a full per-section audit" gap.
+                if item.get("change_type") and item.get("summary"):
+                    bit = f"{bit}: {item['summary']}"
                 date = _item_date(item)
                 lines.append(f"  - {bit}" + (f" ({date})" if date else ""))
             if len(items) > 10:

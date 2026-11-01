@@ -165,6 +165,47 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review): fix - the daily digest's "Listing changes" email section showed only the tender's own generic title on every line, with WHAT changed never reaching the sent email at all
+
+Oriented from `0c6b7c7`; `git fetch origin main` found two new sibling commits since my own last push
+(`79b8d69`, `0c6b7c7` - both discovery-area PDF/table parsing fixes, no overlap). Fast-forwarded
+cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to notify. `daily_digest.py`/`record_heartbeat.py`/`send_pack_ready_email.py` have all had
+dedicated passes already; picked up `send_digest_emails.py`'s own disclosed, honest gap instead of
+re-reading what's already been checked - its `render_text()` docstring says plainly that
+`listing_changes`/`tender_updates`/`reassessed_tenders` "weren't traced key-by-key here... not a full
+per-section audit."
+
+**Found and fixed Finding 113 (CONFIRMED, severe)**: `listing_change_signals()` items (cancellations,
+closing-date moves, new addenda, migration 0051) carry both `"title"` (the tender's own title, already
+shown in every other section of the same email) and `"summary"` (the actual change - "Closing date
+extended: ... -> ...", "Cancelled by the buyer ..."). `render_text()`'s shared bit-selection chain
+checked `"title"` first, unconditionally, so `"summary"` was never reached - every `listing_changes`
+line in every sent digest, since the section existed, showed only the generic tender title. A
+cancellation, a closing-date move and a new addendum all rendered as the exact same text, defeating
+the entire purpose of the section in the one place a person actually reads it.
+
+Fixed with one targeted check keyed off `"change_type"` (confirmed unique to `listing_changes` items
+by grep - `tender_updates` items carry an unrelated `"summary"` key too but never `"change_type"`, so
+they're correctly untouched, verified with a negative control): `bit = f"{bit}: {item['summary']}"`
+when both are present.
+
+Verified red-then-green: added `test_render_text_shows_what_actually_changed_on_a_listing_change()` to
+`engine/notify/test_send_digest_emails.py` (3 checks); reverting reproduced the exact predicted 2
+failures with every other check (including every pre-existing `send_one()`/`main()` check) still
+green; restored, `0 failure(s)`. Regression-checked `engine/notify/test_digest_live.py`,
+`test_digest_opt_in.py` - all pass. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 113.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/notify/send_digest_emails.py`
+- `engine/notify/test_send_digest_emails.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review): clean sweep - compliance/reminders rotation, no new bug found
 
 Oriented from `50b392c`; `git fetch origin main` found one new sibling commit since my own last push

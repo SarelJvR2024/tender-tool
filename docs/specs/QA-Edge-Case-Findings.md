@@ -6400,3 +6400,53 @@ pass.
 format dispatch, ~10 lines including comment - every document whose format was already `pdf`/`docx`/
 `doc`/`txt`/`zip` is byte-for-byte unaffected), `engine/general/test_requirements.py` (1 new test
 function, 6 checks). No schema or other call-site changes.
+
+### Finding 113 (CONFIRMED, FIXED, severe - the daily digest email's "Listing changes" section (cancellations, closing-date moves, new addenda) showed only the tender's own generic title on every single line, with the one fact that section exists to report - WHAT changed - never reaching the sent email at all)
+
+**Where:** this cycle's "notify" rotation, following up on `send_digest_emails.py`'s own disclosed,
+honest gap ("`listing_changes`/`tender_updates`/`reassessed_tenders` weren't traced key-by-key here -
+... not a full per-section audit, flagged as such in `app/AGENTS.md`") the same way this session has
+repeatedly turned a disclosed-but-unconfirmed gap into a confirmed fix or a ruled-out conclusion
+(Finding 111 most recently). `engine/notify/send_digest_emails.py`'s `render_text()`.
+
+**What was tested:** `render_text()`'s per-item text comes from one shared fallback chain: `item.get
+("title") or item.get("description") or item.get("label") or item.get("field") or item.get
+("field_key") or item.get("contract_number") or "item"`. `daily_digest.py`'s `listing_change_signals()`
+items (built by `engine/discovery/tender_changes.py`'s `_event()`, migration 0051) carry BOTH `"title"`
+(the tender's own title - r.get("title"), already shown in every other section of the same email -
+new_tenders, submission_due) AND `"summary"` - the actual, specific change: `"Closing date extended:
+2026-10-20 -> 2026-11-05"`, `"Cancelled by the buyer (...)"`, `"Briefing session moved: ..."`, etc.
+Since `"title"` is checked first and is always present, `"summary"` was never reached. Confirmed by
+constructing a cancelled-tender item and a closing-date-moved item side by side and rendering both
+through the real `render_text()`: both produced the exact same generic line (the tender's own title),
+with zero way for the reader to tell a cancellation from a date move from a new addendum without
+opening the app - the entire value of this section (see its own docstring: "Cancellations and moved
+dates first") defeated in the one place a person actually reads it, their inbox.
+
+**Finding (CONFIRMED, severe).** Every `listing_changes` item in every sent digest email, since this
+section was added (migration 0051), rendered with the specific change silently dropped - not a rare
+edge case, the UNCONDITIONAL behavior for 100% of real items, since `"title"` is always present on a
+real tender record and wins the chain every time.
+
+**Fix:** added one targeted check after the existing `bit` chain: `if item.get("change_type") and
+item.get("summary"): bit = f"{bit}: {item['summary']}"`. Keyed off `"change_type"` specifically
+because it is confirmed (by grep) unique to `listing_changes` items - `tender_updates` items also
+happen to carry an unrelated `"summary"` key (`doc.get("summary")`, the watched document's own
+summary, a different meaning entirely) but never `"change_type"`, so they are correctly left
+untouched; verified this directly with a negative-control case.
+
+**Verified red-then-green.** Added `test_render_text_shows_what_actually_changed_on_a_listing_change()`
+to `engine/notify/test_send_digest_emails.py`: a cancelled-tender item and a closing-date-moved item
+both now render with their real, distinguishable change text, plus the `tender_updates`-with-its-own-
+`"summary"`-key negative control confirming no cross-section effect. Revert-and-confirm-red: reverting
+reproduced the exact predicted 2 failures with every other check (including all of this file's
+pre-existing `send_one()`/`main()` checks) still green; restored, `0 failure(s)`. Regression-checked
+`engine/notify/test_digest_live.py` and `test_digest_opt_in.py` (real consumers/producers of this
+digest shape) - all pass.
+
+**Regression:** `engine/notify/send_digest_emails.py` (one `if` check added inside `render_text()`'s
+existing per-item loop, ~13 lines including comment - every item with no `"change_type"` key, i.e.
+every section except `listing_changes`, is byte-for-byte unaffected), `engine/notify/
+test_send_digest_emails.py` (1 new test function, 3 checks, wired into `main()`). No schema or other
+call-site changes - `daily_digest.py`'s own JSON report is unchanged, only how the already-correct
+`"summary"` field gets rendered into the plain-text email body.
