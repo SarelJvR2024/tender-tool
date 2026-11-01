@@ -146,6 +146,72 @@ def test_review_loop_caps_at_3_passes_and_flags_needs_human_review():
 
 
 # ---------------------------------------------------------------------------
+# 4b. Programmatic evidence-quote verification (the prompt's own line 88
+#     promise - "these are checked against the text afterward" - actually
+#     enforced in code, not just left to the review pass's self-check)
+# ---------------------------------------------------------------------------
+
+def test_quote_in_text_exact_and_line_wrapped():
+    norm = sl._norm(DOC_TEXT)
+    check(sl.quote_in_text("the Contractor shall also be responsible", norm),
+          "a real, exact substring of the document should verify")
+    wrapped_doc = sl._norm("upgrading 12km\nof the R61 road")
+    check(sl.quote_in_text("upgrading 12km of the R61 road", wrapped_doc),
+          "a quote the real document wrapped across a line break should still verify (squeezed-alnum fallback)")
+    check(not sl.quote_in_text("construction of a new bridge over the Vaal river", norm),
+          "a quote with no basis in the document must not verify")
+    check(not sl.quote_in_text("", norm), "an empty quote must not verify")
+
+
+def test_verify_evidence_quotes_requires_at_least_one_real_quote():
+    result_real = draft("x", quotes=("The Contractor shall also be responsible for traffic accommodation",))
+    check(sl.verify_evidence_quotes(result_real, DOC_TEXT), "a genuinely-quoted result should verify")
+    result_fake = draft("x", quotes=("construction of a brand new 40-storey building",))
+    check(not sl.verify_evidence_quotes(result_fake, DOC_TEXT), "a hallucinated quote must not verify")
+    result_empty = draft("x", quotes=())
+    check(not sl.verify_evidence_quotes(result_empty, DOC_TEXT),
+          "scope_found with zero evidence_quotes must not verify - the prompt requires at least one")
+
+
+def test_hallucinated_quote_flags_needs_human_review_even_after_a_clean_review_pass():
+    """Found 2026-11-01: the review pass's own self-check can itself say
+    'No issues found' on a draft whose evidence_quotes don't actually appear
+    in the document - the model reviewing its own work is not a substitute
+    for mechanically checking it. Before this fix, such a result shipped with
+    needs_human_review=False, exactly the 'silently ship a flawed result'
+    outcome this file's own docstring says must never happen."""
+    bad = draft("A scope summary with no real textual basis.",
+                quotes=("construction of a brand new international airport terminal",))
+    client = SequentialStubClient([
+        bad,                      # generate
+        review(False, bad),       # review pass itself reports "No issues found" - wrongly, in this case
+    ])
+    result = sl.extract_scope_with_review(DOC_TEXT, client=client)
+    check(result["needs_human_review"] is True,
+          "a quote that can't be found in the document must flag needs_human_review, even though the review pass itself reported clean")
+    check("evidence_quotes" in (result["review_notes"] or "") or "Programmatic check" in (result["review_notes"] or ""),
+          f"the review_notes should explain the programmatic flag, got {result['review_notes']!r}")
+    check(result["scope_summary"] == bad["scope_summary"], "the best available result should still be returned, not discarded")
+
+
+def test_genuinely_quoted_result_is_not_flagged_by_the_programmatic_check():
+    good = draft("Upgrade and resurfacing of the R61.",
+                 quotes=("The Contractor shall also be responsible for traffic accommodation",))
+    client = SequentialStubClient([good, review(False, good)])
+    result = sl.extract_scope_with_review(DOC_TEXT, client=client)
+    check(result["needs_human_review"] is False, "a genuinely-quoted, clean result must not be falsely flagged")
+
+
+def test_scope_not_found_is_never_checked_against_evidence_quotes():
+    not_found = {"scope_found": False, "scope_summary": None, "evidence_quotes": [],
+                "reason_if_not_found": "No real scope stated."}
+    client = SequentialStubClient([not_found, review(False, not_found)])
+    result = sl.extract_scope_with_review(DOC_TEXT, client=client)
+    check(result["needs_human_review"] is False,
+          "scope_found=false has no summary to verify - the programmatic check must not fire on it")
+
+
+# ---------------------------------------------------------------------------
 # 5. Honest null paths
 # ---------------------------------------------------------------------------
 
@@ -208,6 +274,11 @@ def main():
     test_prompt_is_scenario_specific_not_a_copy_of_the_cv_prompt()
     test_review_loop_chains_forward_and_stops_on_clean_pass()
     test_review_loop_caps_at_3_passes_and_flags_needs_human_review()
+    test_quote_in_text_exact_and_line_wrapped()
+    test_verify_evidence_quotes_requires_at_least_one_real_quote()
+    test_hallucinated_quote_flags_needs_human_review_even_after_a_clean_review_pass()
+    test_genuinely_quoted_result_is_not_flagged_by_the_programmatic_check()
+    test_scope_not_found_is_never_checked_against_evidence_quotes()
     test_too_short_text_returns_none_without_any_call()
     test_scope_not_found_returns_none_not_a_fabricated_summary()
     test_extract_scope_summary_llm_flags_needs_human_review_in_the_note()

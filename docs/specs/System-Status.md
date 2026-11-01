@@ -14,6 +14,73 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): Finding 112 - scope_llm.py's evidence_quotes were never actually checked against the document text, despite the prompt telling the model they would be
+
+Oriented from `bb65de2`; `git fetch origin main` found nothing new, local already matched exactly. Open
+PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Picked a fresh, previously-unread module this session: `engine/discovery/scope_llm.py` (316 lines, the
+LLM-assisted scope-of-work fallback used when the fast/free regex heuristic finds nothing) - read end to
+end against `docs/specs/AI-Call-Quality-Standard.md` per CLAUDE.md's own pointer, rather than assuming
+compliance because the module's own docstring describes following the standard.
+
+**Found and fixed a real gap**: `SYSTEM_PROMPT` (line 88) explicitly tells the model "[evidence quotes]
+are checked against the text afterward, and a summary whose quotes cannot be found is treated as
+unverified" - but grepping this file and its only real caller (`tender_enrichment.py`) end to end, no
+code anywhere ever actually performed that check. The mandatory review pass (`AI-Call-Quality-
+Standard.md` part 2) asks the model to re-check its own quotes against the text as one of five explicit
+checklist items, but a model reviewing its own prior output is not the same as a deterministic,
+code-side check - and nothing backstopped it if the review pass's own self-check missed a bad quote
+(said "No issues found" on a draft whose `evidence_quotes` didn't actually appear in the document).
+This is exactly the gap `engine/cv/extract_cv_fields.py`'s own `evidence_in_text()` exists to close for
+CV extraction, in a sibling file that even cites `extract_cv_fields.py` as "this codebase's own proven,
+tested call site" for its calling conventions - but the one piece of defense-in-depth that function
+provides was never carried over.
+
+Fixed by adding `quote_in_text()`/`verify_evidence_quotes()` (a local reimplementation of
+`evidence_in_text()`'s own fuzzy-match rules - normalized substring, then a squeezed-alphanumeric
+fallback for a quote a narrow PDF column wrapped across a line break - kept local rather than
+cross-importing `engine/cv/` into a production `engine/discovery/` module for one small helper) and
+wiring it into `extract_scope_with_review()`: after the review loop finishes, if `scope_found` is true
+and the review loop itself didn't already flag an issue, every `evidence_quotes` entry is mechanically
+re-checked against the real document text. Any quote that can't be found there - including the
+zero-quotes case, which the prompt's own rule says must never accompany `scope_found: true` - now sets
+`needs_human_review = True` and appends an explicit note, the same "never silently ship a flawed result"
+rule this file's own docstring already states for the pass-cap case. Also corrected
+`extract_scope_summary_llm()`'s own `NEEDS HUMAN REVIEW` note wording, which previously always said "the
+review pass still found an issue after 3 passes" regardless of why the flag was actually set - now
+inaccurate for a flag raised by the new programmatic check on an earlier, "clean" pass.
+
+Verified: wrote 5 new regression tests (direct unit tests of `quote_in_text()`/`verify_evidence_quotes()`,
+plus integration tests through the real `extract_scope_with_review()` call: a hallucinated quote flags
+`needs_human_review` even when the review pass itself reports "No issues found"; a genuinely-quoted
+result is not falsely flagged; `scope_found: false` is never checked against evidence at all). Red-then-
+green: stashed the source fix alone, re-ran the suite - it crashed immediately with `AttributeError:
+module 'scope_llm' has no attribute '_norm'` (the new tests exercise genuinely new code, not something
+already present), confirming a real gap before the fix; restored and re-ran clean. Full suite:
+`python3 engine/discovery/test_scope_llm.py` → 44 checks, 0 failures (up from 20). Regression-checked the
+only real caller's own suite, `test_tender_enrichment.py` → 0 failures. `py_compile` clean on both
+touched files.
+
+Committed and pushed directly to `main` (contained, well-verified, no PR):
+- `engine/discovery/scope_llm.py` (new `quote_in_text()`/`verify_evidence_quotes()`, wired into
+  `extract_scope_with_review()`; wording fix in `extract_scope_summary_llm()`)
+- `engine/discovery/test_scope_llm.py` (5 new test functions, registered in `main()`)
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel. Backlog unchanged at
+**18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` (none yet applied to the live DB),
+`narrative_documents` PostgREST schema-cache reload, the PayFast idempotency design question, the
+"missing ISO 9001 flagged as urgent" UX question, the Form B7 compulsory-vs-matrix disagreement, the
+Dashboard "Decision needed" over-triggering finding, the impersonation token-refresh gap, the SANRAL
+fingerprint heads-up (informational only), the dangling `signatory_person_id` fallback design question
+(Finding 96), the missing reconciliation for a silently-lapsed active subscription (Finding 97), the
+seat-limit TOCTOU race in `team/actions.ts`, the missing storage-level size/type limit on the 9 upload
+buckets (Finding 105), and the pack-generation quota TOCTOU race in `company_can_request_pack()`'s two
+callers.
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): the key_person_minimums.py lead from the prior pass - independently verified, already fixed by a sibling QA/robustness pass
 
 Oriented from `f30c15d`; `git fetch origin main` surfaced one new commit (`0df7616`) that, on inspection,

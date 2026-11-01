@@ -53,6 +53,7 @@ Usage (local, one document's text, needs ANTHROPIC_API_KEY):
 import argparse
 import json
 import os
+import re
 import sys
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -239,6 +240,49 @@ def call_llm_review(document_text, draft, title=None, buyer=None, client=None, m
 
 
 # ---------------------------------------------------------------------------
+# Programmatic evidence check - the prompt above TELLS the model "these are
+# checked against the text afterward, and a summary whose quotes cannot be
+# found is treated as unverified" (line 88), but until this function existed
+# nothing in this file, or in tender_enrichment.py (its only caller), ever
+# actually did that check - the review pass's own self-check was the only
+# thing standing between a hallucinated quote and a "verified" market-
+# intelligence record, exactly the gap engine/cv/extract_cv_fields.py's own
+# evidence_in_text() exists to close for CV extraction. Same fuzzy-match
+# rules as that function (normalized substring, then a squeezed-alnum
+# fallback for a quote a narrow PDF column wrapped across a line break) -
+# reimplemented locally rather than cross-importing engine/cv/ into a
+# production engine/discovery/ module for one small, self-contained helper.
+# ---------------------------------------------------------------------------
+
+def _norm(s):
+    s = (s or "").lower().replace("–", "-").replace("—", "-").replace("’", "'")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def quote_in_text(quote, norm_text):
+    q = _norm(quote)
+    if not q:
+        return False
+    if q in norm_text:
+        return True
+    squeezed = re.sub(r"[^a-z0-9]", "", q)
+    return len(squeezed) >= 8 and squeezed in re.sub(r"[^a-z0-9]", "", norm_text)
+
+
+def verify_evidence_quotes(result, document_text):
+    """True only when every evidence_quotes entry genuinely appears
+    (fuzzy-matched) in document_text. An empty evidence_quotes list verifies
+    as False too - scope_found=true always requires at least one quote
+    (the prompt's own rule), so no quotes at all is itself unverified, never
+    treated as vacuously fine."""
+    quotes = result.get("evidence_quotes") or []
+    if not quotes:
+        return False
+    norm_text = _norm(document_text)
+    return all(quote_in_text(q, norm_text) for q in quotes)
+
+
+# ---------------------------------------------------------------------------
 # 2. Mandatory generate -> review -> revise loop, up to 3 passes
 #    (AI-Call-Quality-Standard.md part 2)
 # ---------------------------------------------------------------------------
@@ -271,6 +315,10 @@ def extract_scope_with_review(document_text, title=None, buyer=None, client=None
     else:
         if reviewed is not None and reviewed["issues_found"]:
             needs_human_review = True
+    if current.get("scope_found") and not needs_human_review and not verify_evidence_quotes(current, document_text):
+        needs_human_review = True
+        review_notes = (f"{review_notes} " if review_notes else "") + \
+            "Programmatic check: at least one evidence_quotes entry could not be found in the document text."
     return {**current, "needs_human_review": needs_human_review, "review_notes": review_notes,
             "passes_run": passes_run}
 
@@ -289,8 +337,13 @@ def extract_scope_summary_llm(document_text, title=None, buyer=None, client=None
         return None
     note = f"LLM-extracted scope summary ({result['passes_run']} review pass(es))."
     if result["needs_human_review"]:
-        note += (f" NEEDS HUMAN REVIEW: the review pass still found an issue after {MAX_REVIEW_PASSES} passes - "
-                 f"{result['review_notes']}")
+        # Not always "found an issue after N passes" - needs_human_review can
+        # also come from the programmatic evidence_quotes check below, which
+        # can fire on a pass that itself reported "No issues found" (the
+        # review pass checks the quotes by re-reading, this re-checks them
+        # mechanically; they don't always agree). review_notes already says
+        # which happened, so the note here states the fact, not the cause.
+        note += f" NEEDS HUMAN REVIEW ({result['passes_run']} pass(es) run) - {result['review_notes']}"
     return result["scope_summary"], "document_scope_snippet", result["needs_human_review"], note
 
 
