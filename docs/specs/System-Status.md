@@ -14,6 +14,55 @@
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review): fix - requirements.py's read_document() silently treated an unreadable document as a successfully-read empty one whenever its saved file had no recognized extension
+
+Oriented from `286ca54`; `git fetch origin main` found nothing new since - local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Rotation: intake. `engine/intake/classify_tender.py` and `scenario_driver.py` were already swept
+clean earlier this window; `engine/intake/test_manual_intake.py` is a DB-backed e2e harness (needs
+`INTAKE_PSQL` + a scratch Postgres, not runnable here), so followed the real production code path it
+exercises instead - `engine/general/process_general_jobs.py`'s `run_extraction()` and the
+`engine/general/requirements.py` manifest it builds from.
+
+**Found and fixed Finding 112 (CONFIRMED, moderate)**: `requirements.py`'s `read_document()` only had
+dispatch branches for `pdf`/`docx`/`doc`/`txt` formats; any OTHER format (collect_documents() derives
+`format` purely from the saved file's own extension) fell through all of them with `text` left at
+`""` and `doc["unreadable"]` never set at all - silently indistinguishable from a genuinely-empty-but-
+successfully-read document. Confirmed reachable two ways: (1) `process_general_jobs.
+download_tender_documents()`'s own fallback-`.pdf` heuristic only fires when there's no dot anywhere
+in a title's last 6 characters, so a real buyer title like `"SBD Forms Part A.1"` keeps `.1` as its
+saved "extension" (format `"1"`); (2) a scanned notice uploaded directly as a raw `.jpg`/`.png` (not
+wrapped in `.pdf`) hits the same gap. `chars == 0` correctly excludes it from `readable`, but
+`unreadable_documents` (filtered on `d["unreadable"]` truthy) silently omits it too, and the loud-
+failure message's own fallback shows a generic "no text found" instead of the real reason - the exact
+"silent wrong answer, not an empty one" shape `run_extraction()`'s own module comment already warns
+against, one dispatch level further in than that comment's guard reaches.
+
+Fixed with an explicit `else` branch: any unrecognized format now sets `doc["unreadable"] = f"not a
+format this can read ({fmt or 'no file extension'}) - re-upload it as a PDF or Word document"`.
+Left `download_tender_documents()`'s extension-guessing heuristic as-is (separate, more speculative
+work - guessing a buyer's real intended extension from a title is not a contained fix); this fix
+alone closes the actual defect.
+
+Verified red-then-green: added `check_unrecognized_format_is_flagged_not_silently_blank()` to
+`engine/general/test_requirements.py` (6 checks - the trailing-`.1` title and a raw `.jpg`, both via
+`read_document()` directly and via the full `extract_requirements()` manifest); reverting reproduced
+the exact predicted 3 failures with every other check (including both premise checks and all pre-
+existing checks in the file) still green; restored, `0 failure(s)`. Regression-checked
+`engine/general/test_requirements_manifest_v2.py`, `test_submission_plan.py`, `test_fill_sbd_docx.py`
+- all pass. Full finding write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 112.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/general/requirements.py`
+- `engine/general/test_requirements.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): fix - sars_procurement.py's TENDER_LINK regex required href as the literal first attribute, which real-world CMS output elsewhere on the same site already contradicts
 
 Oriented from `5c31f97`; `git fetch origin main` found nothing new since - local already matched

@@ -211,6 +211,17 @@ def read_document(doc, work_dir):
             doc["unreadable"] = "LibreOffice could not convert this legacy .doc"
     elif fmt == "txt":
         text = open(doc["path"], encoding="utf-8", errors="replace").read()
+    else:
+        # A file whose extension isn't one of the above (a raw scanned .jpg/
+        # .png, or a title like "SBD Forms Part A.1" whose trailing ".1" was
+        # mistaken for a real extension by download_tender_documents() -
+        # neither has pdftotext/python-docx run on it) used to fall through
+        # here with text left at "" and `unreadable` never set, so it was
+        # silently counted as read with zero characters instead of flagged -
+        # the exact "silent wrong answer, not an empty one" this module's own
+        # extract_requirements() docstring says never to produce. QA pass,
+        # 2026-11-01.
+        doc["unreadable"] = f"not a format this can read ({fmt or 'no file extension'}) - re-upload it as a PDF or Word document"
     doc["text"] = text or ""
     if not doc.get("unreadable") and fmt in ("pdf", "docx", "doc") and len(doc["text"].strip()) < 50:
         tried = doc.pop("_ocr_failure", None)

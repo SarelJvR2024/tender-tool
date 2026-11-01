@@ -292,6 +292,42 @@ def check_buyers_own_manager_excluded():
           "contractor.contract_manager" in _roles_for(GENUINE_CONTRACT_MANAGER_ASK, buyer="Transnet SOC Ltd"))
 
 
+def check_unrecognized_format_is_flagged_not_silently_blank():
+    print("Finding 112: a document whose saved file has no recognized extension "
+          "used to come back silently blank (0 chars, unreadable=None) instead of flagged")
+    with tempfile.TemporaryDirectory() as d:
+        # download_tender_documents()'s own ".pdf"-if-no-dot-in-last-6-chars
+        # heuristic leaves a title like this one saved AS-IS - the trailing
+        # ".1" is mistaken for a real extension, same shape as a buyer's own
+        # "SBD Forms Part A.1" or "Addendum No.1".
+        path = os.path.join(d, "SBD Forms Part A.1")
+        with open(path, "wb") as f:
+            f.write(b"this would actually be real, readable document bytes in production")
+        doc = req.read_document(req.collect_documents([path], d)[0], d)
+        check("format is the bogus trailing fragment, not a known type", doc["format"] == "1", doc["format"])
+        check("text stays empty", doc["text"] == "")
+        check("unreadable is set with a reason naming the format (not left None/silent)",
+              bool(doc.get("unreadable")) and "1" in doc["unreadable"], doc.get("unreadable"))
+
+        # A raw image uploaded directly (not wrapped in a .pdf) hits the same
+        # fallback branch and must be flagged the same way.
+        jpg = os.path.join(d, "scanned_notice.jpg")
+        with open(jpg, "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0 not real jpeg bytes, format is all that matters here")
+        doc2 = req.read_document(req.collect_documents([jpg], d)[0], d)
+        check("a raw .jpg is flagged unreadable too", bool(doc2.get("unreadable")), doc2.get("unreadable"))
+
+        # Still the ONLY document -> extract_requirements() must fail loudly
+        # (JobRefusal-equivalent at the manifest level: zero readable docs),
+        # never silently claim "no standard forms used".
+        manifest = req.extract_requirements([path], work_dir=tempfile.mkdtemp(prefix="tt_req_test_"))
+        readable = [x for x in manifest["documents"] if x["chars"] > 0 and not x["unreadable"]]
+        check("the manifest carries zero readable documents for this case", readable == [])
+        check("the manifest's own document entry says why, not just 'no text found'",
+              "not a format this can read" in (manifest["documents"][0].get("unreadable") or ""),
+              manifest["documents"][0].get("unreadable"))
+
+
 def main():
     print("Finding 29: MBD/SBD suite decided by majority of real mentions, not mere presence")
     check("10 real MBD mentions + 1 stray SBD reference -> MBD (the bug itself: this used to come back SBD)",
@@ -308,6 +344,7 @@ def main():
     check_past_corrections_feedback()
     check_key_personnel_false_positive()
     check_buyers_own_manager_excluded()
+    check_unrecognized_format_is_flagged_not_silently_blank()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

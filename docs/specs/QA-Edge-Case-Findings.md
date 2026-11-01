@@ -6343,3 +6343,60 @@ check - including both "alternatives genuinely empty" premise checks, and all of
 other behavior change - every row that already had `len(numeric) <= 1` or successfully-built
 `alternatives` is byte-for-byte unaffected), `engine/discovery/test_key_person_minimums.py` (1 new
 test function, 6 checks). No schema or other call-site changes.
+
+### Finding 112 (CONFIRMED, FIXED, moderate - a tender document that couldn't actually be read came back silently blank with no reason, instead of flagged unreadable, whenever its saved file had no recognized extension)
+
+**Where:** this cycle's "intake" rotation. `engine/general/requirements.py`'s `read_document()` - the
+dispatcher every tender document goes through (pdf/docx/doc/txt) before `extract_requirements()`
+builds the manifest that `engine/general/process_general_jobs.py`'s `run_extraction()` relies on for
+both the SANRAL/general route decision and the "none of this tender's documents could be read" loud
+failure.
+
+**What was tested:** `collect_documents()` decides a document's `format` purely from the SAVED FILE's
+own extension (`os.path.splitext(path)[1]`). The file a tender document is saved under is named by
+`process_general_jobs.download_tender_documents()`, which only appends a fallback `.pdf` when there is
+NO dot at all in the title's last 6 characters - so a real, buyer-published title like `"SBD Forms Part
+A.1"` or `"Addendum No.1"` keeps its own trailing `.1` as the "extension" (format `"1"`), and a scanned
+notice uploaded directly as a raw `.jpg`/`.png` (not wrapped in a `.pdf`) keeps that extension too.
+`read_document()`'s `if/elif` chain only had branches for `pdf`/`docx`/`doc`/`txt` - any other format
+fell through all of them with `text` left at `""` and, critically, `doc["unreadable"]` never set at
+all (the one `if not doc.get("unreadable") and fmt in ("pdf", "docx", "doc") and ...` scanned-image
+check that would otherwise catch a near-empty read doesn't apply either, since its own `fmt in (...)`
+guard excludes anything outside that same three-format list).
+
+**Finding (CONFIRMED).** Reproduced directly: a file saved as `"SBD Forms Part A.1"` containing real,
+perfectly good bytes came back `{"format": "1", "text": "", "unreadable": None}` - indistinguishable,
+to every downstream consumer, from a genuinely-empty-but-successfully-read document. `chars == 0`
+correctly keeps it out of the `readable` list, so `run_extraction()` still fails loudly when it's the
+only document - but `intake_rec["unreadable_documents"]` (built by filtering on `d["unreadable"]`
+being truthy) silently omits it, and the loud failure message's own `d['unreadable'] or 'no text
+found'` fallback shows a generic, unhelpful "no text found" instead of the real reason (wrong/missing
+file extension) - exactly the "silent wrong answer, not an empty one" failure mode `run_extraction()`'s
+own module comment already names as the thing to never produce, just one dispatch level further in
+than that comment's own guard reaches. The same gap affects a raw scanned image uploaded directly
+(`.jpg`/`.png`), not only the mis-detected-extension case.
+
+**Fix:** added an explicit `else` branch to `read_document()`'s format dispatch: any format not in
+`pdf`/`docx`/`doc`/`txt` now sets `doc["unreadable"] = f"not a format this can read ({fmt or 'no file
+extension'}) - re-upload it as a PDF or Word document"`, so it is correctly counted in
+`unreadable_documents`, correctly excluded from `readable`, and reported with its real reason rather
+than a generic fallback. Scoped to `read_document()` only - the weaker upstream `.pdf`-fallback
+heuristic in `download_tender_documents()` is left as-is (a separate, more speculative improvement:
+guessing a buyer's REAL intended extension from a title is not a "contained issue" fix), since this
+fix alone closes the actual defect (a document that can't be read must never be silently treated as if
+it were read and found empty).
+
+**Verified red-then-green.** Added `check_unrecognized_format_is_flagged_not_silently_blank()` to
+`engine/general/test_requirements.py`: the exact trailing-`.1` title case and a raw `.jpg` case, both
+via `read_document()` directly and via the full `extract_requirements()` manifest. Revert-and-confirm-
+red: reverting reproduced the exact predicted 3 failures (`unreadable` back to `None`/falsy in all
+three assertions) with every other check - including the premise checks (`format == "1"`, `text ==
+""`) and every pre-existing check in the file - still green; restored, `0 failure(s)`. Regression-
+checked `engine/general/test_requirements_manifest_v2.py`, `engine/general/test_submission_plan.py`,
+and `engine/general/test_fill_sbd_docx.py` (real downstream consumers of this manifest shape) - all
+pass.
+
+**Regression:** `engine/general/requirements.py` (one `else` branch added to `read_document()`'s
+format dispatch, ~10 lines including comment - every document whose format was already `pdf`/`docx`/
+`doc`/`txt`/`zip` is byte-for-byte unaffected), `engine/general/test_requirements.py` (1 new test
+function, 6 checks). No schema or other call-site changes.
