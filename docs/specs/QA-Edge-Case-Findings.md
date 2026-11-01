@@ -6450,3 +6450,59 @@ every section except `listing_changes`, is byte-for-byte unaffected), `engine/no
 test_send_digest_emails.py` (1 new test function, 3 checks, wired into `main()`). No schema or other
 call-site changes - `daily_digest.py`'s own JSON report is unchanged, only how the already-correct
 `"summary"` field gets rendered into the plain-text email body.
+
+### Finding 114 (CONFIRMED, FIXED, moderate - a worker killed in the one-call gap between writing an onboarding document's classification result and marking its upload row 'classified' left that document permanently showing as BOTH "to review" and "couldn't be read - upload again" on the same page, with no way for either the system or the user to clear it)
+
+**Where:** this cycle's "worker/job-queue" rotation, after `poll_loop.py`/`run_bridges.py`'s own
+orchestration logic (already thoroughly reviewed the prior two cycles, re-checked again this cycle
+from several different angles - stale-job recovery, the `SetupError`-aborts-the-batch design,
+registered-bridge completeness, CI wiring, worker image dependency completeness, Scout alert
+re-notification correctness - with nothing new found in any of them). `engine/onboarding/
+process_onboarding_jobs.py`'s `fail_stale_uploads()`.
+
+**What was tested:** `process_upload()` does its real work in two separate REST calls with no shared
+transaction: first `POST onboarding_document_results` (the classification proposal, `review_status:
+"pending_review"`), then `PATCH onboarding_uploads` to `status: "classified"`. A worker killed in the
+gap between those two calls - a crash, an OOM kill, an ungraceful redeploy, exactly the scenario
+`fail_stale_uploads()` exists to recover from - leaves the upload row stuck at `status: "classifying"`
+with its result already written. Confirmed directly: constructed exactly this state (a stale
+`classifying` row with a matching `onboarding_document_results` row already present) and ran the real
+`fail_stale_uploads()` against it - it marked the row `classification_failed` with `"Upload this file
+again"`, unconditionally, with no check for whether the work had actually already succeeded.
+
+**Finding (CONFIRMED).** Traced the real consequence on `app/app/company/document-scan/page.tsx`:
+the "To review" list queries `onboarding_document_results` by `review_status = "pending_review"`
+alone (no join back to the parent upload's own status), and the "couldn't be read" list queries
+`onboarding_uploads` by `status = "classification_failed"` independently - the SAME document would
+appear in both simultaneously. Reviewing/applying a result (`actions.ts`'s `markApplied()`) only ever
+updates the result row's own `review_status`; it never touches the parent upload row at all - so even
+after the user reviews and applies the perfectly good result, the SAME document stays listed as
+"failed, upload it again" forever, with no code path that ever clears it. Same bug CLASS (a narrow,
+two-separate-writes race leaving one system of record out of sync with another, with no owner or
+trace) as Finding 98's `save_readiness_seen_db()` fix, here on the onboarding-scan queue specifically.
+
+**Fix:** `fail_stale_uploads()` now checks, before declaring a stale row failed, whether an
+`onboarding_document_results` row already exists for it. If one does, the upload is self-healed to
+`status: "classified"` (clearing `classification_error`) instead of wrongly marked failed, with a
+`"warning"`-severity alert (a recovery, not a loss) rather than the usual `"error"`. A genuinely dead
+row with no result is still marked `classification_failed` exactly as before - verified with a
+negative control in the same test.
+
+**Verified red-then-green.** Added `test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_
+written()` to `engine/onboarding/test_process_onboarding_jobs.py` (4 checks: the raced row self-heals
+to classified with no misleading error, the negative-control dead row still fails, and the alert is a
+warning not an error). Revert-and-confirm-red: reverting reproduced the exact predicted 3 failures
+with every other check in the file - including the pre-existing stale-row test's own real-failure
+case and every `process_upload()` path test - still green; restored, `0 failure(s)`. Regression-
+checked `engine/onboarding/test_classify_documents.py` and `engine/worker/test_poll_loop.py` - all
+pass; `py_compile` clean.
+
+**Regression:** `engine/onboarding/process_onboarding_jobs.py` (`fail_stale_uploads()`: one extra GET
+plus a conditional branch before the existing fail-path, ~25 lines including comment - a stale row
+with NO existing result is byte-for-byte unaffected, matching the pre-existing test case exactly),
+`engine/onboarding/test_process_onboarding_jobs.py` (1 new test function, 4 checks, wired into
+`main()`). No schema or other call-site changes. The identical two-write race shape exists in
+`engine/cv/extract_cv_fields.py`'s own `fail_stale_uploads()`/`cv_extraction_results` pair (same
+pattern, confirmed by reading it) - left unfixed this pass to keep this fix contained and verified;
+flagged in `System-Status.md` as the same bug class, worth a follow-up pass rather than a second,
+unverified change bundled into this one.

@@ -96,6 +96,34 @@ def fail_stale_uploads(url, key, now=None):
                                  context={"onboarding_upload_id": up["id"], "claimed_at": claimed})
             continue
         if claimed_dt < cutoff:
+            # process_upload() does the real work in two separate REST calls
+            # with no shared transaction - POST the onboarding_document_results
+            # row, THEN PATCH this upload to 'classified'. A worker killed in
+            # the gap between those two calls (a crash, an OOM kill, a
+            # redeploy that doesn't wait - exactly what this stale-reclaim
+            # sweep exists to catch) leaves a row stuck 'classifying' with its
+            # result ALREADY written and fully reviewable. Marking it
+            # "classification_failed" here, as every other stale row
+            # correctly is, would be actively wrong for this one: the
+            # document-scan page would show the SAME document as both "to
+            # review" (the real, already-produced result) and "couldn't be
+            # read - upload again" (this row) at once, permanently, since
+            # reviewing a result never touches the upload row's own status.
+            # Found 2026-11-01 (worker/job-queue rotation). Self-heal instead:
+            # a result already exists means the work actually finished.
+            existing = supabase_request(url, key, "GET",
+                                        f"onboarding_document_results?onboarding_upload_id=eq.{up['id']}&select=id")
+            if existing:
+                supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
+                    "status": "classified", "classification_completed_at": _now_iso(), "classification_error": None})
+                print(f"[recovered] onboarding_upload {up['id']}: stale 'classifying' since {claimed}, but its "
+                      "result was already written - marked classified, not failed")
+                system_alerts.record("onboarding_scan", f"An onboarding document classification was stuck "
+                                                         f"'classifying' for over {STALE_AFTER_MINUTES} minutes "
+                                                         "after the worker died, but its result had already been "
+                                                         "written - self-healed to classified rather than wrongly "
+                                                         "failed", "warning", context={"onboarding_upload_id": up["id"]})
+                continue
             supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
                 "status": "classification_failed", "classification_completed_at": _now_iso(),
                 "classification_error": f"The classification worker stopped mid-job (no result after "

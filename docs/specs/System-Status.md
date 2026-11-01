@@ -222,6 +222,61 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review): fix - a worker killed between writing an onboarding classification result and marking its upload row 'classified' left that document permanently stuck showing as both "to review" and "couldn't be read" at once; same race shape flagged (not fixed) in the CV-extraction queue too
+
+Oriented from `6363fdc`; `git fetch origin main` found one new sibling commit since my own last push
+(a discovery-area clean sweep, docs-only, no overlap). Fast-forwarded cleanly. Open PRs re-checked via
+the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to worker/job-queue. `poll_loop.py`/`run_bridges.py` already had a thorough dedicated pass two
+cycles ago (run 141) - re-checked several angles from scratch instead of re-reading the same
+conclusion: the `SetupError`-aborts-the-batch design (confirmed intentional, matches `extract_cv_
+fields.py`'s own canonical pattern exactly, including the `run()`-level non-zero-exit handling), all 6
+registered bridges present and CI-wired (no orphaned 7th queue consumer), the worker Dockerfile/
+requirements.txt's dependency chain traced end to end (no missing package for any bridge's real
+import chain), and `scoutAnomalyIdempotencyKey`'s re-notification-on-new-occurrences design (correctly
+mirrors `check_system_alerts.py`'s own "still occurring" rule, so a persistent critical bridge failure
+does keep reaching Sarel via Scout even with the older Gmail check-in now disabled). None of these
+turned up anything new.
+
+**Found and fixed Finding 114 (CONFIRMED, moderate)**: `process_onboarding_jobs.py`'s `process_upload()`
+does its real work in two separate, non-transactional REST calls - POST the classification result,
+THEN PATCH the upload to `status: "classified"`. A worker killed in that exact gap (a crash, an OOM
+kill, an ungraceful redeploy) left the upload stuck `"classifying"`, which `fail_stale_uploads()` then
+marked `"classification_failed"` ("Upload this file again") - even though the result was already
+written and fully reviewable. Traced the real UI consequence (`document-scan/page.tsx`): the "To
+review" and "couldn't be read" lists query independently with no cross-check, so the same document
+showed in BOTH, permanently - reviewing/applying the result never touches the upload row's own status,
+so nothing ever clears the stale "failed" entry.
+
+Fixed by having `fail_stale_uploads()` check for an existing result before declaring a row failed; if
+one exists, self-heal the upload to `"classified"` instead (a `"warning"` alert, not `"error"` - a
+recovery, not a loss). A genuinely dead row with no result is still marked failed exactly as before.
+
+Verified red-then-green: `engine/onboarding/test_process_onboarding_jobs.py`, 4 new checks; reverting
+reproduced the exact predicted 3 failures with every other check (including the pre-existing real-
+failure case) still green; restored, `0 failure(s)`. Regression-checked `test_classify_documents.py`,
+`engine/worker/test_poll_loop.py` - all pass; `py_compile` clean. Full write-up: `docs/specs/
+QA-Edge-Case-Findings.md` Finding 114.
+
+**Left for a follow-up, not bundled in**: the identical two-write race shape exists in `engine/cv/
+extract_cv_fields.py`'s own `fail_stale_uploads()`/`cv_extraction_results` pair (confirmed by reading
+it - same POST-result-then-PATCH-status pattern, same gap). Not fixed this pass to keep this change
+small and fully verified against one concrete, tested scenario rather than two unverified ones bundled
+together; flagged here so a future worker/job-queue rotation picks it up rather than re-discovering it
+from scratch.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/onboarding/process_onboarding_jobs.py`
+- `engine/onboarding/test_process_onboarding_jobs.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel. The
+`extract_cv_fields.py` follow-up is a concrete, well-scoped TODO for this routine's own future cycles,
+not something needing Sarel's judgment either.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review): fix - the daily digest's "Listing changes" email section showed only the tender's own generic title on every line, with WHAT changed never reaching the sent email at all
 
 Oriented from `0c6b7c7`; `git fetch origin main` found two new sibling commits since my own last push

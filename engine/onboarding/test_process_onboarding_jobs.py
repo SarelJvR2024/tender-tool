@@ -221,6 +221,46 @@ def test_fail_stale_uploads_marks_old_classifying_rows_failed_and_leaves_fresh_o
           alerts)
 
 
+def test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written():
+    print("fail_stale_uploads(): a stale row whose onboarding_document_results row already exists "
+          "is recovered to classified, not wrongly marked failed")
+    # Found 2026-11-01 (worker/job-queue rotation). process_upload() does the
+    # real work in two separate REST calls, no shared transaction: POST the
+    # result, THEN PATCH the upload to 'classified'. A worker killed in that
+    # exact gap (a crash, an OOM kill, an ungraceful redeploy - exactly what
+    # this stale-reclaim sweep exists to catch) used to leave the row marked
+    # "classification_failed" ("Upload this file again") even though its
+    # result was already written and fully reviewable - the document-scan
+    # page would show the same document as both "to review" and "couldn't be
+    # read" at once, permanently (reviewing a result never touches the
+    # upload row's own status).
+    import datetime
+    now = datetime.datetime(2026, 11, 1, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=30)).isoformat()
+    db = FakeDB([
+        {"id": "raced", "status": "classifying", "classification_claimed_at": old},
+        {"id": "dead", "status": "classifying", "classification_claimed_at": old},
+    ])
+    db.tables["onboarding_document_results"] = [{"id": "r1", "onboarding_upload_id": "raced", "review_status": "pending_review"}]
+    alerts = []
+    original, original_record = poj.supabase_request, poj.system_alerts.record
+    poj.supabase_request = db
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        poj.fail_stale_uploads("url", "key", now=now)
+    finally:
+        poj.supabase_request = original
+        poj.system_alerts.record = original_record
+    rows = {r["id"]: r for r in db.tables["onboarding_uploads"]}
+    check("the row with an already-written result is self-healed to classified, not failed",
+          rows["raced"]["status"] == "classified", rows["raced"])
+    check("...with no misleading 'upload again' error left on it", rows["raced"].get("classification_error") is None)
+    check("a genuinely dead row with NO result is still correctly marked failed (negative control)",
+          rows["dead"]["status"] == "classification_failed", rows["dead"])
+    check("the self-heal is recorded as a warning (recovered), not an error (lost)",
+          any(a[0][0] == "onboarding_scan" and a[0][2] == "warning" and "self-healed" in a[0][1] for a in alerts), alerts)
+
+
 def test_process_upload_happy_path_writes_classified_with_every_result_field():
     db = FakeDB([{"id": "u1", "company_id": "co-1", "storage_path": "co-1/doc.pdf", "original_filename": "doc.pdf",
                  "status": "classification_requested"}])
@@ -301,6 +341,7 @@ def main():
     test_double_slash_is_still_rejected()
     test_claim_upload_is_atomic_a_second_claim_on_the_same_row_fails()
     test_fail_stale_uploads_marks_old_classifying_rows_failed_and_leaves_fresh_ones_alone()
+    test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
     test_process_upload_happy_path_writes_classified_with_every_result_field()
     test_process_upload_setup_error_releases_and_reraises_but_transient_error_releases_quietly()
     test_process_upload_classification_failed_marks_the_row_failed_without_raising()
