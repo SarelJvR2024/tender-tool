@@ -14,6 +14,53 @@
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-fifth run): clean sweep - non-SANRAL pack's flat-PDF overlay engine (fill_flat_pdf.py), plus engine/onboarding/classify_documents.py read against the AI-Call-Quality-Standard following up on a sibling's own scope_llm.py fix
+
+Oriented from `0df7616`; `git fetch origin main` found two new sibling commits - a follow-up pass
+independently verifying my own `key_person_minimums.py` fix and reading `boq_extraction.py` clean
+(`bb65de2`), and a real fix to `engine/discovery/scope_llm.py` (`b9417b5`: its system prompt promised
+the model's `evidence_quotes` "are checked against the text afterward", but no code anywhere in that
+file or its caller ever actually performed that check - fixed by adding a local
+`verify_evidence_quotes()`). Neither touches anything below, no overlap. Fast-forwarded cleanly. Open
+PRs re-checked: only `#165`/`#164` remain, both unchanged, no collision.
+
+non-SANRAL pack rotation (the specific `key_person_minimums.py` lead from two cycles ago is now
+closed - see above). Read `engine/general/fill_flat_pdf.py` (1010 lines, the low-level flat-PDF
+text-overlay engine behind every typed-onto-a-scanned-form field) end to end for functions not
+already covered by Finding 95's own whitespace-value fix: `values_for()` (already correctly uses
+`ctx.get(...) or {}` throughout, not the null-vs-missing `.get(key, default)` shape this session has
+found elsewhere), `_pdf_str()` (PDF literal-string escaping - backslash escaped before parens, the
+correct order, not vulnerable to Finding 110's own backslash-replacement shape since it's a plain
+`.replace()` chain, not a `re.sub` replacement string), `_fit()` (a bounded loop, no infinite-loop or
+division risk), and `fill_flat_pdf()`'s own orchestration (clash detection between two fields aimed at
+the same spot, write-then-read-back verification). No new issue found.
+
+Followed up on the sibling's own `scope_llm.py` fix by checking whether the SAME "prompt promises a
+check, no code performs it" gap exists at the other real LLM call sites - grepped the whole `engine/`
+tree for `messages.create`/`beta.messages.create` and found exactly five: `company_documents.py`,
+`scope_llm.py` (just fixed), `generate_narrative.py` (already independently confirmed clean by an
+earlier pass this session), `extract_cv_fields.py` (the original, proven `evidence_in_text()`
+implementation), and `engine/onboarding/classify_documents.py` - never checked this session. Read it
+end to end (612 lines) against `docs/specs/AI-Call-Quality-Standard.md` (read first, per CLAUDE.md's
+own instruction to read it before touching any LLM call): its `validate_proposal()` already reuses
+`extract_cv_fields.py`'s own `evidence_in_text()` directly (`cvx.evidence_in_text(...)`), so the exact
+gap `scope_llm.py` had does NOT exist here - quotes genuinely are checked. What IS still true, and
+already openly disclosed in the standard's own text ("today's three call sites are single-pass...
+retrofitting them is separate follow-up work, not done by writing this standard"):
+`classify_documents.py`'s `call_llm()` makes exactly one Messages API call, with no generate -> review
+-> revise loop. Not reported as a new finding - it's a known, already-documented, deliberately
+deferred gap (the standard's own text says so), not something this pass discovered; a full retrofit
+(a new, document-classification-specific review prompt and checklist, a new chained call, new tests)
+is real, scoped feature work, not a contained robustness fix this pass's own charter covers.
+
+**No code bug found and fixed this pass - a genuine clean sweep**, reached by reading two real files
+end to end (one against this session's own established bug shapes, one against a written standard)
+rather than guessing. Re-ran `engine/onboarding/test_classify_documents.py` - `ALL PASSED`. Committed
+docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): Finding 112 - scope_llm.py's evidence_quotes were never actually checked against the document text, despite the prompt telling the model they would be
 
 Oriented from `bb65de2`; `git fetch origin main` found nothing new, local already matched exactly. Open
