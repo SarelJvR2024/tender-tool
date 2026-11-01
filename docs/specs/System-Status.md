@@ -14,6 +14,63 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): clean sweep - transnet_etenders.py tested thoroughly against its real live site and detail pages, no bug found
+
+Oriented from `0c6b7c7`; `git fetch origin main` found one new commit since - `b5eb263`, a sibling
+pass's real fix to `send_digest_emails.py`'s `listing_changes` section (checked `title` before
+`summary` unconditionally, so a sent digest never showed what actually changed) - no overlap, fast-
+forwarded local `main` to match. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain,
+both unchanged, no collision.
+
+Continuing this session's "test a discovery scraper against its real live source site" technique
+(4 real bugs found so far: `sars_procurement.py`, `vaal_central_water.py`, `lephalale.py`, plus
+`tender_enrichment.py`'s regex and `capetown_procurement.py`'s/`kouga.py`'s confirmed-clean checks).
+Retried `randwater.co.za` first: still fails with `curl: (60) SSL certificate problem: unable to get
+local issuer certificate`, reproduced even with the proxy's own CA bundle passed explicitly
+(`--cacert /root/.ccr/ca-bundle.crt`) - confirms this is the target server's own cert-chain problem,
+not a local config issue, same as the prior pass's finding. Not pursued further per the standing
+rule against disabling TLS verification.
+
+Picked `transnet_etenders.py` instead (not tested this way this session). Fetched the real live
+`GetAdvertisedTenders` JSON endpoint directly (200, 106KB, 99 real open tenders) and tested every
+field the parser reads against it:
+- `nameOfInstitution` values (`{TCC, TNPA, TPL, TP, TFR, TE, TPT}`) all covered by `DIVISIONS` - no
+  silent `f"Transnet ({inst})"` fallback for any real row today.
+- `closingDate`/`publishedDate`/`briefingDate` (US `M/D/YYYY h:mm:ss AM/PM` format) all parsed
+  cleanly by `sh.iso_sast()` - 0 failures across all 99 rows × 3 date fields.
+- `briefing()`'s compulsory/non-compulsory text detection checked against every real row whose
+  `briefingDetails` mentions "compulsory" (49 rows, many phrasings - "A non-compulsory briefing...",
+  "Yes: Non-compulsory.", "A Compulsory Tender Clarification Meeting...") - every one classified
+  correctly. No real row today uses a "not compulsory" phrasing that would defeat the
+  `"non-compulsory" not in low` check (a theoretical gap, not a demonstrated one - not fixed without
+  a real failing case, per this session's own discipline).
+- `DOC_LINK` tested against 12 real detail pages (random sample, including ones with addenda:
+  114789's "Addendum No 6.pdf", 114729/114733's "Addendum 1.pdf", 115012's "Addendum Form No1") -
+  matched every real document link correctly (1 to 25 docs per page), with zero mismatch against a
+  raw `href=` scan of the same pages. One page (114899) correctly returned 0 docs - confirmed by
+  reading its raw HTML that the only blob reference there is a hidden, filename-less
+  `_AttachmentReferenceLink` div (not inside an `href=` attribute, and this tender genuinely has no
+  documents uploaded yet) - a true negative, not a missed match.
+
+No code bug found - a genuine clean sweep, reached by actually exercising every real field against
+live data rather than reading the file by eye. Sanity-ran the existing `test_gov_sources.py` suite
+(which covers this module's `normalize()` via `test_transnet_capetown()`) - `ALL PASSED`, unaffected
+(no code touched this pass).
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. The 18-item backlog is unchanged (migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB; `narrative_documents`
+PostgREST schema-cache reload; PayFast idempotency design question; "missing ISO 9001 flagged as
+urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard "Decision needed"
+over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up; dangling
+`signatory_person_id` fallback design question; active-subscription reconciliation gap; team
+seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets; pack-generation
+quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): fix - lephalale.py's TNUM_RE dropped a real T-number to None when it wrapped across two physical PDF table rows
 
 Oriented from `79b8d69`; `git fetch origin main` found nothing new - local already matched
