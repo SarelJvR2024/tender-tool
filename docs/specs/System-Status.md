@@ -14,6 +14,43 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): capetown_procurement.py's "ambiguous sortable closing time" note resolved (not a bug) - no new fix needed
+
+Oriented from `26a329f` (fast-forwarded past one new sibling commit first, no overlap). Open PRs
+re-checked via the GitHub API: only `#164`/`#165` remain, unchanged, no collision.
+
+Following up on the prior pass's technique (test a scraper's regex against the REAL LIVE source site,
+not just the committed fixture), picked `capetown_procurement.py` - it already carries an open, honest
+"ambiguous, only one data point" note a few passes ago about `normalize_rfq()`'s preference for the
+"Closing Date Sortable" cell, which that one fixture row happened to show as exactly noon (could be a
+real deadline or a padded placeholder).
+
+Fetched the City of Cape Town's real live RFQ page directly (232 rows today) and checked two things:
+
+1. **`DETAIL`'s own regex** (`href="...Details/(\d+)"`, with no leading `<a[^>]*` anchor) - unlike
+   `TENDER_LINK`'s rigid form in `sars_procurement.py` (fixed two passes ago), this one is NOT anchored
+   to attribute position at all, so it was never vulnerable to that bug class. Confirmed: a real live
+   `<a>` tag on this page has `class="linkDetails"` before `href` - `DETAIL` still matches all 231 of
+   them correctly, same as a hypothetical attribute-order-tolerant rewrite would. Nothing to fix here.
+2. **The "always noon" ambiguity** - pulled the real sortable-closing-time value across all 231 live
+   rows today, not just one. Found 10 distinct times (4:00 PM, 9:00 AM, 8:00 AM, 2:30 PM, 3:00 PM,
+   11:00 AM, 12:00 PM, 11:30 AM, 10:00 AM, 2:00 PM) - conclusively **not** a padded placeholder. The
+   "Closing Date Sortable" cell carries a real, stated closing time that happens to coincide with noon
+   on some rows and not others, the same way any other closing time would. `normalize_rfq()`'s existing
+   preference for this cell over the date-only one is correct as written - no fix needed, and the
+   earlier pass's concern is resolved by better evidence, not overridden by it (one row genuinely
+   wasn't enough to tell either way).
+
+No code bug found this pass - a genuine, evidence-backed resolution of a previously-open ambiguity,
+not a clean sweep that skipped the lead. QA: no code touched, so no suite re-run needed; confirmed via
+a standalone live-fetch script, not a committed test (the live site's own current data, not something
+to pin in a fixture).
+
+Backlog: unchanged at 18 items - this resolves an informal note from an earlier pass, not one of the
+18 numbered backlog items Sarel owns, so the count doesn't change.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review): fix - requirements.py's read_document() silently treated an unreadable document as a successfully-read empty one whenever its saved file had no recognized extension
 
 Oriented from `286ca54`; `git fetch origin main` found nothing new since - local already matched
