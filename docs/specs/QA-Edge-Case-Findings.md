@@ -6290,3 +6290,56 @@ fill_sbd_docx.py` (one `.sub()` call, f-string -> lambda), `engine/test_fill_a_f
 test functions, 5 checks), `engine/general/test_fill_sbd_docx.py` (1 new test function, 6 checks). No
 schema or other call-site changes - both fixes are return-value-identical for every input that didn't
 already trigger the bug.
+
+### Finding 111 (CONFIRMED, FIXED, moderate - a tender's own real minimum-years requirement for a key position silently disappeared whenever the C3.1.11 table's qualification-alternatives couldn't be phrase-split, even though the individual years figures were still right there in the text)
+
+**Where:** this cycle's own lead, picked up from the standing solution-architect review's own honest,
+explicitly-unconfirmed note in `docs/specs/System-Status.md` ("one inconclusive lead on
+`key_person_minimums.py` noted, not fixed" - that pass couldn't construct or confirm a real failing
+case in the time it had). `engine/discovery/key_person_minimums.py`'s `extract_key_person_minimums()`
+- the C3.1.11(d) key-person minimum-requirements table parser feeding the real compliance check
+(`app/lib/tenderCompliance.ts`).
+
+**What was tested:** when a position's row offers several qualification/years alternatives (e.g.
+"None specified: 20 years" / "National Diploma: 10 years" / "Pr Techni Eng: 5 years" - the real,
+documented R.396 Senior Materials Technician shape), the parser only builds the structured
+`alternatives` list when `len(numeric) > 1 and len(quals) > 1` - i.e. only when its OWN phrase-
+splitting (`qual_new`/`DANGLE`-based) manages to separate the qualification column into as many
+phrases as there are years values. Constructed two real-world-plausible layouts where that splitting
+fails while the years values themselves are still individually readable: (1) a qualification phrase
+ending in a dangling connector word ("None specified **or**") right before a line-wrapped
+continuation - a genuine `pdftotext -layout` artifact this same file's own `DANGLE` list already
+exists to handle elsewhere, just not for this exact row shape; (2) an all-lowercase qualification
+column (`qual_new` requires an uppercase first letter to recognise a new phrase).
+
+**Finding (CONFIRMED).** In both constructed cases, `alternatives` stayed `[]` as designed (the
+phrase-split genuinely couldn't separate them) - but `years_text`/`years_min`/`years_under` fell
+through to `(None, None)` UNCONDITIONALLY (`ymin, yunder = _years(years_text) if len(numeric) == 1
+else (None, None)` - and since `len(numeric) == 3` here, always the `None, None` branch), even though
+`years_text` itself was a perfectly legible string (`"10 5"` / `"20 10 5"`) and every individual
+numeric fragment (20, 10, 5) was independently parseable. The row's real stated minimum (5 years,
+same position, same real-world figures as the documented R.396 example) was silently discarded to
+`None` - a compliance check reading `years_min` for this position would see "no minimum stated"
+instead of the real "5 years minimum", exactly the "silent wrong data is the main risk" failure mode
+this session has found repeatedly elsewhere, just in a file with zero prior QA attention until the
+architect pass's own read.
+
+**Fix:** when `alternatives` couldn't be built but `len(numeric) > 1`, take the lowest of the
+individually-parsed numeric fragments as the row's own `years_min` - the same "the lower bound is the
+binding minimum" rule the `alternatives` branch immediately above already applies (`min(a["years_min"]
+for a in alternatives ...)`). `alternatives` itself stays `[]` (honest: which qualification pairs with
+which years figure is genuinely lost), but the overall minimum-years compliance signal - the one
+figure the actual check reads - is recovered rather than silently dropped.
+
+**Verified red-then-green.** Added `part1b()` to `engine/discovery/test_key_person_minimums.py`: both
+constructed layouts, 6 checks total (one row read, `alternatives == []` confirming the premise, and
+`years_min == 5` confirming the fix, for each of the two trigger shapes). Revert-and-confirm-red:
+reverting reproduced the exact predicted 2 failures (`years_min` back to `None`) with every other
+check - including both "alternatives genuinely empty" premise checks, and all of the existing Part
+1/2/3 real-fixture tests - still green; restored, `0 failure(s)`. Regression-checked
+`engine/general/test_requirements.py` (a real consumer of this module) - all pass.
+
+**Regression:** `engine/discovery/key_person_minimums.py` (one `elif` branch added, ~15 lines, no
+other behavior change - every row that already had `len(numeric) <= 1` or successfully-built
+`alternatives` is byte-for-byte unaffected), `engine/discovery/test_key_person_minimums.py` (1 new
+test function, 6 checks). No schema or other call-site changes.

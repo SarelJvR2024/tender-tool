@@ -111,6 +111,61 @@ def part1():
     check(r396["ARE"]["years_min"] == 2 and n011["ARE"]["years_min"] == 5, "ARE: 2 years (R.396) vs 5 (N.011)")
 
 
+def part1b():
+    print("Part 1b - a real stated minimum is recovered even when the qualification column's own "
+          "phrase-splitting can't separate the alternatives (QA pass, 2026-11-01)")
+    # Same real R.396-style layout as the Senior Materials Technician row
+    # (None specified/20, National Diploma in civil engineering/10, Pr Techni
+    # Eng/5), but with one real-world PDF-layout artifact each: a
+    # qualification phrase ending in "or" before a line-wrapped continuation
+    # (DANGLE), and an all-lowercase qualification column (qual_new's own
+    # uppercase-start check). Both already block alternatives from being
+    # built at all (confirmed: alternatives == [] in both), which used to
+    # silently drop years_min to None even though the individual years
+    # figures (20, 10, 5) were each still perfectly readable right there.
+    dangling = """
+C3.1.11 Personnel Requirements
+
+the table below indicates the Minimum requirements
+
+     Position                    Qualification/Registration            Minimum Relevant
+                                                                         Experience
+                                                                         (years)
+
+     Senior Technician           None specified or
+                                  National Diploma in civil
+                                                                               10
+                                  engineering
+                                  Pr Techni Eng                                5
+
+C3.1.12 Next clause
+"""
+    lowercase = """
+C3.1.11 Personnel Requirements
+
+the table below indicates the Minimum requirements
+
+     Position                    Qualification/Registration            Minimum Relevant
+                                                                         Experience
+                                                                         (years)
+
+     Senior Technician           none specified                              20
+                                  national diploma in civil
+                                                                               10
+                                  engineering
+                                  pr techni eng                                5
+
+C3.1.12 Next clause
+"""
+    for label, text in (("dangling 'or' before a line-wrapped continuation", dangling),
+                        ("all-lowercase qualification column", lowercase)):
+        res = kpm.extract_key_person_minimums(text)
+        check(len(res["rows"]) == 1, f"{label}: one row read ({res})")
+        r = res["rows"][0]
+        check(r["alternatives"] == [], f"{label}: alternatives genuinely couldn't be split (the premise) ({r['alternatives']})")
+        check(r["years_min"] == 5, f"{label}: the real stated minimum (5, the lowest of 20/10/5) is recovered, not silently None ({r['years_min']})")
+
+
 def part2():
     print("Part 2 - no table -> not_found (the compliance check then labels R.396's table an assumption)")
     cases = {
@@ -137,6 +192,7 @@ def part3():
 
 if __name__ == "__main__":
     part1()
+    part1b()
     part2()
     part3()
     print(f"\n{len(FAILS)} failure(s)")

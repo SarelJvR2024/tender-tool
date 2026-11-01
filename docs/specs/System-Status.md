@@ -14,6 +14,51 @@
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-fourth run): Finding 111 in QA-Edge-Case-Findings.md - a tender's own real minimum-years requirement for a key position silently disappeared whenever the C3.1.11 alternatives table's qualification column couldn't be phrase-split, picked up from the standing solution-architect review's own honestly-unconfirmed lead
+
+Oriented from `8b451a0`; `git fetch origin main` found one new sibling commit (`f30c15d`, the
+solution-architect review's own clean sweep of `fill_financial.py`/`fill_financial_hours.py`/
+`print_financial.py`, plus the specific `key_person_minimums.py` lead this entry picks up) and
+fast-forwarded cleanly. Open PRs re-checked: only `#165`/`#164` remain, both unchanged, no collision.
+
+Rather than starting a fresh engine-area rotation this cycle, picked up the one specific, well-
+described, honestly-unconfirmed lead the immediately-preceding architect pass left open:
+`extract_key_person_minimums()`'s `alternatives` list (several qualification/years pairs for one key
+position, e.g. R.396's real Senior Materials Technician row - None specified/20, National Diploma/10,
+Pr Techni Eng/5) is only built when the qualification column's own phrase-splitting manages to
+separate it into as many phrases as there are years values; when it can't, `years_min`/`years_under`
+fall through to `(None, None)` unconditionally, even when the individual years figures are still
+perfectly legible in the raw text.
+
+Constructed two real-world-plausible trigger layouts (not available before this pass, which is why
+the prior one could trace the mechanism but not confirm it with a concrete failing case): a
+qualification phrase ending in a dangling connector word ("None specified **or**") right before a
+line-wrapped continuation - a genuine `pdftotext -layout` artifact this same file's own `DANGLE` list
+already exists to handle elsewhere, just not for this exact row shape - and an all-lowercase
+qualification column (the phrase-splitter requires an uppercase first letter). Both reproduced the
+exact mechanism the prior pass traced: `alternatives` correctly stays `[]` (the split genuinely
+fails), but the row's real stated minimum (5 years, confirmed against the same real R.396 figures the
+docstring itself quotes) silently became `None` instead of being recovered.
+
+Fixed: when `alternatives` can't be built but more than one numeric years fragment exists, take the
+lowest of the individually-parsed fragments as the row's own `years_min` - the same "the lower bound
+is the binding minimum" rule the `alternatives` branch immediately above it already applies.
+`alternatives` itself stays honestly empty (which qualification pairs with which figure is genuinely
+lost), but the one number the actual compliance check reads is recovered rather than silently dropped.
+
+Verified red-then-green: added `part1b()` to `engine/discovery/test_key_person_minimums.py` (6 checks
+across both constructed layouts); reverting reproduced the exact predicted 2 failures with every other
+check - including all of the existing real-fixture Part 1/2/3 tests - staying green; restored,
+`0 failure(s)`. Regression-checked `engine/general/test_requirements.py` (a real consumer) - passes.
+
+Committed and pushed directly to `main` (contained, well-verified, no PR):
+- `engine/discovery/key_person_minimums.py` (one `elif` branch, ~15 lines)
+- `engine/discovery/test_key_person_minimums.py` (1 new test function, 6 checks)
+- `docs/specs/QA-Edge-Case-Findings.md` (Finding 111)
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): clean sweep - fill_financial.py/fill_financial_hours.py/print_financial.py read end to end; one inconclusive lead on key_person_minimums.py noted, not fixed
 
 Oriented from `daf4a57`; `git fetch origin main` found one new sibling commit (`8b451a0`, a QA/

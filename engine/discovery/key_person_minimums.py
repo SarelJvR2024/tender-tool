@@ -395,6 +395,23 @@ def extract_key_person_minimums(text):
         ymin, yunder = _years(years_text) if len(numeric) == 1 else (None, None)
         if alternatives:
             ymin = min(a["years_min"] for a in alternatives if a["years_min"] is not None) if any(a["years_min"] is not None for a in alternatives) else None
+        elif len(numeric) > 1:
+            # alternatives stayed empty because the qualification column's
+            # own phrase-splitting (qual_new/DANGLE above) didn't recognise
+            # len(quals) separate alternatives here - a real, plausible PDF
+            # shape, not just a contrived one: one alternative's phrase
+            # ending in "or"/"and"/"," before a line-wrapped continuation (a
+            # real pdftotext -layout artifact) already blocks it. The
+            # individual numeric fragments are still each a real,
+            # individually-parseable years figure even though which
+            # qualification goes with which is lost - take the lowest as
+            # this row's own minimum, the same "the lower bound is the
+            # binding minimum" rule the alternatives branch above already
+            # applies, rather than silently dropping a real stated minimum
+            # to null. QA pass, 2026-11-01 (picked up from the standing
+            # solution-architect review's own honestly-unconfirmed lead).
+            mins = [y for y, _ in (_years(t) for _, t in numeric) if y is not None]
+            ymin = min(mins) if mins else None
         code = next((c for c, rx in POSITION_CODES if rx.match(name)), None)
         spec = None if code else next((k for k, rx in SPECIALISTS if rx.search(name)), None)
         reg_text = f"{qualification} {other}"
