@@ -14,6 +14,50 @@
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-third run): clean sweep - SANRAL pack (fill_docx_forms.py/sanral_b7.py/fill_authority_letter.py/company_documents.py); three leads investigated and ruled out
+
+Oriented from `e3afe62`; `git fetch origin main` found two new commits since - a sibling QA/
+robustness pass's real fix (`8762bda`, `extract_cv_fields.py`'s email verification, `engine/cv/`) and
+a follow-up clean sweep (`daf4a57`, `engine/ocr/scan_ocr.py`, docs-only). Neither touches anything
+below, no overlap. Fast-forwarded cleanly. Open PRs re-checked: only `#165`/`#164` remain, both
+unchanged, no collision.
+
+SANRAL pack rotation (discovery was last cycle - clean sweep, logged above). Read `engine/
+fill_docx_forms.py` (the C.1.1.1/C.1.2.3 filler), `engine/sanral_b7.py` (the Form B7 subcontracting-
+plan checker/filler, zero prior QA attention despite dense validation logic), `engine/
+fill_authority_letter.py`, and `engine/company_documents.py` (the per-company upload-or-guideline
+mechanism, including its one LLM call - read, not modified, so `AI-Call-Quality-Standard.md` wasn't
+triggered, but worth noting its own `guard_only_company_wording()` already rejects any AI output that
+adds a word not in the company's own guideline/facts, falling back to verbatim rather than trusting
+the model - already built to that standard's spirit).
+
+Three leads chased to ground, all ruled out:
+1. `fill_docx_forms.py`'s `signatory['signatory_capacity']` is read with no null guard in two places
+   (`fill_contract_data()`/`fill_form_of_offer()`) - looked exactly like a repeat of the literal-"None"
+   bug class this codebase has hit before (`generate_cv.py`'s own historical Finding 49). Traced the
+   real production profile.json's construction (`process_pack_jobs.py`): `key_people[0]` is always the
+   company's chosen signatory, drawn from a query explicitly filtered to `signatory_capacity: NOT_NULL`
+   - not reachable.
+2. `sanral_b7.fill_b7()` hardcodes `f"{len(tes)} Targeted Enterprise"` (always singular) for the Form
+   B7 subcontracting-count dropdown - looked like a singular/plural mismatch that would raise
+   `ValueError` for 2+ Targeted Enterprises. Checked a real sample workbook
+   (`R.352-020-2025.1F_ran.xlsm`) directly: the template's own dropdown options are themselves all
+   singular ("2 Targeted Enterprise", not "...Enterprises") - the code already matches the real form
+   exactly; not a bug.
+3. `sanral_b7.check_plan()`'s `bee_level` validation normalises a float-but-integer value (`3.0` ->
+   `3`) only in a LOCAL variable for the check itself, never mutating `te["bee_level"]` in place -
+   looked like it could let a float slip past validation into `fill_b7()`'s own `int(te["bee_level"])`
+   call with a different conversion path. Traced through: `int()` on a float truncates identically
+   either way, so the two code paths agree on the result regardless; not a bug.
+
+**No code bug found - a genuine clean sweep**, reached by verifying three plausible-looking leads
+against the real data flow and a real sample workbook rather than reporting any of them unverified.
+Re-ran `engine/test_fill_b7_legacy_precedence.py`, `engine/test_fill_docx_forms.py`, and
+`engine/sanral_b7.py`'s own self-check - all pass. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): clean sweep - engine/ocr/scan_ocr.py read end to end, no bug found
 
 Oriented from `8762bda`; `git fetch origin main` found nothing new, local already matched
