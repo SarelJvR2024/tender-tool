@@ -14,6 +14,56 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): clean sweep - fill_financial.py/fill_financial_hours.py/print_financial.py read end to end; one inconclusive lead on key_person_minimums.py noted, not fixed
+
+Oriented from `daf4a57`; `git fetch origin main` found one new sibling commit (`8b451a0`, a QA/
+robustness pass's own clean sweep of the SANRAL pack's `fill_docx_forms.py`/`sanral_b7.py`, docs-only)
+and fast-forwarded cleanly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Continuing this session's "read a whole module end to end for the first time" technique, picked the
+Financial-workbook writers (never closely read this session) plus one compliance-critical parser:
+
+- `engine/fill_financial.py` (80 lines, mechanical name-only fields) and `engine/fill_financial_hours.py`
+  (152 lines, the 7 Hours sheets) - both already carefully built with explicit null/finite/non-negative
+  guards and real-sample-confirmed cell positions; `fill_financial_hours.py` even carries its own dated
+  QA-pass comment (2026-10-28) fixing a `NaN`/`inf` YAML-literal corruption risk. No new issue.
+- `engine/print_financial.py` (106 lines, the LibreOffice-based Financial-workbook-to-PDF exporter) -
+  traced the two-stage export (full group PDF, then an optional FORM C2.4 FIN-only PDF with every other
+  sheet's visibility/print-area cleared in memory) end to end; the workbook is opened read-only and
+  never saved, so the in-memory sheet-hiding for the second export has no persistence risk. No bug
+  found.
+- `engine/discovery/key_person_minimums.py` (494 lines, zero prior QA attention - a dense PDF-table
+  parser for a tender's own key-person minimum-qualification table, feeding a real compliance check).
+  Traced one inconclusive lead: a band whose experience-column cells include 2+ numeric fragments but
+  whose qualification-column cells don't (so `alternatives` stays empty) falls through to
+  `ymin, yunder = (None, None)` even when `years_text` itself still carries a readable fallback string -
+  i.e. a specific, narrow page-layout shape that *might* silently drop a real minimum-years figure.
+  Couldn't construct or confirm a real failing case against this file's own test fixtures or a real
+  downloaded tender in the time this pass had, and the existing test suite (`test_key_person_minimums.py`,
+  0 failures, re-run as a sanity check) already exercises the documented alternatives/non-alternatives
+  split correctly for every real sample on hand. Noted here as an honest, unconfirmed lead rather than
+  guessed at and shipped as a fix - the same discipline an earlier pass this session used for Cape
+  Town's ambiguous "sortable" closing cell.
+
+**No code bug found and fixed this pass - a genuine clean sweep**, reached by reading real code end to
+end and chasing the one promising lead as far as the evidence actually supported, not further.
+Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item, nothing resolved. Backlog unchanged at **18 items**: migrations `0096`/`0107`/
+`0108`/`0109`/`0110`/`0111` (none yet applied to the live DB), `narrative_documents` PostgREST
+schema-cache reload, the PayFast idempotency design question, the "missing ISO 9001 flagged as
+urgent" UX question, the Form B7 compulsory-vs-matrix disagreement, the Dashboard "Decision needed"
+over-triggering finding, the impersonation token-refresh gap, the SANRAL fingerprint heads-up
+(informational only), the dangling `signatory_person_id` fallback design question (Finding 96), the
+missing reconciliation for a silently-lapsed active subscription (Finding 97), the seat-limit TOCTOU
+race in `team/actions.ts`, the missing storage-level size/type limit on the 9 upload buckets
+(Finding 105), and the pack-generation quota TOCTOU race in `company_can_request_pack()`'s two
+callers.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-third run): clean sweep - SANRAL pack (fill_docx_forms.py/sanral_b7.py/fill_authority_letter.py/company_documents.py); three leads investigated and ruled out
 
 Oriented from `e3afe62`; `git fetch origin main` found two new commits since - a sibling QA/
