@@ -58,13 +58,24 @@ PAUSE_S = 0.3
 # Order matters: the first match names the notice. Matched on the reference
 # number plus the first part of the header, where Eskom puts the notice word
 # ("E3484CXMWPList of bidders", "MWP2524DXcancellatio", "REGRER LETTER ...").
+#
+# "award"'s own leading \b used to require a non-word character right before
+# "award" - but Eskom glues it directly onto the preceding station code with
+# no separator at all ("E1828GXMPTUTaward", "E1635CXMWPAward"), the identical
+# gluing style every other kind here already tolerates (cancel/bidder/regret/
+# validity have no \b of their own). Found 2026-11-01 against the real live
+# bulletin: 5 real, currently-open-looking entries were genuine Eskom award
+# notices (HEADER_DESC ends in "... Award.") misclassified as "tender" -
+# shown to a customer as still biddable with a real future closing date, when
+# the tender had already been awarded. Dropped the \b to match the same
+# no-separator reality as every sibling pattern.
 NOTICE_PATTERNS = [
     ("cancellation", re.compile(r"cancel", re.I)),
     ("bidders_list", re.compile(r"bidder|list\s+of\s+bidders|publication\s+of\s+(the\s+)?(names|bidders)|names?\s+of\s+(the\s+)?bidders", re.I)),
     ("regret", re.compile(r"regre[tr]", re.I)),
     ("validity_extension", re.compile(r"validity", re.I)),
     ("closing_date_extension", re.compile(r"(tender|closing)\W{0,3}(date\W{0,3})?(extension|extended)|postpone", re.I)),
-    ("award", re.compile(r"\baward|successful\s+bidder|intention\s+to\s+award", re.I)),
+    ("award", re.compile(r"award|successful\s+bidder|intention\s+to\s+award", re.I)),
     ("addendum", re.compile(r"addend|amendment|clarification", re.I)),
 ]
 # Notice words Eskom glues onto (or in front of) the original reference,

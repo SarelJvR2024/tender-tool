@@ -14,6 +14,63 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): fix - eskom_bulletin.py's "award" classifier required a word boundary that Eskom's own real reference numbers don't have, showing 5 real awarded tenders as still open
+
+Oriented from `6363fdc`; `git fetch origin main` found one new commit since - `76451fe`, a sibling
+pass's real fix to `process_onboarding_jobs.py`'s stale-upload self-heal logic - no overlap, fast-
+forwarded local `main` to match. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain,
+both unchanged, no collision.
+
+Continuing this session's "test a discovery scraper against its real live source site" technique
+(now 4 real bugs found: `sars_procurement.py`, `vaal_central_water.py`, `lephalale.py`, and this
+one). Picked `eskom_bulletin.py` (not tested this way this session) and fetched the real live
+`GetTender` API directly (200, 290KB, 316 real bulletin entries - 180 tenders, 136 notices under
+the old code).
+
+**Found and fixed a real, customer-facing bug**: `classify()`'s `award` pattern was `r"\baward|..."` -
+the leading `\b` requires a non-word character right before "award". Every other notice kind here
+(`cancel`, `bidder`, `regre[tr]`, `validity`) already tolerates Eskom gluing the notice word directly
+onto the preceding station code with zero separator ("MWP2524DXcancellatio", "CANCELLAE3122GXGPLET")
+- `award` alone kept the boundary requirement, and Eskom glues its own award notices onto the
+reference the exact same way ("E1828GXMPTUTaward", "E1635CXMWPAward" - "T" and "award" are both word
+characters, so `\b` never matches). Confirmed against the real live data: **5 real bulletin entries
+today** - `E1828GXMPTUTaward`, `E1859GXMPTUTaward`, `E2074GXMPTUTaward`, `E2232GXMPTUTaward`,
+`E1635CXMWPAward` - are genuine award notices (every one's real `HEADER_DESC` ends in "... Award.")
+with a real future `CLOSING_DATE`, misclassified as `"tender"` instead of `"award"`. Every one of
+these would have been fed to Discovery with `status="advertised"` as if still open for bidding, when
+the contract has already been awarded to someone else - a customer could have genuinely wasted real
+time preparing a bid for work that's already gone.
+
+Fixed by dropping the `\b` (matching the same no-boundary tolerance every sibling pattern already
+has): `r"award|successful\s+bidder|intention\s+to\s+award"`. Verified precisely scoped before
+committing - ran `classify()` against all 316 real live entries both before and after the change:
+**exactly these 5 entries flip** `tender` → `award`, zero other entries change (no new false
+positive from the wider match - checked specifically for any legitimate tender whose text merely
+contains "award" as a substring elsewhere; none exists in the real live data today).
+
+Added a new real-data regression case to `test_gov_sources.py`'s existing `ESKOM_NOTICES` list
+(`E1828GXMPTUTaward`, the real `HEADER_DESC`, expected kind `award`, expected base reference
+`E1828GXMPTUT`). Revert-and-confirm-red performed (`git stash` on the source file alone, test file
+kept): `1 FAILED: classify E1828GXMPTUTaward (tender)` against the unfixed regex, restored clean -
+`ALL PASSED` (the full `test_gov_sources.py` suite, unaffected elsewhere) - after. `py_compile` clean
+on both touched files.
+
+Committed and pushed directly to `main` (no PR - small, fully verified against real live data):
+- `engine/discovery/eskom_bulletin.py`
+- `engine/discovery/test_gov_sources.py`
+- `docs/specs/System-Status.md`
+
+No new backlog item - standalone, now-fixed data-quality bug, not a judgment call for Sarel. The
+18-item backlog is unchanged (migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need
+applying to the live DB; `narrative_documents` PostgREST schema-cache reload; PayFast idempotency
+design question; "missing ISO 9001 flagged as urgent" UX question; Form B7 compulsory-vs-matrix
+disagreement; Dashboard "Decision needed" over-triggering; impersonation token-refresh gap; SANRAL
+fingerprint heads-up; dangling `signatory_person_id` fallback design question; active-subscription
+reconciliation gap; team seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload
+buckets; pack-generation quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): clean sweep - transnet_etenders.py tested thoroughly against its real live site and detail pages, no bug found
 
 Oriented from `0c6b7c7`; `git fetch origin main` found one new commit since - `b5eb263`, a sibling

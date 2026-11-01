@@ -54,6 +54,11 @@ ESKOM_NOTICES = [
     ("VALIDITYE2442DXFSOU", "Validity extension-Establishing an Enabling Agreement", "validity_extension", "E2442DXFSOU"),
     ("E3573GXMPKRI", "TENDER CLOSING EXTENDED: Supply and Delivery of Critical spares", "closing_date_extension", "E3573GXMPKRI"),
     ("MPARN11462GXAWARD", "Notification of Award of MPARN11462GX Provision of", "award", "MPARN11462GX"),
+    # real live row, 2026-11-01: "award" glued directly onto the station code with
+    # no separator at all (unlike MPARN11462GXAWARD above, which has a space-
+    # preceded "Award" in its own header text) - found 2026-11-01 misclassified
+    # as "tender" when \baward required a boundary that doesn't exist here.
+    ("E1828GXMPTUTaward", "Provision of 24-hour emergency spillage response and rehabilitation services for a period of 5 Years at Tutuka Power Station, on as and when required basis, Award.", "award", "E1828GXMPTUT"),
     ("E2778DXGOURegretLett", "E2778DXGOU - REGRET LETTER THE SUPPLY, DELIVERY AN", "regret", "E2778DXGOU"),
     # a real tender whose title contains "EXTENSION" (a building extension) - not a notice
     ("E3464CXMWPERE", "NTCSA EXECUTIVE OFFICE EXTENSION AT MEGAWATT PARK (MWP) AND", "tender", None),
