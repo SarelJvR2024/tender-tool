@@ -14,6 +14,61 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): fix - vaal_central_water.py's parser silently mangled a real "extension of validity" notice into a bogus tender with a reference number as its title, dropping 4 referenced tenders
+
+Oriented from `ba3ac75`; `git fetch origin main` found nothing new since - local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Continuing this session's technique of testing a discovery scraper's regex against its REAL LIVE
+source site, not just the committed fixture: `kouga.py` checked clean (10/10 cards on page 1 matched,
+`max_page()` correctly read 29 from the page's own pagination, no attribute-order variance found on
+this site). `randwater.py`/`lephalale.py` were unreachable this pass (network timeouts through the
+agent proxy, not a code issue - not pursued further).
+
+**Found and fixed a real bug in `vaal_central_water.py`**, fetched live (122,951 bytes, 10 rows where
+only 9 real tenders were expected from the module's own docstring). Row 1 was a real "EXTENSION OF
+VALIDITY TO TENDERS" notice listing 5 separate reference numbers
+(`VCW/MAINCE/25`/`VCW/MAINEB/25`/`VCW/MAINME/25`/`VCW383/LEGAL36/24`/`VCW261/PPE/21`) as 5 separate
+`<p>` tags all crammed into the SAME widget `ROW_FIELDS` expects to hold exactly one reference, with
+the real title ("EXTENSION OF VALIDITY TO TENDERS") sitting in the next widget, never reached.
+`ROW_FIELDS`' own lazy `.*?` grabbed the second reference in that list as if it were the title,
+producing a nonsense record (`ref="VCW/MAINCE/25"`, `title="VCW/MAINEB/25"`) and silently losing the
+real title and the other 4 referenced tenders entirely - confirmed by direct comparison against a
+normal row's HTML (ref and title each sit in their own single-`<p>` widget there).
+
+Fixed by adding `_TITLE_LOOKS_LIKE_A_REFERENCE` (`^(?:VCW|BW)\S*/\d{2}$`) and skipping (with a logged
+warning naming the dropped reference) any row whose "title" field is itself reference-shaped - a
+genuine tender title never matches that pattern, so this reliably catches exactly the "my
+one-reference-per-row assumption doesn't hold for this row" case without touching any real tender.
+Threaded `log` through `parse_tenders()` (previously had no way to report a skip) from
+`fetch_releases()`.
+
+Verified: reproduced red first against the real live page (10 rows, row 0's bogus title confirmed);
+after the fix, 9 rows (the exact 9 real references the module's own docstring names) plus one logged
+warning naming `VCW/MAINCE/25`. Added a realistic fixture row (built from the real captured live HTML)
+to `test_vaal_central_water.py`; confirmed it crashes against the unfixed source (`parse_tenders()` had
+no `log` kwarg at all pre-fix - isolated the revert to just the source file via `git stash push --`,
+keeping the new test assertions in place, rather than stashing both files together which would have
+silently hidden the new checks and shown a false "ALL PASSED"). Full suite: `ALL PASSED` (26 checks,
+up from 23); `test_gov_sources.py` sanity sweep unaffected; `py_compile` clean on both touched files.
+
+This does NOT resolve the "extension of validity" notice's own real content (which tenders it extends,
+to what date) - that information is now correctly dropped rather than corrupted, matching this
+reader's existing no-notice-handling scope (unlike `eskom_bulletin.py`, this module has no concept of
+a notice referring to other tenders - building that is a real feature, not a bug fix, and out of scope
+here).
+
+Committed and pushed directly to `main` (small, fully verified against the real live site, no live-DB
+access needed):
+- `engine/discovery/vaal_central_water.py`
+- `engine/discovery/test_vaal_central_water.py`
+
+No new backlog item - a standalone, now-fixed data-quality bug, not a judgment call for Sarel. Backlog
+unchanged at 18 items.
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): capetown_procurement.py's "ambiguous sortable closing time" note resolved (not a bug) - no new fix needed
 
 Oriented from `26a329f` (fast-forwarded past one new sibling commit first, no overlap). Open PRs

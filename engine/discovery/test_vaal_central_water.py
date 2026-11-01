@@ -294,6 +294,43 @@ FIXTURE_PAGE = r"""
 				</div>
 """
 
+# A real "notice" row from the live page, 2026-11-01 - "EXTENSION OF
+# VALIDITY TO TENDERS" lists 5 reference numbers as separate <p> tags all
+# inside the FIRST widget (the one ROW_FIELDS expects to hold exactly one
+# reference), with the real title in the SECOND widget. Appended as its own
+# row, not mixed into FIXTURE_PAGE above, so the 3-tenders assertion below
+# stays about the original fixture unchanged.
+NOTICE_ROW = r"""
+		<div class="elementor-element elementor-element-93fde96 e-flex e-con-boxed e-con e-parent" data-id="93fde96" data-element_type="container" data-e-type="container" data-settings="{&quot;background_background&quot;:&quot;classic&quot;}">
+					<div class="e-con-inner">
+		<div class="elementor-element elementor-element-2e83892 e-con-full e-flex e-con e-child" data-id="2e83892" data-element_type="container" data-e-type="container">
+				<div class="elementor-element elementor-element-4a8779e elementor-widget elementor-widget-text-editor" data-id="4a8779e" data-element_type="widget" data-e-type="widget" data-widget_type="text-editor.default">
+				<div class="elementor-widget-container">
+									<p>VCW/MAINCE/25</p><p>VCW/MAINEB/25</p><p>VCW/MAINME/25</p><p>VCW383/LEGAL36/24</p><p>VCW261/PPE/21</p>								</div>
+				</div>
+				</div>
+		<div class="elementor-element elementor-element-5966268 e-con-full e-flex e-con e-child" data-id="5966268" data-element_type="container" data-e-type="container">
+				<div class="elementor-element elementor-element-b5731ae elementor-widget elementor-widget-text-editor" data-id="b5731ae" data-element_type="widget" data-e-type="widget" data-widget_type="text-editor.default">
+				<div class="elementor-widget-container">
+									<p><strong>EXTENSION OF VALIDITY TO TENDERS</strong></p>								</div>
+				</div>
+				</div>
+		<div class="elementor-element elementor-element-504b13f e-con-full e-flex e-con e-child" data-id="504b13f" data-element_type="container" data-e-type="container">
+				<div class="elementor-element elementor-element-15008a5 elementor-widget elementor-widget-text-editor" data-id="15008a5" data-element_type="widget" data-e-type="widget" data-widget_type="text-editor.default">
+				<div class="elementor-widget-container">
+									<p>Date uploaded:</p><p>03 October 2026</p>								</div>
+				</div>
+				</div>
+		<div class="elementor-element elementor-element-03fae78 e-con-full e-flex e-con e-child" data-id="03fae78" data-element_type="container" data-e-type="container">
+				<div class="elementor-element elementor-element-9bd2b8c elementor-widget elementor-widget-text-editor" data-id="9bd2b8c" data-element_type="widget" data-e-type="widget" data-widget_type="text-editor.default">
+				<div class="elementor-widget-container">
+									<p>Closing date:</p><p>07 December 2026</p>								</div>
+				</div>
+				</div>
+					</div>
+				</div>
+"""
+
 
 # --- parse_tenders() against the real fixture -------------------------------
 
@@ -301,6 +338,20 @@ rows = vcw.parse_tenders(FIXTURE_PAGE)
 check("all 3 real tenders found, in page order, header/empty rows skipped (not errors)",
       [r[0] for r in rows] == ["VCW380/PWLPLM/24", "VCW440/STEELBPTB/26", "VCW438/LIMS3/26"],
       [r[0] for r in rows])
+
+# A multi-reference "notice" row (e.g. "EXTENSION OF VALIDITY TO TENDERS")
+# crams several <p>-wrapped reference numbers into the column ROW_FIELDS
+# expects to hold exactly one - its lazy .*? then grabs the SECOND reference
+# as if it were the title. Found 2026-11-01, reproduced against the real
+# live page (not just this fixture): skipped with a warning, not emitted as
+# a bogus tender whose "title" is itself a reference number.
+notice_logs = []
+rows_with_notice = vcw.parse_tenders(FIXTURE_PAGE + NOTICE_ROW, log=lambda m: notice_logs.append(m))
+check("the multi-reference notice row is skipped, not emitted as a 4th tender",
+      [r[0] for r in rows_with_notice] == ["VCW380/PWLPLM/24", "VCW440/STEELBPTB/26", "VCW438/LIMS3/26"],
+      [r[0] for r in rows_with_notice])
+check("...and a warning naming the skipped reference is logged, not silently dropped",
+      len(notice_logs) == 1 and "VCW/MAINCE/25" in notice_logs[0], notice_logs)
 
 vcw380 = rows[0]
 check("a plain (non-<strong>) reference with a trailing <br/>-broken title reads as one clean line",

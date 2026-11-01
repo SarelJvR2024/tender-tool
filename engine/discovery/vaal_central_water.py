@@ -82,13 +82,25 @@ DOC_LINK = re.compile(
     r'<span class="elementor-button-text">([^<]*)</span>',
     re.S,
 )
+# Found 2026-11-01, against the real live page: a "notice" row (e.g.
+# "EXTENSION OF VALIDITY TO TENDERS") can list several reference numbers as
+# separate <p> tags all inside the SAME first widget ROW_FIELDS expects to
+# hold exactly one reference - <p>VCW/MAINCE/25</p><p>VCW/MAINEB/25</p>
+# <p>VCW/MAINME/25</p><p>VCW383/LEGAL36/24</p><p>VCW261/PPE/21</p> - with the
+# row's real title ("EXTENSION OF VALIDITY TO TENDERS") sitting in the NEXT
+# widget, never reached. ROW_FIELDS' own lazy .*? then grabs the second
+# reference in that list as if it were the title ("VCW/MAINEB/25"), silently
+# losing the real title and the other 3 referenced tenders. A genuine title
+# never looks like a bare reference number, so this is a reliable tell that
+# the row doesn't fit this reader's one-reference-per-row assumption at all.
+_TITLE_LOOKS_LIKE_A_REFERENCE = re.compile(r"^(?:VCW|BW)\S*/\d{2}$", re.I)
 
 
 def _text(fragment):
     return sh.clean(html.unescape(re.sub(r"<[^>]+>", " ", fragment or "")))
 
 
-def parse_tenders(page):
+def parse_tenders(page, log=print):
     """[(reference, title, uploaded_text, closing_text, [(url, label), ...])]
     for every tender row on the page. The page's own 2 header rows share the
     same row wrapper class as a real tender row but carry no VCW/BW
@@ -104,6 +116,12 @@ def parse_tenders(page):
             continue
         ref, title, uploaded, closing = (_text(g) for g in m.groups())
         if not ref:
+            continue
+        if _TITLE_LOOKS_LIKE_A_REFERENCE.match(title or ""):
+            log(f"  WARNING: vaal_central_water: row '{ref}' skipped - its title field is itself a "
+                "reference number, meaning this is a multi-reference notice crammed into one cell "
+                "(this reader's one-reference-per-row assumption doesn't hold here), not a genuine "
+                "tender title.")
             continue
         docs = [(_text(url), _text(label)) for url, label in DOC_LINK.findall(chunk)]
         rows.append((ref, title, uploaded, closing, docs))
@@ -133,7 +151,7 @@ def normalize(ref, title, uploaded, closing, docs):
 
 def fetch_releases(log=print):
     page = sh.http_get(LIST_URL, timeout=90).decode("utf-8", errors="replace")
-    rels = [normalize(*row) for row in parse_tenders(page)]
+    rels = [normalize(*row) for row in parse_tenders(page, log=log)]
     log(f"  Vaal Central Water Board: {len(rels)} advertised tenders")
     return rels
 
