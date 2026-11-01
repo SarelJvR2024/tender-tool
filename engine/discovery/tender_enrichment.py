@@ -289,10 +289,20 @@ VALUE_BANDS = ("R0-5m", "R5-20m", "R20-50m", "R50m+")
 # stated value - an unanchored "R" amount elsewhere in the text is far more
 # likely a document fee, a deposit or an unrelated figure (confirmed against
 # real tender text while building this - see test_tender_enrichment.py).
+#
+# The amount group's trailing "...[0-9]" used to be mandatory, so it required
+# at least 2 digit characters (first + last) even when the stated amount is a
+# single digit - "the estimated contract value is R5 million" (a real,
+# plausible SA tender phrasing: round single-digit amounts before a
+# million/billion suffix are common) never matched at all, silently falling
+# back to value_band_basis='unknown' as if no value had been stated. Found
+# 2026-11-01. The trailing "middle digits + last digit" part is now optional,
+# so a lone single digit (R5, R8, ...) matches on its own, while a real
+# multi-digit/separator amount (R500 000,00) is unaffected.
 _VALUE_ANCHOR_RE = re.compile(
     r"(?:estimated\s+(?:contract\s+|project\s+|tender\s+)?value|contract\s+value|project\s+value|"
     r"tender\s+value|engineer'?s?\s+estimate|budget(?:ed)?\s*(?:amount|value)?|total\s+estimated\s+cost)"
-    r"[^R0-9]{0,40}R\s?([0-9][0-9,.\s]{0,18}[0-9])\s*(million|billion|bn|m|k)?",
+    r"[^R0-9]{0,40}R\s?([0-9](?:[0-9,.\s]{0,18}[0-9])?)\s*(million|billion|bn|m|k)?",
     re.I,
 )
 

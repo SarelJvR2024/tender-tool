@@ -14,6 +14,70 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): fix - tender_enrichment.py's estimated-value regex silently missed single-digit amounts ("R5 million", "R8 billion"), falling back to "unknown" as if no value had been stated
+
+Oriented from `3111741`; `git fetch origin main` found one new sibling commit (`2de368e`, a
+QA/robustness pass's own clean sweep of `generate_cv.py`'s `build_world_bank()` - docs-only, no
+overlap) and fast-forwarded cleanly. Open PRs re-checked via the GitHub API: only `#164`/`#165`
+remain, both unchanged, no collision.
+
+With the LLM-call-quality, TOCTOU/row-lock, SECURITY DEFINER ownership-check and
+`briefing_shortlisted` allow-list audits all exhausted, picked a module not yet read end to end this
+session: `engine/discovery/tender_enrichment.py` (728 lines - the real caller of the recently-fixed
+`scope_llm.py`, and the module that computes a tender's industry/discipline tags, scope summary,
+pricing model, BOQ reference and estimated project value band). Read the whole file, then tested
+`estimate_value_band()`'s own anchor regex directly rather than trusting it by eye.
+
+**Found and fixed a real bug**: `_VALUE_ANCHOR_RE`'s amount group was `([0-9][0-9,.\s]{0,18}[0-9])` -
+a mandatory LEADING digit AND a mandatory TRAILING digit, which needs at least 2 digit characters
+even when the stated amount genuinely has only one. "The estimated contract value is R5 million" or
+"Estimated value: R8 billion" - both real, plausible South African tender phrasings (a round
+single-digit amount before a million/billion/bn/m/k suffix) - never matched the anchor regex at all,
+so `estimate_value_band()` returned `(None, "unknown", None, "No stated contract/project value or
+budget found...")` for a tender whose text plainly states one. This is exactly the class of defect
+the module's own docstring is most alert to in the OTHER direction (never invent a value that wasn't
+stated) - here a real, honestly-stated value was being silently treated as absent instead.
+
+Reproduced directly first with a standalone regex test (`'The estimated contract value is R5
+million.'` -> no match; `'The estimated contract value is R15 million.'` -> matches fine - only the
+single-digit case fails). Fixed by making the amount group's "middle digits + trailing digit" part
+optional: `([0-9](?:[0-9,.\s]{0,18}[0-9])?)` - a lone single digit (R5, R8, ...) now matches on its
+own, while a real multi-digit/separator amount (`R500 000,00`) is completely unaffected (tested
+side by side, same results as before for every existing case).
+
+Added `test_value_band_single_digit_amount_still_matches()` to `test_tender_enrichment.py`, wired
+into `main()`'s own explicit test list (this harness has no auto-discovery - a test function that
+isn't called from `main()` silently never runs; caught this myself when the new test reported "0
+failure(s)" on the deliberately-unfixed source during the revert-and-confirm-red check, traced it to
+the missing `main()` call, fixed that too). One test case (`"R5 million"` itself) initially expected
+the wrong band - R5 million lands exactly on `_band_for()`'s own `R0-5m`/`R5-20m` boundary (`< 5_000_000`
+is false at exactly 5 000 000, same boundary convention `test_value_band_stated_amount_is_banded_correctly()`
+already exercises for R15m) - corrected the test case to R4 million to test the single-digit fix in
+isolation, not the unrelated boundary rule.
+
+Verification: confirmed red against the unfixed source (6 failures, `git stash` revert), confirmed
+green after restoring the fix (`0 failure(s)`); full `engine/discovery/test_tender_enrichment.py` ->
+0 failures; sibling sanity sweep on `engine/discovery/test_award_outcomes.py` (the real source of
+`parse_rand()`, reused by this module's own `_parse_amount()`) -> ALL PASSED, unaffected; `py_compile`
+clean on both touched files.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access needed):
+- `engine/discovery/tender_enrichment.py`
+- `engine/discovery/test_tender_enrichment.py`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel. Backlog unchanged at
+**18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` (none yet applied to the live DB),
+`narrative_documents` PostgREST schema-cache reload, the PayFast idempotency design question, the
+"missing ISO 9001 flagged as urgent" UX question, the Form B7 compulsory-vs-matrix disagreement, the
+Dashboard "Decision needed" over-triggering finding, the impersonation token-refresh gap, the SANRAL
+fingerprint heads-up (informational only), the dangling `signatory_person_id` fallback design question
+(Finding 96), the missing reconciliation for a silently-lapsed active subscription (Finding 97), the
+seat-limit TOCTOU race in `team/actions.ts`, the missing storage-level size/type limit on the 9 upload
+buckets (Finding 105), and the pack-generation quota TOCTOU race in `company_can_request_pack()`'s two
+callers.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-sixth run): clean sweep - CV (generate_cv.py's build_world_bank(), empirical fuzzing of both CV builders)
 
 Oriented from `fc773af`; `git fetch origin main` found one new sibling commit (`3111741`, the

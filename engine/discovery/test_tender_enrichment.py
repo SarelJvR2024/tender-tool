@@ -167,6 +167,27 @@ def test_value_band_stated_amount_is_banded_correctly():
         check(amount is not None, f"{text!r} should have a parsed raw amount")
 
 
+def test_value_band_single_digit_amount_still_matches():
+    """Found 2026-11-01: the amount group used to require at least 2 digit
+    characters (a leading AND a trailing digit), so a real, plausible SA
+    tender phrasing with a single-digit amount before its multiplier suffix
+    ("R5 million", "R8 billion") never matched the anchor regex at all - the
+    value silently fell back to basis='unknown' as if nothing had been
+    stated, even though the text plainly states one."""
+    cases = [
+        # R5 million lands exactly on the R0-5m/R5-20m boundary (_band_for's
+        # own `< 5_000_000` check is false at exactly 5 000 000) - R4 million
+        # avoids that ambiguity and tests the single-digit-amount fix alone.
+        ("The estimated contract value is R4 million.", "R0-5m"),
+        ("Estimated value: R8 billion over the contract period.", "R50m+"),
+    ]
+    for text, expected in cases:
+        band, basis, amount, note = te.estimate_value_band(text)
+        check(band == expected, f"{text!r} -> expected {expected}, got {band}")
+        check(basis == "stated_in_text", f"{text!r} should have basis stated_in_text, got {basis}")
+        check(amount is not None, f"{text!r} should have a parsed raw amount")
+
+
 def test_value_band_ignores_unanchored_rand_amounts():
     """A stray Rand figure with no value/budget anchor (a document fee, a
     deposit) must NOT be read as the project value - this is the case most
@@ -302,6 +323,7 @@ def main():
     test_boq_reference_never_fabricates_items()
     test_value_band_null_when_unknown()
     test_value_band_stated_amount_is_banded_correctly()
+    test_value_band_single_digit_amount_still_matches()
     test_value_band_ignores_unanchored_rand_amounts()
     test_scope_summary_from_description_is_labelled_not_a_summary()
     test_scope_summary_prefers_document_scope_heading_when_available()
