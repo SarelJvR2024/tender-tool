@@ -159,6 +159,19 @@ def test_new_sources():
           r["title"] is not None and "South African Revenue Service" not in r["title"], r["title"])
     check("SARS published date", r["published_date"] == "2026-10-16T00:00:00+02:00")
 
+    # Found 2026-11-01, tested against the real live site: TENDER_LINK used to
+    # require href as the literal first attribute right after "<a " - the
+    # real SARS site already puts other attributes before href on plenty of
+    # its own <a> tags elsewhere on these same pages, so a CMS/theme change
+    # doing the same for a tender link would have silently dropped it with
+    # no error. DOC_LINK (checked above) already tolerated this correctly.
+    sars_attr_before_href = """<li><strong>17 October 2026 – New Tender</strong><ul>
+<li><a target="_blank" href="https://www.sars.gov.za/tender/rfp20-2026-attr-before-href/">RFP20/2026: Attribute before href | South African Revenue Service</a></li>
+</ul></li>"""
+    attr_entries = sars_procurement.parse_listing(sars_attr_before_href)
+    check("SARS: a tender link with an attribute before href is still found",
+          len(attr_entries) == 1 and attr_entries[0]["ref"] == "RFP20/2026", attr_entries)
+
     # QA-Edge-Case-Findings.md, 2026-10-19: DOC_LINK has no scheme requirement
     # (a real site's own HTML commonly links a same-site document with a
     # relative href), but fetch_documents() used to store it unresolved -

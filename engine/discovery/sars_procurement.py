@@ -41,7 +41,17 @@ DATE_BLOCK = re.compile(
     r"<strong>\s*(\d{1,2}\s+\w+\s+\d{4})\s*[–—-]\s*(?:New Tender)?\s*</strong>\s*<ul>(.*?)</ul>",
     re.S,
 )
-TENDER_LINK = re.compile(r'<a href="([^"]+/tender/[^"]+)"[^>]*>([^<]+)</a>', re.I)
+# Found 2026-11-01: this required "href" to be the literal first attribute
+# right after "<a " (no tolerance for another attribute - class, target -
+# appearing first). The real live site already puts other attributes before
+# href on plenty of its own <a> tags elsewhere on the same pages (nav/social
+# links checked directly) - a CMS/theme change that did the same for a
+# tender link would silently drop that tender with no error, the same
+# quiet-data-loss shape this session has found and fixed repeatedly for
+# other sources. DOC_LINK below already tolerates this correctly
+# (`<a[^>]+href=`) - TENDER_LINK alone had the rigid form. Re-verified
+# against the real live listing page: identical matches before and after.
+TENDER_LINK = re.compile(r'<a[^>]+href="([^"]+/tender/[^"]+)"[^>]*>([^<]+)</a>', re.I)
 REF = re.compile(r"\b(RF[PIQ]\s*\d{1,3}\s*/\s*20\d{2})\b", re.I)
 DOC_LINK = re.compile(r'<a[^>]+href="([^"]+\.(?:pdf|docx?|xlsx?|zip))"[^>]*>([^<]{1,150})</a>', re.I)
 

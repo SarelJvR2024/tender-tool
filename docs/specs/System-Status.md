@@ -14,6 +14,62 @@
 
 ---
 
+## This pass (2026-11-01, standing solution-architect review): fix - sars_procurement.py's TENDER_LINK regex required href as the literal first attribute, which real-world CMS output elsewhere on the same site already contradicts
+
+Oriented from `5c31f97`; `git fetch origin main` found nothing new since - local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Continuing this session's technique of testing a regex/parser directly against real-world input
+rather than reading it by eye: picked `engine/discovery/sars_procurement.py` (SARS's own Published
+Tenders page, 168 lines, thin existing test coverage - one shared fixture in `test_gov_sources.py`,
+not its own dedicated file). Fetched the REAL live SARS listing page and two of its real detail
+pages directly (network access confirmed working in this environment) rather than trusting the
+regexes by eye or against a synthetic fixture alone.
+
+**Found and fixed a real structural fragility, confirmed against the live site itself, not just a
+constructed example**: `TENDER_LINK` was `r'<a href="([^"]+/tender/[^"]+)"[^>]*>...'` - requiring
+`href` to be the literal FIRST attribute right after `<a `, with zero tolerance for another
+attribute (`class`, `target`) appearing first. Confirmed empirically that every `<a>` tag on the
+real, live tender listing page happens to have `href` first today (6/6 occurrences), so nothing is
+silently dropped right now - but a direct count of `<a>` tags on the real live detail pages for
+this exact site shows 15 instances per page where SARS's own CMS already puts another attribute
+BEFORE href on other links (nav/social). A single theme update that did the same for a tender link
+would silently drop that tender from discovery with no error at all - the identical quiet-data-loss
+shape this session has found and fixed repeatedly for other sources (DBSA's discarded real closing
+time, SANRAL's wrong midnight default, the two notification-claim-too-early races). `DOC_LINK`
+immediately below it in the same file already uses the correct, tolerant form
+(`<a[^>]+href="..."`) - `TENDER_LINK` alone had the rigid one.
+
+Fixed by widening `TENDER_LINK` to the same `<a[^>]+href="..."` form `DOC_LINK` already uses.
+Re-tested against the real live listing page before and after the change - byte-identical match
+results (6/6, same 3 unique URLs), confirming zero behavior change for every case that already
+worked; added a constructed test case (an `<a target="_blank" href="...">` tender link) to
+`test_gov_sources.py`'s existing `test_new_sources()` and confirmed it fails against the unfixed
+regex (red) and passes with the fix (green).
+
+Verification: `python3 engine/discovery/test_gov_sources.py` -> `ALL PASSED` (97 checks, including
+the new one); confirmed red (1 FAILED) against the unfixed source via `git stash`, green after
+restoring the fix; `py_compile` clean on both touched files.
+
+Committed and pushed directly to `main` (no PR - small, fully verified against the real live site,
+no live-DB access needed):
+- `engine/discovery/sars_procurement.py`
+- `engine/discovery/test_gov_sources.py`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel. Backlog
+unchanged at **18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` (none yet applied to
+the live DB), `narrative_documents` PostgREST schema-cache reload, the PayFast idempotency design
+question, the "missing ISO 9001 flagged as urgent" UX question, the Form B7 compulsory-vs-matrix
+disagreement, the Dashboard "Decision needed" over-triggering finding, the impersonation
+token-refresh gap, the SANRAL fingerprint heads-up (informational only), the dangling
+`signatory_person_id` fallback design question (Finding 96), the missing reconciliation for a
+silently-lapsed active subscription (Finding 97), the seat-limit TOCTOU race in `team/actions.ts`,
+the missing storage-level size/type limit on the 9 upload buckets (Finding 105), and the
+pack-generation quota TOCTOU race in `company_can_request_pack()`'s two callers.
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): fix - tender_enrichment.py's estimated-value regex silently missed single-digit amounts ("R5 million", "R8 billion"), falling back to "unknown" as if no value had been stated
 
 Oriented from `3111741`; `git fetch origin main` found one new sibling commit (`2de368e`, a
