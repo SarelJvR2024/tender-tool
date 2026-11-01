@@ -51,6 +51,45 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review): clean sweep - compliance/reminders rotation, no new bug found
+
+Oriented from `50b392c`; `git fetch origin main` found one new sibling commit since my own last push
+(`50b392c`, a solution-architect pass resolving `capetown_procurement.py`'s closing-time note against
+live data - discovery, docs-only, no overlap). Fast-forwarded cleanly. Open PRs re-checked via the
+GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to compliance/reminders. Read `registration_reminders.py` and `watch_deadlines.py` end to end
+again, independently re-deriving (not assuming) "exhausted": checked every `.get(key, default)` for
+the null-vs-missing shape (none - `document_type`/`registration_type_id` are both DB `not null`, same
+conclusion an earlier pass already reached), checked `_mark_company()`'s manual company_id backfill
+against `_expiry_window()`'s own optional kwarg (intentional, matches its docstring), checked
+`find_due_tasks()`'s `tenders_by_id.get(task["tender_id"], {})` (tender_id is `not null` too, so the
+None-key branch is unreachable, harmless dead code), and verified `daily_digest.py`'s live-mode
+`document_expiry` routing (`build_digest_for_person()`'s finance/cv_admin `type` filtering) correctly
+covers the items `registration_reminders.find_due_registrations()`/`find_due_property_documents()`
+emit, not just the original two document/person-credential sources. No new bug.
+
+Re-checked Finding 91 (the disabled "Compliance deadline reminder check-in" trigger,
+`trig_01HQHdLaBfKDJ7oUBMBU1hAt`) via `list_triggers` directly, as every compliance/reminders pass
+since has - still `enabled: false`, still `updated_at: 2026-10-27T20:30:13Z`, unchanged for 5 days
+now. Confirmed independently (before finding this was already Finding 91) that its two categories -
+`find_documents_lapsing_before_closing()`'s "document lapses before this tender's closing date"
+check and `find_due_tasks()`'s tender-task reminders - have exactly the delivery-channel shape this
+file's own prior entries already describe: `find_due_tasks()` is NOT actually affected
+(`daily_digest.py` calls it independently in live mode, confirmed by re-reading that call site);
+`find_documents_lapsing_before_closing()` remains genuinely undelivered. Stays Sarel's own call, not
+re-raised in chat again this cycle (already flagged with full severity 2026-10-28, re-confirmed
+unchanged on 2026-10-29/2026-10-30/2026-10-31 and now again today) - re-flagging an unchanged, already-
+escalated judgment call every ~8 hours would be noise, not signal.
+
+**No code bug found - a genuine clean sweep.** Re-ran `engine/compliance/test_watch_deadlines_urgency.py`,
+`test_watch_person_credentials.py`, `test_principals_registrations.py` (Part 1, no `REGISTRATION_PSQL`
+in this environment), `test_watch_conditional_registrations.py` (Part 1) - all pass. Committed
+docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review): fix - requirements.py's read_document() silently treated an unreadable document as a successfully-read empty one whenever its saved file had no recognized extension
 
 Oriented from `286ca54`; `git fetch origin main` found nothing new since - local already matched
