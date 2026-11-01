@@ -14,6 +14,37 @@
 
 ---
 
+## This pass (2026-11-01, standing QA/robustness review - one-hundred-and-forty-sixth run): clean sweep - CV (generate_cv.py's build_world_bank(), empirical fuzzing of both CV builders)
+
+Oriented from `fc773af`; `git fetch origin main` found one new sibling commit (`3111741`, the
+solution-architect review's own follow-up closing out the 5-site LLM-call audit with
+`company_documents.py` - docs-only, no overlap) and fast-forwarded cleanly. Open PRs re-checked: only
+`#165`/`#164` remain, both unchanged, no collision.
+
+CV rotation (non-SANRAL pack was last cycle - clean sweep, logged above). `extract_cv_fields.py`/
+`process_cv_jobs.py`/`generate_cv.py` are all already heavily audited this session and across prior
+passes (several dated QA-pass comments each, including a sibling's own very recent email-verification
+fix in `extract_cv_fields.py`). Read `build_world_bank()` (the World Bank donor-format CV, 145 lines) -
+the one builder function not deeply read in an earlier pass - end to end against this session's own
+established bug shapes: every nullable field (`client_and_number`, education institution/date,
+project start/end/value_rm/position_held/referee) is already correctly guarded with `or`/ternaries,
+confirmed against migration `0001`'s own schema (`client_and_number text not null` - the one field
+read with the plain `.get(key, default)` form instead of `or` is genuinely safe, since the column can
+never be null in the first place).
+
+Empirically fuzzed both `build_sanral_keyperson()` and `build_world_bank()` directly (not just read)
+with adversarial person profiles: `qualifications`/`projects` explicitly `None`, a person with
+nothing on file at all, and - the one case worth checking on its own, since a naive `if value:` guard
+would wrongly treat it as missing - a project with `value_rm: 0` (a real, falsy-but-meaningful value).
+Confirmed the real output renders "R0m" correctly, not "?" or a dropped field; all cases ran clean, no
+crash.
+
+**No code bug found - a genuine clean sweep.** Re-ran `engine/cv/test_generate_cv.py` and
+`engine/cv/test_process_cv_jobs.py` - both `0 failure(s)`. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): clean sweep - the last unchecked real LLM call site, engine/company_documents.py, read against AI-Call-Quality-Standard.md; the "prompt promises a check, no code backs it" audit is now exhausted across all 5 sites
 
 Oriented from `b9417b5`; `git fetch origin main` found one new sibling commit (`fc773af`, docs-only -
