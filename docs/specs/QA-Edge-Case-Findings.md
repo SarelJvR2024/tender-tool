@@ -6562,3 +6562,53 @@ identical - only the previously-missing `extra_notes`/`notes` append is new), `e
 tender.py` (new file, 6 test functions, 8 checks), `.github/workflows/bridge-worker-ci.yml` (1 new
 step). No schema or other call-site changes - `assemble_pack.py`'s own handling of `FILLERS[family].
 main()`'s return value is unchanged; it simply now receives a fuller list.
+
+### Finding 116 (CONFIRMED, FIXED, moderate - the identical race-stuck-queue-row bug Finding 114 fixed in the onboarding scan queue, ported to the CV-extraction queue it was explicitly flagged for)
+
+**Where:** this cycle's CV rotation - a direct, planned follow-up on Finding 114's own documented TODO
+("the identical two-write race shape exists in `engine/cv/extract_cv_fields.py`'s own
+`fail_stale_uploads()`/`cv_extraction_results` pair... left unfixed this pass... worth a follow-up
+pass rather than a second, unverified change bundled into this one" - `docs/specs/System-Status.md`,
+2026-11-01). `engine/cv/extract_cv_fields.py`'s `fail_stale_uploads()`.
+
+**What was tested:** confirmed the code shape is byte-for-byte the same pattern as `process_
+onboarding_jobs.py` before its own fix: `process_upload()` does its real work in two separate,
+non-transactional REST calls - POST `cv_extraction_results` (the proposed fields, `review_status:
+"pending_review"`), THEN PATCH `cv_uploads` to `status: "extracted"`. Reproduced directly (the exact
+same repro Finding 114 used, adapted to this table pair): a stale `extracting` row with a matching
+`cv_extraction_results` row already present got marked `extraction_failed` ("upload the CV again"),
+unconditionally, with no check for whether the work had actually already succeeded.
+
+**Finding (CONFIRMED).** Traced the real UI consequence this time too, not assumed from the onboarding
+precedent: `app/app/people/[id]/page.tsx` queries `cv_extraction_results` by `review_status =
+"pending_review"` and `cv_uploads.status = "extraction_failed"` independently (same pattern as the
+onboarding page); `applyCvExtraction` (`app/app/people/actions.ts`) only ever updates `people` and
+the result row's own `review_status` - it never touches the parent upload row at all. Same consequence
+as Finding 114: a raced CV upload would show as both "pending review" and "extraction_failed - upload
+again" at once, permanently, with no code path that ever clears it even after the result is reviewed
+and applied.
+
+**Fix:** identical to Finding 114 - `fail_stale_uploads()` now checks for an existing `cv_extraction_
+results` row before declaring a stale upload failed; if one exists, self-heals to `status: "extracted"`
+(clearing `extraction_error`) with a `"warning"`-severity alert instead of `"error"`. A genuinely dead
+row with no result is still marked `extraction_failed` exactly as before.
+
+**Verified red-then-green.** Added `test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_
+written()` to `engine/cv/test_extract_cv_fields.py` (4 checks, same shape as Finding 114's own test -
+the raced row self-heals with no misleading error, the negative-control dead row still fails, the
+alert is a warning not an error). Revert-and-confirm-red: reverting reproduced the exact predicted 3
+failures with every other check in the file - including `test_queue()`'s own real-failure case and
+every other `process_upload()`/`poll_once()` path test - still green; restored, `ALL PASSED`.
+Regression-checked `engine/cv/test_process_cv_jobs.py` - `0 failure(s)`; `py_compile` clean on both
+touched files.
+
+**Regression:** `engine/cv/extract_cv_fields.py` (`fail_stale_uploads()`: one extra GET plus a
+conditional branch before the existing fail-path, ~25 lines including comment - a stale row with NO
+existing result is byte-for-byte unaffected), `engine/cv/test_extract_cv_fields.py` (1 new test
+function, 4 checks, wired into `main()`; added the module's missing `import datetime`, needed by the
+new test only - `fail_stale_uploads()` itself already had its own). No schema or other call-site
+changes. Finding 114's own backlog item is now closed - no further follow-up outstanding for this
+bug class across the six job queues (all six already had their stale-job-recovery guard fixed
+repo-wide for the separate malformed-timestamp bug, Finding 99; this self-heal refinement was
+specific to the two queues - onboarding and CV - whose own result table is a SEPARATE row from the
+upload row they claim, the shape that makes this exact race possible).

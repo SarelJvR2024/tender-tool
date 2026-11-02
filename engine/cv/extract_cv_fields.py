@@ -824,6 +824,35 @@ def fail_stale_uploads(url, key, now=None):
                                  "as stale.", "warning", context={"cv_upload_id": up["id"], "claimed_at": claimed})
             continue
         if claimed_dt < cutoff:
+            # process_upload() does its real work in two separate REST calls
+            # with no shared transaction - POST the cv_extraction_results
+            # row, THEN PATCH this upload to 'extracted'. A worker killed in
+            # the gap between those two calls (a crash, an OOM kill, an
+            # ungraceful redeploy - exactly what this stale-reclaim sweep
+            # exists to catch) leaves a row stuck 'extracting' with its
+            # result ALREADY written and fully reviewable. Marking it
+            # "extraction_failed" here, as every other stale row correctly
+            # is, would be actively wrong for this one: people/[id]/page.tsx
+            # would show the SAME CV upload as both "pending review" (the
+            # real, already-produced result) and "extraction_failed -
+            # upload again" (this row) at once, permanently, since applying
+            # a result (applyCvExtraction) never touches the upload row's
+            # own status. Identical shape to Finding 114
+            # (process_onboarding_jobs.py's own fail_stale_uploads()) -
+            # ported here, 2026-11-02 (CV rotation). Self-heal instead: a
+            # result already exists means the work actually finished.
+            existing = supabase_request(url, key, "GET",
+                                        f"cv_extraction_results?cv_upload_id=eq.{up['id']}&select=id")
+            if existing:
+                supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
+                    "status": "extracted", "extraction_completed_at": _now_iso(), "extraction_error": None})
+                print(f"[recovered] cv_upload {up['id']}: stale 'extracting' since {claimed}, but its result "
+                      "was already written - marked extracted, not failed")
+                system_alerts.record("cv_extract", f"A CV extraction was stuck 'extracting' for over "
+                                                   f"{STALE_AFTER_MINUTES} minutes after the worker died, but its "
+                                                   "result had already been written - self-healed to extracted "
+                                                   "rather than wrongly failed", "warning", context={"cv_upload_id": up["id"]})
+                continue
             supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
                 "status": "extraction_failed", "extraction_completed_at": _now_iso(),
                 "extraction_error": f"The extraction worker stopped mid-job (no result after {STALE_AFTER_MINUTES} "

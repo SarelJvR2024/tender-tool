@@ -526,6 +526,55 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): fix - ported Finding 114's own self-heal fix from the onboarding-scan queue to the CV-extraction queue, closing the follow-up this routine flagged for itself last cycle
+
+Oriented from `e47214a`; `git fetch origin main` found two new sibling commits since my own last push
+(`d4c5a0c`, a real intake fix - `classify_tender.py`'s closing-time reader misread a 12-hour PM time;
+`e47214a`, a docs-only re-audit of the backslash/re.sub bug class and the "5 LLM call sites" count,
+both independently re-confirmed exhausted) - neither touches `engine/cv/`, no overlap. Fast-forwarded
+cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to CV - and for once this cycle didn't need to go looking: last cycle's Finding 114 (`engine/
+onboarding/process_onboarding_jobs.py`) had already found and explicitly flagged the IDENTICAL bug
+shape in `engine/cv/extract_cv_fields.py`'s own `fail_stale_uploads()`, deliberately left unfixed
+pending a verified follow-up pass rather than bundled in unverified. This is that pass.
+
+**Found (already known) and fixed Finding 116**: confirmed the code shape really is byte-for-byte the
+same race - `process_upload()` POSTs `cv_extraction_results` then PATCHes `cv_uploads` to `extracted`
+in two separate, non-transactional calls; a worker killed in that gap left the row stuck `extracting`,
+wrongly marked `extraction_failed` by the stale-reclaim sweep even though its result was already
+written and reviewable. Traced the real UI consequence directly this time (not assumed from the
+onboarding precedent): `people/[id]/page.tsx` queries the two tables independently, and
+`applyCvExtraction` never touches the upload row's own status - so a raced CV upload would show as
+both "pending review" and "extraction_failed" at once, permanently.
+
+Fixed identically to Finding 114: check for an existing result before declaring the row failed; self-
+heal to `extracted` with a `"warning"` alert instead of `"error"` if one exists. A genuinely dead row
+is unaffected.
+
+Verified red-then-green: `engine/cv/test_extract_cv_fields.py`, 1 new test function (4 checks, same
+shape as Finding 114's own test); reverting reproduced the exact predicted 3 failures with every other
+check (including `test_queue()`'s real-failure case) still green; restored, `ALL PASSED`. Regression-
+checked `engine/cv/test_process_cv_jobs.py` - clean; `py_compile` clean. Full write-up: `docs/specs/
+QA-Edge-Case-Findings.md` Finding 116.
+
+Confirmed while writing this up (not just assumed) that this closes the whole backlog item: checked
+`process_pack_jobs.py`/`process_general_jobs.py`/`process_narrative_jobs.py` all mark their own job
+row `ready` in ONE `PATCH` with the result folded in (`**result`), never a separate results table -
+the two-write race is structurally only possible for onboarding and CV (the two queues with a
+separate `_results` table from the row they claim). No further follow-up outstanding for this bug
+class.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/cv/extract_cv_fields.py`
+- `engine/cv/test_extract_cv_fields.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel. Finding
+114's own follow-up TODO is now closed.
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): clean sweep - non-SANRAL pack rotation; one real-looking lead in submission_plan.py investigated and ruled out (the module itself isn't live-called anywhere, and its already-built, LIVE TypeScript counterpart handles the same case correctly)
 
 Oriented from `7513108`; `git fetch origin main` found one new sibling commit since my own last push

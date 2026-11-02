@@ -26,6 +26,7 @@ gitignored PII so they can't be committed as fixtures.
 
 Usage: python3 engine/cv/test_extract_cv_fields.py   (exit 0 = all passed)
 """
+import datetime
 import json
 import os
 import shutil
@@ -508,6 +509,45 @@ def test_queue(docx_path, tmp):
         x.supabase_request = real_request
 
 
+def test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written():
+    print("5b. fail_stale_uploads(): a stale row whose cv_extraction_results row already exists "
+          "is recovered to extracted, not wrongly marked failed")
+    # Ported from Finding 114 (process_onboarding_jobs.py's own identical
+    # fail_stale_uploads(), 2026-11-01) - the same two-write race exists here:
+    # process_upload() does its real work in two separate REST calls with no
+    # shared transaction (POST cv_extraction_results, THEN PATCH cv_uploads
+    # to 'extracted'). A worker killed in that exact gap left the upload
+    # stuck 'extracting', which this function then wrongly marked
+    # 'extraction_failed' even though the result was already written and
+    # fully reviewable - people/[id]/page.tsx's "pending review" and
+    # "extraction_failed" lists query independently, so the same CV upload
+    # showed in both, permanently (applyCvExtraction never touches the
+    # upload row's own status). CV rotation, 2026-11-02.
+    db = MemoryDb({})
+    now = datetime.datetime(2026, 11, 2, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=x.STALE_AFTER_MINUTES * 3)).isoformat()
+    db.tables["cv_uploads"] = [
+        {"id": "raced", "status": "extracting", "extraction_claimed_at": old},
+        {"id": "dead", "status": "extracting", "extraction_claimed_at": old},
+    ]
+    db.tables["cv_extraction_results"] = [{"id": "r1", "cv_upload_id": "raced", "review_status": "pending_review"}]
+    alerts = []
+    real_request, real_record = x.supabase_request, x.system_alerts.record
+    x.supabase_request = db.request
+    x.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        x.fail_stale_uploads("u", "k", now=now)
+    finally:
+        x.supabase_request = real_request
+        x.system_alerts.record = real_record
+    rows = {r["id"]: r for r in db.tables["cv_uploads"]}
+    check(rows["raced"]["status"] == "extracted", f"the row with an already-written result is self-healed to extracted, not failed ({rows['raced']})")
+    check(rows["raced"].get("extraction_error") is None, "...with no misleading 'upload again' error left on it")
+    check(rows["dead"]["status"] == "extraction_failed", f"a genuinely dead row with NO result is still correctly marked failed (negative control) ({rows['dead']})")
+    check(any(a[0][0] == "cv_extract" and a[0][2] == "warning" and "self-healed" in a[0][1] for a in alerts),
+          f"the self-heal is recorded as a warning (recovered), not an error (lost) ({alerts})")
+
+
 def test_ocr(docx_path, tmp):
     """EXPERIMENTAL OCR path (engine/ocr/scan_ocr.py). Needs tesseract; skipped
     (stated, not silently) where it isn't installed."""
@@ -611,6 +651,7 @@ def main():
         test_validation(docx_path, tmp)
         test_llm_call()
         test_queue(docx_path, tmp)
+        test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
         test_email_verification_survives_line_wrap()
