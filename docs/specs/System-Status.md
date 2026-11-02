@@ -983,6 +983,54 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): clean sweep - discovery rotation (cidb_tenders.py against its real live feed; the "two raw strings, one entity" bug class and a SQL/Python parallel-implementation pair both checked for drift, neither found)
+
+Oriented from `4b3f334`; `git fetch origin main` found nothing new since - local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no
+collision.
+
+Rotated to discovery. The sibling "solution-architect review" pass has moved off discovery onto
+security/tenant-isolation checks, so no active-collision concern this cycle (unlike recent cycles
+where discovery was deliberately skipped for that reason). Picked `engine/discovery/cidb_tenders.py`
+(small, direct-buyer reader, last touched 2026-10-18 per its own docstring) and fetched the real live
+`cidb.org.za/tenders.json` feed directly. Found a benign discrepancy, not a bug: the feed's own
+`tender_count` field reports 34 while only 25 rows are actually returned today - already self-aware
+(the module's own log line reports both numbers side by side, `"N open of M listed (K reported by the
+feed)"`, so this was never silently hidden) and not something the code's own logic depends on for
+correctness (only `realstatus` per row decides what's "open"). Checked `normalize()`'s own field
+mapping against real row data for the one currently-open tender (`tender_ID` 34) - `modified_date`
+reads from `tender_awards_date_time`, which for THIS open (not-yet-awarded) row is identical to the
+advert date (a placeholder, confirmed by comparing against 3 real AWARDED rows where the field is
+genuinely a later, distinct timestamp) - cosmetically odd but not a defect: nothing downstream treats
+an unawarded tender's `modified_date` as a meaningful "last changed" signal.
+
+Followed up directly on today's own sibling fix (`byBuyer()`'s "two raw strings, one entity" SANRAL
+bug in `marketPricing.ts`) by checking whether the identical shape exists on the Python ingestion side
+that feeds it: `store_award_outcomes.py`'s `outcome_key()` already groups SANRAL records through a
+dedicated `is_sanral_buyer()` helper (recognising the literal `"SANRAL"` string AND `"NATIONAL ROADS
+AGENCY"`/`"(SANRAL)"` substrings), not a raw string comparison - already correct, consistent with the
+sibling's own commit message implying this function was the reference they checked the broken TS
+version against.
+
+Also checked `award_match_keys()` for the OTHER bug class found today (two independent
+implementations of the same logic drifting apart) - its own docstring says plainly "Python twin of
+the SQL award_match_keys() in migration 0053 - keep them identical," with `test_award_prices.py`'s own
+Part 2 (needs a live scratch Postgres, not available in this environment) existing specifically to
+catch drift. Compared both regex patterns and their key-building logic character-by-character by
+hand instead of trusting "there's a test for that" - `CONTRACT_RE` is byte-identical between the two;
+the NRA pattern's only surface difference (`[A-Z]{0,3}` + `re.I` in Python vs. explicit `[A-Za-z]{0,3}`
+in SQL) is functionally identical since `re.I` makes Python's character class case-insensitive too.
+No drift found.
+
+**No code bug found - a genuine clean sweep**, reached by testing one scraper against real live data
+and specifically re-deriving (not assuming clean from a sibling's own success elsewhere) whether two
+now-proven bug classes from today's other fixes apply here too. Re-ran `engine/discovery/test_award_
+prices.py` (Part 1, no `AWARD_PRICES_PSQL` in this environment) and `test_gov_sources.py` - both
+`0 failure(s)`/`ALL PASSED`. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): clean sweep - worker/job-queue rotation, no new bug found (third dedicated pass on this area this session; the Finding 114/116 result-table race is now triple-confirmed exhausted)
 
 Oriented from `50b0218`; `git fetch origin main` found two new sibling commits since my own last push
