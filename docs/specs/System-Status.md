@@ -14,6 +14,70 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): Market Intelligence's "By buyer" breakdown silently split SANRAL across two groups - the same real buyer, two different raw strings, no normalisation before grouping
+
+Oriented from `8106221`; `git fetch origin main` found one new sibling commit (`e08f1ea`, docs-only
+clean sweep of the intake rotation, no overlap) and fast-forwarded local `main` to match. Open PRs
+re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Picked `app/app/market-intelligence/page.tsx` + `app/lib/marketPricing.ts` - a fresh area, not yet
+reviewed this session (the "market-wide overview" section, deliberately separate from `/analytics`'
+company-scoped pricing trends). Read `marketPricing.ts` in full; found a real bug in `byBuyer()`.
+
+`store_award_outcomes.py` writes the `buyer` column onto `public_tender_outcomes` from two different
+raw strings for the exact same real-world buyer, SANRAL: `part_from_sanral()` hardcodes the literal
+`"SANRAL"` when a tender is scraped from SANRAL's own site, while `part_from_portal()` stores eTenders'
+own free-text `organ_of_State` value verbatim (a real captured sample: `"South African National Roads
+Agency Soc Limited (SANRAL)"`). `outcome_key()`'s own `is_sanral_buyer()` already recognises both
+strings as the same buyer - but only for MERGE purposes (combining the same tender seen from two
+sources into one row); the merge's own `"buyer": first("buyer")` never canonicalises which string wins,
+so a SANRAL tender known to this table ONLY via eTenders (never also scraped from SANRAL's own site -
+entirely plausible; SANRAL's own site plainly doesn't claim to mirror every organ-of-State listing)
+keeps the long eTenders string verbatim in the stored row. `byBuyer()` then grouped market-wide rows by
+that raw, uncanonicalised string with no normalisation at all - silently splitting SANRAL, almost
+certainly the single largest, most data-rich buyer in this whole backfilled ~39,500-row table, across
+two (or more) separate rows on the live Market Intelligence "By buyer" table, each with a smaller, less
+representative `n`/median/etc. than SANRAL's own real combined figures. The existing test's own
+docstring ("groups by the exact buyer name") shows this was the file's actual, deliberate design at the
+time it was written - not an oversight nobody considered, but written before this specific cross-source
+SANRAL string variance was known; the module's own `normName()`/`is_sanral_buyer()` precedent for
+bidder/winner names shows the authors already recognise and solve this exact "same real entity, two
+raw strings" shape elsewhere in this same file, just not here.
+
+Reproduced directly first: a standalone repro test with `buyer: "SANRAL"` and
+`buyer: "South African National Roads Agency Soc Limited (SANRAL)"` confirmed `byBuyer()` returned 2
+groups, not 1 (confirmed red). Fixed by adding `isSanralBuyer()` (a direct TS mirror of
+`store_award_outcomes.is_sanral_buyer()`) and canonicalising the buyer key to `"SANRAL"` in
+`groupBySingle()` whenever it matches, scoped narrowly to the one demonstrated case rather than a
+sweeping generic buyer-name normaliser (which would risk merging genuinely different government
+departments that happen to share a word) - `province` is left untouched, with no known equivalent
+variance. Added 2 regression tests: the merge case (3 differently-spelled SANRAL rows -> 1 group of 3),
+and a "doesn't over-merge" case (an unrelated buyer sharing the word "Agency" stays separate). Confirmed
+red against the unfixed source via `git stash` (the merge test failed exactly as expected, the
+non-merge test still passed), green after restoring.
+
+Verification: `npx vitest run lib/marketPricing.spec.ts` -> 13/13 (up from 11); full `npx vitest run`
+-> 337/337 (up from 335); `node --experimental-strip-types --test lib/*.test.ts` -> 215/215, unaffected
+(sanity sweep, nothing in that family touches this file); `npx tsc --noEmit` and `npx eslint` on both
+touched files clean.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, read-side only, no migration/
+backfill needed):
+- `app/lib/marketPricing.ts`
+- `app/lib/marketPricing.spec.ts`
+- `docs/specs/System-Status.md`
+
+No new backlog item - a standalone, now-fixed bug. The 18-item backlog is unchanged (migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB; `narrative_documents`
+PostgREST schema-cache reload; PayFast idempotency design question; "missing ISO 9001 flagged as
+urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard "Decision needed"
+over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up; dangling
+`signatory_person_id` fallback design question; active-subscription reconciliation gap; team
+seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets; pack-generation
+quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): clean sweep - taxonomy admin area and the position-to-registration-body matcher both read end to end, no bug found
 
 Oriented from `e47214a`; `git fetch origin main` found one new sibling commit (`2047aba`, Finding 116

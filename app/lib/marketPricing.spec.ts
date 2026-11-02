@@ -163,6 +163,22 @@ describe("byBuyer / byProvince", () => {
     expect(breakdown).toEqual([{ key: "SANRAL", label: "SANRAL", n: 2, benchmark: expect.anything() }]);
   });
 
+  it("merges SANRAL's two known raw buyer strings (own-site vs eTenders' organ_of_State) into one group - found 2026-11-02", () => {
+    const rows = [
+      row({ buyer: "SANRAL" }),
+      row({ buyer: "South African National Roads Agency Soc Limited (SANRAL)" }),
+      row({ buyer: "The South African National Roads Agency SOC Ltd" }),
+    ];
+    const breakdown = byBuyer(rows);
+    expect(breakdown).toEqual([{ key: "SANRAL", label: "SANRAL", n: 3, benchmark: expect.anything() }]);
+  });
+
+  it("does not merge an unrelated buyer whose name happens to share words with SANRAL's", () => {
+    const rows = [row({ buyer: "SANRAL" }), row({ buyer: "Passenger Rail Agency of South Africa" })];
+    const breakdown = byBuyer(rows);
+    expect(breakdown.map((b) => b.key).sort()).toEqual(["Passenger Rail Agency of South Africa", "SANRAL"]);
+  });
+
   it("groups by province the same way, independently of buyer", () => {
     const rows = [row({ province: "Gauteng" }), row({ province: "Gauteng" }), row({ province: "Western Cape" })];
     const breakdown = byProvince(rows);

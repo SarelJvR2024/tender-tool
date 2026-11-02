@@ -106,6 +106,29 @@ export function firstToken(name: string | null | undefined): string | null {
   return null;
 }
 
+/**
+ * Same rule as store_award_outcomes.is_sanral_buyer(): recognises SANRAL
+ * under either of the two raw `buyer` strings this table actually stores -
+ * the literal "SANRAL" written by part_from_sanral() when a tender comes
+ * from SANRAL's own site, or eTenders' own free-text organ_of_State value
+ * ("South African National Roads Agency Soc Limited (SANRAL)") when the
+ * SAME real tender is known to this table only via eTenders (store_award_outcomes'
+ * own outcome_key() already treats these as one buyer for MERGE purposes via
+ * is_sanral_buyer() - but the stored `buyer` field itself is never
+ * canonicalized, just `first("buyer")` across whichever source(s) a given
+ * outcome_key happened to merge, so a SANRAL-only-via-eTenders row keeps the
+ * long eTenders string verbatim). Found 2026-11-02: byBuyer() below grouped
+ * by that raw string with no normalisation at all, silently splitting
+ * SANRAL - almost certainly the single largest, most data-rich buyer in this
+ * whole backfilled table - across two separate rows on the live Market
+ * Intelligence "By buyer" table, each with a smaller, less representative n
+ * than SANRAL's own real combined one.
+ */
+export function isSanralBuyer(buyer: string | null | undefined): boolean {
+  const b = (buyer ?? "").toUpperCase();
+  return b === "SANRAL" || b.includes("NATIONAL ROADS AGENCY") || b.includes("(SANRAL)");
+}
+
 // ------------------------------------------------------------ one tender, one company
 
 /** Same rule as store_award_outcomes.OUTLIER_FACTOR: an amount 5x off the median is almost always a typing error on the register. */
@@ -513,8 +536,12 @@ export function byCategory(rows: MarketRow[], labelFor: (slug: string) => string
 function groupBySingle(rows: MarketRow[], field: "buyer" | "province"): Map<string, MarketRow[]> {
   const groups = new Map<string, MarketRow[]>();
   for (const r of rows) {
-    const v = r[field];
-    if (!v) continue;
+    const raw = r[field];
+    if (!raw) continue;
+    // Canonicalise SANRAL's own two known raw buyer strings to one key -
+    // isSanralBuyer()'s own header comment explains why this field alone
+    // needs it (province values don't have a known equivalent split).
+    const v = field === "buyer" && isSanralBuyer(raw) ? "SANRAL" : raw;
     groups.set(v, [...(groups.get(v) ?? []), r]);
   }
   return groups;
