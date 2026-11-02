@@ -14,6 +14,66 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): classify_tender.py's closing-time reader silently misread a 12-hour AM/PM time as the raw digits, 12 hours off
+
+Oriented from `7513108`; `git fetch origin main` found one new sibling commit (`b90b5e3`, a clean
+sweep of `submission_plan.py` - flagged a real-looking gap but confirmed the function isn't called
+live anywhere in production, not shipped as a speculative fix on dead code - no overlap) and fast-
+forwarded local `main` to match. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain,
+both unchanged, no collision.
+
+The discovery-scraper-against-its-real-live-site streak has now covered essentially every scraper in
+`engine/discovery/`, so this pass picked a different, not-yet-stress-tested parsing file:
+`engine/intake/classify_tender.py` (the first thing that happens to a tender's documents on intake -
+SANRAL/general routing, NRA reference, delivery address, closing time). The file already carries many
+dated QA-pass comments (10-17 through 10-30) hardening its NRA/address/discrepancy logic against real
+SANRAL text - read it end to end and stress-tested the regexes against constructed real-phrasing
+variants rather than just reading the code.
+
+**Found and fixed a real bug**: `CLOSING_TIME_RE`/`find_closing_time()` read the Tender Notice's own
+"closing time ... is HH:MM" sentence, but never accounted for a 12-hour AM/PM suffix - `"2:00pm"` came
+back as the literal digits `"02:00"` (2am), 12 hours wrong, with no conversion at all. Confirmed this
+isn't a purely theoretical worry invented for this pass: `source_http.py`'s own `_US_DT`/`parse_sast()`
+already has to do the identical AM/PM-to-24-hour conversion for Transnet's real "11/30/2026 3:00:00 PM"
+dates - proof a 12-hour time is a real pattern SA government procurement text uses, even though every
+real SANRAL closing-time sample seen so far (this file's own docstring, `Form-Field-Audit.md`) states
+24-hour time with no AM/PM. Checked specifically for any real captured SANRAL AM/PM closing time before
+treating this as confirmed vs. speculative - found none, but the fix itself is the exact same cheap,
+already-proven conversion `source_http.py` already uses, so there was no real cost to closing this gap
+proactively rather than waiting for a live incident, consistent with this file's own stated design
+philosophy of refusing to let a silently-wrong value through (`find_nra_reference()`/
+`find_delivery_address()` above exist for the identical reason).
+
+Reproduced first (`"2:00pm"` -> `{"value": "02:00", ...}` against the unfixed regex), then fixed by
+adding an optional `([AP]M)?` group and applying the same `hh % 12 + (12 if PM else 0)` conversion
+`source_http.py` already uses. A real 24-hour time with no AM/PM suffix (every sample seen so far) is
+completely unaffected - verified the existing test suite's own 24-hour/multi-separator/ambiguity cases
+all still pass unchanged. Added 5 new regression cases (2pm, 9am, the 12:00pm-is-noon and
+12:00am-is-midnight edge cases, and a PM time + its 24-hour equivalent correctly recognised as the SAME
+time, not `ambiguous=True`). Revert-and-confirm-red performed (`git stash` on the source file alone,
+keeping the new test assertions): 3 of the 5 new checks failed exactly as expected against the unfixed
+regex; restored to a clean pass after un-stashing.
+
+Verification: `python3 engine/intake/test_classify_tender.py` -> `0 failure(s)` (full suite, all prior
+cases plus the 5 new ones); `py_compile` clean on both touched files; `test_manual_intake.py` correctly
+skips without a scratch-Postgres environment set up (expected, unrelated to this change - no live DB
+touched or needed for this fix).
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB dependency):
+- `engine/intake/classify_tender.py`
+- `engine/intake/test_classify_tender.py`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel. The 18-item backlog
+is unchanged (migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB;
+`narrative_documents` PostgREST schema-cache reload; PayFast idempotency design question; "missing ISO
+9001 flagged as urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard "Decision
+needed" over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up; dangling
+`signatory_person_id` fallback design question; active-subscription reconciliation gap; team seat-limit
+TOCTOU race; no storage-level size/type limit on the 9 upload buckets; pack-generation quota TOCTOU
+race).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): clean sweep - etenders_national.py tested thoroughly against its real live OCDS API and site-category endpoint, no bug found; one honest, non-actionable observation noted
 
 Oriented from `aa3a866`; `git fetch origin main` found one new sibling commit (`37ec943`, a real

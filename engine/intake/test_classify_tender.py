@@ -327,6 +327,28 @@ def test_find_closing_time_single_ambiguous_and_formats():
     check("a genuinely different closing time elsewhere in the text sets ambiguous=True", result["ambiguous"] is True, result)
     check("'value' stays the FIRST match found (unchanged default), not the later/extended one",
           result["value"] == "12:00", result)
+    # QA pass, 2026-11-02: a stated AM/PM time must convert to 24-hour before
+    # anything compares or displays it - the same conversion source_http.py's
+    # own _US_DT/parse_sast() already applies for Transnet's "...3:00:00 PM".
+    # Before this fix, "2:00pm" read as the raw digits "02:00" (2am) with no
+    # conversion at all - a silently wrong closing time, 12 hours off.
+    check("a 12-hour PM time converts to 24-hour, not the raw digits",
+          ct.find_closing_time("The closing time and date for receipt of tenders is 2:00pm on 5 December 2026.")
+          == {"value": "14:00", "ambiguous": False})
+    check("a 12-hour AM time is unaffected (same hour either way)",
+          ct.find_closing_time("The closing time and date for receipt of tenders is 9:00am on 5 December 2026.")
+          == {"value": "09:00", "ambiguous": False})
+    check("12:00pm (noon) converts to 12:00, not 00:00",
+          ct.find_closing_time("The closing time and date for receipt of tenders is 12:00pm on 22 October 2026.")
+          == {"value": "12:00", "ambiguous": False})
+    check("12:00am (midnight) converts to 00:00, not 12:00",
+          ct.find_closing_time("The closing time and date for receipt of tenders is 12:00am on 22 October 2026.")
+          == {"value": "00:00", "ambiguous": False})
+    check("a PM time and the equivalent 24-hour time are recognised as the SAME time, not ambiguous",
+          ct.find_closing_time(
+              "The closing time and date for receipt of tenders is 2:00pm on 5 December 2026. "
+              "The closing time and date for receipt of tenders is 14:00 on 5 December 2026."
+          ) == {"value": "14:00", "ambiguous": False})
 
 
 def test_find_delivery_address_single_ambiguous_and_stops_correctly():

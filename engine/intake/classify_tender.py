@@ -185,9 +185,20 @@ def find_nra_reference(all_text):
 DELIVERY_RE = re.compile(
     r"(?:tender\s+box\s+(?:at|situated\s+at|located\s+at)|(?:delivered|deposited|submitted)\s+(?:to|at)\s+the\s+following\s+address)\s*:?[ \t]*\n",
     re.IGNORECASE)
+# An optional trailing AM/PM, same shape and same conversion
+# (hh % 12 + (12 if PM else 0)) as source_http.py's own _US_DT/parse_sast()
+# already uses for Transnet's "11/30/2026 3:00:00 PM" - proof a 12-hour
+# AM/PM closing time is a real pattern in SA government procurement text,
+# not a theoretical one, even though every real SANRAL closing-time sample
+# seen so far states 24-hour time ("12:00") with no AM/PM. Found 2026-11-02:
+# without this, a SANRAL notice that ever did state e.g. "2:00pm" would have
+# silently read as 02:00 (2am) - exactly the "silently wrong data" class
+# find_nra_reference()/find_delivery_address() above already exist to avoid,
+# just not yet closed for this function. A real 24-hour time with no AM/PM
+# suffix (every sample seen so far) is completely unaffected.
 CLOSING_TIME_RE = re.compile(
     r"closing\s+(?:time\s+and\s+date|date\s+and\s+time|time)\s+(?:for\s+(?:the\s+)?receipt\s+of\s+tenders\s+)?is\s+"
-    r"(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)",
+    r"(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)\s*([AP]M)?",
     re.IGNORECASE)
 
 
@@ -255,8 +266,17 @@ def find_closing_time(all_text):
     first-match search has no real basis for picking the extended time over
     the original one, or vice versa. `value` stays the FIRST match found
     (unchanged default); the caller is told to check rather than trust it
-    silently when there's more than one. QA pass, 2026-10-23."""
-    times = [f"{int(h):02d}:{m}" for h, m in CLOSING_TIME_RE.findall(all_text or "")]
+    silently when there's more than one. QA pass, 2026-10-23.
+
+    An AM/PM suffix (if stated) is converted to 24-hour before this
+    comparison - "2:00pm" and "14:00" must compare as the same time, not as
+    two different ones. QA pass, 2026-11-02."""
+    times = []
+    for h, m, ap in CLOSING_TIME_RE.findall(all_text or ""):
+        hh = int(h)
+        if ap:
+            hh = hh % 12 + (12 if ap.upper() == "PM" else 0)
+        times.append(f"{hh:02d}:{m}")
     if not times:
         return None
     return {"value": times[0], "ambiguous": len(set(times)) > 1}
