@@ -921,6 +921,44 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): clean sweep - worker/job-queue rotation, no new bug found (third dedicated pass on this area this session; the Finding 114/116 result-table race is now triple-confirmed exhausted)
+
+Oriented from `50b0218`; `git fetch origin main` found two new sibling commits since my own last push
+(`d41f234`, a real app/TS fix widening more missing `briefing_shortlisted` allow-lists; `50b0218`, a
+docs-only read of `engine/pack_generator/confirm_pack.py`, no bug) - neither touches `engine/worker/`,
+`engine/cv/`, `engine/onboarding/`, `engine/pack/`, `engine/general/`, or `engine/narrative/`, no
+overlap. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both
+unchanged, no collision.
+
+Rotated to worker/job-queue. Re-read `engine/worker/poll_loop.py` end to end (the generic polling loop
+every bridge shares) looking specifically for a gap in its signal-handling/stop-check ordering - none
+found; the loop's own "cycles += 1 before poll, stop-checks after poll, sleep is interruptible" shape
+is internally consistent throughout. Re-read `run_bridges.py`'s `main()` (not previously read in full
+this session - only `BridgeRunner.run_once()`/`resolve_*` had been) and confirmed `poll_forever()`'s
+own `alert_source=None` in `--loop` mode is deliberate, not a gap: `BridgeRunner.run_once()` already
+calls `system_alerts.record()` per broken bridge before raising, so `poll_forever`'s own generic except
+block logging to stdout only is not a missed alert, just not a second one. Re-confirmed the registered-
+bridge list is still exactly the 6 real `process_*jobs.py`/`extract_cv_fields.py` files via `git log
+--diff-filter=A` (no 7th bridge added since the last check).
+
+Specifically re-verified, by reading the actual code rather than trusting the prior pass's own
+conclusion, that `engine/narrative/process_narrative_jobs.py`'s `process_one()` really does write its
+result (`generated_text`/`generated_storage_path`/etc.) and `status: "ready"` in ONE PATCH to the SAME
+`narrative_documents` row, and that `engine/pack/process_pack_jobs.py`'s `process_job()` - despite its
+own multi-step Storage upload loop before the final status write - has no equivalent self-heal gap: a
+crash mid-upload leaves nothing reviewable for `fail_stale_jobs()` to wrongly fail, since the job's
+`storage_path_pdf`/`manifest` (the only thing that makes a pack "ready") is never written until that
+one final `PATCH` succeeds - unlike onboarding/CV's own SEPARATE, independently-queried result table,
+which is what made Finding 114/116's self-heal fix necessary there in the first place. This is now the
+third dedicated worker/job-queue pass this session (2026-10-31, earlier 2026-11-02) to independently
+re-derive "exhausted" rather than skip the area - all three agree.
+
+**No code bug found - a genuine clean sweep.** Re-ran `engine/worker/test_poll_loop.py` - still green
+(`All bridge-loop smoke tests passed`). Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): fix - a non-string closing_date on any one scored release crashed with a raw TypeError, silently dropping that one roster entry's whole daily digest for the day
 
 Oriented from `fd18533`; `git fetch origin main` found one new sibling commit since my own last push
