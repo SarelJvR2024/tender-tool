@@ -398,6 +398,49 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): clean sweep - non-SANRAL pack rotation; one real-looking lead in submission_plan.py investigated and ruled out (the module itself isn't live-called anywhere, and its already-built, LIVE TypeScript counterpart handles the same case correctly)
+
+Oriented from `7513108`; `git fetch origin main` found one new sibling commit since my own last push
+(a discovery-area clean sweep, docs-only, no overlap). Fast-forwarded cleanly. Open PRs re-checked via
+the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to non-SANRAL pack (`fill_flat_pdf.py`/`build_general_pack.py`/`fill_sbd_docx.py` all clean-
+swept in the last two cycles). Read `engine/general/submission_plan.py` (the "assessment engine"
+compiler's own Python reference implementation) end to end against this session's established bug
+shapes.
+
+**A real-looking lead, investigated to ground and ruled out rather than shipped as a fix**:
+`_returnable_step()`'s `VAULT_FILE_FOR` lookup only covers 5 of the 14 `RETURNABLES` keys
+(`tax_compliance`/`bbbee_proof`/`coid`/`bank_letter`/`pi_insurance`); for the other 9 (`csd_report`,
+`cipc_documents`, `director_ids`, `municipal_account`, `public_liability`, `psira`,
+`financial_statements`, `she_plan`, `jv_agreement`) it unconditionally says "Tender Tool doesn't keep
+a standing copy of this" - false for at least `csd_report` (`companies.csd_supplier_number` is a real,
+live column) and potentially `psira` (a real, seeded `registration_types` slug since migration 0050,
+trackable via `held_registrations` - but that table isn't reachable from this function's flat
+`company` dict at all, a genuine architectural gap, not a one-line fix).
+
+**Why not fixed**: confirmed via grep (no caller anywhere in `engine/`, `app/`, or `.github/workflows/`
+outside this module's own test/CLI) that `compile_plan()` is NOT called live from anywhere in
+production - this file's own prior architecture finding (this doc, 2026-10-21/22) already established
+"can't actually be called live from the Next.js app... needs a TypeScript port." Checked whether that
+port has actually happened since: `app/lib/generalTender.ts`'s `checkReturnable()` is the REAL, LIVE
+implementation of this exact logic, and it already handles `csd` correctly (`c.csd_supplier_number`)
+and, for `vault: null` keys like `psira`, is already honest rather than confidently wrong (asks for a
+per-tender upload, never claims "Tender Tool doesn't keep a standing copy of this" the way the Python
+version does). So: a real latent bug in `submission_plan.py`, with zero current production impact
+(dead code today), whose real, live replacement does NOT share the same bug. Fixing it would be
+speculative work on a module nothing calls, not a contained robustness fix - flagged here for whoever
+eventually revisits this file (delete it once the TS port is confirmed to have fully superseded it, or
+fix `_returnable_step()`'s wording to stop overclaiming if it's kept as a reference), not shipped.
+
+**No code bug found and fixed this pass - a genuine clean sweep**, reached by tracing a real-looking
+lead all the way to its actual reachability (a grep for callers, then reading the live TS counterpart
+directly) rather than reporting it unverified. Re-ran `engine/general/test_submission_plan.py` -
+`ALL PASSED`. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): fix - the RRM SANRAL filler's three real discrepancy/gap WARNINGs (Form B7 vs SETUP closing date, a bundled contract not YES, a YES contract with no Form C2.4 figures yet) only ever reached the worker container's stdout, never the pack's own manifest
 
 Oriented from `aa3a866`; `git fetch origin main` found two new sibling commits since my own last push
