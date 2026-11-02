@@ -14,6 +14,68 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): `engine/security/test_tenant_isolation.py` run in full against a real replayed schema - genuine clean sweep, unusually well-substantiated
+
+Oriented from `4c69964`; `git fetch origin main` found one new sibling commit (`4c69964` itself, a
+docs-only clean-sweep entry for `engine/` worker/job-queue rotation, no overlap with anything touched
+here) and fast-forwarded local `main` to match. Open PRs re-checked via the GitHub API: only
+`#164`/`#165` remain, both unchanged, no collision.
+
+With the `briefing_shortlisted` thread apparently exhausted, picked `engine/security/` - the POPIA /
+cross-tenant isolation audit harness (`test_tenant_isolation.py`, 1018+ lines, from the 2026-10-17
+audit documented in `docs/specs/POPIA-Security-Audit.md`). Grepped it for every function name this
+session's own newest fixes touch (`company_can_request_pack`, `lifecycle_unsubscribe`,
+`redeem_company_invite`, `briefing_shortlisted`, `accept_tender_update_date`) - zero hits, so this is a
+genuinely independent, pre-existing audit of the schema as a whole rather than a re-check of anything
+already covered.
+
+Ran it properly, not just the cheap half:
+- **Part 1** (in-memory, drives the real bridge code - `process_pack_jobs`, `process_general_jobs`,
+  CV extraction bridge - with two fake companies, no DB needed): `ALL PASSED`.
+- **Part 2** (the real test: full RLS-level audit against the actual migration history) needs
+  `TENANT_PSQL` pointed at a real Postgres. Started the local Postgres service, created a disposable
+  scratch database (`tenant_iso_scratch_fork`), and replayed the stub + all 101 real
+  `app/supabase/migrations/*.sql` files in order via `engine/security/replay_schema.sh` (peer auth over
+  the Unix socket, as `postgres`, after an initial TCP password-auth failure) - confirmed clean replay
+  of every migration including all five this session itself wrote (`0107`-`0111`), ending
+  `== Schema replay complete (101 migrations) ==`. Then ran the full suite with `TENANT_PSQL` set:
+  storage-path isolation, tender-template upload/replacement isolation, admin-console isolation,
+  shared-template database+storage visibility, cascading deletion correctness, and the restricted
+  "employee" role's exact-scope access control - every check printed `PASS`, final line `ALL PASSED`.
+  No live database was touched; the scratch database and the Postgres service used for it were local
+  to this container only, and the scratch database was dropped immediately after the run.
+
+No code bug found - a genuine clean sweep, and more substantiated than a typical "read the code and
+see nothing wrong" pass: this is a real RLS-level replay of the entire migration history (including
+this session's own newest migrations) with zero tenant-isolation regressions found. Confirms the
+cumulative effect of this session's many fixes plus every prior migration hasn't broken cross-tenant
+isolation anywhere this harness checks.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. **Standing backlog, unchanged at 18 items** (old 18 + 0 new = 18;
+Sarel has not yet applied any of the 6 pending migrations - expected, not re-flagged as new):
+- Migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` - written, verified, **not yet applied to the
+  live database** (needs Sarel's run via Supabase's SQL Editor; no DDL path exists from this session)
+- `narrative_documents` PostgREST schema-cache reload - not yet confirmed
+- PayFast idempotency design question
+- "Missing ISO 9001 flagged as urgent" UX question
+- Form B7 compulsory-vs-matrix disagreement (real SANRAL template conflict)
+- Dashboard "Decision needed" over-triggering finding
+- Impersonation-feature token-refresh gap
+- Heads-up only: next real SANRAL fingerprint check will show an expected (already-fixed) baseline
+  mismatch - FYI, no action needed
+- Dangling `signatory_person_id` fallback design question (Finding 96)
+- No reconciliation for an 'active' subscription whose `current_period_end` has silently passed with
+  no new ITN ever arriving (Finding 97)
+- Low-severity TOCTOU race in `team/actions.ts`'s seat-limit check
+- No storage-level size/type limit on any of the 9 upload buckets (Finding 105)
+- Pack-generation quota TOCTOU race (`company_can_request_pack()`'s two callers check-then-insert with
+  no lock between)
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): `confirm_pack.py` read end to end (no dedicated test file) - genuine clean sweep
 
 Oriented from `d41f234`; `git fetch origin main` found nothing new, local already matched `origin/main`
