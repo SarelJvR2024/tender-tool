@@ -149,7 +149,16 @@ export type PastTender = {
   sameBuyer: boolean;
 };
 
-const DONE_STAGES = ["submitted", "won", "lost"];
+// briefing_shortlisted (0105/PR #173) sits between submitted and an outcome
+// (won/lost) - a tender there has genuinely gone in and is awaiting the
+// buyer's decision, the same "real past submission, safe to copy from" case
+// submitted/won/lost already are. Found 2026-11-02: this list was never
+// widened for it when 0105 landed, so a company's own most recent, most
+// relevant prior submission (one far enough along to have reached a
+// briefing/shortlist) was silently invisible as a "copy from" source - the
+// same bug class opportunityInsights.ts's own DONE_STAGES had (fixed
+// 2026-10-31), just a second, independent copy of the same hardcoded list.
+const DONE_STAGES = ["submitted", "briefing_shortlisted", "won", "lost"];
 
 type TenderRow = { id: string; contract_no: string | null; title: string | null; description: string | null; buyer: string | null; family: string | null; document_requirements?: RequirementManifest | null };
 

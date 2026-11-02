@@ -14,6 +14,67 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): "Start from a previous submission" had a third, independent copy of the same missing-`briefing_shortlisted` bug - and a second, inverse instance in the same feature
+
+Oriented from `bd11c07`; `git fetch origin main` found one new sibling commit (`a85eda6`, docs-only
+clean sweep of the compliance/reminders rotation, no overlap) and fast-forwarded local `main` to
+match. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no
+collision.
+
+Grepped for every other hardcoded `pipeline_stage`-shaped array/list in `app/` not yet checked this
+session, since the `briefing_shortlisted`-missing bug class has now turned up in 9 sites (7 TS, 2
+Python) across two earlier passes. Found a genuinely new pair of instances in
+`app/lib/pastSubmissionReuse.ts` and its own UI caller, `app/app/tenders/[id]/reuse-past-submission.tsx`
+("Start from a previous submission", feature item 9) - a completely different file from every site
+found before, never touched by PR #173/#174's own sweep:
+
+1. **`pastSubmissionReuse.ts`'s own `DONE_STAGES = ["submitted", "won", "lost"]`** (used by
+   `listPastSubmissions()` to decide which of a company's own past tenders are safe "copy a pack
+   from" sources) - a completely independent hardcoded copy of the exact same list
+   `opportunityInsights.ts`'s own `DONE_STAGES` had before its 2026-10-31 fix, never updated when
+   migration 0105 (PR #173) added `briefing_shortlisted`. A company's own tender currently sitting at
+   `briefing_shortlisted` - genuinely submitted, now awaiting the buyer's briefing/shortlist decision,
+   arguably the single MOST relevant possible source (most recent, vetted furthest) - was silently
+   invisible as a reuse source.
+2. **`reuse-past-submission.tsx`'s own inline stage check**, `if (stage === "submitted" || stage ===
+   "won" || stage === "lost") return null;` - the INVERSE direction of the same bug: this guards
+   against showing the "reuse a past submission into THIS tender" widget once the CURRENT tender
+   itself has already gone in (nothing left to prepare). A tender that reached `briefing_shortlisted`
+   has also already gone in, for the identical reason - but wasn't covered, so the widget would have
+   kept rendering on a tender that's already past the point this whole feature exists for.
+
+Confirmed directly against the real committed pre-fix source (`git show HEAD:app/lib/
+pastSubmissionReuse.ts`) that `DONE_STAGES` genuinely read `["submitted", "won", "lost"]` with no
+`briefing_shortlisted` before this pass touched it - not a hypothetical, the actual shipped array.
+Fixed both by adding `"briefing_shortlisted"` to each list, matching the convention every other site
+of this bug class has used.
+
+No dedicated regression test added for either: `listPastSubmissions()` does its own live Supabase
+query (not a pure function) and `ReusePastSubmission` is a Server Component reading two Supabase
+tables directly - the same "needs a Supabase client/session to exercise for real" category this
+session has already accepted for other Server Action/Server Component fixes (e.g. the `value_rm`
+family). Verified instead: confirmed the pre-fix array via the real committed source, confirmed the
+post-fix array now includes the value, `npx tsc --noEmit` and `npx eslint` clean on both touched
+files, full `npx vitest run` -> 337/337 and `node --experimental-strip-types --test lib/*.test.ts` ->
+215/215, both unaffected (neither touched file is in either family).
+
+Committed and pushed directly to `main` (no PR - small, fully verified, consistent with 9 prior fixes
+of this exact bug class this session):
+- `app/lib/pastSubmissionReuse.ts`
+- `app/app/tenders/[id]/reuse-past-submission.tsx`
+- `docs/specs/System-Status.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel. The 18-item backlog
+is unchanged (migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live
+database; `narrative_documents` PostgREST schema-cache reload; PayFast idempotency design question;
+"missing ISO 9001 flagged as urgent" UX question; Form B7 compulsory-vs-matrix disagreement;
+Dashboard "Decision needed" over-triggering; impersonation token-refresh gap; SANRAL fingerprint
+heads-up; dangling `signatory_person_id` fallback design question; active-subscription reconciliation
+gap; team seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets;
+pack-generation quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): follow-up on the SANRAL byBuyer() fix - checked for the same "two raw strings, one real entity" bug class elsewhere in marketPricing.ts and the backfill pipeline; genuinely clean
 
 Oriented from `0af87df`; `git fetch origin main` found nothing new, local already matched

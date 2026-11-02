@@ -41,8 +41,12 @@ export async function ReusePastSubmission({
   ]);
   if (!t) return null;
   // A tender that has gone in is the thing being reused, not a draft.
+  // briefing_shortlisted (0105) is also past that point - already submitted,
+  // now awaiting the buyer's briefing/shortlist decision - so this widget
+  // must hide there too, same as submitted/won/lost; found 2026-11-02, the
+  // same missing-stage gap pastSubmissionReuse.ts's own DONE_STAGES had.
   const stage = (pack?.pipeline_stage as string | undefined) ?? "found";
-  if (stage === "submitted" || stage === "won" || stage === "lost") return null;
+  if (stage === "submitted" || stage === "briefing_shortlisted" || stage === "won" || stage === "lost") return null;
 
   const past = await listPastSubmissions(supabase, t as Parameters<typeof listPastSubmissions>[1]);
   if (past.length === 0) return null;
