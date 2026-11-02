@@ -591,6 +591,40 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): clean sweep - intake rotation re-confirmed exhausted (classify_tender.py re-read end to end after today's own sibling AM/PM fix; scenario_driver.py confirmed harness-only)
+
+Oriented from `8106221`; `git fetch origin main` found one new sibling commit since my own last push
+(a discovery/admin-area clean sweep, docs-only, no overlap). Fast-forwarded cleanly. Open PRs
+re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to intake. A sibling (solution-architect review) already fixed a real bug in `classify_tender.
+py`'s own `find_closing_time()` earlier today (the 12-hour AM/PM misread) - re-read the whole file end
+to end anyway rather than assume "someone just looked at it, skip it": `classify_documents()` (the
+SANRAL-vs-general routing gate, already carrying two dated 2026-10-20/10-26 QA-pass fixes for
+candidate tie-break consistency), `read_setup()`, `discrepancies()`, `assess_fit_from_text()` -
+specifically checked `assess_fit_from_text()`'s `if verdict in ("not_a_fit", "strong_fit", "possible"):
+verdict = "needs_review"` against `assess_tender.py`'s own full verdict vocabulary (confirmed
+exhaustive via grep - exactly 4 values, the 4th being `needs_review` itself, so the check correctly
+needs no explicit case for it) and `classify_workbook()`'s own guarantee that `kind == "technical"`
+never pairs with a `None`/`"UNKNOWN"` family (confirmed by reading the function directly - the `if
+family != "UNKNOWN"` guard makes this structurally impossible, not just usually true). No new bug in
+any of them.
+
+Also read `engine/intake/scenario_driver.py` (158 lines, interrupted mid-read by a context
+compaction in an earlier window this session, never actually finished) end to end - confirmed it is
+pure CLI scenario-reporting/demo tooling over a scratch Postgres (needs `INTAKE_PSQL`), not reachable
+from any real user flow, consistent with `bridge-worker-ci.yml`'s own comment on why `test_manual_
+intake.py` deliberately stays out of CI. No logic worth hardening there beyond what a demo script
+needs.
+
+**No code bug found - a genuine clean sweep**, reached by actually re-deriving "exhausted" this cycle
+(checking the specific logic this session's own established bug shapes would predict, not just noting
+someone looked at it recently) rather than skipping the area outright. Re-ran `engine/intake/test_
+classify_tender.py` - `0 failure(s)`. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): fix - ported Finding 114's own self-heal fix from the onboarding-scan queue to the CV-extraction queue, closing the follow-up this routine flagged for itself last cycle
 
 Oriented from `e47214a`; `git fetch origin main` found two new sibling commits since my own last push
