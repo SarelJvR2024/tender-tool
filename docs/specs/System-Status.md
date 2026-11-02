@@ -14,6 +14,65 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): `confirm_pack.py` read end to end (no dedicated test file) - genuine clean sweep
+
+Oriented from `d41f234`; `git fetch origin main` found nothing new, local already matched `origin/main`
+exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no
+collision with anything touched here.
+
+With the `briefing_shortlisted` thread now at 18 real sites found and apparently exhausted (two
+consecutive passes turned up nothing further), picked a fresh angle: `engine/pack_generator/
+confirm_pack.py` (202 lines) - the one gate between a human's confirmed key-person selections and the
+real `pack.yaml` the SANRAL filler consumes - which has no dedicated `test_confirm_pack.py` at all,
+unlike every sibling file in `engine/pack_generator/`/`engine/pack/`.
+
+Read it end to end and traced two things that looked like real candidates before ruling both out with
+evidence, not by eye:
+
+- **`closing_date = datetime.date.fromisoformat(str(suggestions.get("closing_date") or "")[:10])`** -
+  looked like the same "naive `[:10]` truncation drops a timezone offset" bug class fixed elsewhere
+  this session for Supabase `timestamptz` values. Traced the actual source: `suggestions["closing_date"]`
+  comes from `suggest_pack.py`'s own `_excel_date()`, which returns a plain `datetime.date` (no time
+  component at all) read straight from SANRAL's SETUP!C3 Excel cell, then serialised via `.isoformat()`
+  - a bare `"YYYY-MM-DD"` string with no offset to lose. The `[:10]` slice is a genuine no-op on this
+    input, not a latent bug - this file's closing date is never a `timestamptz`-shaped value in the
+    first place.
+- **`dropped_incomplete_projects`** (confirm_pack.py's own 2026-10-20 fix, from the earlier summary
+  context) - confirmed via `grep -rn "dropped_incomplete_projects" engine/ app/` that nothing reads it
+  back out downstream. Not a regression: this script is a standalone CLI tool (`Usage: python3
+  confirm_pack.py ...`, no bridge/worker ever calls it), and the same information is already printed
+  straight to stdout for the human operator at the end of `confirm()` (lines 195-198) - the intended
+  surface for a CLI tool, not a web-app field with a missing reader.
+
+No code bug found - a genuine clean sweep, reached by tracing both candidates to ground rather than
+either shipping a speculative fix or stopping at "looks suspicious." No code touched, so no QA run was
+needed.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. **Standing backlog, unchanged at 18 items** (Sarel has not yet
+applied any of the 6 pending migrations - expected, not re-flagged as new):
+- Migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` - written, verified, **not yet applied to the
+  live database** (needs Sarel's run via Supabase's SQL Editor; no DDL path exists from this session)
+- `narrative_documents` PostgREST schema-cache reload - not yet confirmed
+- PayFast idempotency design question
+- "Missing ISO 9001 flagged as urgent" UX question
+- Form B7 compulsory-vs-matrix disagreement (real SANRAL template conflict)
+- Dashboard "Decision needed" over-triggering finding
+- Impersonation-feature token-refresh gap
+- Heads-up only: next real SANRAL fingerprint check will show an expected (already-fixed) baseline
+  mismatch - FYI, no action needed
+- Dangling `signatory_person_id` fallback design question (Finding 96)
+- No reconciliation for an 'active' subscription whose `current_period_end` has silently passed with
+  no new ITN ever arriving (Finding 97)
+- Low-severity TOCTOU race in `team/actions.ts`'s seat-limit check
+- No storage-level size/type limit on any of the 9 upload buckets (Finding 105)
+- Pack-generation quota TOCTOU race (`company_can_request_pack()`'s two callers check-then-insert with
+  no lock between)
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): one more targeted sweep for the missing-`briefing_shortlisted` bug class - 7 more real sites found across 6 files, the tender workspace page itself worst-hit
 
 Oriented from `fd18533`; `git fetch origin main` found one new sibling commit (`d28666d`, a real fix
