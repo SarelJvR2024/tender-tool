@@ -14,6 +14,74 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): clean sweep - backslash-in-re.sub() bug class re-audited codebase-wide, the "5 real LLM call sites" count independently re-verified, a couple of speculative leads ruled out with evidence
+
+Oriented from `d4c5a0c`; `git fetch origin main` found nothing new, local already matched exactly.
+Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+With the discovery-scraper-against-its-real-live-site streak essentially exhausted and the
+SECURITY DEFINER/RLS/email-escaping/`briefing_shortlisted`-allow-list/LLM-call audits all already
+closed out, this pass tried two different angles:
+
+1. **Re-audited the backslash-in-`re.sub()`/`re.subn()` replacement bug class** (Finding 110,
+   `8670a4e`, fixed in `fill_a_forms.py`/`fill_sbd_docx.py`) across the WHOLE `engine/` tree, not
+   just those two files, in case a sibling instance existed elsewhere. Grepped for every
+   `re.sub(..., f"...")`/`re.sub(..., f'...')` across all of `engine/`: found exactly two more
+   matches, both traced and ruled out with evidence, not assumed safe - `fill_sbd_docx.py`'s own
+   `answer_yes_no()` passes `f"[X] {ans}"` as a replacement, but `ans` is always the literal
+   constant `"Yes"` or `"No"` (set two lines above from a ternary), never free text, so there's no
+   backslash to inject; `sanral_fill.py`'s combo-box filler passes `f' sel="{idx}"'`, but `idx` is
+   always an integer list index from `resolve_option()`, never a string a backslash could appear
+   in. Also confirmed every `re.subn(` call across `engine/` already uses the fixed `lambda`-based
+   replacement form (the 4 in `fill_a_forms.py`, independently re-read against `8670a4e`'s own
+   diff to confirm they're genuinely the post-fix versions, not merely present). This bug class is
+   genuinely exhausted now, re-confirmed by grep rather than assumed closed just because the one
+   known fix landed.
+
+2. **Independently re-verified the "all 5 real LLM call sites audited" claim** from several passes
+   ago by re-deriving the list myself via a fresh grep for `anthropic`/`openai`/`client.messages.create`
+   across all of `engine/`, rather than trusting the prior count: `company_documents.py`,
+   `cv/extract_cv_fields.py`, `discovery/scope_llm.py`, `narrative/generate_narrative.py`,
+   `onboarding/classify_documents.py` - 5, confirmed. `discovery/tender_enrichment.py` matched the
+   grep too (the string "anthropic" appears there), but reading it directly shows that's only a
+   comment confirming the module itself never touches the LLM client - it calls into
+   `scope_llm.py`'s own (already-audited) functions instead. The count holds; genuinely exhausted,
+   not just claimed.
+
+Also chased two smaller, speculative leads to ground rather than shipping either as a guessed fix:
+`experience_items`/`people_projects`' `completion_date`/`start_date` fields have no ordering or
+future-date validation in either `experience/actions.ts` or `people/actions.ts` - but Postgres's own
+`date` column type already rejects a genuinely malformed string outright (a visible insert failure,
+not silent corruption), and there's no stronger "written onto a real document incorrectly" story
+here the way there was for the `value_rm` family - not worth shipping a speculative validation
+addition on a column with no demonstrated real-world bad input. `engine/narrative/build_prompt.py`'s
+`f"R{e['value_rm']}m"` has no decimal rounding, but checked the real HTML inputs feeding it
+(`experience/[id]/page.tsx`, `people/[id]/page.tsx`) and both already carry `step="0.01"` - the
+normal browser UI path can't actually produce more than 2 decimal places, and no real captured
+value has ever shown the ugly-many-decimals shape; not pursued further.
+
+Also independently re-verified (not re-fixed, just re-checked) that migration `0111`'s
+`accept_tender_update_date()` body is internally consistent with `0106`'s own structure, just
+widened for `briefing_shortlisted` - no new issue found there either.
+
+No code bug found - a genuine clean sweep, reached by actually re-deriving and re-checking two
+already-claimed-closed audits from scratch rather than trusting the prior passes' own counts, plus
+ruling out two speculative leads with real evidence instead of guessing either way.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. The 18-item backlog is unchanged (migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB; `narrative_documents`
+PostgREST schema-cache reload; PayFast idempotency design question; "missing ISO 9001 flagged as
+urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard "Decision needed"
+over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up; dangling
+`signatory_person_id` fallback design question; active-subscription reconciliation gap; team
+seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets; pack-generation
+quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): classify_tender.py's closing-time reader silently misread a 12-hour AM/PM time as the raw digits, 12 hours off
 
 Oriented from `7513108`; `git fetch origin main` found one new sibling commit (`b90b5e3`, a clean
