@@ -716,6 +716,44 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): clean sweep - compliance/reminders rotation, no new bug found
+
+Oriented from `bd11c07`; `git fetch origin main` found two new sibling commits since my own last push
+(`0af87df` a real market-intel fix - `byBuyer()` silently split SANRAL into two groups by raw buyer
+string; `bd11c07` a docs-only follow-up checking the same "two raw strings, one entity" bug class
+elsewhere, clean) - both app/-only, no overlap with `engine/compliance/`. Fast-forwarded cleanly. Open
+PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to compliance/reminders. Considered whether the sibling's own "two raw strings, one entity"
+bug class could apply here (anything in this area grouping/matching by a free-text buyer/company
+name rather than an id) - it doesn't: every compliance/reminders function matches by real ids
+(`company_id`/`person_id`/`principal_id`/`tender_id`), never by a raw name string, so that specific
+shape genuinely doesn't reach this area.
+
+Picked two angles not specifically re-derived in the last several passes: (1) `find_readiness_
+changes()`'s `prov::` seen-store logic - checked whether a `field_provenance.status` of literal `None`
+could slip past the `cur_status in ("confirmed", "computed")` first-seen-suppression check and
+generate a confusing "changed from None to None" notification; ruled out by reading migration `0002`'s
+own schema directly (`status text not null check (status in ('confirmed', 'computed',
+'assumed_default', 'missing'))` - never null, never any other value, so this is structurally
+unreachable, not just unlikely). (2) `load_seen_db()`'s own `client.select()` (via `company_profiles.
+RestClient`, not `watch_deadlines.supabase_request()`'s own already-fixed pagination guard) - confirmed
+it ALREADY paginates correctly past PostgREST's 1000-row cap (`RestClient.select()`'s own explicit
+comment: "a seen store read that silently stopped at row 1000 would re-score and re-report everything
+after it"), so a growing seen store can't silently cause repeat reminders. Both genuinely clean, not
+weak findings forced into existence.
+
+Re-checked Finding 91 (the disabled "Compliance deadline reminder check-in" trigger) via `get_trigger`
+directly - still `enabled: false`, `updated_at: 2026-10-27T20:30:13Z`, unchanged for 6 days now. Not
+re-raised in chat again (already escalated 2026-10-28, re-confirmed quietly on every pass since).
+
+**No code bug found - a genuine clean sweep.** Re-ran `engine/compliance/test_watch_deadlines_urgency.
+py` and `test_reminder_seen_db.py` (Part 1, no `REMINDER_PSQL` in this environment) - both `0
+failure(s)`. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): clean sweep - intake rotation re-confirmed exhausted (classify_tender.py re-read end to end after today's own sibling AM/PM fix; scenario_driver.py confirmed harness-only)
 
 Oriented from `8106221`; `git fetch origin main` found one new sibling commit since my own last push
