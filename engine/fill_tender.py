@@ -90,6 +90,36 @@ def fill_person(wb, base, person, projects_lib, slot=None):
     wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])
     return notes
 
+def tender_check_notes(close, b7, bundles):
+    """The three WARNING checks main() runs after filling the workbook, as a
+    pure function of already-read values - no Workbook needed - so they can
+    be tested without a real RRM-family sample (none is committed to this
+    repo; see test_fill_tender.py's own docstring). `bundles` is a list of
+    (tender_number, contract, yes_no_answer, c2_4_b13_value) already read
+    from the template's own TENDDER rows.
+
+    Found 2026-11-01 (SANRAL pack rotation): all three used to only print() -
+    never reaching `notes`, the one list main() returns and assemble_pack.py
+    actually surfaces into the pack's own manifest warnings (what a person
+    reviewing the pack sees). A background worker's stdout is not a
+    notification channel - the same gap this codebase has already found and
+    fixed for other print-only checks (classify_tender.py's own
+    discrepancies() is the analogous SETUP-vs-typed-data check, and it IS
+    wired into real notes)."""
+    notes = []
+    if close != b7:
+        notes.append(f"Form B7 closing date ({b7}) differs from the SETUP sheet's own closing date ({close}) - "
+                     "check which is correct before relying on this.")
+    for n, contract, answer, c24_b13 in bundles:
+        if str(answer).upper() != "YES":
+            notes.append(f"TENDER {n} ({contract}): the SANRAL template's own YES/NO answer reads "
+                         f"{answer!r}, not YES - check before relying on this.")
+        elif c24_b13 in (None, "", 0):
+            notes.append(f"FORM C2.4 TECH  -TENDER {n} has no tender value/hours/category filled in "
+                         "yet - pending real figures.")
+    return notes
+
+
 def main(tpl, pack_path, out, log=None):
     pack = yaml.safe_load(open(pack_path))
     wb = Workbook(tpl)
@@ -146,13 +176,12 @@ def main(tpl, pack_path, out, log=None):
     # Contract number lives at SETUP!C2 (B2 holds the "Contract Number:" label) -
     # O2/P2 are blank on the real template; this print was reading the wrong cells.
     print("Tender (from SANRAL template):", wb.cached("SETUP", "C2"), "| closes", close)
-    if close != b7:
-        print(f"WARNING: Form B7 closing date {b7} differs from SETUP closing date {close}")
 
     # Every bundled contract gets its own "TENDDER n" row (17, 19, 21, ...) with a
     # YES/NO the SANRAL template ships pre-filled. Never write to these - only
     # report what's there, and flag any that isn't YES or whose own Form C2.4
     # financial figures (hours, value, category) are still empty.
+    bundles = []
     for r in range(17, 40, 2):
         contract = wb.cached(T, f"D{r}")
         if contract in (None, "", 0):
@@ -161,14 +190,18 @@ def main(tpl, pack_path, out, log=None):
         n = (r - 17) // 2 + 1
         print(f"  TENDER {n} ({contract}): {answer}" + ("" if str(answer).upper() == "YES"
               else "  <-- WARNING: not YES, check before relying on this"))
-        if str(answer).upper() == "YES":
-            sheet = f"FORM C2.4 TECH  -TENDER {n}"
-            if wb.cached(sheet, "B13") in (None, "", 0):
-                print(f"    WARNING: {sheet} has no tender value/hours/category filled in yet - "
-                      "pending real figures from Sarel")
+        c24_b13 = wb.cached(f"FORM C2.4 TECH  -TENDER {n}", "B13") if str(answer).upper() == "YES" else None
+        if str(answer).upper() == "YES" and c24_b13 in (None, "", 0):
+            print(f"    WARNING: FORM C2.4 TECH  -TENDER {n} has no tender value/hours/category filled in "
+                  "yet - pending real figures from Sarel")
+        bundles.append((n, contract, answer, c24_b13))
+
+    extra_notes = tender_check_notes(close, b7, bundles)
+    if close != b7:
+        print(f"WARNING: Form B7 closing date {b7} differs from SETUP closing date {close}")
 
     # Key persons
-    notes = list(front_notes)
+    notes = list(front_notes) + extra_notes
     for a in pack["key_persons"]:
         bases = [a["block_row"]] if a.get("block_row") else blocks_for(wb, a["position"])
         for base in bases:

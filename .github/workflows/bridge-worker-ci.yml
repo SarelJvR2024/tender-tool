@@ -210,6 +210,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_fill_b7_legacy_precedence.py
 
+      - name: RRM tender filler - closing-date/bundled-contract WARNINGs now reach the pack's own notes, not just stdout (Finding 114)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_tender.py
+
       - name: Key-person docx forms - unrecognized title now logged missing instead of silently skipped (real template)
         if: ${{ !cancelled() }}
         run: python3 engine/test_fill_docx_forms.py

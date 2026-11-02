@@ -6506,3 +6506,59 @@ with NO existing result is byte-for-byte unaffected, matching the pre-existing t
 pattern, confirmed by reading it) - left unfixed this pass to keep this fix contained and verified;
 flagged in `System-Status.md` as the same bug class, worth a follow-up pass rather than a second,
 unverified change bundled into this one.
+
+### Finding 115 (CONFIRMED, FIXED, moderate - the RRM-family SANRAL filler computed three real discrepancy/gap WARNINGs correctly but only ever printed them to the worker container's own stdout, so none of the three ever reached the pack's own manifest, the one place a reviewer actually looks)
+
+**Where:** this cycle's SANRAL pack rotation, after `fill_docx_forms.py`/`sanral_b7.py`/`fill_
+authority_letter.py`/`company_documents.py` (clean-swept the prior cycle) and `fill_financial_hours.py`
+(re-read, already correctly hardened against NaN/Infinity). `engine/fill_tender.py`'s `main()` - the
+RRM Consultant Tender family filler (`assemble_pack.py`'s `FILLERS["RRM Consultant Tender"]`).
+
+**What was tested:** `main()` runs three real, computed checks after filling the workbook: (1) Form
+B7's own closing date (`TEND 1X!F125`) against the SETUP sheet's own closing date (`SETUP!C3`) - a
+genuine discrepancy would mean the template itself disagrees with itself, the same class of signal
+`classify_tender.discrepancies()` already surfaces for client-typed-vs-SETUP mismatches elsewhere in
+this codebase; (2) each bundled "TENDDER n" row's own YES/NO answer, flagging any that isn't YES; (3)
+for a YES row, whether its own Form C2.4 sheet has real tendered figures yet. All three were computed
+correctly but only ever `print()`ed - never appended to `notes`, the one list `main()` returns that
+`assemble_pack.py` actually folds into the pack's real `warnings`/manifest (confirmed by reading the
+call site: `warnings += FILLERS[family].main(...) or []`, then `"warnings": warnings` in the saved
+manifest). A background worker's stdout is not a notification channel - the exact "a real check exists
+in code but never reaches a real surface" shape this session has found and fixed repeatedly elsewhere
+(Finding 91's disabled trigger, Finding 113's dropped `summary` field), here inside a filler that had
+never had this specific angle checked before.
+
+**Finding (CONFIRMED).** For the RRM family specifically (the minority family by sample count in this
+repo, but a real, live SANRAL route `assemble_pack.py` dispatches to), a genuine Form-B7-vs-SETUP
+closing-date conflict, a bundled contract whose own template answer isn't YES, or a bundled contract
+still missing its real Form C2.4 figures would ALL be silently invisible to anyone reviewing the pack
+in the app - visible only in container logs nobody routinely reads. `fill_conventional.py` (the
+majority Conventional family) has no equivalent closing-date check at all, confirming this gap was
+specific to the RRM filler's own, more thorough diagnostic, not a codebase-wide pattern needing a
+wider fix.
+
+**Fix:** factored the three checks into a new, pure `tender_check_notes(close, b7, bundles)` function
+(no `Workbook` needed - takes already-read values) returning the note strings; `main()` now appends
+its output to `notes` (kept the existing `print()`s too, for log visibility) instead of only printing.
+Scoped to `fill_tender.py` only - `fill_conventional.py` was deliberately left alone: adding a brand
+new closing-date check there would be a feature addition needing its own real-template verification,
+not a "contained issue" fix of something already computed but unsurfaced.
+
+**Verified red-then-green.** New file `engine/test_fill_tender.py` (6 test functions, 8 checks) drives
+`tender_check_notes()` directly - no RRM-family sample workbook is committed to this repo (the exact
+same limitation `test_fill_b7_legacy_precedence.py`'s own docstring already names for this file's
+earlier Finding-81 fix), which is precisely why the checks were factored into a pure function: testable
+without one. Revert-and-confirm-red: reverting made the test file's own import crash with
+`AttributeError: module 'fill_tender' has no attribute 'tender_check_notes'` (the function didn't exist
+yet) - confirmed the test genuinely exercises the new code, not a tautology; restored, `0 failure(s)`.
+Regression-checked `engine/test_fill_b7_legacy_precedence.py` (the real, template-backed consumer of
+this same module's Form B7 logic) - still `0 failure(s)`, unaffected. `py_compile` clean. Wired the new
+test into `bridge-worker-ci.yml` right after the existing Finding-81 B7 step (validated with
+`yaml.safe_load` before committing).
+
+**Regression:** `engine/fill_tender.py` (`tender_check_notes()`: new ~25-line pure function; `main()`:
+the three checks' control flow is otherwise unchanged, their `print()` output is byte-for-byte
+identical - only the previously-missing `extra_notes`/`notes` append is new), `engine/test_fill_
+tender.py` (new file, 6 test functions, 8 checks), `.github/workflows/bridge-worker-ci.yml` (1 new
+step). No schema or other call-site changes - `assemble_pack.py`'s own handling of `FILLERS[family].
+main()`'s return value is unchanged; it simply now receives a fuller list.

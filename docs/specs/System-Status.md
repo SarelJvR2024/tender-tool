@@ -334,6 +334,61 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): fix - the RRM SANRAL filler's three real discrepancy/gap WARNINGs (Form B7 vs SETUP closing date, a bundled contract not YES, a YES contract with no Form C2.4 figures yet) only ever reached the worker container's stdout, never the pack's own manifest
+
+Oriented from `aa3a866`; `git fetch origin main` found two new sibling commits since my own last push
+(`c262bc1`, `aa3a866` - both discovery-area, one real regex fix + one clean sweep, no overlap). Fast-
+forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no
+collision.
+
+Rotation note: strict order says discovery is next, but a sibling "solution-architect review" pass is
+very actively working that exact area right now (4 real fixes + 2 clean sweeps across discovery
+sources in the last ~6 hours alone) - picked SANRAL pack instead (2nd in rotation, untouched since
+yesterday's own clean sweep of a different file set) to avoid any risk of colliding mid-flight, per
+this routine's own established precedent of skipping an area a sibling is actively hammering.
+
+Read `engine/fill_tender.py` (the RRM-family filler, `assemble_pack.FILLERS["RRM Consultant Tender"]`)
+end to end - no dedicated test file existed for it at all before this (`test_fill_b7_legacy_
+precedence.py` only exercises its Form B7 precedence logic, via `fill_conventional.py`'s own real-
+template path, with its own docstring already noting no RRM sample workbook is committed to drive
+`fill_tender.py` the same way).
+
+**Found and fixed Finding 115 (CONFIRMED, moderate)**: `main()` computes three real checks after
+filling the workbook - Form B7's own closing date vs SETUP's, a bundled "TENDDER n" row whose own
+YES/NO answer isn't YES, and a YES row with no Form C2.4 figures yet - all correctly, but only ever
+`print()`ed. Confirmed by reading `assemble_pack.py`'s own call site that `main()`'s RETURN value
+(`notes`) is what actually becomes the pack's real `warnings`/manifest; these three never flowed into
+it. For the RRM family (a real, live SANRAL route), a genuine Form-B7-vs-SETUP closing-date conflict
+or a missing bundled-contract figure would be invisible to anyone reviewing the pack in the app -
+visible only in worker container logs nobody routinely reads.
+
+Fixed by factoring the three checks into a new, pure `tender_check_notes(close, b7, bundles)` function
+(no `Workbook` needed) and having `main()` append its output to `notes` (kept the existing `print()`s
+too). Scoped to `fill_tender.py` only - `fill_conventional.py` (the majority Conventional family) has
+no equivalent closing-date check at all, confirming this is a gap in this filler's own extra
+diagnostic, not a codebase-wide pattern; adding a brand-new check to the other filler would be a
+feature addition, not a contained fix.
+
+Verified red-then-green: new file `engine/test_fill_tender.py` (6 test functions, 8 checks) against
+the pure function directly - no RRM sample workbook exists in this repo to test `main()` end to end,
+the exact same limitation this file's own earlier Finding-81 fix already lived with. Reverting made
+the test file's own import crash (`AttributeError`, the function didn't exist), confirming it
+genuinely exercises the new code; restored, `0 failure(s)`. Regression-checked `engine/test_fill_b7_
+legacy_precedence.py` (the real, template-backed consumer of this same module) - unaffected. `py_
+compile` clean. Wired into `bridge-worker-ci.yml` right after the existing Finding-81 step (`yaml.
+safe_load`-validated before committing). Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding
+115.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/fill_tender.py`
+- `engine/test_fill_tender.py` (new file)
+- `.github/workflows/bridge-worker-ci.yml`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-01, standing QA/robustness review): fix - a worker killed between writing an onboarding classification result and marking its upload row 'classified' left that document permanently stuck showing as both "to review" and "couldn't be read" at once; same race shape flagged (not fixed) in the CV-extraction queue too
 
 Oriented from `6363fdc`; `git fetch origin main` found one new sibling commit since my own last push
