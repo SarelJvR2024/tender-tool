@@ -14,6 +14,70 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): clean sweep - etenders_national.py tested thoroughly against its real live OCDS API and site-category endpoint, no bug found; one honest, non-actionable observation noted
+
+Oriented from `aa3a866`; `git fetch origin main` found one new sibling commit (`37ec943`, a real
+`fill_tender.py` fix - RRM filler's discrepancy/gap warnings never reached the pack's own manifest,
+only stdout - touches `engine/fill_tender.py`/`engine/test_fill_tender.py`, no overlap) and fast-
+forwarded local `main` to match. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain,
+both unchanged, no collision.
+
+Continuing this session's "test a discovery scraper against its real live source site" technique
+(5 real bugs found so far: `sars_procurement.py`, `vaal_central_water.py`, `lephalale.py`,
+`eskom_bulletin.py`; `capetown_procurement.py`/`kouga.py`/`transnet_etenders.py`/`etenders_portal.py`
+confirmed clean). Picked `etenders_national.py` (National Treasury's own OCDS API - not tested this
+way this session).
+
+Fetched the real live `OCDSReleases` API directly across several date windows (200-400 real
+releases per fetch, multiple fetches): confirmed `tender.status` is genuinely always `""` and
+`awards`/`contracts` are genuinely always empty on every real release sampled, exactly as the
+module's own header docstring already documents from 2026-10-16 testing - still true today.
+`normalize()` ran clean on every real release with zero crashes, zero null titles (every real
+release carries both a description and a bid number). `dedupe_releases()` and the real live-site
+`fetch_site_categories()`/`attach_site_categories()` cross-reference also ran clean end to end
+(2,033 real site categories fetched, 177/200 sampled OCDS releases matched - the gap is expected,
+not a bug: the site's category endpoint only covers `status=1` "advertised" rows, while the OCDS
+fetch covers the full date range regardless of status).
+
+One honest, **non-actionable** observation, not fixed: `normalize()`'s own `is_closed` field is
+computed with a naive `datetime.datetime.now().isoformat()` string comparison against the OCDS
+`closing_date`, instead of reusing this codebase's own established, SAST-aware `sh.is_past()`
+helper (used correctly everywhere else a closing date needs a now-vs-then comparison). Traced
+every real reader of this specific field rather than assuming either way: the one real, scheduled,
+customer-facing consumer (`watch_new_tenders.py`, run daily by `.github/workflows/daily-discovery.yml`)
+calls `etenders_national.normalize()` directly in its OCDS-fallback branch, but its own `run()`
+function never actually reads `is_closed` or `closing_date` from that output at all - dead field in
+that one real pipeline. The only code that does read it (`assess_tender.py`'s go/no-go CLI, and
+`etenders_national.py`'s own `--out report.json` CLI) is manual/interactive tooling, not an
+automated customer-facing path. Did NOT change it to reuse `sh.is_past()`: `source_http.py`'s own
+`parse_utc()` docstring flags a deeper, already-documented, unresolved quirk ("OCDS's 'Z' on
+'...T12:00:00Z' closing times is plainly wrong: tenders close at local noon") that I could not
+resolve in the time available - whether `parse_sast()`'s existing `Z`-as-UTC-then-convert-to-SAST
+handling already correctly compensates for that quirk, or shares it, is a genuinely separate,
+deeper question than what this pass set out to check. Swapping in `sh.is_past()` without first
+resolving that would just propagate whichever behavior `parse_sast()` already has onto a field
+nothing customer-facing reads - not worth guessing at. Flagged here for whoever next investigates
+the OCDS-closing-time-vs-`parse_sast()` question specifically, not added to Sarel's own 18-item
+backlog (no live consequence today, nothing for him to decide).
+
+No code bug found - a genuine clean sweep, reached by testing real live data across every function
+in the file, not by reading the code alone. `test_gov_sources.py`/`test_discovery_fanout.py` re-run
+as a sanity check (no code changed) - both clean.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. The 18-item backlog is unchanged (migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB;
+`narrative_documents` PostgREST schema-cache reload; PayFast idempotency design question; "missing
+ISO 9001 flagged as urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard
+"Decision needed" over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up;
+dangling `signatory_person_id` fallback design question; active-subscription reconciliation gap;
+team seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets;
+pack-generation quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): clean sweep - etenders_portal.py tested thoroughly against its real live site (advertised/awarded/closed tabs), no bug found
 
 Oriented from `c262bc1`; `git fetch origin main` found nothing new, local already matched exactly.
