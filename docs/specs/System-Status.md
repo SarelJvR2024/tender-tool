@@ -14,7 +14,68 @@
 
 ---
 
-## This pass (2026-11-02, standing solution-architect review): Market Intelligence's "By buyer" breakdown silently split SANRAL across two groups - the same real buyer, two different raw strings, no normalisation before grouping
+## This pass (2026-11-02, standing solution-architect review): follow-up on the SANRAL byBuyer() fix - checked for the same "two raw strings, one real entity" bug class elsewhere in marketPricing.ts and the backfill pipeline; genuinely clean
+
+Oriented from `0af87df`; `git fetch origin main` found nothing new, local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision with anything touched here.
+
+Directly followed up on the immediately-prior pass's real `byBuyer()` fix (SANRAL stored as either
+the literal `"SANRAL"` or eTenders' own long free-text name, never canonicalised before grouping).
+Checked whether the same class of bug - a backfilled/ingested field with two known raw-string variants
+for the same real-world entity, never canonicalised before aggregation - exists anywhere else:
+
+- **`byCategory()` / `categories`**: traced `store_award_outcomes.py`'s own `row["categories"] =
+  assess_tender.categorize(...)` - every row, regardless of which source (SANRAL or eTenders) it came
+  from, runs through the exact same single canonicalising function. No raw free text ever reaches
+  `categories` directly, so there is no second-string variant to collide on. Clean by construction.
+- **`byProvince()` / `province`**: `province` IS written from each source's own raw field
+  (`row.get("province")` on both the SANRAL and eTenders ingestion paths, per `award_outcomes.py`), so
+  the same shape of risk the buyer field had is structurally possible here. Checked every real
+  `"province"` string literal captured across this session's own test fixtures
+  (`engine/discovery/test_*.py`) for the 9 SA provinces: all five observed so far (Eastern Cape,
+  Gauteng, KwaZulu-Natal, North West, Northern Cape) are already the same canonical full name across
+  every source that states them - no abbreviation/full-name split, no "(SANRAL)"-style parenthetical
+  variant, found anywhere in real captured data. Not provably impossible for a yet-unseen
+  source/combination, but no concrete evidence of it today - correctly not "fixed" against a
+  hypothetical, same restraint this session has applied to other speculative leads (`completion_date`
+  ordering, unrounded decimals).
+- **`segmentsFor()`** (the per-company, same-buyer-same-discipline comparison segment, a different
+  code path from the market-wide `byBuyer()`): already structurally immune - it recognises SANRAL via
+  `isSanral` (derived from the `outcome_key`'s `sanral:` prefix, set once at ingestion time), never by
+  matching on the raw `buyer` string at all, so it was never exposed to this bug in the first place.
+
+No code bug found this pass - a genuine, substantiated clean sweep (verified by reading the real
+ingestion source and real captured fixture data, not just reasoning about it in the abstract). QA
+sanity sweep: no code touched, so no new QA run was needed; the prior pass's own fix
+(`lib/marketPricing.spec.ts` 13/13, full `vitest` 337/337) stands unchanged.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+**Standing backlog, unchanged at 18 items** (all `#`-numbered items below are Sarel's own call, not
+mine to resolve):
+- Migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` - written, verified, **not yet applied to the
+  live database** (needs Sarel's run via Supabase's SQL Editor; no DDL path exists from this session)
+- `narrative_documents` PostgREST schema-cache reload - not yet confirmed
+- PayFast idempotency design question
+- "Missing ISO 9001 flagged as urgent" UX question
+- Form B7 compulsory-vs-matrix disagreement (real SANRAL template conflict)
+- Dashboard "Decision needed" over-triggering finding
+- Impersonation-feature token-refresh gap
+- Heads-up only: the next real SANRAL fingerprint check will show an expected, already-fixed baseline
+  mismatch - FYI, no action needed
+- Dangling `signatory_person_id` fallback design question (Finding 96)
+- No reconciliation for an `active` subscription whose `current_period_end` has silently passed with
+  no new ITN ever arriving (Finding 97)
+- Low-severity TOCTOU race in `team/actions.ts`'s seat-limit check
+- No storage-level size/type limit on any of the 9 upload buckets (Finding 105)
+- Pack-generation quota TOCTOU race (`company_can_request_pack()`'s two callers check-then-insert with
+  no lock between)
+
+---
+
+## Earlier pass (2026-11-02, standing solution-architect review): Market Intelligence's "By buyer" breakdown silently split SANRAL across two groups - the same real buyer, two different raw strings, no normalisation before grouping
 
 Oriented from `8106221`; `git fetch origin main` found one new sibling commit (`e08f1ea`, docs-only
 clean sweep of the intake rotation, no overlap) and fast-forwarded local `main` to match. Open PRs
