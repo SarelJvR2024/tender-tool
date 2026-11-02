@@ -14,6 +14,61 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): clean sweep - etenders_portal.py tested thoroughly against its real live site (advertised/awarded/closed tabs), no bug found
+
+Oriented from `c262bc1`; `git fetch origin main` found nothing new, local already matched exactly.
+Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Continuing this session's "test a discovery scraper against its real live source site" technique
+(5 real bugs found so far: `sars_procurement.py`, `vaal_central_water.py`, `lephalale.py`,
+`eskom_bulletin.py`). Picked `etenders_portal.py` (not tested this way this session) - National
+Treasury's eTenders portal, the primary feed for ~2,000+ open tenders across 400+ buyers.
+
+Fetched the real live `PaginatedTenderOpportunities` endpoint directly across all three tabs this
+reader uses:
+- **Advertised** (500 real rows): confirmed `briefing()`'s two field names (`briefingSession`,
+  `compulsory_briefing_session`) both genuinely exist and match the code - no mismatch. Found 8/500
+  real rows with `briefingSession: true` but a `null` date (a real, live, compulsory briefing with a
+  venue but no date yet announced) - traced this all the way through `briefing()` ->
+  `tender_changes.py`'s `briefing_date` -> `tenders.briefing_date` (nullable) -> every app-side
+  consumer (`briefingReminderCandidates`, the Tender Workspace's own conditional render) and
+  confirmed a null briefing date is already a correctly-handled, existing state everywhere, not a
+  crash or a silently-wrong value. Not a bug.
+- **Awarded** (reproduced the file's own documented HTTP 500-then-chunk-recovery behavior live -
+  `fetch_rows()`'s recovery path worked exactly as documented): ~1,300 real rows sampled across
+  several fetches, zero duplicate ids found in this tab, zero `normalize()` crashes.
+- **Closed** (539 real rows, the tab `dedupe_rows()`'s own docstring specifically calls out for
+  multi-row joins): found 11 real duplicate-id groups. Traced one in full (id 175819, 3 rows) - the
+  only field that actually differed across the duplicates was each row's own `closed` sub-object
+  (3 different closing-reason/dateModified values) - confirmed `dedupe_rows()` does NOT merge this
+  field (only `cancelled` and `bidders` are merged, per its own docstring), so 2 of the 3 real
+  closing-reason records are silently dropped on a genuine live duplicate. Checked whether this
+  actually matters: grepped every reader of a portal row's `closed` key across
+  `etenders_portal.py`/`gov_sources.py`/`tender_changes.py` - `normalize()` itself never reads
+  `row.get("closed")` at all (status comes from the row's own top-level `status` string, not this
+  sub-object), and `gov_sources.merge()`'s own portal-closed matching only ever reads the already-
+  normalized `release` dict's `status`/`closing_date`/`documents` fields. The `closed` sub-object is
+  dead data as far as this whole pipeline is concerned - confirmed, not assumed. Not a bug with a
+  real consequence.
+
+No code bug found - a genuine clean sweep, reached by testing real live data end to end across all
+three tabs this reader uses, not by reading the code alone. `test_gov_sources.py` re-run as a sanity
+check (no code changed) - `ALL PASSED`.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. The 18-item backlog is unchanged (migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB;
+`narrative_documents` PostgREST schema-cache reload; PayFast idempotency design question; "missing
+ISO 9001 flagged as urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard
+"Decision needed" over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up;
+dangling `signatory_person_id` fallback design question; active-subscription reconciliation gap;
+team seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets;
+pack-generation quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-01, standing solution-architect review): fix - eskom_bulletin.py's "award" classifier required a word boundary that Eskom's own real reference numbers don't have, showing 5 real awarded tenders as still open
 
 Oriented from `6363fdc`; `git fetch origin main` found one new commit since - `76451fe`, a sibling
