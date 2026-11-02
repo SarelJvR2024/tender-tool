@@ -14,6 +14,71 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): clean sweep - taxonomy admin area and the position-to-registration-body matcher both read end to end, no bug found
+
+Oriented from `e47214a`; `git fetch origin main` found one new sibling commit (`2047aba`, Finding 116
+- porting the same "stuck between two states" race fix already applied to `process_onboarding_jobs.py`
+onto `extract_cv_fields.py`'s own CV upload queue, confirmed via its own commit body to touch only
+`engine/cv/extract_cv_fields.py`/`test_extract_cv_fields.py`/docs, no overlap) and fast-forwarded local
+`main` to match. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no
+collision.
+
+With the discovery-scraper, SECURITY DEFINER/RLS/email-escaping, `briefing_shortlisted`-allow-list, and
+backslash-in-`re.sub()` audits all already closed out, this pass picked two areas not yet explicitly
+reviewed this session:
+
+1. **`/admin/taxonomy`** (`app/app/admin/taxonomy/actions.ts` + migration `0054`'s
+   `approve_discipline_suggestion()`/RLS policies) - the shared discipline-list editor and the
+   company-suggests-a-tag -> admin-approves-or-rejects flow. Read every action end to end: every one
+   of `addCategory`/`updateCategory`/`approveSuggestion`/`rejectSuggestion` calls `requireAdmin()`
+   first (checked against `is_platform_admin()`, with RLS as the real backstop behind it); the SQL
+   side's `approve_discipline_suggestion()` takes a `for update` row lock on the suggestion, re-checks
+   `status = 'pending'` under that lock (the same TOCTOU-safe pattern this session's own
+   `redeem_company_invite()` fix established), and is `security invoker` so the caller's own RLS
+   applies to both of its writes - correctly gated, not just by the function's own check. The
+   company-side `suggestSharedCategory()`/`withdrawSuggestion()` (`app/app/experience/actions.ts`) rely
+   on RLS for company scoping rather than an explicit `.eq("company_id", ...)` filter - verified the
+   policies themselves (`"suggestions: members withdraw a pending one"`,
+   `discipline_category_suggestions_one_pending` unique index) actually enforce this, not just assumed
+   they do. No bug found.
+
+2. **`app/lib/personCredentials.ts`'s `POSITION_BODY_RES`** (the regexes that decide which professional
+   body - SACNASP/SAGC/SACAP/SACPLAN/SACQSP/SACPVP/PSIRA - a SANRAL position description's own free text
+   requires), the same "stress-test a regex against real-world phrasing" technique that found several
+   real bugs in `engine/discovery/` and `engine/intake/` earlier this session. Traced every negative
+   lookahead/lookbehind (`architect(?!ural\s+engineer)`, `(?<!landscape\s)architect`,
+   `(?<!quantity\s)surveyor`) against the real captured SANRAL C3.1.11 fixture text
+   (`engine/discovery/fixtures/c3111/*.txt`) and the existing `tenderCompliance.test.ts` cases
+   (`"Design Specialist 4 - Quantity Surveyor"`, `"... Design Specialist 5 - Land Surveyor"`) - both
+   confirmed these patterns' plain-space assumption matches real text. Considered, but did NOT ship,
+   widening the `\s+`/`\s` separators to also tolerate a hyphen (`Quantity-Surveyor`,
+   `Landscape-Architect`), the same kind of widening that fixed several real line-wrap/formatting bugs
+   this session - traced `position_description`'s own real source (the tender's SETUP sheet, per this
+   file's own header comment) rather than the C3.1.11 table fixture I'd first checked (a different
+   document entirely, already handled by the already-twice-fixed `key_person_minimums.py`), found no
+   real captured hyphenated-compound-title sample there, and stopped rather than guess at a fix with no
+   concrete evidence behind it - the same discipline the prior pass applied to the `completion_date`/
+   `value_rm`-rounding leads. Also noted, not flagged as a backlog item: `personCredentials.ts` has no
+   dedicated test file of its own (`tenderCompliance.test.ts` covers the position-matching regexes
+   only indirectly, via `minimumRequirementFor()`).
+
+No code bug found - a genuine clean sweep. QA sanity sweep: `node --experimental-strip-types --test
+lib/*.test.ts` (from `app/`) -> 215/215, unaffected (nothing changed this pass).
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item, nothing resolved. The 18-item backlog is unchanged (migrations
+`0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need applying to the live DB; `narrative_documents`
+PostgREST schema-cache reload; PayFast idempotency design question; "missing ISO 9001 flagged as
+urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard "Decision needed"
+over-triggering; impersonation token-refresh gap; SANRAL fingerprint heads-up; dangling
+`signatory_person_id` fallback design question; active-subscription reconciliation gap; team
+seat-limit TOCTOU race; no storage-level size/type limit on the 9 upload buckets; pack-generation
+quota TOCTOU race).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): clean sweep - backslash-in-re.sub() bug class re-audited codebase-wide, the "5 real LLM call sites" count independently re-verified, a couple of speculative leads ruled out with evidence
 
 Oriented from `d4c5a0c`; `git fetch origin main` found nothing new, local already matched exactly.
