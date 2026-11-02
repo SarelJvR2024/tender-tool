@@ -41,6 +41,7 @@ describe("printCutoffCandidates", () => {
   it("never fires once the tender has reached a closed pipeline stage", () => {
     const now = new Date("2026-11-10T11:00:00+02:00");
     expect(printCutoffCandidates([pack({ pipeline_stage: "submitted" })], tendersById, now)).toEqual([]);
+    expect(printCutoffCandidates([pack({ pipeline_stage: "briefing_shortlisted" })], tendersById, now)).toEqual([]);
     expect(printCutoffCandidates([pack({ pipeline_stage: "won" })], tendersById, now)).toEqual([]);
     expect(printCutoffCandidates([pack({ pipeline_stage: "lost" })], tendersById, now)).toEqual([]);
   });

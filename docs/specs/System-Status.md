@@ -14,6 +14,91 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): one more targeted sweep for the missing-`briefing_shortlisted` bug class - 7 more real sites found across 6 files, the tender workspace page itself worst-hit
+
+Oriented from `fd18533`; `git fetch origin main` found one new sibling commit (`d28666d`, a real fix
+- `submission_due_signals()` crashed with a raw `TypeError` on a non-string `closing_date` - no
+overlap with anything touched here) and fast-forwarded local `main` to match. Open PRs re-checked via
+the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Ran one more broad sweep (`grep` across both `app/` and `engine/` for any hardcoded array/tuple
+containing `"submitted"` together with `"won"`/`"lost"` not yet checked this session) for the same bug
+class: migration `0105` (PR #173) widened `pipeline_stage` from 5 values to 7, adding
+`briefing_shortlisted` between `submitted` and an outcome, but many pre-existing hardcoded
+`submitted`/`won`/`lost` allow-lists across the codebase were never widened to match, silently
+mistreating a tender genuinely awaiting the buyer's briefing/shortlist decision as still-in-progress
+(or, inversely, as not-yet-submitted). 19 candidate files surfaced; most were already correctly fixed
+by earlier passes (`pastSubmissionReuse.ts`, `reuse-past-submission.tsx`, `opportunityInsights.ts`,
+`pipeline.ts`/`.spec.ts`, `pipeline/page.tsx`, `dispatchTriage.ts`/`.test.ts`,
+`returnablesDigestCandidates.ts`, `deadlineReminders.ts` - all confirmed to already include
+`briefing_shortlisted`). Found and fixed 7 genuinely new, distinct instances across 6 files:
+
+1. **`app/app/tenders/[id]/page.tsx`** - three separate bugs in the main tender workspace page itself,
+   never touched by any earlier pass despite being the most central page in the product:
+   - `dispatchLogistics`'s own stage check omitted `briefing_shortlisted`, so a tender at that stage
+     kept showing print/transit dispatch planning as if it still needed to go out.
+   - The "Submitted on {date}" record display's own stage check likewise omitted it, so a genuinely
+     submitted tender sitting at `briefing_shortlisted` silently showed no submission record at all -
+     confirmed against migration `0105`'s own trigger that `submitted_at` really is stamped for this
+     stage too, so this was a pure read-side gap, not a data gap.
+   - `WorkspaceStatusBadge()` had **no branch at all** for `briefing_shortlisted` - such a tender fell
+     through to "Ready to submit" or "Assessing & building", as if it hadn't been submitted yet. Added
+     a branch using the same label text `pipeline.ts`'s own `STAGE_META` already uses for this stage.
+2. **`app/lib/pipelineCardHelpers.ts`**'s `primaryActionLabel()` - missing from the "already done, show
+   View bid pack" branch; a `briefing_shortlisted` card's `packHealth` is always `null` (confirmed:
+   `pipeline/page.tsx`'s `biddingCards` filter only computes it for `assessing`/`building`), so this
+   fell through to "Continue workspace →" as if the pack still needed work. Added a regression test to
+   `pipelineCardHelpers.spec.ts`; confirmed red-without-fix, green-with-fix via `git stash`.
+3. **`app/lib/printCutoffReminders.ts`**'s `CLOSED_STAGES` - missing, so an already-submitted tender
+   awaiting briefing/shortlist would still nag for a print/transit cutoff that's already moot (the same
+   "submitted-tender nagging gap" shape PR #174 fixed in the two cron scripts, found here in a separate
+   lib file never touched by that PR). Added a regression test to `printCutoffReminders.spec.ts`;
+   confirmed red-without-fix, green-with-fix via `git stash`.
+4. **`app/app/tenders/[id]/market-context.tsx`**'s "not found in register" note - missing, so the "why
+   isn't my price in the register yet" explanation didn't show for a tender at this stage even though
+   the same question genuinely applies.
+5. **`app/app/pipeline/pricing/page.tsx`**'s `renderPricingHistory()` - two bugs, the first materially
+   worse than every other site found this session:
+   - The Supabase `.in("pipeline_stage", [...])` query itself was missing the value, meaning a
+     company's own real submitted price for a tender at that stage was **entirely absent** from the
+     page - not merely mis-categorized, but invisible to `all`, `priced`, the per-group summary stats,
+     and the credit/commission totals, with nothing on screen to indicate it was missing.
+   - The "Awaiting outcome" filter's own `outcome === "submitted"` check didn't also match
+     `briefing_shortlisted`, even though it's equally "awaiting an outcome" - fixed without adding a new
+     dropdown option, just making the existing filter semantically correct.
+
+Deliberately did NOT touch `app/app/pipeline/outcome-form.tsx`'s own `stage !== "submitted" && stage
+!== "won" && stage !== "lost"` gate after tracing the real alternate code path: a `briefing_shortlisted`
+tender can still advance to `won`/`lost` via the plain stage-advance buttons in `pipeline/page.tsx`
+(`NEXT_STAGES`/`StageButton`, rendered whenever `card.stage !== "submitted"`), and `OutcomeForm`
+correctly reappears once it reaches `won`/`lost`. A legitimate product-flow nuance (a different capture
+point for outcome details, no data loss), not a correctness bug.
+
+No test added for the `pricing/page.tsx` or `market-context.tsx` fixes - both are Server
+Component/page-level functions (`renderPricingHistory()` is an unexported `async function`, not a pure
+lib function with an existing spec file), the same "needs a Supabase client/session to exercise for
+real" category already accepted for other Server Component fixes this session. Verified instead by
+reading the real diff directly against migration `0105`'s trigger and `pipeline/page.tsx`'s actual
+rendering logic.
+
+QA: `npx tsc --noEmit` clean, `npx eslint` clean on all 6 touched files, full `npx vitest run` ->
+**338/338** passed (up from 337 - the two new regression tests). Both new tests independently confirmed
+red without their fix and green with it restored, via `git stash`.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, consistent with every prior fix
+of this exact bug class this session, now 18 real sites found and fixed in total):
+- `app/app/tenders/[id]/page.tsx`
+- `app/app/tenders/[id]/market-context.tsx`
+- `app/app/pipeline/pricing/page.tsx`
+- `app/lib/pipelineCardHelpers.ts` + `.spec.ts`
+- `app/lib/printCutoffReminders.ts` + `.spec.ts`
+- `docs/specs/System-Status.md`
+
+No new backlog item - standalone, now-fixed bugs, not a judgment call for Sarel. The 18-item backlog
+below is unchanged.
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): "Start from a previous submission" had a third, independent copy of the same missing-`briefing_shortlisted` bug - and a second, inverse instance in the same feature
 
 Oriented from `bd11c07`; `git fetch origin main` found one new sibling commit (`a85eda6`, docs-only

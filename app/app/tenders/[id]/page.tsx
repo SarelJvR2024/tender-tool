@@ -464,8 +464,13 @@ export default async function TenderWorkspacePage({
       : openPositionsCount > 0
         ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming`
         : null;
+  // briefing_shortlisted (0105) is also past the point of needing print/
+  // transit dispatch planning - the tender has already gone in, same reason
+  // submitted/won/lost already exclude it; found 2026-11-02, the same
+  // missing-stage gap this bug class has turned up 11 other times this
+  // session (most recently pastSubmissionReuse.ts's own inverse instance).
   const dispatchLogistics =
-    tenderPack && !["submitted", "won", "lost"].includes(tenderPack.pipeline_stage)
+    tenderPack && !["submitted", "briefing_shortlisted", "won", "lost"].includes(tenderPack.pipeline_stage)
       ? {
           closingDate: tenderFacts?.closing_date ?? null,
           submissionType: tenderPack.submission_type,
@@ -709,10 +714,15 @@ export default async function TenderWorkspacePage({
               )}
 
               {/* The actual record of submission (0021's trigger stamps this
-                  the moment pipeline_stage first reaches submitted/won/lost)
-                  - separate from the submission-deadline reminder below,
-                  which is "remind us before it's due". */}
-              {tenderPack && ["submitted", "won", "lost"].includes(tenderPack.pipeline_stage) && tenderPack.submitted_at && (
+                  the moment pipeline_stage first reaches submitted/won/lost,
+                  widened by 0105 to also stamp it on briefing_shortlisted -
+                  see that migration's own trigger) - separate from the
+                  submission-deadline reminder below, which is "remind us
+                  before it's due". Found 2026-11-02: this read-side check
+                  was never widened to match, so a genuinely submitted
+                  tender sitting at briefing_shortlisted silently showed no
+                  "Submitted on" record at all. */}
+              {tenderPack && ["submitted", "briefing_shortlisted", "won", "lost"].includes(tenderPack.pipeline_stage) && tenderPack.submitted_at && (
                 <div className="mt-1.5 text-[13px] font-semibold text-success">
                   Submitted on {(formatDate(tenderPack.submitted_at) ?? "—")}
                 </div>
@@ -1691,6 +1701,14 @@ function WorkspaceStatusBadge({
     className = "bg-muted text-muted-foreground";
   } else if (tenderPack && tenderPack.pipeline_stage === "submitted") {
     label = "Submitted";
+    className = "bg-success/10 text-success";
+  } else if (tenderPack && tenderPack.pipeline_stage === "briefing_shortlisted") {
+    // Found 2026-11-02: missing entirely before this - a tender here (0105;
+    // already submitted, now awaiting the buyer's briefing/shortlist
+    // decision) fell all the way through to the "Assessing & building"/
+    // "Ready to submit" branches below, as if it hadn't been submitted yet.
+    // Same label text as pipeline.ts's own STAGE_META for this stage.
+    label = "Briefing / shortlisted";
     className = "bg-success/10 text-success";
   } else if (tenderReadiness && tenderReadiness.thingsLeft === 0) {
     label = "Ready to submit";

@@ -34,7 +34,14 @@ export function packHealthStatusFromReadiness(score: number, fixCount: number): 
  * opened at all; everything else is still a workspace to continue.
  */
 export function primaryActionLabel(stage: PipelineStage, packHealth: PackHealth | null): string {
-  if (stage === "submitted" || stage === "won" || stage === "lost") return "View bid pack →";
+  // briefing_shortlisted (0105) is also "done" for this purpose - already
+  // submitted, now awaiting the buyer's briefing/shortlist decision - the
+  // same reason submitted/won/lost already return here. Found 2026-11-02:
+  // missing before this, so a briefing_shortlisted card (whose packHealth is
+  // always null - page.tsx's own biddingCards only computes it for
+  // assessing/building) fell through to "Continue workspace →", as if the
+  // pack still needed work.
+  if (stage === "submitted" || stage === "briefing_shortlisted" || stage === "won" || stage === "lost") return "View bid pack →";
   if (packHealth?.status === "blocked") return `Fix returnables (${packHealth.fixCount}) →`;
   if (packHealth?.status === "not_started") return "Start workspace →";
   return "Continue workspace →";

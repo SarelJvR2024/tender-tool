@@ -23,6 +23,10 @@ describe("primaryActionLabel", () => {
     expect(primaryActionLabel("lost", null)).toBe("View bid pack →");
   });
 
+  it("briefing_shortlisted also reads 'View bid pack' - it's already submitted, same as submitted/won/lost (found 2026-11-02: packHealth is always null here, so this used to fall through to 'Continue workspace')", () => {
+    expect(primaryActionLabel("briefing_shortlisted", null)).toBe("View bid pack →");
+  });
+
   it("a blocked pre-submission tender shows the real mandatory-item count, not a generic label", () => {
     expect(primaryActionLabel("building", { status: "blocked", score: 60, confirmedCount: 3, totalCount: 5, fixCount: 2 })).toBe("Fix returnables (2) →");
   });

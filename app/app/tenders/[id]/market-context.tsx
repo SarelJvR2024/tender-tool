@@ -212,7 +212,10 @@ function ThisTender({ outcome, position, submitted, stage, inclVat }: { outcome:
             whether a register amount includes VAT - check which is right.
           </div>
         )}
-        {p.found === "not_found" && stage && ["submitted", "won", "lost"].includes(stage) && (
+        {/* briefing_shortlisted (0105) has also already been submitted - the
+            same "why isn't my price in the register yet" question applies;
+            found 2026-11-02, missing before this. */}
+        {p.found === "not_found" && stage && ["submitted", "briefing_shortlisted", "won", "lost"].includes(stage) && (
           <div className={`mt-1 ${mutedClass}`}>
             {submitted === null ? "No submitted price is recorded for this tender. " : ""}If you bid as a joint venture or under a trading name, the register lists that name instead.
           </div>

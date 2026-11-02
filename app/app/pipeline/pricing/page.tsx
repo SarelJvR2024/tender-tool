@@ -115,8 +115,14 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
       // 'bidding' is the pre-0105 legacy value (lib/pipeline.ts's
       // LEGACY_BIDDING_STAGE) - kept so a not-yet-backfilled row isn't
       // dropped from pricing history; harmless, unreachable once 0105 has
-      // run and every row is assessing/building instead.
-      .in("pipeline_stage", ["assessing", "building", "bidding", "submitted", "won", "lost"]),
+      // run and every row is assessing/building instead. 'briefing_shortlisted'
+      // (0105) was missing entirely until found 2026-11-02 - a company's own
+      // real submitted price for a tender sitting at that stage (awaiting the
+      // buyer's briefing/shortlist decision) was silently excluded from this
+      // whole query, not just mis-filtered - the row never reached `all`,
+      // `priced`, the per-group summary stats, or the credit/commission totals
+      // below, with nothing to indicate it was missing.
+      .in("pipeline_stage", ["assessing", "building", "bidding", "submitted", "briefing_shortlisted", "won", "lost"]),
     supabase.from("people").select("id, name").order("name"),
     // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
     // the root-cause writeup): only used below to look up `categories` for
@@ -183,7 +189,10 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
     .filter((r) => !sp.client || r.client === sp.client)
     // a group filter takes every discipline in it (0040)
     .filter((r) => !sp.sector || (sp.sector === "none" ? !r.sector : r.sector === sp.sector || sectorGroup(r.sector, taxonomy) === sp.sector))
-    .filter((r) => outcome === "all" || r.stage === outcome)
+    // outcome === "submitted" is the "Awaiting outcome" filter option below
+    // - briefing_shortlisted (0105) is also genuinely awaiting an outcome,
+    // the same reason it's included in the base query above; found 2026-11-02.
+    .filter((r) => outcome === "all" || r.stage === outcome || (outcome === "submitted" && r.stage === "briefing_shortlisted"))
     .sort((a, b) => (b.submittedAt ?? "").localeCompare(a.submittedAt ?? ""));
 
   // "By sector" rolls a discipline up to its group (road maintenance and

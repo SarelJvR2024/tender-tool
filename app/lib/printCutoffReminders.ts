@@ -9,7 +9,14 @@ import { hoursUntilPrintSignDeadline, type DispatchLogisticsInput, type Submissi
 
 export const PRINT_CUTOFF_THRESHOLD_HOURS = 48;
 
-const CLOSED_STAGES = ["submitted", "won", "lost"];
+// briefing_shortlisted (0105) is also already submitted - nothing left to
+// print or dispatch - the same reason submitted/won/lost are excluded here.
+// Found 2026-11-02: missing before this, so a tender already submitted and
+// now awaiting the buyer's briefing/shortlist decision would still nag for
+// a print/transit cutoff that's already moot - the same "submitted-tender
+// nagging gap" shape PR #174 fixed in the two cron scripts, in this
+// separate lib file.
+const CLOSED_STAGES = ["submitted", "briefing_shortlisted", "won", "lost"];
 
 export type PrintCutoffTenderPackRow = {
   id: string;
