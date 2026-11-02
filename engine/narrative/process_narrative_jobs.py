@@ -342,7 +342,19 @@ def main():
             poll_forever(lambda: poll_once(url, key, out_dir), interval=args.interval)
         else:
             handled = poll_once(url, key, out_dir)
-            print(f"Processed {handled} job(s).")
+            # "No pending ..." (not "Processed 0 job(s).") so run_bridges.py's
+            # own QUIET_PREFIXES suppresses an idle pass, same as every other
+            # engine/*/process_*_jobs.py bridge already does - this one used to
+            # print a line QUIET_PREFIXES never matched, so a real worker
+            # running --loop (interval=30s by default) logged "narrative:
+            # Processed 0 job(s)." every single cycle forever, burying the
+            # alerts that matter under noise - exactly what QUIET_PREFIXES's
+            # own comment in run_bridges.py says it exists to prevent. Found
+            # in a standing review pass, 2026-11-02.
+            if handled:
+                print(f"Processed {handled} job(s).")
+            else:
+                print("No pending narrative document requests.")
 
 
 if __name__ == "__main__":

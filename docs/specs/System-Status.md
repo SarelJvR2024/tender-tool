@@ -14,6 +14,44 @@
 
 ---
 
+## This pass (2026-11-02, standing solution-architect review): `narrative` bridge's idle-pass log line didn't match `run_bridges.py`'s own QUIET_PREFIXES - fixed
+
+Oriented from `ad0f11f`; `git fetch origin main` found one new sibling commit (`ad0f11f`, a docs-only
+clean-sweep entry for discovery rotation, no overlap) and fast-forwarded local `main` to match. Open
+PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Read `engine/worker/run_bridges.py` in full (245 lines) - the runner that drives all six bridges
+(`cv`/`cv_extract`/`pack`/`general`/`onboarding`/`narrative`) every cycle in `--loop` mode (what the
+container actually runs). Checked `resolve_bridge_names()`/`resolve_scripts()`'s additive-`--script`
+interaction, the `_missing_reported` bookkeeping, and the timeout/process-group-kill path - all correct,
+no bug there. Confirmed all six registered bridge scripts exist and support `--once`.
+
+Found the real bug by comparing how each bridge reports an empty queue: `run_bridges.py`'s own
+`QUIET_PREFIXES = ("No pending",)` exists specifically so a pass that finds nothing stays silent in
+the log (its own comment: "In loop mode that would be two log lines every 30 seconds forever, burying
+the ones that matter"). Five of the six bridges (`cv`, `cv_extract`, `pack`, `general`, `onboarding`)
+print `"No pending ..."` on an empty queue, matching the prefix. `engine/narrative/process_narrative_jobs.py`
+- added only on 2026-10-25 to close the "narrative requests never got processed" gap - instead printed
+`f"Processed {handled} job(s)."` unconditionally, even when `handled == 0`. `DEFAULT_INTERVAL_SECONDS`
+is 30s, so the real worker logged `"narrative: Processed 0 job(s)."` every 30 seconds, forever, burying
+real alerts under noise - exactly the failure mode `QUIET_PREFIXES` exists to prevent - and also
+inflated `run_bridges.py`'s own "did something" activity count every single idle cycle.
+
+Fixed in `engine/narrative/process_narrative_jobs.py`'s `main()`: prints `"No pending narrative document
+requests."` when `handled == 0`, matching every sibling bridge's convention; unchanged
+`"Processed N job(s)."` when `handled > 0`. Added a regression test
+(`test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line`, in
+`engine/narrative/test_process_narrative_jobs.py`) that runs `main()` end-to-end against a stubbed-empty
+queue and asserts the printed line starts with `"No pending"` - confirmed it fails against the
+pre-fix code (`"Processed 0 job(s)."`) and passes against the fix. Full suite:
+`python3 engine/narrative/test_process_narrative_jobs.py` -> `0 failure(s)` (13 tests, up from 12).
+
+No new backlog item - a standalone, now-fixed log-noise bug, not a judgment call for Sarel. The 18-item
+backlog is unchanged (migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` still need Sarel to apply
+them to the live database; the 12 judgment-call items are listed further down this file).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): `engine/security/test_tenant_isolation.py` run in full against a real replayed schema - genuine clean sweep, unusually well-substantiated
 
 Oriented from `4c69964`; `git fetch origin main` found one new sibling commit (`4c69964` itself, a

@@ -1,4 +1,6 @@
+import contextlib
 import datetime
+import io
 import os
 import sys
 
@@ -371,6 +373,33 @@ def test_process_one_never_leaks_a_raw_exception_to_the_customer():
           len(ALERTS) == 1 and "Some raw internal detail" in ALERTS[0]["p_message"], ALERTS)
 
 
+def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
+    """run_bridges.py suppresses an idle pass only when its only output
+    starts with QUIET_PREFIXES ("No pending"). This bridge used to print
+    "Processed 0 job(s)." on an empty queue - a line QUIET_PREFIXES never
+    matched - so a real --loop worker (30s default interval) logged
+    "narrative: Processed 0 job(s)." every single cycle forever. Standing
+    review pass, 2026-11-02."""
+    stub, original = _patch({"narrative_documents": []})
+    old_environ = dict(os.environ)
+    old_argv = sys.argv
+    os.environ["NEXT_PUBLIC_SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+    sys.argv = ["process_narrative_jobs.py", "--once"]
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            pnj.main()
+    finally:
+        pnj.supabase_request = original
+        os.environ.clear()
+        os.environ.update(old_environ)
+        sys.argv = old_argv
+    printed = out.getvalue().strip()
+    check("prints a line run_bridges.py's QUIET_PREFIXES recognises as quiet",
+          printed.startswith("No pending"), printed)
+
+
 def main():
     test_load_key_people_computes_years_experience_from_graduation_date()
     test_load_key_people_handles_missing_graduation_date()
@@ -384,6 +413,7 @@ def main():
     test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_alone()
     test_process_one_happy_path_writes_ready_with_every_generation_field()
     test_process_one_transient_error_requeues_quietly_but_setup_error_requeues_and_raises()
+    test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
