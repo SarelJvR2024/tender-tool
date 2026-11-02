@@ -6612,3 +6612,52 @@ bug class across the six job queues (all six already had their stale-job-recover
 repo-wide for the separate malformed-timestamp bug, Finding 99; this self-heal refinement was
 specific to the two queues - onboarding and CV - whose own result table is a SEPARATE row from the
 upload row they claim, the shape that makes this exact race possible).
+
+### Finding 117 (CONFIRMED, FIXED, moderate - a non-string closing_date on any one scored release crashed with a raw TypeError, silently dropping that one roster entry's whole daily digest for the day with no hint which field caused it)
+
+**Where:** this cycle's "notify" rotation. `engine/notify/daily_digest.py`'s `submission_due_signals()`
+- zero dedicated test coverage existed for this function before this pass (confirmed by grep - no
+`test_daily_digest*.py` file, and neither `test_digest_live.py` nor `test_digest_opt_in.py` exercised
+it).
+
+**What was tested:** `submission_due_signals()` reads `r.get("closing_date")` from a scored OCDS
+release and calls `closing[:10]` then `datetime.date.fromisoformat(...)`, inside a `try/except
+ValueError` that does NOT also catch `TypeError` - the exact same malformed-TYPE (not just malformed-
+string) risk `watch_deadlines.days_until()` already has an explicit, documented guard against
+elsewhere in this same codebase ("a value that isn't a string at all - a number, bool, or a list/dict
+... slips past a bare ValueError catch entirely"). Reproduced directly: a release dict with
+`closing_date: 20261115` (an int, not a string) raised `TypeError: 'int' object is not subscriptable`
+straight out of the function.
+
+**Finding (CONFIRMED).** Traced the blast radius precisely rather than assuming the worst: `company_
+signals()` (which calls this function) runs inside `main()`'s own per-roster-entry `try/except`
+(Enterprise-readiness audit round 2, 2026-10-20 - "one bad roster entry... must not cost everyone else
+their digest"), so this does NOT take down the whole run - but it DOES silently drop that ONE person's
+entire digest for the day (every section, not just "closing soon"), logged only as a generic "could
+not build a digest for X: TypeError" alert with no hint it was specifically `closing_date`'s type. No
+live incident confirmed (every real scraper's own `closing_date` field traced back to either a plain
+`.strip()`'d string or a direct OCDS JSON passthrough, both normally strings or `None`) - fixed
+proactively anyway, same reasoning this file's own sibling pass used today for `classify_tender.py`'s
+AM/PM closing-time fix: the guard is the exact same cheap, already-proven pattern (`isinstance`-check
++ `system_alerts.record`) this codebase already uses for the identical risk elsewhere, so there is no
+real cost to closing the gap before a live incident forces it.
+
+**Fix:** added an `isinstance(closing, str)` check before the existing try/except, mirroring `days_
+until()`'s own style - skips the item with a `"warning"`-severity alert naming the real value and
+field, instead of letting `TypeError` propagate. The existing `ValueError` path (a malformed-but-
+string date, e.g. `"not-a-real-date"`) is completely unchanged.
+
+**Verified red-then-green.** Added `test_submission_due_signals_survives_a_non_string_closing_date()`
+to `engine/notify/test_digest_live.py` (4 checks: non-string closing_date skipped + alerted, a real
+string closing_date completely unaffected, a malformed-but-string date still handled by the pre-
+existing path). Revert-and-confirm-red: reverting reproduced the exact predicted crash (`TypeError:
+'int' object is not subscriptable`, uncaught, aborting the test file's own `__main__` block) -
+confirmed the test genuinely exercises the new code, not a tautology; restored, `0 failure(s)`.
+Regression-checked `engine/notify/test_digest_opt_in.py`, `test_send_digest_emails.py` - all pass.
+`py_compile` clean on both touched files.
+
+**Regression:** `engine/notify/daily_digest.py` (`submission_due_signals()`: one `isinstance` check
+added before the existing try/except, ~15 lines including comment - every release whose `closing_date`
+is already a string, real or malformed, is byte-for-byte unaffected), `engine/notify/test_digest_
+live.py` (1 new test function, 4 checks, wired into the file's own `__main__` block). No schema or
+other call-site changes.

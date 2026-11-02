@@ -354,6 +354,24 @@ def submission_due_signals(scored, lead_days=14):
         closing = r.get("closing_date")
         if not closing:
             continue
+        # Same malformed-type guard as watch_deadlines.days_until() (a value
+        # that isn't a string at all raises TypeError, not ValueError, from
+        # `closing[:10]`/fromisoformat() - confirmed directly with an int
+        # closing_date). This function has no per-item isolation of its own
+        # (it runs inside company_signals(), itself inside main()'s own
+        # per-roster-entry try/except - Enterprise-readiness audit round 2,
+        # 2026-10-20) - one bad release's closing_date would still silently
+        # drop that one roster entry's whole digest for the day, logged only
+        # as a generic alert with no hint it was THIS field. Found 2026-11-02
+        # (notify rotation), same reasoning as classify_tender.py's own
+        # proactive 12-hour-time fix today: no live incident confirmed, but
+        # the guard is the same cheap, already-proven pattern this codebase
+        # uses everywhere else a date string is parsed from external data.
+        if not isinstance(closing, str):
+            system_alerts.record("digest", f"A release's closing_date ({closing!r}) is not a string - "
+                                 "skipped from the 'closing soon' section, not treated as due.", "warning",
+                                 context={"closing_date": str(closing)})
+            continue
         try:
             closing_date = datetime.date.fromisoformat(closing[:10])
         except ValueError:

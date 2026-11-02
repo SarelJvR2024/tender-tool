@@ -777,6 +777,47 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-02, standing QA/robustness review): fix - a non-string closing_date on any one scored release crashed with a raw TypeError, silently dropping that one roster entry's whole daily digest for the day
+
+Oriented from `fd18533`; `git fetch origin main` found one new sibling commit since my own last push
+(a real app/TS fix - `pastSubmissionReuse.ts`'s own independent missing-`briefing_shortlisted` gap,
+no overlap). Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both
+unchanged, no collision.
+
+Rotated to notify. `daily_digest.py`/`send_digest_emails.py`/`send_pack_ready_email.py`/`record_
+heartbeat.py` have all had dedicated passes already; picked `submission_due_signals()` - confirmed by
+grep it had ZERO dedicated test coverage (no `test_daily_digest*.py` file exists, and neither of the
+two existing notify test files exercised it at all).
+
+**Found and fixed Finding 117 (CONFIRMED, moderate)**: `submission_due_signals()` calls `closing[:10]`
+then `fromisoformat()` inside a bare `except ValueError` - the exact malformed-TYPE (not just
+malformed-string) risk `watch_deadlines.days_until()` already has an explicit guard against elsewhere
+in this codebase. Reproduced directly: an int `closing_date` raised `TypeError` straight out of the
+function. Traced the real blast radius: `main()`'s own per-roster-entry isolation (2026-10-20) catches
+it one level up, so it doesn't take down the whole run - but it DOES silently drop that one person's
+entire digest for the day, logged only as a generic alert with no hint it was this field. No live
+incident confirmed (every real scraper's `closing_date` traces back to a string or `None`) - fixed
+proactively anyway, same reasoning a sibling pass used today for `classify_tender.py`'s AM/PM fix: the
+guard is the same cheap, already-proven pattern this codebase uses for the identical risk elsewhere.
+
+Fixed with an `isinstance(closing, str)` check before the existing try/except, alerting with the real
+value rather than letting `TypeError` propagate. The existing malformed-but-string `ValueError` path is
+unchanged.
+
+Verified red-then-green: new test in `engine/notify/test_digest_live.py` (4 checks); reverting
+reproduced the exact predicted crash, confirming the test genuinely exercises the new code; restored,
+`0 failure(s)`. Regression-checked `test_digest_opt_in.py`, `test_send_digest_emails.py` - all pass;
+`py_compile` clean. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 117.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/notify/daily_digest.py`
+- `engine/notify/test_digest_live.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): clean sweep - compliance/reminders rotation, no new bug found
 
 Oriented from `bd11c07`; `git fetch origin main` found two new sibling commits since my own last push

@@ -314,6 +314,36 @@ def main():
     sys.exit(1 if FAILS else 0)
 
 
+def test_submission_due_signals_survives_a_non_string_closing_date():
+    """submission_due_signals() reads closing_date[:10] directly - a value
+    that isn't a string at all (confirmed reachable: an OCDS release field
+    read from real external JSON, same class of risk watch_deadlines.
+    days_until() already guards against) raised TypeError, not the
+    ValueError its own try/except caught, which would have silently dropped
+    that ONE roster entry's whole digest for the day (main()'s own per-entry
+    isolation catches it one level up, but with no hint it was this field).
+    Found 2026-11-02 (notify rotation)."""
+    alerts = []
+    real_record = daily_digest.system_alerts.record
+    daily_digest.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        out = daily_digest.submission_due_signals([{"verdict": "strong_fit", "closing_date": 20261115}])
+    finally:
+        daily_digest.system_alerts.record = real_record
+    check(out == [], f"a non-string closing_date is skipped, not crashed on ({out})")
+    check(any(a[0][0] == "digest" and "not a string" in a[0][1] for a in alerts),
+          f"...and it's reported as its own warning alert, not silently dropped ({alerts})")
+
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
+    good_close = (today + datetime.timedelta(days=5)).isoformat()
+    out2 = daily_digest.submission_due_signals([{"verdict": "strong_fit", "closing_date": good_close}])
+    check(len(out2) == 1 and out2[0]["days_left"] == 5,
+          f"a real string closing_date is completely unaffected by the new guard ({out2})")
+
+    out3 = daily_digest.submission_due_signals([{"verdict": "strong_fit", "closing_date": "not-a-real-date"}])
+    check(out3 == [], f"a malformed-but-string closing_date is still handled by the existing ValueError path ({out3})")
+
+
 def test_orphaned_field_provenance_owner_not_silently_dropped():
     """field_provenance.tender_pack_id is NOT NULL and cascades from
     tender_packs, so in normal operation it always resolves - the one way
@@ -358,5 +388,6 @@ def test_orphaned_field_provenance_owner_not_silently_dropped():
 
 
 if __name__ == "__main__":
+    test_submission_due_signals_survives_a_non_string_closing_date()
     test_orphaned_field_provenance_owner_not_silently_dropped()
     main()
