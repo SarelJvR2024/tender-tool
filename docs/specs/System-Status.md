@@ -1465,6 +1465,64 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - ECSA's/SACPCMP's own registration expiry, already watched for compliance reminders, never reached a generated CV; plus a correction to a same-day sibling fix that turned out not to reach any real output
+
+Oriented from `9bdcf55`; `git fetch origin main` found two new sibling commits since my own last push
+(`4353040`, a real fix - no decompression-bomb cap on zip unpacking in `collect_documents()`;
+`1a95b51`, a docs-only clean sweep confirming the PDF-text path is already memory-bounded) - neither
+touches `engine/cv/`, no overlap. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API:
+`#164`/`#165` only, both unchanged, no collision.
+
+Rotated to compliance/reminders (intake was last). Read `watch_deadlines.py`'s own
+`TRACKED_PERSON_EXPIRY_FIELDS` end to end - its own docstring names `ecsa_expiry`/`sacpcmp_expiry` as
+real columns (migration `0035_person_registration_expiry.sql`) this script already watches for
+compliance reminders, distinct from `ecsa_date`/`sacpcmp_date` (date GRANTED, which Finding 120 fixed
+for display). Confirmed by grep: neither expiry column is read anywhere in `generate_cv.py` or
+`process_cv_jobs.py`.
+
+**Found and fixed Finding 121 (CONFIRMED, moderate)**: a company's key person with a real, actively-
+watched ECSA or SACPCMP expiry on file gets a compliance reminder email about it, but their own
+standalone CV never showed it at all. Fixed with the same pattern as Finding 120 and a same-day
+sibling fix for `sacnasp_expiry`/`sagc_expiry`: two new rows in `build_sanral_keyperson()`, two new
+dict entries in `process_cv_jobs.py`'s `adapt_person_row()`.
+
+**Correction to that same-day sibling fix** (not a new bug, but worth setting straight, same spirit as
+this file's earlier migration-0063 pairing-check correction): before mirroring the sibling's addition
+of `sacnasp_*`/`sagc_*` into `process_pack_jobs.py`'s own `adapt_person()`, traced where that
+qualifications dict is actually consumed in that file's own pipeline, rather than assuming the sibling
+had already proven the path mattered. Its only two real consumers - `suggest_pack.score_candidate()`
+(candidate scoring) and `fill_tender.py`/`fill_conventional.py`'s own Excel-cell writer, via `confirm_
+pack.confirm()`'s dict passthrough into `pack.yaml` - never reference `sacnasp`/`sagc` anywhere
+(confirmed by grep), and unzipping a real sample `.xlsm` and grepping its own `sharedStrings.xml`
+confirms Form B2.1 has cells for ECSA/SACPCMP but none at all for SACNASP/SAGC - there is nowhere on
+the real form to put that data. The sibling's own new test only verifies "reaches the qualifications
+dict," not that it reaches a written cell, so their commit's framing overstates what changed: the real
+mechanism by which this data reaches an actual submitted document is the attached CV
+(`process_pack_jobs.py`'s own `cv_docs` just downloads whatever PDF `generated_cvs.storage_path_pdf`
+already holds, produced by `process_cv_jobs.py` + `generate_cv.py` - the two files this fix and the
+sibling's own `generate_cv.py` display change actually touched). Deliberately did not add `ecsa_
+expiry`/`sacpcmp_expiry` to `process_pack_jobs.py`'s `adapt_person()` for this same reason - it would
+be the identical kind of inert, unreachable addition.
+
+Verified red-then-green: 4 new checks in `test_generate_cv.py`, 2 in `test_process_cv_jobs.py`;
+reverting both production files together reproduced a `StopIteration` plus the 2 predicted failures,
+everything else (including Finding 120's and the sibling's own sacnasp/sagc tests) staying green;
+restored, `0 failure(s)` on both. Regression-checked `test_extract_cv_fields.py`,
+`process_cv_jobs.py --self-test`, and `engine/pack/test_process_pack_jobs.py` (unaffected) - all clean.
+Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 121.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/cv/generate_cv.py`
+- `engine/cv/process_cv_jobs.py`
+- `engine/cv/test_generate_cv.py`
+- `engine/cv/test_process_cv_jobs.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug plus a documentation correction, not a judgment call
+for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): clean sweep - intake rotation (classify_tender.py's real call site in process_general_jobs.py read end to end; real adversarial XML-entity-amplification/zip-based attack against a malicious .docx tried against both consumers, neither was vulnerable)
 
 Oriented from `56ef07e`; `git fetch origin main` found one new sibling commit since my own last push

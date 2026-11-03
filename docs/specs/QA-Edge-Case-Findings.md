@@ -6848,3 +6848,81 @@ needed - still "Self-test OK"). `py_compile` clean on both touched production fi
 file's existing convention). No schema or other call-site changes - `people.sacpcmp_date` already
 exists and is already written to by `extract_cv_fields.py`; this fix only wires already-live data into
 an already-live display path and an already-live Supabase adapter.
+
+### Finding 121 (CONFIRMED, FIXED, moderate - ECSA's and SACPCMP's own registration EXPIRY dates, already real columns watch_deadlines.py actively watches for compliance reminders, never once reached a generated CV document; plus a correction to a same-day sibling fix that turned out not to reach any real output)
+
+**Where:** this cycle's compliance/reminders rotation. `engine/cv/generate_cv.py`'s
+`build_sanral_keyperson()` and `engine/cv/process_cv_jobs.py`'s `adapt_person_row()` - the same two
+files Finding 120 (earlier this session) fixed for `sacpcmp_date`, and a same-day sibling pass fixed
+for `sacnasp_expiry`/`sagc_expiry`.
+
+**What was tested:** read `watch_deadlines.py`'s own `TRACKED_PERSON_EXPIRY_FIELDS` end to end while on
+the compliance/reminders rotation (its own docstring explicitly names `ecsa_expiry`/`sacpcmp_expiry` as
+real columns added by migration `0035_person_registration_expiry.sql`, distinct from `ecsa_date`/
+`sacpcmp_date` which only record when a registration was GRANTED). Confirmed both columns are real via
+`app/supabase/migrations/0035_person_registration_expiry.sql` directly. Checked whether either expiry
+reaches a generated CV: confirmed by grep, `ecsa_expiry`/`sacpcmp_expiry` appear nowhere in
+`generate_cv.py` or `process_cv_jobs.py` before this fix - `build_sanral_keyperson()` showed ECSA's
+level/number/date and SACPCMP's number/date (per Finding 120), but neither body's own expiry, even
+though `watch_deadlines.py` already actively reminds a company when either one is about to lapse - the
+exact compliance risk this document is meant to help a person track.
+
+**Finding (CONFIRMED).** A company's key person with a real, watched ECSA or SACPCMP expiry on file
+would get a compliance reminder email about it, but their own standalone CV - the document a buyer
+actually sees - never mentioned it at all. Fixed with the same pattern Finding 120 and the sibling's
+`sacnasp_expiry`/`sagc_expiry` fix both used: a new `"ECSA registration expiry:"` row and a new
+`"SACPCMP registration expiry:"` row in `build_sanral_keyperson()` (both `q.get(...) or "MISSING"`,
+matching every other row's honest-degrade convention), and `"ecsa_expiry": person_row.get("ecsa_expiry")`
+/ `"sacpcmp_expiry": person_row.get("sacpcmp_expiry")` added to `process_cv_jobs.py`'s
+`adapt_person_row()` qualifications dict (which already carried `sacnasp_expiry`/`sagc_expiry` - this
+adapter had the SACNASP/SAGC pair but was missing the ECSA/SACPCMP pair, the opposite gap shape from
+`generate_cv.py`'s own display code, which had ECSA/SACPCMP rows but no SACNASP/SAGC rows until the
+sibling's fix).
+
+**Correction to a same-day sibling fix (not a new bug of my own, but worth setting the record
+straight, same spirit as this file's earlier migration-0063 pairing-check correction):** before adding
+`ecsa_expiry`/`sacpcmp_expiry` to `engine/pack/process_pack_jobs.py`'s own `adapt_person()` for
+consistency with that file's sibling-added `sacnasp_category`/`sacnasp_number`/`sacnasp_expiry`/
+`sagc_*` fields, traced where `adapt_person()`'s qualifications dict is actually CONSUMED within that
+file's own pipeline, rather than assuming "the sibling already proved this path matters." Found it has
+exactly two real consumers: `suggest_pack.score_candidate()` (candidate scoring - reads only
+`ecsa_level`, `highest_description`, `initial_description`, `description`, project fields; confirmed by
+grep, never `sacnasp_*`/`sagc_*`/either expiry) and `fill_tender.py`/`fill_conventional.py`'s own
+`fill_person()` (the actual Excel-cell writer for Form B1/B2, via `confirm_pack.confirm()`'s
+`qual = dict(person["qualifications"])` passthrough into `pack.yaml`) - confirmed by grep, neither
+filler references `sacnasp`/`sagc` anywhere, and unzipping a real sample `.xlsm`
+(`templates/samples/R.352-020-2025.1F_ran.xlsm`) and grepping its own `sharedStrings.xml` confirms the
+real Form B2.1 template has cells for "ECSA"/"SACPCMP" but none at all for "SACNASP"/"SAGC" - the form
+genuinely has nowhere to put that data, so there was never a cell to reach. The sibling's own
+`test_process_pack_jobs.py` addition only verifies "reaches the qualifications dict", the same shallow
+first-layer check, not that it reaches a written cell - so their commit's framing ("never appeared at
+all on a real, submitted SANRAL key-person form... [fixed]") overstates what changed: `process_pack_
+jobs.py`'s `adapt_person()` now carries the data one hop further down a chain that still dead-ends
+before any real output, same "stops at the first gap, not the real consumer" shape this session's own
+Finding 119/120 discipline exists to catch - just caught in a sibling's fix this time instead of a
+fresh bug. (The actual mechanism by which a key person's SACNASP/SAGC/ECSA-expiry/SACPCMP-expiry DOES
+reach a real submitted document is the attached CV: `process_pack_jobs.py`'s own `cv_docs` downloads
+whatever PDF `generated_cvs.storage_path_pdf` already holds, produced by `process_cv_jobs.py`'s
+`adapt_person_row()` + `generate_cv.build_sanral_keyperson()` - the two files this finding and the
+sibling's own `generate_cv.py` display fix actually changed.) Deliberately did NOT add `ecsa_expiry`/
+`sacpcmp_expiry` to `process_pack_jobs.py`'s `adapt_person()` for this same reason - it would be the
+identical kind of inert, unreachable addition, not a real fix.
+
+**Verified red-then-green.** Added `test_ecsa_and_sacpcmp_expiry_now_appear_on_form_b21()` and
+`test_ecsa_and_sacpcmp_expiry_missing_degrades_honestly()` to `test_generate_cv.py` (4 checks: both
+expiries print and log confirmed when present; both log missing with a reason when absent). Added
+`test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()` to `test_process_cv_jobs.py` (2
+checks). Revert-and-confirm-red across both production files at once: reproduced a `StopIteration` in
+`test_generate_cv.py` and exactly the 2 predicted failures in `test_process_cv_jobs.py`, every
+pre-existing check in both files (including Finding 120's and the sibling's own sacnasp/sagc tests)
+staying green; restored, `0 failure(s)` on both. Regression-checked `test_extract_cv_fields.py` (all
+pass), `process_cv_jobs.py --self-test` (still "Self-test OK"), and `engine/pack/test_process_pack_
+jobs.py` (unaffected, untouched - still `0 failure(s)`). `py_compile` clean on both touched production
+files.
+
+**Regression:** `engine/cv/generate_cv.py` (two new table rows, ~10 lines including comment),
+`engine/cv/process_cv_jobs.py` (one new dict entry, ~7 lines including comment),
+`engine/cv/test_generate_cv.py` (2 new test functions, 4 checks), `engine/cv/test_process_cv_jobs.py`
+(1 new test function, 2 checks) - all wired into their files' existing `main()`/module-level test
+runners. No schema or other call-site changes; `engine/pack/process_pack_jobs.py` deliberately left
+unchanged (see correction above).

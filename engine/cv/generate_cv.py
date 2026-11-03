@@ -335,6 +335,16 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         ("Professional registration body / level:", q.get("ecsa_level") or "MISSING"),
         ("ECSA number:", q.get("ecsa_number") or "MISSING"),
         ("ECSA registration date:", q.get("ecsa_date") or "MISSING"),
+        # Finding 121 (2026-11-03): people.ecsa_expiry/sacpcmp_expiry are
+        # real columns (migration 0035_person_registration_expiry.sql) -
+        # watch_deadlines.py's own TRACKED_PERSON_EXPIRY_FIELDS already
+        # watches both for compliance reminders, and the sibling fix just
+        # above this one (Finding 120) proved the exact adapter+display
+        # chain for sacpcmp_date - but neither CV path, nor the SANRAL pack
+        # adapter, ever read or showed either body's own expiry at all. The
+        # same gap the sibling pass closed for sacnasp_expiry/sagc_expiry
+        # two rows below, just not yet closed here for ECSA/SACPCMP.
+        ("ECSA registration expiry:", q.get("ecsa_expiry") or "MISSING"),
         ("SACPCMP number:", q.get("sacpcmp_number") or "Not registered / not on file"),
         # Finding 120 (2026-11-03): the real Form B2.1 has a SACPCMP
         # registration DATE field too (fill_tender.py/fill_conventional.py's
@@ -346,6 +356,7 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         # B2.1, never showed it: ECSA got level+number+date, SACPCMP got
         # number only, silently dropping a confirmed date right off the page.
         ("SACPCMP registration date:", q.get("sacpcmp_date") or "MISSING"),
+        ("SACPCMP registration expiry:", q.get("sacpcmp_expiry") or "MISSING"),
         # Other councils (0040), only when the person holds them - the form
         # used to show ECSA/SACPCMP only, an engineering firm's view.
         # Finding (2026-11-03): people.sacnasp_expiry/sagc_expiry are real,

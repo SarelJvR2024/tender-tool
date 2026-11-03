@@ -355,6 +355,45 @@ def test_sacnasp_expiry_missing_degrades_honestly():
     check("no 'expires None' text leaked onto the document", "expires None" not in text, text)
 
 
+def test_ecsa_and_sacpcmp_expiry_now_appear_on_form_b21():
+    print("build_sanral_keyperson: ECSA's and SACPCMP's own registration EXPIRY, not just the "
+          "date registered, must now reach the generated CV document")
+    # Finding 121 (2026-11-03): people.ecsa_expiry/sacpcmp_expiry are real
+    # columns (migration 0035_person_registration_expiry.sql) -
+    # watch_deadlines.py's own TRACKED_PERSON_EXPIRY_FIELDS already watches
+    # both for compliance reminders, proving they're real, live, actively
+    # used data - but this function never displayed either expiry at all,
+    # even after Finding 120 added SACPCMP's registration DATE and a sibling
+    # pass added SACNASP/SAGC's own expiry two rows below. Same bug class,
+    # just the two bodies that pass's own commit title didn't cover.
+    person = {"name": "Jane Doe", "role": "Engineer", "projects": [],
+              "qualifications": {"ecsa_level": "Professional Engineer", "ecsa_expiry": "2028-01-15",
+                                  "sacpcmp_number": "SACPCMPREG12345", "sacpcmp_expiry": "2027-09-30"}}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    text = "\n".join(p.text for t in doc.tables for r in t.rows for p in r.cells[1].paragraphs)
+    check("the ECSA registration expiry is now printed on the document", "2028-01-15" in text, text)
+    check("the SACPCMP registration expiry is now printed on the document", "2027-09-30" in text, text)
+    ecsa_entry = next(e for e in log.entries if e["field_key"] == "cv.b21.ecsa_registration_expiry")
+    sacpcmp_entry = next(e for e in log.entries if e["field_key"] == "cv.b21.sacpcmp_registration_expiry")
+    check("ECSA expiry is logged as confirmed", ecsa_entry["status"] == "confirmed" and ecsa_entry["value"] == "2028-01-15", ecsa_entry)
+    check("SACPCMP expiry is logged as confirmed", sacpcmp_entry["status"] == "confirmed" and sacpcmp_entry["value"] == "2027-09-30", sacpcmp_entry)
+
+
+def test_ecsa_and_sacpcmp_expiry_missing_degrades_honestly():
+    print("build_sanral_keyperson: no ECSA/SACPCMP registration expiry on file reads MISSING")
+    person = {"name": "Jane Doe", "role": "Engineer", "projects": [],
+              "qualifications": {"ecsa_level": "Professional Engineer", "sacpcmp_number": "SACPCMPREG12345"}}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    ecsa_entry = next(e for e in log.entries if e["field_key"] == "cv.b21.ecsa_registration_expiry")
+    sacpcmp_entry = next(e for e in log.entries if e["field_key"] == "cv.b21.sacpcmp_registration_expiry")
+    check("no ECSA expiry on file is logged as missing, with a reason", ecsa_entry["status"] == "missing" and ecsa_entry["reason"], ecsa_entry)
+    check("no SACPCMP expiry on file is logged as missing, with a reason", sacpcmp_entry["status"] == "missing" and sacpcmp_entry["reason"], sacpcmp_entry)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -371,6 +410,8 @@ def main():
     test_sacpcmp_registration_date_missing_degrades_honestly()
     test_sacnasp_expiry_now_appears_on_form_b21()
     test_sacnasp_expiry_missing_degrades_honestly()
+    test_ecsa_and_sacpcmp_expiry_now_appear_on_form_b21()
+    test_ecsa_and_sacpcmp_expiry_missing_degrades_honestly()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

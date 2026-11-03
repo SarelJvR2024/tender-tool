@@ -145,9 +145,27 @@ def test_adapt_person_row_carries_sacpcmp_date_through():
           person["qualifications"].get("sacpcmp_date") == "2018-06-01", person["qualifications"])
 
 
+def test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through():
+    print("adapt_person_row: a person's own ECSA/SACPCMP registration EXPIRY reaches "
+          "generate_cv.py's profile dict, not just the registration date")
+    # Finding 121 (2026-11-03): people.ecsa_expiry/sacpcmp_expiry are real
+    # columns (migration 0035) watch_deadlines.py already watches for
+    # compliance reminders - same shape as Finding 120's sacpcmp_date, just
+    # for the expiry side, and for both bodies this bridge's own adapter had
+    # missed (sacnasp_expiry/sagc_expiry were already present here).
+    person_row = {"name": "Jane Doe", "ecsa_number": "20150155", "ecsa_expiry": "2028-01-15",
+                  "sacpcmp_number": "SACPCMPREG12345", "sacpcmp_expiry": "2027-09-30"}
+    person = pcj.adapt_person_row(person_row, [])
+    check("ecsa_expiry is now carried through (the bug this test guards)",
+          person["qualifications"].get("ecsa_expiry") == "2028-01-15", person["qualifications"])
+    check("sacpcmp_expiry is now carried through too",
+          person["qualifications"].get("sacpcmp_expiry") == "2027-09-30", person["qualifications"])
+
+
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
 test_adapt_person_row_carries_sacpcmp_date_through()
+test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()
 
 print(f"\n{len(FAILS)} failure(s)")
 if FAILS:
