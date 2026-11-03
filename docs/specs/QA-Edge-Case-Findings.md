@@ -6782,3 +6782,69 @@ comment), `engine/general/process_general_jobs.py` (one list entry added, ~5 lin
 comment), `engine/general/test_build_general_pack.py` (1 new test function, 4 checks, wired into
 `main()`). No schema or other call-site changes - the columns already exist (migration `0063`, live
 since it was applied); this fix only wires already-live data into an already-live code path.
+
+### Finding 120 (CONFIRMED, FIXED, moderate - a company's own confirmed SACPCMP registration date, already extracted and already stored, never once reached a generated CV document - two independent gaps, one in the display logic, one in the Supabase-backed bridge's own adapter)
+
+**Where:** this cycle's CV rotation. `engine/cv/generate_cv.py`'s `build_sanral_keyperson()` (the
+function that explicitly claims to mirror SANRAL's own real Form B2.1 exactly) and
+`engine/cv/process_cv_jobs.py`'s `adapt_person_row()` (the adapter that turns a Supabase `people` row
+into the profile dict `build_sanral_keyperson()` reads).
+
+**What was tested:** `docs/specs/CV-Engine-Findings.md` (the evidence doc written before this engine
+was built) states Form B2.1 shows "professional registration body + level + number + date
+(ECSA/SACPCMP)" - date, for BOTH bodies, not just ECSA. Confirmed against the real, live SANRAL-form
+filler: `engine/fill_tender.py`'s and `engine/fill_conventional.py`'s own cell-offset dict both carry
+`sacpcmp_date="P41"` as a real, distinct cell on the actual completed workbook, and `fill_person()`
+writes `q.get("sacpcmp_date")` into it whenever present - proving the real form genuinely has this
+field, it isn't a misreading of the spec. `people.sacpcmp_date` (migration `0001_init_schema.sql`,
+same table/migration as `sacpcmp_number`) is a real, live column: `engine/cv/extract_cv_fields.py`'s
+own `PERSON_DATE_FIELDS` already extracts it from an uploaded CV via AI, and a completely separate
+pipeline, `engine/pack/process_pack_jobs.py`'s `adapt_person()` (line ~273), already reads it
+correctly into the SANRAL pack-build path. But `generate_cv.py`'s `build_sanral_keyperson()` - the one
+function whose entire job is producing a portable Word/PDF CV that mirrors this exact form - only ever
+printed `q.get("sacpcmp_number")`, never `q.get("sacpcmp_date")`, even though the row directly above it
+in the same table shows ECSA's level, number, AND date, all three. Confirmed by grep: `sacpcmp_date` is
+read nowhere in `generate_cv.py` before this fix.
+
+**Finding (CONFIRMED).** Traced the full chain rather than stopping at the display gap, the same
+discipline Finding 119 used: even if `build_sanral_keyperson()` alone were fixed, the real,
+Supabase-backed CV-generation path (`process_cv_jobs.py`'s `process_job()` -> `fetch_job_context()` ->
+`adapt_person_row()`) would still never surface the date, because `adapt_person_row()`'s own
+qualifications dict carried `sacpcmp_number` through but never read `person_row.get("sacpcmp_date")`
+at all - confirmed by grep, and by direct inspection of the dict literal. A company whose key person
+has a real, AI-extracted SACPCMP registration date on file (the same date `extract_cv_fields.py`
+already captured and the SANRAL pack builder already uses) would see it correctly appear in a merged
+SANRAL submission pack, but the standalone CV document generated for that same person - whether via
+the CLI/JSON path (display gap only) or the live Supabase-backed "Generate tender-specific CV" button
+(both gaps stacked) - silently omitted it, every single time, not a rare race.
+
+**Fix:** added a `"SACPCMP registration date:"` row to `build_sanral_keyperson()`'s own `rows` list in
+`engine/cv/generate_cv.py`, immediately after the existing `"SACPCMP number:"` row, reading
+`q.get("sacpcmp_date") or "MISSING"` - the same unconditional-row, honest-"MISSING"-fallback pattern
+already used for ECSA's own date field two rows above it; the file's existing per-row provenance
+classification loop (`if value in ("MISSING", "Not registered / not on file"): log.missing(...)`)
+needed no change, since it already treats "MISSING" correctly. Added `"sacpcmp_date":
+person_row.get("sacpcmp_date")` to `process_cv_jobs.py`'s `adapt_person_row()` qualifications dict, the
+same one-line-per-field pattern every other field in that dict already uses.
+
+**Verified red-then-green.** Added `test_sacpcmp_registration_date_now_appears_on_form_b21()` and
+`test_sacpcmp_registration_date_missing_degrades_honestly()` to `engine/cv/test_generate_cv.py` (3
+checks: the date is printed on the real document when present, logged as confirmed with the right
+value; logged as missing with a reason when absent, not silently blank). Added
+`test_adapt_person_row_carries_sacpcmp_date_through()` to `engine/cv/test_process_cv_jobs.py` (2
+checks: `sacpcmp_number` still carries through unchanged; `sacpcmp_date` now does too). Revert-and-
+confirm-red across both production files at once (one patch): reproduced the exact predicted breakage
+- a `StopIteration` in `test_generate_cv.py` (the new field_key no longer exists in the provenance log
+at all, not just a wrong value) and exactly 1 failure in `test_process_cv_jobs.py` (`sacpcmp_date` not
+carried through), every pre-existing check in both files staying green; restored, `0 failure(s)` on
+both. Regression-checked `engine/cv/test_extract_cv_fields.py` (all pass) and
+`process_cv_jobs.py --self-test` (the real end-to-end Supabase-row-shape self-test, no live project
+needed - still "Self-test OK"). `py_compile` clean on both touched production files.
+
+**Regression:** `engine/cv/generate_cv.py` (one new table row, ~9 lines including comment),
+`engine/cv/process_cv_jobs.py` (one new dict entry, ~7 lines including comment),
+`engine/cv/test_generate_cv.py` (2 new test functions, 3 checks, wired into `main()`),
+`engine/cv/test_process_cv_jobs.py` (1 new test function, 2 checks, wired at module level matching this
+file's existing convention). No schema or other call-site changes - `people.sacpcmp_date` already
+exists and is already written to by `extract_cv_fields.py`; this fix only wires already-live data into
+an already-live display path and an already-live Supabase adapter.

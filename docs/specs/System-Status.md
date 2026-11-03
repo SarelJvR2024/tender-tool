@@ -1274,6 +1274,61 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - a company's own confirmed SACPCMP registration date was extracted, stored, and used by the SANRAL pack builder, but never once reached a generated CV document
+
+Oriented from `f21c0c7`; `git fetch origin main` found two new sibling commits since my own last push
+(`566d604`, a docs-only clean sweep closing out the migration-0063 CIDB-column pairing check and
+confirming this file's own two-block structure is correct, not a push collision; `34cfe5d`, a real
+fix - DBSA re-broke its own closing-time format) - neither touches `engine/cv/`, no overlap.
+Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no
+collision.
+
+Rotated to CV (non-SANRAL pack was last). Read `generate_cv.py` and `process_cv_jobs.py` end to end;
+both already carry many prior findings' fixes (path traversal, null-field "None" rendering, SAST
+timezone). Cross-checked `docs/specs/CV-Engine-Findings.md`'s own evidence ("professional registration
+body + level + number + date (ECSA/SACPCMP)") against what `build_sanral_keyperson()` actually
+displays: ECSA gets level, number, AND date; SACPCMP gets number only.
+
+**Found and fixed Finding 120 (CONFIRMED, moderate)**: confirmed the real form genuinely has a SACPCMP
+date field - `fill_tender.py`/`fill_conventional.py`'s own cell-offset dict carries
+`sacpcmp_date="P41"` as a distinct cell on a real completed workbook, and both fillers already write
+`q.get("sacpcmp_date")` into it. `people.sacpcmp_date` is a real, live column (same table/migration as
+`sacpcmp_number`): `extract_cv_fields.py`'s own `PERSON_DATE_FIELDS` already extracts it via AI, and
+`process_pack_jobs.py`'s `adapt_person()` already reads it for the SANRAL pack-build path. But
+`generate_cv.py`'s `build_sanral_keyperson()` - the function that explicitly claims to mirror this
+exact form - never read `sacpcmp_date` at all (confirmed by grep). Traced further, same discipline as
+Finding 119: even fixing the display alone would not have closed the real gap for the live
+"Generate tender-specific CV" button - `process_cv_jobs.py`'s own `adapt_person_row()` adapter never
+carried `sacpcmp_date` through to generate_cv.py's profile dict either, a second, independent gap on
+top of the first. A company with a real AI-extracted SACPCMP date on file would see it correctly
+appear in a merged SANRAL submission pack, but never on that same person's own standalone CV document,
+every time, not a rare race.
+
+Fixed with a new `"SACPCMP registration date:"` row in `build_sanral_keyperson()` (same
+unconditional-row, honest-"MISSING"-fallback pattern already used for ECSA's own date row), and a new
+`"sacpcmp_date": person_row.get("sacpcmp_date")` entry in `process_cv_jobs.py`'s adapter - the same
+one-line-per-field pattern every other field there already uses.
+
+Verified red-then-green: added 2 new checks to `test_generate_cv.py` (date shown and logged confirmed
+when present; logged missing with a reason when absent) and 2 to `test_process_cv_jobs.py`
+(`sacpcmp_number` still carries through, `sacpcmp_date` now does too); reverting both production files
+together reproduced the exact predicted breakage (a `StopIteration` in one file, the one predicted
+failure in the other), everything else staying green; restored, `0 failure(s)` on both.
+Regression-checked `test_extract_cv_fields.py` and `process_cv_jobs.py --self-test` - both clean;
+`py_compile` clean on both touched production files. Full write-up: `docs/specs/QA-Edge-Case-Findings.md`
+Finding 120.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/cv/generate_cv.py`
+- `engine/cv/process_cv_jobs.py`
+- `engine/cv/test_generate_cv.py`
+- `engine/cv/test_process_cv_jobs.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - a company's own uploaded CIDB registration/grading certificate could never reach a general (non-SANRAL) pack's "CIDB registration / grading" returnable, even when it was sitting right there in the vault
 
 Oriented from `873af2d`; `git fetch origin main` found one new sibling commit since my own last push

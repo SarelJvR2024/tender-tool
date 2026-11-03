@@ -174,6 +174,13 @@ def adapt_person_row(person_row, project_rows):
             "ecsa_number": person_row.get("ecsa_number"),
             "ecsa_date": person_row.get("ecsa_date"),
             "sacpcmp_number": person_row.get("sacpcmp_number"),
+            # Finding 120 (2026-11-03): missing here meant a person's own
+            # confirmed SACPCMP registration date, already stored in
+            # people.sacpcmp_date and already read by process_pack_jobs.py's
+            # own adapt_person(), never even reached generate_cv.py's profile
+            # dict for this bridge's jobs - a second, independent gap behind
+            # generate_cv.py's own display-side fix for the same field.
+            "sacpcmp_date": person_row.get("sacpcmp_date"),
             "highest_description": person_row.get("highest_description"),
             "highest_institution": person_row.get("highest_institution"),
             "highest_graduated": person_row.get("highest_graduated"),

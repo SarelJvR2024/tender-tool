@@ -285,6 +285,42 @@ def test_world_bank_education_with_null_institution_does_not_log_the_word_none()
     check("the visible document cell for institution is blank, not the word 'None'", "None" not in text, text)
 
 
+def test_sacpcmp_registration_date_now_appears_on_form_b21():
+    print("build_sanral_keyperson: Form B2.1's own SACPCMP registration date, not just the "
+          "number, must now reach the generated CV document")
+    # Finding 120 (2026-11-03): fill_tender.py/fill_conventional.py's own
+    # B["sacpcmp_date"] = "P41" proves the real SANRAL Form B2.1 has a
+    # SACPCMP registration DATE field, same shape as ECSA's level+number+date -
+    # but this function, which explicitly claims to mirror Form B2.1, only
+    # ever showed SACPCMP's number, silently dropping a confirmed date a
+    # company may have on file (extract_cv_fields.py's own PERSON_DATE_FIELDS
+    # already extracts it, and process_pack_jobs.py's adapt_person() already
+    # reads it - this was the one consumer that didn't).
+    person = {"name": "Jane Doe", "role": "Engineer", "projects": [],
+              "qualifications": {"sacpcmp_number": "SACPCMPREG12345", "sacpcmp_date": "2018-06-01"}}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    text = "\n".join(p.text for t in doc.tables for r in t.rows for p in r.cells[1].paragraphs)
+    check("the SACPCMP registration date is now printed on the document",
+          "2018-06-01" in text, text)
+    entry = next(e for e in log.entries if e["field_key"] == "cv.b21.sacpcmp_registration_date")
+    check("it is logged as confirmed (a real value on file), not missing",
+          entry["status"] == "confirmed" and entry["value"] == "2018-06-01", entry)
+
+
+def test_sacpcmp_registration_date_missing_degrades_honestly():
+    print("build_sanral_keyperson: no SACPCMP registration date on file reads MISSING, not blank")
+    person = {"name": "Jane Doe", "role": "Engineer", "projects": [],
+              "qualifications": {"sacpcmp_number": "SACPCMPREG12345"}}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    entry = next(e for e in log.entries if e["field_key"] == "cv.b21.sacpcmp_registration_date")
+    check("no date on file is logged as missing, with a reason, not silently blank",
+          entry["status"] == "missing" and entry["reason"], entry)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -297,6 +333,8 @@ def main():
     test_world_bank_project_with_null_position_held_does_not_print_the_word_none()
     test_sanral_keyperson_project_with_null_position_held_does_not_crash()
     test_world_bank_education_with_null_institution_does_not_log_the_word_none()
+    test_sacpcmp_registration_date_now_appears_on_form_b21()
+    test_sacpcmp_registration_date_missing_degrades_honestly()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

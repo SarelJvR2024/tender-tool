@@ -336,6 +336,16 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         ("ECSA number:", q.get("ecsa_number") or "MISSING"),
         ("ECSA registration date:", q.get("ecsa_date") or "MISSING"),
         ("SACPCMP number:", q.get("sacpcmp_number") or "Not registered / not on file"),
+        # Finding 120 (2026-11-03): the real Form B2.1 has a SACPCMP
+        # registration DATE field too (fill_tender.py/fill_conventional.py's
+        # own B["sacpcmp_date"] = "P41" cell, confirmed against a real
+        # completed workbook), and people.sacpcmp_date is a real column this
+        # engine's own extract_cv_fields.py (PERSON_DATE_FIELDS) and
+        # process_pack_jobs.py's adapt_person() both already read - but this
+        # standalone CV document, which explicitly claims to mirror Form
+        # B2.1, never showed it: ECSA got level+number+date, SACPCMP got
+        # number only, silently dropping a confirmed date right off the page.
+        ("SACPCMP registration date:", q.get("sacpcmp_date") or "MISSING"),
         # Other councils (0040), only when the person holds them - the form
         # used to show ECSA/SACPCMP only, an engineering firm's view.
         *[(f"{body} registration:", " ".join(x for x in (q.get(f"{key}_category"), q.get(f"{key}_number")) if x))

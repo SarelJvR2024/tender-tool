@@ -128,8 +128,26 @@ def test_fail_stale_jobs_survives_a_malformed_claimed_at():
           sorted((a[0][0], a[0][2]) for a in alerts) == [("cv", "error"), ("cv", "warning")], alerts)
 
 
+def test_adapt_person_row_carries_sacpcmp_date_through():
+    print("adapt_person_row: a person's own confirmed SACPCMP registration date reaches "
+          "generate_cv.py's profile dict, not just the number")
+    # Finding 120 (2026-11-03): people.sacpcmp_date is a real column (same
+    # migration as sacpcmp_number, 0001_init_schema.sql) this bridge's own
+    # sibling adapters already read correctly (process_pack_jobs.adapt_person(),
+    # confirmed by grep) - but this adapter only ever carried sacpcmp_number
+    # through, dropping the date before it ever reached generate_cv.py's
+    # build_sanral_keyperson(), regardless of that function's own display fix.
+    person_row = {"name": "Jane Doe", "sacpcmp_number": "SACPCMPREG12345", "sacpcmp_date": "2018-06-01"}
+    person = pcj.adapt_person_row(person_row, [])
+    check("sacpcmp_number still carried through (unchanged)",
+          person["qualifications"]["sacpcmp_number"] == "SACPCMPREG12345", person["qualifications"])
+    check("sacpcmp_date is now carried through too (the bug this test guards)",
+          person["qualifications"].get("sacpcmp_date") == "2018-06-01", person["qualifications"])
+
+
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
+test_adapt_person_row_carries_sacpcmp_date_through()
 
 print(f"\n{len(FAILS)} failure(s)")
 if FAILS:
