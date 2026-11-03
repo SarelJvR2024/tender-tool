@@ -113,8 +113,29 @@ def test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_on
           sorted((a[0][0], a[0][2]) for a in alerts) == [("pack", "error"), ("pack", "warning")], alerts)
 
 
+def test_adapt_person_carries_sacnasp_and_sagc_through():
+    print("adapt_person(): a person's own SACNASP/SAGC registration (0040) must reach the "
+          "SANRAL pack's qualifications dict, same as ECSA/SACPCMP already do")
+    # Finding (2026-11-03): process_cv_jobs.py's own adapt_person_row() (the standalone-CV path)
+    # already read sacnasp_category/number/expiry and sagc_category/number/expiry - this
+    # SANRAL-pack adapter never did, so a geologist's/surveyor's real registration (exactly what
+    # SANRAL C3.1.11 asks for, per 0050's own held_registrations comment) never reached a
+    # generated SANRAL pack's Form B2.1 at all, even though generate_cv.py's own
+    # build_sanral_keyperson() has always had display code ready for it.
+    row = {"name": "Jane Doe", "id_number": "123", "sacnasp_category": "Pr.Sci.Nat",
+           "sacnasp_number": "SACNASP999", "sacnasp_expiry": "2027-06-30",
+           "sagc_category": None, "sagc_number": None, "sagc_expiry": None}
+    person = ppj.adapt_person(row, [])
+    q = person["qualifications"]
+    check("sacnasp_category reaches the qualifications dict", q.get("sacnasp_category") == "Pr.Sci.Nat", q)
+    check("sacnasp_number reaches the qualifications dict", q.get("sacnasp_number") == "SACNASP999", q)
+    check("sacnasp_expiry reaches the qualifications dict", q.get("sacnasp_expiry") == "2027-06-30", q)
+    check("sagc_* keys are present (as None) rather than absent", "sagc_number" in q, q)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
+    test_adapt_person_carries_sacnasp_and_sagc_through()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

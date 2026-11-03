@@ -14,6 +14,69 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): a geologist's/surveyor's real SACNASP/SAGC registration never reached a generated SANRAL pack at all, and its expiry date never reached either CV path - fixed
+
+Oriented from `56ef07e` (a sibling session's own fix: `generate_cv.py`'s Form B2.1 never showed a
+person's SACPCMP registration *date*, only its number - Finding 120). `git fetch origin main` found
+nothing newer; local already matched `origin/main` exactly. Open PRs re-checked via the GitHub API:
+only `#164`/`#165` remain, both unchanged since 2026-10-26, no collision.
+
+Finding 120's own fix flagged a "second, independent gap" pattern for a field one adapter read and
+another didn't - worth checking whether that shape recurred anywhere else in the same CV/pack chain.
+It had, worse: migration `0040` added `people.sacnasp_category`/`sacnasp_number`/`sacnasp_expiry` and
+the SAGC equivalents specifically because SANRAL's own requirement schedule asks for them (`0050`'s
+`held_registrations` comment: SACNASP for "SANRAL C3.1.11 Engineering Geologist", SAGC for "SANRAL
+C3.1.11 Surveyor"). `process_cv_jobs.py`'s `adapt_person_row()` (the standalone-CV path) already reads
+all six columns. `generate_cv.py`'s shared `build_sanral_keyperson()` already has display code for
+SACNASP/SAGC (category + number, gated on `_number` being held) - used by BOTH the standalone-CV path
+and the full SANRAL pack build. But `process_pack_jobs.py`'s own `adapt_person()` - the adapter that
+feeds that SAME shared function for an actual SANRAL bid pack - never read any of the six columns at
+all. Net effect: a company's geologist or surveyor, with a real SACNASP/SAGC registration on file,
+would see it correctly on a standalone-CV document but see **nothing at all** for that registration in
+a real, submitted SANRAL key-person form (Form B2.1) - the exact artifact SANRAL's own requirement
+schedule asks for it on. Separately, confirmed `_expiry` (both bodies) was never displayed on *either*
+CV path - stored, extracted, and already tracked for compliance reminders (`watch_deadlines.py`'s
+`sacnasp_expiry`/`sagc_expiry` rows, confirmed already correct, not a gap) but silently absent from
+the document itself.
+
+**Fixed, two sites:**
+- `engine/pack/process_pack_jobs.py`'s `adapt_person()`: added `sacnasp_category`/`sacnasp_number`/
+  `sacnasp_expiry`/`sagc_category`/`sagc_number`/`sagc_expiry` to the qualifications dict it builds,
+  mirroring `process_cv_jobs.py`'s own `adapt_person_row()` exactly.
+- `engine/cv/generate_cv.py`'s `build_sanral_keyperson()`: the existing SACNASP/SAGC composite row now
+  folds in `"expires <date>"` when `_expiry` is on file, same pattern as every other optional
+  sub-value on this form. `build_world_bank()` left untouched on purpose - that format never shows a
+  registration date for ANY body (ECSA/SACPCMP included), a deliberate, consistent design choice, not
+  a gap.
+
+**Verified for real, both sites, genuine red-then-green:**
+- `engine/pack/test_process_pack_jobs.py`: new `test_adapt_person_carries_sacnasp_and_sagc_through()`.
+  Stashing just the `process_pack_jobs.py` fix and re-running reproduces the exact predicted failure
+  (all four new checks fail, qualifications dict shows only the pre-existing 12 keys); restoring is
+  clean, 0 failures.
+- `engine/cv/test_generate_cv.py`: two new tests (`test_sacnasp_expiry_now_appears_on_form_b21`,
+  `test_sacnasp_expiry_missing_degrades_honestly`). Stashing just the `generate_cv.py` fix reproduces
+  the predicted failure (expiry absent from the composite logged value); restoring is clean.
+- Full regression sweep, all clean: `test_generate_cv.py` (0 failures), `test_process_pack_jobs.py`
+  (0 failures), `test_process_cv_jobs.py` (0 failures, including its own pre-existing SACPCMP-date
+  regression check), `test_extract_cv_fields.py` (ALL PASSED), `process_cv_jobs.py --self-test`
+  (clean docx write, `confirmed: 20, computed: 4, missing: 8`).
+- `ast.parse` clean on both touched production files. `ruff check` on all four touched files: 33
+  pre-existing findings total, none on any touched line (checked line-by-line against the diff).
+- No live-database access, no mutation - pure Python adapter/display fix, nothing SQL to replay.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `engine/pack/process_pack_jobs.py`
+- `engine/cv/generate_cv.py`
+- `engine/pack/test_process_pack_jobs.py`
+- `engine/cv/test_generate_cv.py`
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 19** (standalone bug, now fixed - nothing added, nothing resolved from Sarel's own
+judgment-call list).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): DBSA re-broke its own closing-time format (`@` -> `at`), silently re-opening the exact 2026-10-29 bug - fixed, and confirmed it was actively showing already-closed RFPs as open
 
 Oriented from `566d604`; `git fetch origin main` found nothing new, local already matched

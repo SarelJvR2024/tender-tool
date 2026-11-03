@@ -321,6 +321,40 @@ def test_sacpcmp_registration_date_missing_degrades_honestly():
           entry["status"] == "missing" and entry["reason"], entry)
 
 
+def test_sacnasp_expiry_now_appears_on_form_b21():
+    print("build_sanral_keyperson: a SACNASP/SAGC registration's own expiry date, not just its "
+          "category and number, must now reach the generated CV document")
+    # Finding (2026-11-03): people.sacnasp_expiry/sagc_expiry (0040) are real,
+    # already-extracted, already-watched (watch_deadlines.py) columns - but
+    # this row only ever printed category + number, same "stored and used
+    # elsewhere, never reaches the CV" shape as Finding 120's SACPCMP date.
+    person = {"name": "Jane Doe", "role": "Geologist", "projects": [],
+              "qualifications": {"sacnasp_category": "Pr.Sci.Nat", "sacnasp_number": "SACNASP999",
+                                  "sacnasp_expiry": "2027-06-30"}}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    text = "\n".join(p.text for t in doc.tables for r in t.rows for p in r.cells[1].paragraphs)
+    check("the SACNASP expiry date is now printed on the document",
+          "expires 2027-06-30" in text, text)
+    entry = next(e for e in log.entries if e["field_key"] == "cv.b21.sacnasp_registration")
+    check("it is logged as confirmed, with the expiry folded into the one composite value",
+          entry["status"] == "confirmed" and "2027-06-30" in entry["value"], entry)
+
+
+def test_sacnasp_expiry_missing_degrades_honestly():
+    print("build_sanral_keyperson: a SACNASP registration with no expiry on file still prints "
+          "category + number, with no 'expires None' text and no crash")
+    person = {"name": "Jane Doe", "role": "Geologist", "projects": [],
+              "qualifications": {"sacnasp_category": "Pr.Sci.Nat", "sacnasp_number": "SACNASP999"}}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    text = "\n".join(p.text for t in doc.tables for r in t.rows for p in r.cells[1].paragraphs)
+    check("category and number still print", "SACNASP999" in text and "Pr.Sci.Nat" in text, text)
+    check("no 'expires None' text leaked onto the document", "expires None" not in text, text)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -335,6 +369,8 @@ def main():
     test_world_bank_education_with_null_institution_does_not_log_the_word_none()
     test_sacpcmp_registration_date_now_appears_on_form_b21()
     test_sacpcmp_registration_date_missing_degrades_honestly()
+    test_sacnasp_expiry_now_appears_on_form_b21()
+    test_sacnasp_expiry_missing_degrades_honestly()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

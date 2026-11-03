@@ -272,7 +272,14 @@ def adapt_person(row, projects):
         "qualifications": {k: row.get(k) for k in (
             "ecsa_level", "ecsa_number", "ecsa_date", "sacpcmp_number", "sacpcmp_date", "highest_level",
             "highest_description", "highest_institution", "highest_graduated", "initial_description",
-            "initial_institution", "initial_graduated")},
+            "initial_institution", "initial_graduated",
+            # 0040: SACNASP/SAGC - process_cv_jobs.py's own adapt_person_row() already reads these
+            # for the standalone CV path; this SANRAL-pack adapter never did, so a geologist's/
+            # surveyor's real SACNASP/SAGC registration (exactly what SANRAL C3.1.11 asks for, per
+            # 0050's own held_registrations comment) never reached a generated SANRAL pack's B2.1 at
+            # all, standing review 2026-11-03.
+            "sacnasp_category", "sacnasp_number", "sacnasp_expiry",
+            "sagc_category", "sagc_number", "sagc_expiry")},
         "projects": [{
             "client_and_number": p["client_and_number"],
             "client_type": p.get("client_type"),

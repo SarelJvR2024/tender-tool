@@ -348,7 +348,13 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         ("SACPCMP registration date:", q.get("sacpcmp_date") or "MISSING"),
         # Other councils (0040), only when the person holds them - the form
         # used to show ECSA/SACPCMP only, an engineering firm's view.
-        *[(f"{body} registration:", " ".join(x for x in (q.get(f"{key}_category"), q.get(f"{key}_number")) if x))
+        # Finding (2026-11-03): people.sacnasp_expiry/sagc_expiry are real,
+        # extracted, already-watched (watch_deadlines.py) columns, but this
+        # row never showed them - same "stored and used elsewhere, never
+        # reaches the CV" shape as Finding 120's SACPCMP date.
+        *[(f"{body} registration:", " ".join(x for x in (
+              q.get(f"{key}_category"), q.get(f"{key}_number"),
+              (f"expires {q[f'{key}_expiry']}" if q.get(f"{key}_expiry") else None)) if x))
           for body, key in (("SACNASP", "sacnasp"), ("SAGC", "sagc")) if q.get(f"{key}_number")],
         ("Highest qualification:", q.get("highest_description") or "MISSING"),
         ("Highest qualification institution:", q.get("highest_institution") or "MISSING"),
