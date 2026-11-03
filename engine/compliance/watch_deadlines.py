@@ -48,6 +48,15 @@ mechanism as document-expiry reminders, not a second one):
    still has no expiry column (not part of Sarel's answer), so it is still
    not tracked.
 
+   `cidb_expiry` (added later, by 0063_onboarding_document_scan.sql, after
+   this doc's own 2026-10-16 resolution) is added here too - confirmed a
+   real `companies` column by grepping the migrations, and confirmed
+   already tracked on the app side (app/lib/companyExpiryFields.ts's
+   COMPANY_EXPIRY_FIELDS, the topbar bell, the Document Vault's expiry
+   overview and bid-readiness score) with no Python-side counterpart until
+   now - this reminder/digest never once fired for a CIDB grading lapse,
+   standing review, 2026-11-03.
+
    The bank letter has an issue date, not an expiry; the tracked column is
    the generated bank_confirmation_letter_valid_until (letter date + 3
    months), with its own 30-day lead time - a 60-day window on a 3-month
@@ -149,6 +158,7 @@ SAST = datetime.timezone(datetime.timedelta(hours=2))
 # None = use --doc-lead-days.
 TRACKED_EXPIRY_FIELDS = [
     ("coid_letter_of_good_standing_expiry", "COID Letter of Good Standing", None),
+    ("cidb_expiry", "CIDB grading", None),
     ("sars_tcs_pin_expiry", "SARS Tax Compliance Status PIN", None),
     ("pi_insurance_expiry", "Professional indemnity insurance", None),
     ("iso_9001_expiry", "ISO 9001 certificate", None),

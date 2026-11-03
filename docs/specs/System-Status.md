@@ -14,6 +14,73 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): `engine/compliance/watch_deadlines.py`'s reminder/digest never once watched a CIDB grading expiry - fixed
+
+Oriented from `873af2d`; `git fetch origin main` found nothing new, local already matched `origin/main`
+exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain (both untouched since
+2026-10-26), no collision with anything touched here.
+
+Read `app/lib/notifications.ts`, `app/lib/readiness.ts` and `app/lib/documentExpiry.ts` end to end (the
+three "pure, no I/O" core modules `app/lib/billing.ts`'s own header comment names as siblings, none of
+which had a dedicated pass yet). All three read cleanly - no bug in any of them. But
+`app/lib/notifications.ts`/`documentExpiry.ts` both source their company-document list from
+`app/lib/companyExpiryFields.ts`'s `COMPANY_EXPIRY_FIELDS` (7 entries: COID, **CIDB grading**, SARS TCS
+PIN, PI insurance, ISO 9001, bank confirmation letter, B-BBEE proof) - the exact same "two copies,
+checked against each other" bug class this session has repeatedly found drift in (most recently,
+`tt_plan_price_zar()` vs `lib/billing.ts`). Checked its real Python-side counterpart,
+`engine/compliance/watch_deadlines.py`'s `TRACKED_EXPIRY_FIELDS` (the list `find_due_documents()` -
+and, via it, `engine/notify/daily_digest.py`'s live-mode digest - actually iterates to decide what to
+remind a company about): only **6** entries. `cidb_expiry` was missing entirely.
+
+Confirmed this is real, not a naming mismatch: `cidb_expiry date` is a genuine `companies` column
+(added by `0063_onboarding_document_scan.sql`, well after `docs/specs/Document-Expiry-Tracked-Fields-Open-Item.md`'s
+2026-10-16 resolution that fixed `TRACKED_EXPIRY_FIELDS` at 6 fields from Sarel's "10. Yes." answer -
+CIDB's column simply didn't exist yet at that point, and nobody revisited the list once `0063` added
+it). CIDB grading is weighted 15/100 in `lib/readiness.ts`'s bid-readiness score and shown on the
+topbar bell and the Document Vault's expiry overview - but a company whose CIDB grading lapsed got
+**zero** reminder emails/digest entries for it, the one tracked compliance field with no Python-side
+watch at all. Every other tracked field (COID, SARS TCS PIN, PI insurance, ISO 9001, bank letter,
+B-BBEE) already fires correctly.
+
+Fixed with a one-line addition to `TRACKED_EXPIRY_FIELDS` in `engine/compliance/watch_deadlines.py`:
+`("cidb_expiry", "CIDB grading", None)` (`None` = the default 60-day lead time, matching
+`notifications.ts`'s own default for this field - CIDB has no per-field override on either side).
+Header comment updated to record why it was missing and why it's safe to add now. No other list
+needed changing: `daily_digest.py`'s live mode calls `find_due_documents()` directly (picks the new
+field up for free, as its own comment already promises); its local-mode dev/demo stand-in
+(`local_document_expiry()`) is explicitly out of the production path per its own docstring and was left
+alone; no third Python copy of this field list exists anywhere (`grep`-confirmed).
+
+**Verified for real, not just read:**
+- `python3 -c "import ast; ast.parse(...)"` - syntax clean.
+- Ran all 4 existing `engine/compliance/test_*.py` suites that exercise this area
+  (`test_watch_deadlines_urgency.py`, `test_reminder_seen_db.py`, `test_watch_conditional_registrations.py`,
+  `test_principals_registrations.py`) - **0 failures**, no regression (mock company rows with no
+  `cidb_expiry` key are correctly skipped, same as a real company with no CIDB grading on file).
+- Started the local Postgres service, created a disposable scratch database, replayed the stub + all
+  102 real migrations via `engine/security/replay_schema.sh` (clean - `== Schema replay complete (102
+  migrations) ==`). Confirmed `cidb_expiry date` is a real column with `\d companies`, inserted a real
+  test company with `cidb_expiry` 10 days out, and confirmed the EXACT select-column string
+  `TRACKED_EXPIRY_FIELDS` now generates is a valid query against the real schema and returns the right
+  value. Scratch database dropped and the local Postgres service stopped immediately after.
+- Ran `find_due_documents()` itself end to end with a stubbed `supabase_request()` returning that same
+  company row shape: it now reports `{'field': 'cidb_expiry', 'label': 'CIDB grading', 'status':
+  'renew_soon', 'days_left': 10}` - the exact gap just described, now closed, proven by running the
+  real function, not by inspection alone.
+- `ruff check` on the touched file: 6 pre-existing findings, all unrelated to this change (stale import
+  ordering, one pre-existing broad `except Exception` - none on the lines touched here); confirmed by
+  reading each one.
+
+Committed and pushed directly to `main`:
+- `engine/compliance/watch_deadlines.py`
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 19** (no new item - this was a standalone, now-fixed bug, not a judgment call for
+Sarel; nothing else on the list changed or re-flagged. The 7 pending-migration backlog item
+(`0096`/`0107`-`0112`) is unchanged.)
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): PayFast ITN handler never checked `amount_gross` - the 4th of PayFast's own documented ITN security checks, missing - fixed
 
 Oriented from `477afe4`; `git fetch origin main` found nothing new, local already matched
