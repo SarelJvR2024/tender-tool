@@ -14,6 +14,59 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): tried a real PDF decompression bomb against `requirements.pdf_text_or_error()` - genuinely already bounded, no fix needed
+
+Oriented from `4353040` (the prior pass's own zip decompression-bomb fix on `collect_documents()`,
+independently re-verified by Sarel's own session building a separate 400MB bomb by hand). `git fetch
+origin main` found nothing newer; local already matched `origin/main`. Open PRs re-checked: only
+`#164`/`#165` remain, both unchanged since 2026-10-26, no collision.
+
+That pass's own technique - build a real adversarial input and run it through the real consumer,
+not just reason about it - prompted trying the same document-bomb shape against a *different*
+parser on the same intake path: `engine/general/requirements.py`'s `pdf_text_or_error()`, which
+shells out to the real `pdftotext` (poppler) on every uploaded/downloaded PDF, with a 120-second
+subprocess timeout already in place but no check on how much it decompresses or how much memory it
+uses before that timeout fires.
+
+Built two real PDF decompression bombs by hand (a minimal hand-rolled PDF: one `Flate`-compressed
+content stream of millions of repeated `Tj` text-show operators, the same DEFLATE algorithm a zip
+bomb exploits, since PDF content streams use it too):
+- Bomb 1: a 495KB file whose content stream decompresses to 170MB (~343:1 ratio, 5,000,000 repeats).
+  Ran the real `pdftotext` binary against it while polling `/proc/<pid>/status` for `VmRSS` every
+  0.3s: finished in 4.5s, peak RSS **16.8MB** - nowhere near the 170MB decompressed size.
+- Bomb 2: scaled 10x - a 4.9MB file decompressing to 1.7GB (50,000,000 repeats, same ratio). Finished
+  in 48s (time scaling roughly linearly with decompressed size, confirming `pdftotext` genuinely
+  processes the whole stream, not short-circuiting), peak RSS **1.8MB** - poppler is clearly
+  streaming the Flate-decompressed content through its parser rather than buffering the whole thing
+  in memory, the same architectural property that already defended the entity-amplification bomb a
+  sibling pass tried against `.docx` parsing (libxml2's own internal cap, a different library, same
+  shape of protection).
+
+Net finding: a PDF decompression bomb against this specific call site cannot exhaust a worker's
+memory (confirmed, not assumed, at two different scales) and cannot run longer than the 120-second
+subprocess timeout the code already enforces - worst case is "one worker spends up to 120s on it,
+then gets a clean `pdftotext timed out...` error," not the open-ended, no-limit-at-all disk-filling
+shape the zip bomb had. Also worth noting for the record (not a vulnerability, just why the obvious
+"repeat the same text many times" bomb shape produces small real output here): the exact repetition
+that gives DEFLATE its high compression ratio is also what `pdftotext`'s own line-clustering logic
+collapses into a handful of output lines, so this attack shape can't even produce a large captured
+`stdout` to add a second risk on top - confirmed directly (8.3KB of output text from both bombs,
+regardless of 170MB vs. 1.7GB of underlying decompressed content).
+
+**No fix needed** - genuinely confirmed bounded by two independent mechanisms already in place
+(poppler's own memory-safe streaming parse, and the function's existing subprocess timeout), not
+assumed safe because nothing obviously bad happened. Did not pursue further exotic PDF attack shapes
+(nested/chained filters, object-stream self-reference "quines") in this pass - noted as something a
+future pass could try, not flagged as a known gap.
+
+Committed docs-only (no code change - nothing to fix):
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 19** (no new item, nothing resolved - this pass closed out an investigation with a
+confirmed-clean result, it didn't find a standalone bug).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): `requirements.collect_documents()`'s zip unpacking had no decompression-bomb cap at all - a 200KB zip extracted to 200MB in just over a second, with nothing to stop a much bigger one - fixed
 
 Oriented from `9bdcf55` (a sibling "standing QA/robustness review" pass's own clean sweep: a real
