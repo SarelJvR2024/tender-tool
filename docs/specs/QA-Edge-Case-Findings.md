@@ -6972,3 +6972,57 @@ staying green; restored, `0 failure(s)`. Regression-checked `test_digest_live.py
 comment), `engine/notify/test_send_digest_emails.py` (1 new test function, 2 checks, wired into
 `main()`). No schema or call-site changes - `discovery_downgrades.py`'s own `pending_digest_downgrades()`
 already computed `summary` correctly; this fix only lets the existing email renderer show it.
+
+### Finding 123 (CONFIRMED, FIXED, severe - a bridge subprocess failing to even START (not just timing out or exiting non-zero) silently aborted the WHOLE worker cycle and reached no alert at all in --loop mode, the one mode the real container actually runs)
+
+**Where:** this cycle's worker/job-queue rotation. `engine/worker/run_bridges.py`'s
+`BridgeRunner.run_once()`.
+
+**What was tested:** `run_once()`'s own loop already guards two bridge-pass failure shapes carefully
+(a hung bridge, killed by its whole process group per the 2026-10-23 fix; a bridge that exits
+non-zero) - both `broken.append(...)` and alert via `system_alerts.record(label, ...)`, then continue
+to the next bridge. But `subprocess.Popen(...)` itself (launching the subprocess, not waiting on it)
+sat OUTSIDE both of those try blocks, unguarded. Reproduced directly: monkeypatched `subprocess.Popen`
+to raise `OSError("Cannot allocate memory")` on the first call (simulating a real, reachable fork
+failure under memory pressure - plausible for this exact container, which this file's own docstring
+says may be mid-soffice/LibreOffice work for a pack bridge when a second bridge's turn comes up in the
+same cycle) and ran `BridgeRunner.run_once()` against two registered bridges.
+
+**Finding (CONFIRMED, severe).** The raw `OSError` propagated straight out of `run_once()`, uncaught:
+(1) the loop aborted entirely - the SECOND bridge was never even attempted that cycle, not just the
+failing one (confirmed: only 1 `Popen()` call recorded before the test's own exception assertions);
+(2) zero calls reached `system_alerts.record()` - the failure never got the per-bridge alert treatment
+every other failure shape in this same function already gets. In `--once` mode this exception does
+still reach the `if __name__ == "__main__":` guard's own fallback (`except Exception: system_alerts.
+record("worker", ...)`) - no real gap there. But in `--loop` mode - explicitly the ONLY mode the real
+worker container runs, per this file's own docstring ("what the container runs") - `runner.run_once`
+is called as `poll_loop.poll_forever()`'s own `poll_once` callback, which wraps it in a GENERIC
+per-cycle `except Exception` that only `print()`s and counts an error, never calling `system_alerts.
+record()` at all unless an `alert_source` was passed to `poll_forever()` - and `run_bridges.py`'s own
+call in `main()` never passes one. So in production, a `Popen()`-level failure (fork failure, a broken
+interpreter path, a permissions issue) was silently lost: not in system_alerts, only in a container log
+nobody watches (the entire reason `system_alerts` exists per this codebase's own standing practice).
+
+**Fix:** wrapped the `Popen(...)` call itself in `try/except OSError`, treating a failure to even
+start a bridge the same way as every other failure shape in this function: `broken.append(...)` +
+`system_alerts.record(label, ..., "critical", ...)` under that bridge's OWN source, then `continue` to
+the next bridge rather than aborting the whole cycle. Deliberately did NOT add a blanket `alert_source`
+to the `poll_forever()` call in `main()` as a second line of defense: `poll_forever`'s own generic
+catch fires on the ordinary `RuntimeError` `run_once()` already raises for every per-bridge failure
+too, which already gets its own, more specific alert recorded inside `run_once()` - adding
+`alert_source` there would double-alert on the common, already-well-handled path (timeout/non-zero
+exit) to guard a now-much-narrower residual gap, not a clean improvement.
+
+**Verified red-then-green.** Added `test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost()`
+to `engine/worker/test_poll_loop.py`, in the same real-subprocess, no-mock-framework style as this
+file's existing `test_timeout_kills_the_whole_process_group()`: monkeypatches `subprocess.Popen` to
+fail only on the first call, confirms the SECOND bridge still runs (loop doesn't abort), confirms
+exactly one `system_alerts.record()` call under the failing bridge's own label with `"critical"`
+severity. Ran the full `test_poll_loop.py` suite (every real end-to-end bridge-loop smoke test, not
+just the new one) - all pass. Revert-and-confirm-red: reverting reproduced the exact predicted raw
+`OSError` escaping uncaught; restored, all tests pass again. `py_compile`/`ast.parse` clean.
+
+**Regression:** `engine/worker/run_bridges.py` (one `try/except` added around the `Popen()` call,
+~20 lines including comment), `engine/worker/test_poll_loop.py` (1 new test function, wired into the
+file's own `__main__` runner). No change to the timeout/non-zero-exit handling already in place, and
+no change to `--once` mode's own existing correct behavior.

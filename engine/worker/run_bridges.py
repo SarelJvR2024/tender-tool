@@ -137,9 +137,32 @@ class BridgeRunner:
             # confirmed directly - adding start_new_session=True to
             # subprocess.run alone changes nothing, since nothing then
             # targets the group it creates. QA pass, 2026-10-23.
-            p = subprocess.Popen([sys.executable, path, "--once"] + self.extra_args,
-                                 cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                 text=True, start_new_session=True)
+            # Launching the subprocess itself (not just waiting on it) can
+            # fail - a real, reachable failure mode for a worker container
+            # under memory pressure (fork() raises OSError: Cannot allocate
+            # memory) while a soffice-heavy pack bridge is still running, or
+            # any other environment-level Popen failure (confirmed directly
+            # with a simulated fork failure). Before this fix, that raised
+            # straight out of this method, uncaught: the whole cycle aborted
+            # mid-loop (every bridge after this one was skipped too, not
+            # just this one), AND - since it never reached the broken.append()/
+            # system_alerts.record() pattern just below, which only guards
+            # the communicate()/timeout/exit-code failures - no alert was
+            # ever recorded for it either. In --loop mode (what the
+            # container actually runs) that exception is then swallowed by
+            # poll_loop.poll_forever()'s own generic per-cycle catch (this
+            # file's main() doesn't pass it an alert_source), so the failure
+            # reached neither system_alerts nor anyone watching - a silent
+            # loss, not just a missed alert. QA pass, 2026-11-03.
+            try:
+                p = subprocess.Popen([sys.executable, path, "--once"] + self.extra_args,
+                                     cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, start_new_session=True)
+            except OSError as e:
+                broken.append(f"{label} could not even be started: {e}")
+                system_alerts.record(label, f"The {label} bridge pass could not be started: {type(e).__name__}: {e}",
+                                     "critical", context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT)})
+                continue
             try:
                 stdout, stderr = p.communicate(timeout=self.timeout)
             except subprocess.TimeoutExpired:

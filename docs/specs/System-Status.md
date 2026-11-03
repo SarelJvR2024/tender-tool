@@ -1656,6 +1656,59 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - a bridge subprocess failing to even START (not timing out, not exiting non-zero - the launch itself failing) silently aborted the whole worker cycle and reached no alert in --loop mode, the one mode the real container actually runs
+
+Oriented from `cff9cd8`; `git fetch origin main` found two new sibling commits since my own last push
+(`80550b9`, a real app/TS fix - the last hand-rolled filename sanitizer now uses the shared
+`safeFileName()`; `a89c5b5`, a docs-only pass closing out a regex-ReDoS loose end with real timed
+adversarial input) - neither touches `engine/worker/`, no overlap. Fast-forwarded cleanly. Open PRs
+re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to worker/job-queue (notify was last). `run_bridges.py` read end to end - already carries
+several hardening fixes (process-group timeout kill, missing-script re-check every cycle, `--script`
+additive to the default set, per-bridge `system_alerts` source instead of a shared generic one).
+Noticed `subprocess.Popen(...)` itself sits OUTSIDE both of the function's own two existing guards
+(the `communicate(timeout=...)` try/except for a hang, the `p.returncode != 0` check for a bridge that
+exits non-zero) - construct a real adversarial case rather than just reading: monkeypatched `Popen` to
+raise `OSError("Cannot allocate memory")` on the first call, simulating a real, reachable fork failure
+under memory pressure (plausible on this exact container mid-soffice/LibreOffice work for a pack
+bridge when a second bridge's turn comes up the same cycle).
+
+**Found and fixed Finding 123 (CONFIRMED, severe)**: the raw `OSError` propagated straight out of
+`run_once()` uncaught - the loop aborted entirely (the SECOND bridge was never even attempted that
+cycle, confirmed: only 1 `Popen()` call recorded), and zero calls reached `system_alerts.record()` -
+unlike every other failure shape in this same function. In `--once` mode the exception still reaches
+the file's own `__main__` guard fallback (`system_alerts.record("worker", ...)`) - no real gap there.
+But in `--loop` mode - the ONLY mode the real worker container runs, per this file's own docstring -
+`poll_loop.poll_forever()`'s own generic per-cycle catch swallows it with only a `print()`, since
+`run_bridges.py`'s own `poll_forever()` call never passes it an `alert_source`. A `Popen()`-level
+failure (fork failure, a broken interpreter path, a permissions issue) was silently lost in
+production: not in system_alerts, only in a container log nobody watches.
+
+Fixed by wrapping the `Popen(...)` call itself in `try/except OSError`, treating it the same as every
+other failure shape already handled here: `broken.append(...)` + `system_alerts.record(label, ...,
+"critical")` under that bridge's own source, then `continue` to the next bridge rather than aborting
+the whole cycle. Deliberately did NOT also add a blanket `alert_source` to the `poll_forever()` call in
+`main()` - that would double-alert on the ordinary, already-well-handled `RuntimeError` path (every
+per-bridge timeout/non-zero-exit already gets its own, more specific alert) to guard a now-much-
+narrower residual gap, not a clean improvement.
+
+Verified red-then-green: added `test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost()`
+to `test_poll_loop.py`, same real-subprocess style as its existing timeout test - confirms the SECOND
+bridge still runs (no whole-cycle abort) and exactly one `critical` alert is recorded under the failing
+bridge's own label. Ran the full suite (every real end-to-end bridge-loop smoke test) - all pass.
+Reverting reproduced the exact predicted raw `OSError` escaping uncaught; restored, all green.
+`py_compile`/`ast.parse` clean. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 123.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/worker/run_bridges.py`
+- `engine/worker/test_poll_loop.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - a re-assessed/downgraded tender's digest line never said WHY it was no longer a good fit, only the tender's own generic title - the same bug class Finding 113 fixed for listing_changes, left unfixed for a second, independent section
 
 Oriented from `09a94a0`; `git fetch origin main` found one new sibling commit since my own last push

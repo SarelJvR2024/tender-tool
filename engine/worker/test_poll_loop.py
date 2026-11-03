@@ -297,6 +297,64 @@ def test_timeout_kills_the_whole_process_group():
           f"not leaked")
 
 
+def test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost():
+    # QA pass, 2026-11-03: subprocess.Popen() itself (launching the bridge
+    # subprocess, not waiting on it) can fail - confirmed directly with a
+    # simulated fork failure (OSError: Cannot allocate memory), a real,
+    # reachable failure mode for a worker container under memory pressure
+    # while a soffice-heavy pack bridge is still running. Before this fix,
+    # that OSError raised straight out of run_once(), uncaught: it aborted
+    # the WHOLE cycle (every bridge after the failing one was skipped too,
+    # not just that one) and was never recorded in system_alerts at all
+    # (the broken.append()/system_alerts.record() pattern only guarded
+    # communicate()/timeout/exit-code failures, never Popen() itself) - and
+    # in --loop mode (what the container actually runs), poll_loop.
+    # poll_forever()'s own generic per-cycle catch then swallowed it with
+    # only a print(), since run_bridges.py's main() never passes it an
+    # alert_source. A silent loss in the one mode that matters, not just a
+    # missed alert.
+    alerts = []
+    original_record = run_bridges.system_alerts.record
+    run_bridges.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    original_popen = run_bridges.subprocess.Popen
+    calls = []
+
+    def flaky_popen(*a, **kw):
+        calls.append(a)
+        if len(calls) == 1:
+            raise OSError("Cannot allocate memory (simulated fork failure)")
+        return original_popen(*a, **kw)
+    run_bridges.subprocess.Popen = flaky_popen
+
+    tmp = tempfile.mkdtemp(prefix="bridge_popen_fail_")
+    flaky_script = os.path.join(tmp, "flaky_bridge.py")
+    ok_script = os.path.join(tmp, "ok_bridge.py")
+    for path in (flaky_script, ok_script):
+        with open(path, "w") as f:
+            f.write("print('bridge ran fine')\n")
+    runner = run_bridges.BridgeRunner([("flaky", flaky_script), ("ok", ok_script)])
+    try:
+        try:
+            runner.run_once()
+            raise AssertionError("a bridge that fails to even start must still be reported as broken")
+        except RuntimeError as e:
+            assert "flaky could not even be started" in str(e), str(e)
+    finally:
+        run_bridges.subprocess.Popen = original_popen
+        run_bridges.system_alerts.record = original_record
+
+    assert len(calls) == 2, f"expected the loop to still attempt the SECOND bridge, not abort the whole " \
+                            f"cycle on the first bridge's Popen failure - got {len(calls)} Popen call(s)"
+    assert len(alerts) == 1, f"expected exactly one system_alerts.record() call for the bridge that " \
+                             f"couldn't start - got {alerts}"
+    (source, message, severity), kwargs = alerts[0]
+    assert source == "flaky", f"alert must be recorded under the FAILING bridge's own label, not a generic source - got {source!r}"
+    assert "could not be started" in message, message
+    assert severity == "critical", severity
+    print("PASS run_bridges.py: a bridge that fails to even start (Popen itself raising) is reported under "
+          "its own source, and the OTHER bridge in the same cycle still runs - not a silent, whole-cycle loss")
+
+
 if __name__ == "__main__":
     test_poll_forever_unit()
     test_claim_is_atomic()
@@ -304,4 +362,5 @@ if __name__ == "__main__":
     test_runner_drives_bridges_and_stops_on_sigterm()
     test_script_flag_is_additive()
     test_timeout_kills_the_whole_process_group()
+    test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost()
     print("All bridge-loop smoke tests passed.")
