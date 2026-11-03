@@ -14,6 +14,62 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): clean sweep - exhausted the migration-0063 CIDB-column pairing check across both pack pipelines; corrected a mistaken "misordering" flag from the prior pass
+
+Oriented from `f21c0c7`; `git fetch origin main` + `git pull` found one new sibling commit since my
+own last push (`f21c0c7`, a real fix - `build_general_pack.py`/`process_general_jobs.py` never wired
+up a company's uploaded CIDB certificate for a general pack) on top of my own `d6a449f`
+(`watch_deadlines.py` never watched `cidb_expiry`) - no overlap, no collision. Open PRs re-checked via
+the GitHub API: only `#164`/`#165` remain, both unchanged since 2026-10-26.
+
+Two consecutive passes had just found real bugs tied to the same migration-0063 `cidb_*` columns, so
+this pass deliberately checked whether any OTHER column from that migration (or any other
+company/returnable field) has the same "added to the schema and to one consumer, but missed in a
+sibling consumer" shape, rather than assuming the class was now closed:
+
+- Cross-checked `app/lib/companyExpiryFields.ts`'s `COMPANY_EXPIRY_FIELDS` (7: coid, cidb, SARS TCS
+  PIN, PI insurance, **ISO 9001**, bank letter, B-BBEE) against the general-pack side's
+  `VAULT_FILE_FOR`/`VAULT_EXPIRY_FOR`/`VAULT_COLUMNS` (now 6 each, post-`f21c0c7`: no ISO 9001 entry)
+  and against `engine/general/requirements.py`'s `RETURNABLES`. Confirmed this is correct, not a
+  sibling gap: `RETURNABLES` has no `iso_9001` key at all - ISO 9001 certification is simply not a
+  general-tender returnable this pipeline ever matches for, so there is nothing for the vault maps to
+  route to. Also checked `RETURNABLES`' `csd_report` (`"vault": "csd"`) - `companies` has no
+  `csd_document_path`/`csd_expiry` column at all (only the text `csd_supplier_number`), and
+  `build_general_pack.py` correctly reads `csd_supplier_number` directly (line ~209) rather than
+  expecting a vault file - not a gap either.
+- Cross-checked the SANRAL-pack side: `engine/pack/assemble_pack.py`'s `VAULT_ORDER`/`ISO_KEY` and
+  `engine/pack/process_pack_jobs.py`'s own `VAULT_COLUMNS` (6 entries: SARS TCS PIN, B-BBEE, PI
+  insurance, bank letter, COID, ISO 9001 - genuinely no CIDB entry on this side). Checked whether
+  SANRAL tenders actually need the CIDB registration/grading certificate the way general tenders do:
+  grepped `app/lib/tenderCompliance.ts`/`app/lib/sanralScoring.ts` for every "CIDB" mention - every one
+  is about **CIDB PSP performance reports** (past-project reference letters, scored via the Experience
+  Library for Form B6), a completely different artifact from the CIDB registration/grading certificate
+  the vault stores. SANRAL's own returnable schedule genuinely never asks for the registration
+  certificate itself, so `VAULT_ORDER`'s omission of `cidb` is correct, not a missed sibling.
+- Net result: the CIDB-column bug class is now genuinely exhausted on both pipelines - two real bugs
+  found and fixed (`d6a449f`, `f21c0c7`), everything else checked and confirmed correct by evidence,
+  not assumed.
+
+**Correcting the record, not a new finding:** my own prior report (relayed to Sarel in chat) described
+`873af2d`'s `System-Status.md` entry as having "landed out of reverse-chronological order" around line
+~1167. Reading the file's actual structure now shows that's wrong - line ~1167 onward is not a
+misplaced insertion into this routine's block at all, but the **start of a second, separate standing
+review's own block** ("standing QA/robustness review", a different routine/trigger from this one,
+155 entries deep, each correctly newest-first within its own block). Both blocks are internally
+consistent; the file is just two routines' logs concatenated, solution-architect block first, then
+QA/robustness block - not a push-collision artifact. No edit made; nothing was broken, so there is
+nothing to fix. Said here mainly so the mistaken "ordering slip" claim doesn't get repeated.
+
+No code bug found this pass - a genuine, evidence-backed clean sweep plus one honest self-correction.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 19** (no new item, nothing resolved - this pass closed out an investigation, it didn't
+find or fix a new standalone bug. The 7 pending-migration item (`0096`/`0107`-`0112`) is unchanged.)
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): `engine/compliance/watch_deadlines.py`'s reminder/digest never once watched a CIDB grading expiry - fixed
 
 Oriented from `873af2d`; `git fetch origin main` found nothing new, local already matched `origin/main`
