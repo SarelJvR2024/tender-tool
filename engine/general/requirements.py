@@ -129,18 +129,35 @@ def pdf_text_or_error(path):
     return out.stdout, None
 
 
+_ZIP_MEMBER_MAX_BYTES = 300 * 1024 * 1024  # 300MB - generous for a real drawing-heavy tender pack
+_ZIP_TOTAL_MAX_BYTES = 1024 * 1024 * 1024  # 1GB per zip, across all its members combined
+
+
 def collect_documents(paths, work_dir):
     """Expands dirs and zips into a flat list of {name, path, format}. Zips are
-    unpacked into work_dir (ESKOM publishes everything as zips)."""
+    unpacked into work_dir (ESKOM publishes everything as zips).
+
+    Decompression-bomb guard (found 2026-11-03, standing review): a zip's own
+    header claims nothing can be trusted - a 200KB zip of 200MB of zeros
+    (reproduced directly: ZIP_DEFLATED, ~1000:1 ratio) extracted in full, in
+    just over a second, with no limit at all before this fix. Enforced
+    during the actual streamed copy (not by trusting the zip's own stated
+    `file_size`, which a crafted zip can misstate) - both per-member and
+    across the whole zip, so a bomb built from many small entries is caught
+    too, not just one giant one."""
     found = []
 
     def add(path, display):
         ext = os.path.splitext(path)[1].lower().lstrip(".")
         if ext == "zip":
             dest = os.path.join(work_dir, re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.basename(path)) + "_unz")
+            total_written = 0
+            bomb_tripped = False
             try:
                 with zipfile.ZipFile(path) as z:
                     for member in z.namelist():
+                        if bomb_tripped:
+                            break
                         # zip-slip guard: never extract outside dest
                         target = os.path.realpath(os.path.join(dest, member))
                         if not target.startswith(os.path.realpath(dest) + os.sep):
@@ -148,8 +165,29 @@ def collect_documents(paths, work_dir):
                         if member.endswith("/"):
                             continue
                         os.makedirs(os.path.dirname(target), exist_ok=True)
+                        member_written = 0
                         with z.open(member) as src, open(target, "wb") as dst:
-                            shutil.copyfileobj(src, dst)
+                            while True:
+                                chunk = src.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                member_written += len(chunk)
+                                total_written += len(chunk)
+                                if member_written > _ZIP_MEMBER_MAX_BYTES or total_written > _ZIP_TOTAL_MAX_BYTES:
+                                    bomb_tripped = True
+                                    break
+                                dst.write(chunk)
+                        if bomb_tripped:
+                            os.remove(target)
+                            scan_ocr.system_alerts.record(
+                                "requirements",
+                                f"A zip in a tender pack decompressed past the {_ZIP_MEMBER_MAX_BYTES // (1024*1024)}MB "
+                                f"per-file / {_ZIP_TOTAL_MAX_BYTES // (1024*1024)}MB total guard - stopped extracting "
+                                f"it rather than risk filling the worker's disk: {display} > {member}",
+                                "warning")
+                            found.append({"name": display, "path": path, "format": "zip",
+                                          "unreadable": "decompresses past the size guard - not extracted"})
+                            break
                         add(target, f"{display} > {member}")
             except zipfile.BadZipFile:
                 found.append({"name": display, "path": path, "format": "zip", "unreadable": "corrupt zip"})

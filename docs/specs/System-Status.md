@@ -14,6 +14,81 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): `requirements.collect_documents()`'s zip unpacking had no decompression-bomb cap at all - a 200KB zip extracted to 200MB in just over a second, with nothing to stop a much bigger one - fixed
+
+Oriented from `9bdcf55` (a sibling "standing QA/robustness review" pass's own clean sweep: a real
+XML entity-amplification/"billion laughs" `.docx` built by hand and run against both real docx
+consumers, neither vulnerable - libxml2's own built-in entity cap already defends it). `git fetch
+origin main` found nothing newer; local fast-forwarded to match. Open PRs re-checked via the GitHub
+API: only `#164`/`#165` remain, both unchanged since 2026-10-26, no collision.
+
+That sibling pass's technique - build a real adversarial input and run it through a real consumer,
+not just reason about it - prompted checking the other classic document-bomb shape against a
+*different* parser: a zip-based decompression bomb (not an XML entity one) against
+`engine/general/requirements.py`'s own zip unpacking in `collect_documents()` (ESKOM and other
+sources publish tender packs as zips; this feeds both the general-pack builder and
+`watch_tender_updates.py`'s own re-extraction of a changed pack).
+
+First ruled out zip-slip (path traversal) two ways: confirmed CPython 3.13's own `zipfile`
+`_extract_member()` already strips `..`/empty/`.`-only path components outright (read its actual
+source: `invalid_path_parts = ('', os.path.curdir, os.path.pardir)`) - stdlib-safe by design,
+nothing to fix there. `collect_documents()` *also* has its own explicit, independent zip-slip guard
+(`os.path.realpath()` + a `startswith()` check) predating this pass - genuinely defended twice over,
+confirmed clean.
+
+Decompression bombs are a different attack surface entirely: built a real one by hand (a `.docx`
+named zip entry filled with 200MB of zeros, `ZIP_DEFLATED` level 9) - **204KB on disk, ~1000:1 ratio**.
+Ran it through the real `collect_documents()` directly: it extracted the full 200MB to disk in 1.2
+seconds, with **no size check anywhere in the path** - not on the zip's own stated `file_size` header
+(which a crafted zip can misstate to begin with, so checking it wouldn't even have been a real
+guarantee), not during the actual streamed copy. A worker processing a hostile or merely corrupted
+zip from any tender-document source had nothing stopping it from filling its own disk - affecting
+every job sharing that worker, not just the one tender.
+
+**Fixed:** `collect_documents()`'s zip-extraction loop now streams each member in 1MB chunks (never
+trusting the header's stated size) and enforces two caps, checked live against bytes actually
+written: `_ZIP_MEMBER_MAX_BYTES` (300MB per file - generous for a real drawing-heavy tender pack) and
+`_ZIP_TOTAL_MAX_BYTES` (1GB per zip, summed across all its members - catches a "many small entries"
+bomb that no single member would trip). Tripping either cap deletes the partial file, fires a
+`system_alerts.record()` warning (same non-fatal pattern `read_document()`'s own OCR-crash handling
+already uses two functions down), and marks that zip `unreadable` in the manifest rather than
+crashing or silently claiming success - an ordinary small zip is completely unaffected.
+
+**Verified for real, genuine red-then-green:**
+- Built the 200MB-zero-byte bomb above by hand, ran it against the real pre-fix code: extracted in
+  full, 209,715,200 bytes on disk, 1.2s, no warning of any kind.
+- Built a second, 400MB bomb (over the per-member cap): post-fix, correctly stopped, 0 bytes left on
+  disk, one `system_alerts.record()` warning fired, the zip entry marked `unreadable`.
+- Built a third bomb from 9 separate 150MB members (1.35GB total, each individually under the
+  per-member cap, to specifically test the *total* guard rather than the per-member one): post-fix,
+  stopped after 6 members (900MB), never reaching the 7th - confirms the "many small entries" shape
+  is caught too, not just one giant member.
+- Added `test_requirements.py::check_zip_decompression_bomb_is_capped()` (4 new checks: the
+  per-member cap, nothing left on disk after it trips, the total cap, and - the negative control - an
+  entirely ordinary small zip still extracts normally, unaffected by either guard). Stashed just the
+  `requirements.py` fix and re-ran: genuine red, all 4 new checks fail exactly as predicted (315MB and
+  1.35GB land on disk with nothing flagged). Restored: genuine green, `0 failure(s)` across the whole
+  suite (unchanged pre-existing tests included).
+- `ast.parse` clean on both touched files. `ruff check` on both: 20 pre-existing findings total, none
+  on any touched line (checked line-by-line against the diff - the new code is lines 132-207, every
+  finding sits well outside that range).
+- Confirmed `build_general_pack.py` (the real caller feeding a general pack) still imports and wires
+  through cleanly with the new module-level constants in place.
+- No live-database access, no mutation - pure Python extraction-loop fix, nothing SQL to replay.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `engine/general/requirements.py`
+- `engine/general/test_requirements.py`
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 19** (standalone bug, now fixed - nothing added, nothing resolved from Sarel's own
+judgment-call list. Worth a general observation for Sarel, not a backlog item: this is now the
+*second* real "constructed adversarial input against a real parser" finding today, after the
+entity-amplification one - both document-bomb classes checked, both now actually defended, one newly
+so).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): a geologist's/surveyor's real SACNASP/SAGC registration never reached a generated SANRAL pack at all, and its expiry date never reached either CV path - fixed
 
 Oriented from `56ef07e` (a sibling session's own fix: `generate_cv.py`'s Form B2.1 never showed a

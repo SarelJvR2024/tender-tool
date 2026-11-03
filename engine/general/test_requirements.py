@@ -328,6 +328,64 @@ def check_unrecognized_format_is_flagged_not_silently_blank():
               manifest["documents"][0].get("unreadable"))
 
 
+def check_zip_decompression_bomb_is_capped():
+    print("Standing review (2026-11-03): a zip whose own header lies about how much it "
+          "decompresses to must not be trusted - collect_documents() must cap extraction, "
+          "not fill the worker's disk")
+    import zipfile
+    with tempfile.TemporaryDirectory() as d:
+        # Per-member cap: a single entry that decompresses past the 300MB guard.
+        big_zip = os.path.join(d, "big.zip")
+        with zipfile.ZipFile(big_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+            zi = zipfile.ZipInfo("evil.docx")
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            with z.open(zi, "w") as f:
+                chunk = b"\x00" * (1024 * 1024)
+                for _ in range(301):  # 301MB, 1MB over the per-member cap
+                    f.write(chunk)
+        extract_dir = os.path.join(d, "extract1")
+        os.makedirs(extract_dir)
+        docs = req.collect_documents([big_zip], extract_dir)
+        check("the oversized member is not extracted - zip comes back as one 'unreadable' entry",
+              len(docs) == 1 and docs[0]["format"] == "zip" and bool(docs[0].get("unreadable")), docs)
+        written = sum(os.path.getsize(os.path.join(r, f))
+                      for r, _, fs in os.walk(extract_dir) for f in fs)
+        check("nothing from the oversized member was left on disk", written == 0, written)
+
+        # Total-across-members cap: many entries, each under the per-member cap on
+        # its own, that together exceed the 1GB total guard - the "many small
+        # entries" bomb shape, not just one giant one.
+        many_zip = os.path.join(d, "many.zip")
+        with zipfile.ZipFile(many_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+            chunk = b"\x00" * (1024 * 1024)
+            for i in range(9):  # 9 x 150MB = 1.35GB total, each well under the per-member cap
+                zi = zipfile.ZipInfo(f"part{i}.bin")
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                with z.open(zi, "w") as f:
+                    for _ in range(150):
+                        f.write(chunk)
+        extract_dir2 = os.path.join(d, "extract2")
+        os.makedirs(extract_dir2)
+        docs2 = req.collect_documents([many_zip], extract_dir2)
+        written2 = sum(os.path.getsize(os.path.join(r, f))
+                       for r, _, fs in os.walk(extract_dir2) for f in fs)
+        check("the total guard stops extraction before the full 1.35GB lands on disk",
+              written2 < 1024 * 1024 * 1024, written2)
+        check("the zip itself is flagged unreadable once the total guard trips",
+              any(x.get("format") == "zip" and x.get("unreadable") for x in docs2), docs2)
+
+        # A genuinely small, ordinary zip must still extract normally - the guard
+        # must not false-positive on a real document.
+        small_zip = os.path.join(d, "small.zip")
+        with zipfile.ZipFile(small_zip, "w") as z:
+            z.writestr("notice.txt", "a perfectly ordinary tender notice")
+        extract_dir3 = os.path.join(d, "extract3")
+        os.makedirs(extract_dir3)
+        docs3 = req.collect_documents([small_zip], extract_dir3)
+        check("an ordinary small zip still extracts its real member, unaffected by the guard",
+              len(docs3) == 1 and docs3[0]["format"] == "txt" and not docs3[0].get("unreadable"), docs3)
+
+
 def main():
     print("Finding 29: MBD/SBD suite decided by majority of real mentions, not mere presence")
     check("10 real MBD mentions + 1 stray SBD reference -> MBD (the bug itself: this used to come back SBD)",
@@ -345,6 +403,7 @@ def main():
     check_key_personnel_false_positive()
     check_buyers_own_manager_excluded()
     check_unrecognized_format_is_flagged_not_silently_blank()
+    check_zip_decompression_bomb_is_capped()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
