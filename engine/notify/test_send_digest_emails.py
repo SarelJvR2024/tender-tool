@@ -194,6 +194,33 @@ def test_render_text_shows_what_actually_changed_on_a_listing_change():
           "  - Addendum 3.pdf" in update_body and "unrelated document summary text" not in update_body)
 
 
+def test_render_text_shows_why_a_tender_was_reassessed():
+    print("render_text(): a reassessed_tenders line shows WHY it's no longer a good fit, not just the title")
+    # Finding 122 (2026-11-03): discovery_downgrades.pending_digest_downgrades()
+    # items carry the exact same "title" + "summary" shape as listing_changes
+    # (the summary names what actually changed: "No longer a good fit: was
+    # strong_fit, now possible...") - but they never set "change_type" (that
+    # key is unique to tender_changes.py's own items), so Finding 113's own
+    # fix, scoped only to "change_type", silently never applied here: every
+    # reassessed-tender line showed just the generic tender title, with the
+    # one fact this whole section exists to report never reaching the email.
+    items = [
+        {"contract_number": "R.343-020-2025/1F", "title": "Routine maintenance of provincial roads",
+         "was_verdict": "strong_fit", "now_verdict": "possible",
+         "summary": "No longer a good fit: was Strong fit, now Possible - your company profile changed since it was first scored"},
+    ]
+    body = sde.render_text(_digest(reassessed_tenders=items))
+    check("the reassessed-tender line names the real tender AND the actual reason it changed",
+          "Routine maintenance of provincial roads: No longer a good fit: was Strong fit, now Possible" in body)
+
+    # The sibling tender_updates case above must stay unaffected by widening
+    # the condition to cover "was_verdict" too.
+    update_items = [{"type": "tender_update", "title": "Addendum 3.pdf", "summary": "unrelated document summary text"}]
+    update_body = sde.render_text(_digest(tender_updates=update_items))
+    check("a tender_updates item is still unaffected after this widening (no change_type, no was_verdict)",
+          "  - Addendum 3.pdf" in update_body and "unrelated document summary text" not in update_body)
+
+
 # --- send_one(): every status path, no real network -------------------------
 
 def test_send_one_skips_cleanly_without_email_or_content():
@@ -360,6 +387,7 @@ def main():
     test_render_text_uses_document_expiry_label_not_raw_field()
     test_render_text_names_the_person_on_a_person_credential_item()
     test_render_text_shows_what_actually_changed_on_a_listing_change()
+    test_render_text_shows_why_a_tender_was_reassessed()
     test_send_one_skips_cleanly_without_email_or_content()
     test_send_one_dry_run_never_touches_the_network()
     test_send_one_reports_sent_on_a_real_looking_success()

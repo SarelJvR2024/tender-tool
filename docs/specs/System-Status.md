@@ -1532,6 +1532,54 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - a re-assessed/downgraded tender's digest line never said WHY it was no longer a good fit, only the tender's own generic title - the same bug class Finding 113 fixed for listing_changes, left unfixed for a second, independent section
+
+Oriented from `09a94a0`; `git fetch origin main` found one new sibling commit since my own last push
+(`aa6de95`, a docs-only pass that independently re-confirmed the correction to `process_pack_jobs.py`'s
+`sacnasp`/`sagc` fix, did the definitive sweep of the whole dedicated-column bug class, and flagged
+`held_registrations` as a new, unfixed, needs-a-design-decision gap - backlog item 20) - docs-only, no
+overlap with `engine/notify/`. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API:
+`#164`/`#165` only, both unchanged, no collision.
+
+Rotated to notify (compliance/reminders was last). `daily_digest.py` (54KB, several dedicated passes
+already) read end to end first with nothing new found (`find_readiness_changes()`'s tenant-isolation
+`own()` filter, `submission_due_signals()`'s already-fixed closing_date guard, `build_digest_for_person()`'s
+per-role section narrowing all checked out); then `send_digest_emails.py`'s `render_text()` - the
+function Finding 113 fixed on 2026-11-01 - re-read against every place `engine/` sets a digest item's
+own `"summary"` key, rather than assuming that fix's own scope was still complete.
+
+**Found and fixed Finding 122 (CONFIRMED, moderate)**: grepped for every `"summary"` assignment -
+exactly two, `tender_changes.py` (listing_changes, the case Finding 113 fixed) and
+`discovery_downgrades.py`'s `pending_digest_downgrades()` (reassessed_tenders - "No longer a good fit:
+was strong_fit, now possible..."). Finding 113's own fix was deliberately scoped to `item.get("change_type")`
+as a safe, unique discriminator at the time ("confirmed by grep, no other section sets it") - but
+`reassessed_tenders` items never set `change_type` at all (they have their own unique `was_verdict`/
+`now_verdict` instead), so that fix silently never covered this section. Every reassessed-tender email
+line showed only the tender's own generic title - already shown in every other section of the same
+email - with the one fact this section exists to report never reaching the sent email.
+
+Fixed by widening the condition to `(item.get("change_type") or item.get("was_verdict")) and
+item.get("summary")` - `was_verdict` confirmed unique to `reassessed_tenders` by grep, same discipline
+as Finding 113's own `change_type` check. Deliberately did NOT widen to a bare `item.get("summary")`:
+`tender_updates` items also carry an unrelated `"summary"` (a watched document's own AI summary) that
+Finding 113's own test already locks in as deliberately unshown via this exact path.
+
+Verified red-then-green: added `test_render_text_shows_why_a_tender_was_reassessed()` (2 checks: the
+reassessed-tender line now shows the real reason; the `tender_updates` regression guard still holds);
+reverting reproduced exactly the 1 predicted failure, every pre-existing check (including Finding 113's
+own) staying green; restored, `0 failure(s)`. Regression-checked `test_digest_live.py`,
+`test_digest_opt_in.py` - both clean; `py_compile` clean. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md` Finding 122.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/notify/send_digest_emails.py`
+- `engine/notify/test_send_digest_emails.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - ECSA's/SACPCMP's own registration expiry, already watched for compliance reminders, never reached a generated CV; plus a correction to a same-day sibling fix that turned out not to reach any real output
 
 Oriented from `9bdcf55`; `git fetch origin main` found two new sibling commits since my own last push

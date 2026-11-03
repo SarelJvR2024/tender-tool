@@ -189,7 +189,24 @@ def render_text(digest):
                 # this section exists to report never appearing in the sent
                 # email at all. Found 2026-11-01 following up on this
                 # module's own disclosed "not a full per-section audit" gap.
-                if item.get("change_type") and item.get("summary"):
+                # Finding 122 (2026-11-03): reassessed_tenders items
+                # (discovery_downgrades.pending_digest_downgrades()) carry
+                # the exact same shape of fact in their own "summary" (e.g.
+                # "No longer a good fit: was strong_fit, now possible...")
+                # but never set "change_type" (confirmed by grep - that key
+                # is unique to tender_changes.py's listing_changes items) -
+                # so the fix above, scoped only to "change_type", silently
+                # never applied to this section at all: every reassessed-
+                # tender line showed just the generic tender title, with the
+                # one fact this whole section exists to report (WHY it's no
+                # longer a good fit) never reaching the sent email either.
+                # "was_verdict" is confirmed unique to reassessed_tenders
+                # items (grep) - deliberately NOT widened to a bare
+                # `item.get("summary")`, which would also catch
+                # tender_updates' own unrelated "summary" (a watched
+                # document's own AI summary, a different meaning - see this
+                # file's own test guarding that case).
+                if (item.get("change_type") or item.get("was_verdict")) and item.get("summary"):
                     bit = f"{bit}: {item['summary']}"
                 date = _item_date(item)
                 lines.append(f"  - {bit}" + (f" ({date})" if date else ""))

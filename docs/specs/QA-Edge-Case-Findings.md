@@ -6926,3 +6926,49 @@ files.
 (1 new test function, 2 checks) - all wired into their files' existing `main()`/module-level test
 runners. No schema or other call-site changes; `engine/pack/process_pack_jobs.py` deliberately left
 unchanged (see correction above).
+
+### Finding 122 (CONFIRMED, FIXED, moderate - a re-assessed/downgraded tender's "Re-assessed tenders" digest line never showed WHY it was no longer a good fit, only the tender's own generic title - the exact same bug class Finding 113 fixed for listing_changes, left unfixed for a second, independent section)
+
+**Where:** this cycle's notify rotation. `engine/notify/send_digest_emails.py`'s `render_text()`.
+
+**What was tested:** read `render_text()`'s own `bit`-selection chain end to end, alongside every
+place in `engine/` that sets a `"summary"` key on a digest item (grepped: exactly two,
+`discovery/tender_changes.py` for `listing_changes` items, and `discovery/discovery_downgrades.py`'s
+`pending_digest_downgrades()` for `reassessed_tenders` items). Finding 113 (2026-11-01) fixed
+`listing_changes`' own "title wins unconditionally, summary never shown" bug by appending `summary`
+whenever `item.get("change_type") and item.get("summary")` - deliberately scoped to `"change_type"`
+as a safe, unique discriminator (confirmed by that fix's own comment: "no other section sets it").
+But `discovery_downgrades.py`'s `reassessed_tenders` items carry the identical shape of fact in their
+own `"summary"` (e.g. `"No longer a good fit: was strong_fit, now possible..."`) without ever setting
+`"change_type"` at all (confirmed by grep: `was_verdict`/`now_verdict` are its own unique keys
+instead) - so Finding 113's own fix, scoped only to `change_type`, silently never applied to this
+section, which didn't exist as a digest section yet at the time that fix's "no other section sets it"
+grep was done (or simply wasn't re-checked against it).
+
+**Finding (CONFIRMED).** Every reassessed-tender line in a sent digest showed only the tender's own
+generic title - already shown in every other section of the same email - with the one fact this whole
+section exists to report (a tender a company was tracking is no longer a good fit, and why) never
+reaching the actual sent email text. A company relying on the digest to flag tenders worth dropping
+would see "Routine maintenance of provincial roads" and nothing else - no indication it had been
+downgraded, from what, to what, or why.
+
+**Fix:** widened the condition to `(item.get("change_type") or item.get("was_verdict")) and
+item.get("summary"):` - `was_verdict` confirmed unique to `reassessed_tenders` items by grep, the same
+discipline Finding 113 used for `change_type`. Deliberately NOT widened to a bare `item.get("summary")`:
+`tender_updates` items (`watch_tender_updates.pending_digest_updates()`) also carry a `"summary"` key
+with a different meaning (a watched document's own AI-generated summary) that Finding 113's own test
+already locks in as deliberately unshown via this path - a bare `summary` check would have silently
+started showing that unrelated text too.
+
+**Verified red-then-green.** Added `test_render_text_shows_why_a_tender_was_reassessed()` to
+`test_send_digest_emails.py` (2 checks: the reassessed-tender line now shows both the tender title and
+the real reason; the existing `tender_updates` regression guard from Finding 113's own test still
+holds after the widening). Revert-and-confirm-red: reverting reproduced exactly the 1 predicted
+failure, every pre-existing check (including Finding 113's own listing_changes/tender_updates checks)
+staying green; restored, `0 failure(s)`. Regression-checked `test_digest_live.py` and
+`test_digest_opt_in.py` - both clean. `py_compile` clean.
+
+**Regression:** `engine/notify/send_digest_emails.py` (one condition widened, ~14 lines including
+comment), `engine/notify/test_send_digest_emails.py` (1 new test function, 2 checks, wired into
+`main()`). No schema or call-site changes - `discovery_downgrades.py`'s own `pending_digest_downgrades()`
+already computed `summary` correctly; this fix only lets the existing email renderer show it.
