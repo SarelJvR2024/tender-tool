@@ -14,6 +14,73 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): definitive sweep of every `people` registration/expiry field across both CV paths - dedicated-column bug class now genuinely exhausted; one new architectural gap found and flagged (not fixed)
+
+Oriented from `09a94a0` (a sibling "standing QA/robustness review" pass's own fix: ECSA's and
+SACPCMP's own registration expiry, already watched for compliance reminders, never reached a
+generated CV - the third instance of the "field stored/watched but never shown on the CV" bug class
+this session, after SACPCMP's registration date and SACNASP/SAGC's registration+expiry). `git fetch
+origin main` found this one new commit; local fast-forwarded cleanly (note: my own working tree had
+only been `fetch`ed, not merged, for part of this pass - caught before drawing any conclusion from a
+stale checkout, see below). Open PRs re-checked: only `#164`/`#165`, both unchanged since 2026-10-26,
+no collision.
+
+That sibling pass's own commit message flagged something worth treating as a correction, not just a
+finding: it traced where an *earlier same-day* sibling fix's `sacnasp_*`/`sagc_*` addition to
+`process_pack_jobs.py`'s `adapt_person()` actually goes, and found it reaches nowhere real -
+`suggest_pack.score_candidate()` never reads those keys, neither does `fill_tender.py`'s/
+`fill_conventional.py`'s Excel-cell writer (confirmed directly here too: grepped both files, neither
+mentions `sacnasp`/`sagc` at all, and the real SANRAL Form B2.1 template has no cell for either body).
+That earlier fix was correctly verified at the time - the data genuinely does reach the
+`qualifications` dict, and its own new test genuinely passes - but the fix's own framing ("never
+appeared on a real submitted SANRAL key-person form") overstated what reaching that dict actually
+accomplishes: it still doesn't appear on a real submitted SANRAL pack today, because nothing
+downstream in that pipeline reads it. The sibling pass's own correction (leaving `process_pack_jobs.py`
+unchanged, routing the real fix through the CV path instead, which does have a real consumer) is the
+right call, independently re-confirmed by the same grep here.
+
+Given the dedicated-column bug class (CIDB, SACPCMP date, SACNASP/SAGC, ECSA/SACPCMP expiry) has now
+been found piecemeal four times, did the definitive sweep the parent's directive asked for rather than
+risk a fifth piecemeal find: cross-checked every `people` registration/expiry column (migrations
+`0001`, `0035`, `0040`) against `generate_cv.py`'s `build_sanral_keyperson()` AND `build_world_bank()`,
+and both adapters (`process_cv_jobs.py`'s `adapt_person_row()`, `process_pack_jobs.py`'s
+`adapt_person()`), together rather than one field at a time.
+
+**Result: the dedicated-column class is now genuinely exhausted.** `ecsa_level`/`ecsa_number`/
+`ecsa_date`/`ecsa_expiry`, `sacpcmp_number`/`sacpcmp_date`/`sacpcmp_expiry`, and `sacnasp_category`/
+`sacnasp_number`/`sacnasp_expiry`/`sagc_category`/`sagc_number`/`sagc_expiry` are now all present in
+both `build_sanral_keyperson()` and `adapt_person_row()` - confirmed by grep, then confirmed for real
+by running both `cv/test_generate_cv.py` and `cv/test_process_cv_jobs.py` (0 failures, every new
+check from both today's fixes genuinely present and genuinely passing - not just trusted from the
+commit message). `build_world_bank()` deliberately never shows a registration date/expiry for any
+body, for any of them - consistent, existing design, not a gap.
+
+**New gap found, not fixed - flagged for Sarel's own call (backlog item 20):** migration `0050`'s
+`held_registrations` table is a *second*, generic mechanism for a person's professional
+registrations/licences - explicitly for types that do NOT have a dedicated column (its own
+`registration_types.stored_in` comment: "Set when this type is recorded in dedicated columns instead
+... held_registrations refuses such a type"). It has a real, nullable `person_id` - a registration can
+be held by an individual person, not just a company or principal. `watch_deadlines.py`,
+`registration_reminders.py` and `classify_documents.py` all read it for compliance purposes - but
+`grep`-confirmed neither `generate_cv.py` nor `process_cv_jobs.py` references `held_registrations` at
+all. If a key person holds a real "other" professional registration recorded only this way (anything
+outside ECSA/SACPCMP/SACNASP/SAGC/CIDB), it is watched for compliance reminders but **never appears on
+their CV in any form** - the same shape as the bug class just closed out, but for the generic catalog
+instead of a dedicated column. Not fixed here: unlike the dedicated-column fixes (a one-line "add this
+named field to the existing display"), this needs a real design decision - whether CVs should surface
+arbitrary held-registration rows at all, and if so in what format, given the lesson from today's own
+`sacnasp`/`sagc` correction that SANRAL's own real Form B2.1 has no generic cell for this kind of
+data either. Sarel's own call, not a safe default to just build.
+
+Committed docs-only (no code change):
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 20** (new item 20: `held_registrations` never reaches a generated CV - judgment call,
+not fixed; everything else carried forward unchanged, including the 7 pending migrations `0096`,
+`0107`-`0112`).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): tried a real PDF decompression bomb against `requirements.pdf_text_or_error()` - genuinely already bounded, no fix needed
 
 Oriented from `4353040` (the prior pass's own zip decompression-bomb fix on `collect_documents()`,
