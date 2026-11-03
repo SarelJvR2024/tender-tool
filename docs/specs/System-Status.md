@@ -14,6 +14,52 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): checked two fresh angles after `e6326f4`'s bridge-launch fix - the same "silently lost" shape does not recur elsewhere, and a real image-decompression-bomb attack on the OCR path is already safely handled - clean sweep, no code change
+
+Oriented from `e6326f4` (a sibling pass: `run_bridges.py`'s `subprocess.Popen()` itself, not just
+waiting on the bridge, could raise an uncaught `OSError` under memory pressure, silently aborting the
+whole cycle with no alert - now caught, alerted, and skipped like the other two guarded failure
+shapes). `git fetch origin main` + `git merge --ff-only` confirmed clean, no new commits. Open PRs
+re-checked: only `#164`/`#165`, unchanged since 2026-10-26, no collision.
+
+**Angle 1: does `run_bridges.py`'s exact bug shape (a loop over several independent sub-units within
+one poll cycle, each launched via `subprocess.Popen`, with a launch failure able to escape past
+per-unit isolation) recur anywhere else?** Grepped every `subprocess.Popen`/`subprocess.run` call site
+in `engine/`. Every other `poll_forever()`-driven job processor (`cv`, `pack`, `general`, `onboarding`,
+`narrative`) claims and processes exactly ONE job per cycle, with any subprocess calls
+(`pdftotext`/`soffice`/`tesseract`) already inside that single job's own generic `except Exception`
+handler (confirmed directly in `process_pack_jobs.py`: the `try` at the top of the job body wraps the
+entire `build_submission_pack()` call chain, including `print_reports.py`'s own `subprocess.Popen(["soffice",
+...])` inside `Office.__enter__()` - an `OSError` there would be caught at line 710, alert via
+`system_alerts.record()`, mark just that one job 'failed', and move on). `run_bridges.py`'s
+"iterate N independent things per cycle" shape is genuinely unique to it among the 6
+`poll_forever()`-driven processors - confirmed by grep, not assumed from the function names alone. No
+other instance of this bug class found.
+
+**Angle 2: a fresh adversarial-input test not yet tried this session - an image decompression bomb
+against the OCR path** (`engine/ocr/scan_ocr.py`'s `ocr_image_file()`, which calls `PIL.Image.open()`
+directly on an uploaded photo/scan). Built a real 9.7MB PNG by hand (`IHDR` claiming 100,000 x 100,000
+px = 10 billion pixels, grayscale, with an `IDAT` of all-zero scanlines compressed via `zlib` without
+ever materializing the ~1TB raw stream in memory) and ran it against the real PIL install in this
+environment: confirmed `Image.MAX_IMAGE_PIXELS` is at its library default (89,478,485 px) - never
+raised or disabled anywhere in this codebase - so `Image.open()` itself raised
+`DecompressionBombError` in 12ms, long before any large allocation. Ran the real bomb through the
+actual `ocr_image_file()` function end to end (patching only `available()` to bypass this sandbox's
+missing Tesseract binary, not the PIL path itself): the exception is caught by the exact `except
+Exception as e:` block already added 2026-10-30 for a different reason (a corrupted/mislabeled image
+upload) - alerts via `system_alerts.record()` with `"the image could not be opened
+(DecompressionBombError)"`, returns a clean "could not read this" result, 0.57s total, no crash. Also
+checked the app side (`app/`) for any other image-decoding library (e.g. `sharp`) that might lack
+this protection - none found; the two `grep` hits for "sharp" were unrelated prose ("sharper
+results", "sharpened"), not an image library.
+
+**No code change this pass** - both investigations came back clean, built and run against real
+adversarial input/the real exception path rather than left as inspection. `docs/specs/System-Status.md`
+updated and pushed directly to `main`. Backlog unchanged at 20 (7 pending migrations `0096`,
+`0107`-`0112`; the `held_registrations`-vs-CV judgment call from two passes ago).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): closed out the regex-ReDoS loose end with real timed adversarial input instead of inspection alone; `randwater.py` retried live, still unreachable (environment TLS, not a code bug) - clean sweep, no code change
 
 Oriented from `80550b9` (my own prior pass: the last hand-rolled filename sanitizer migrated to the
