@@ -26,6 +26,12 @@ import { PAYFAST_ITN_HOSTNAMES, decodePlanInterval, payfastValidateUrl, verifyIt
  *      which matters here since the sandbox's universal test merchant has
  *      no real passphrase, so signature alone is a weaker guarantee than
  *      on a live account with one configured).
+ *   4. Amount: amount_gross is passed through to apply_payfast_itn(), which
+ *      verifies it against tt_plan_price_zar() for whatever plan/interval
+ *      this m_payment_id was actually checked out for before ever
+ *      activating anything (migration 0112) - PayFast's own documented 4th
+ *      check (payfast.kayako.com/article/321), not checkable here since
+ *      this route has no session and never looks up a company's own plan.
  * PayFast expects a 200 response and retries on anything else - a rejected
  * ITN (any check failing) still returns 200 so PayFast doesn't hammer this
  * endpoint with retries for a request that will never become valid, but
@@ -60,6 +66,8 @@ export async function POST(request: NextRequest) {
   const pfPaymentId = params.get("pf_payment_id") || params.get("token");
   const paymentStatus = params.get("payment_status");
   const planInterval = decodePlanInterval(params.get("custom_str2"));
+  const amountGrossRaw = params.get("amount_gross");
+  const amountGross = amountGrossRaw !== null && amountGrossRaw !== "" ? Number(amountGrossRaw) : null;
 
   if (!mPaymentId || !paymentStatus) {
     console.error("PayFast ITN: missing m_payment_id or payment_status after verification passed - ignoring", {
@@ -77,12 +85,14 @@ export async function POST(request: NextRequest) {
     p_payfast_token: pfPaymentId,
     p_payment_status: paymentStatus,
     p_period_end: periodEnd,
+    p_amount_gross: amountGross !== null && Number.isFinite(amountGross) ? amountGross : null,
   });
   if (error) {
-    // Genuinely unexpected (e.g. no pending row for this m_payment_id) -
-    // logged loudly, still 200 so PayFast doesn't retry forever for a
-    // payment this app can never reconcile.
-    console.error("apply_payfast_itn rpc failed", error, { mPaymentId, paymentStatus });
+    // Genuinely unexpected (e.g. no pending row for this m_payment_id, or -
+    // migration 0112 - amount_gross didn't match this plan's expected
+    // price) - logged loudly, still 200 so PayFast doesn't retry forever
+    // for a payment this app can never reconcile.
+    console.error("apply_payfast_itn rpc failed", error, { mPaymentId, paymentStatus, amountGross });
   }
 
   return new NextResponse("OK", { status: 200 });

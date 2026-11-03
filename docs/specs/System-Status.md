@@ -14,6 +14,82 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): PayFast ITN handler never checked `amount_gross` - the 4th of PayFast's own documented ITN security checks, missing - fixed
+
+Oriented from `477afe4`; `git fetch origin main` found nothing new, local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain (both
+untouched since 2026-10-26), no collision with anything touched here.
+
+Read `app/lib/billing.ts` (pricing/limits), then followed its only money-adjacent consumer that
+hadn't had a dedicated pass yet: `app/app/api/billing/payfast/itn/route.ts` and `app/lib/payfast.ts`.
+The route's own header comment claims "every one of PayFast's own documented ITN security checks is
+done" and lists three: signature (`verifyItnSignature`), source IP (resolves against PayFast's
+documented hostnames), and server confirmation (`eng/query/validate` returns `"VALID"`). Checked that
+claim against PayFast's own published ITN security-check list (`payfast.kayako.com/article/321` -
+"What causes the ITN security check errors?") rather than assuming it from the code: PayFast documents
+a **fourth** check - that the ITN's `amount_gross` matches what your own records say this transaction
+was for - described there explicitly as a real class of error ("amount mismatch... occurs when the ITN
+amount differs from the amount your database holds for that transaction"). `apply_payfast_itn()`
+(0078/0081/0082/0083/0110) never looked at an amount at all - a `COMPLETE` ITN that passed signature +
+IP + server confirmation was applied at face value regardless of `amount_gross`, so the route's own
+"every one... is done" claim wasn't true. Low exploit likelihood on its own (PayFast's outgoing
+checkout amount is itself signed, so tampering it client-side breaks PayFast's own acceptance of the
+transaction before it ever reaches our ITN) - but it's PayFast's own documented check, explicitly
+named in their own troubleshooting of real ITN failures, and the gap was real and checkable, not
+theoretical.
+
+Fixed with a new migration, `0112_payfast_itn_amount_verification.sql`:
+- `tt_plan_price_zar(plan_tier, billing_interval)` - a new SQL function mirroring `lib/billing.ts`'s
+  `PLAN_MONTHLY_ZAR`/`priceForPlanZar()`/`yearlyPriceZar()` exactly, same "two copies, never imported
+  across the app/database boundary" convention `tt_plan_limits()` (0083) already uses for
+  `PLAN_LIMITS` - pricing itself still lives in exactly one real place (`lib/billing.ts`); this is only
+  the read-only SQL-side mirror `apply_payfast_itn()` needs to verify an amount, never the other
+  direction.
+- `apply_payfast_itn()` gains a new `p_amount_gross numeric` parameter (old 4-arg signature dropped
+  outright, not left granted alongside the new one). For any ITN that would activate a subscription
+  (`COMPLETE`), it now looks up the plan/interval that specific `m_payment_id` was actually checked out
+  for - `company_subscriptions`' own current row for the ordinary path, `payfast_payment_attempts`'
+  append-only record (0081/0082) for the superseded-attempt rescue path - and raises (`P0003`, failing
+  closed, same as every other ITN check) if `amount_gross` doesn't match that plan's price. A `FAILED`
+  ITN activates nothing, so it's never gated on amount.
+- `app/api/billing/payfast/itn/route.ts`: extracts `amount_gross` from the ITN body and passes it
+  through to the RPC as `p_amount_gross` (`null` if absent/non-numeric, which the SQL side then
+  correctly rejects for any `COMPLETE` ITN); header comment's "every one... is done" list now actually
+  has 4 items, truthfully.
+
+**Verified against a real Postgres, not just read**: started the local Postgres service, created a
+disposable scratch database, and replayed the stub + all 102 real `app/supabase/migrations/*.sql`
+files in order via `engine/security/replay_schema.sh` (clean - `== Schema replay complete (102
+migrations) ==`, including this migration itself). Then, against that replayed schema, ran 5 concrete
+scenarios by hand (`set role authenticated` + `test.uid`, same harness pattern
+`test_tenant_isolation.py` uses): (1) a real `start_payfast_checkout('professional','monthly')`
+followed by `apply_payfast_itn(...)` with a **wrong** `amount_gross` (R10 instead of R2,990) -
+correctly raised `P0003` and left the row `trialing`, untouched; (2) the same `m_payment_id` with the
+**correct** amount (R2,990) - correctly activated, `professional`, right limits; (3) a second checkout
+(`business`/`yearly`) superseding the first on `company_subscriptions`, then the **rescue path**
+(0081/0082) replayed for the superseded `professional`/`monthly` attempt with the **wrong** amount
+(R4,990) - correctly raised `P0003`; (4) the same rescue with the **correct** amount (R2,990) -
+correctly rescued the right company into `professional`/`monthly`/`active` with the right limits,
+reclaiming `payfast_m_payment_id`, exactly matching 0082's own pre-existing documented behaviour; (5) a
+`FAILED` ITN with `amount_gross` entirely absent (`null`) on a fresh company/attempt - correctly still
+set `past_due` with `current_period_end` left `null`/untouched, confirming the amount gate never blocks
+the one ITN type (`FAILED`) that was never meant to need one. `grep`-confirmed `apply_payfast_itn` has
+exactly one real caller in the whole codebase (the route handler, now updated) - no other code needed
+touching for the signature change. `npx tsc --noEmit` clean, `npx vitest run lib/payfast.spec.ts
+lib/billing.spec.ts` - 28/28 passed (both suites untouched by this fix, run to confirm no regression),
+`eslint` clean on the touched route file. Scratch database dropped and the local Postgres service
+stopped immediately after.
+
+Committed and pushed directly to `main`:
+- `app/supabase/migrations/0112_payfast_itn_amount_verification.sql` (new)
+- `app/app/api/billing/payfast/itn/route.ts`
+- `docs/specs/System-Status.md`
+
+**Backlog: 18 → 19** (new item: migration `0112` needs applying to live DB, same as the other 6 - now
+7 - pending migrations; nothing else changed or re-flagged).
+
+---
+
 ## This pass (2026-11-02, standing solution-architect review): `narrative` bridge's idle-pass log line didn't match `run_bridges.py`'s own QUIET_PREFIXES - fixed
 
 Oriented from `ad0f11f`; `git fetch origin main` found one new sibling commit (`ad0f11f`, a docs-only
