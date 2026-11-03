@@ -14,6 +14,85 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): three fresh angles tried (job-claim TOCTOU, regex ReDoS, upload-filename-sanitizer consistency) - the first two genuinely clean, the third found and fixed the one straggler `safeFileName.ts`'s own header comment had been warning about since it was written
+
+Oriented from `cff9cd8` (a sibling "standing QA/robustness review" pass's own fix: Finding 122,
+`send_digest_emails.py`'s `render_text()` never showed why a *reassessed* tender changed, only its
+generic title - the `reassessed_tenders` section used `was_verdict` as its own change-indicator
+key, which Finding 113's earlier fix never accounted for). `git fetch origin main` found this one new
+commit; fast-forwarded cleanly this time (note from the prior pass: fetch-without-merge is a real trap
+this session hit once - checked explicitly here). Open PRs re-checked: only `#164`/`#165`, both
+unchanged since 2026-10-26, no collision.
+
+The "field stored/watched but never reaches a consumer" bug class (CIDB, SACPCMP/SACNASP/SAGC/ECSA)
+and the document-decompression-bomb class (zip, PDF, XML entity) are both now exhausted per the last
+several passes. Tried three different fresh angles instead of a fifth instance of either:
+
+**1. Job-claim TOCTOU (clean, genuinely checked, not assumed).** Two already-flagged TOCTOU races
+(`team/actions.ts` seat-limit, `company_can_request_pack()`'s two callers) are backlog items 7/8 -
+checked whether the more basic "two workers claim the same job row" race existed anywhere *else*.
+Read the actual claim logic in all 5 job processors (`cv`, `pack`, `general`, `onboarding`,
+`narrative`): every one does a single atomic `PATCH .../table?id=eq.X&status=eq.requested` (confirmed
+by reading `SupabaseRest.update()`'s/`supabase_request()`'s own query-string construction in each
+file - the status filter is applied server-side, in the same statement as the write, by PostgREST/
+Postgres, never a separate SELECT-then-UPDATE from Python) - `process_pack_jobs.py:672`'s own
+`client.update(..., {"id": job["id"], "status": "requested"}, {"status": "generating", ...})` and the
+near-identical pattern in the other four. An empty result means another worker already won the race;
+nothing here can double-claim. Genuinely exhausted, not a new finding.
+
+**2. Regex catastrophic backtracking / ReDoS.** Grepped `engine/` for the classic vulnerable shape
+(nested quantifiers over the same/overlapping character class, e.g. `(\s*)+`, `(.+)+`). Found 5
+candidates with a nested-quantifier *shape* (`score_outlook.py`, `capetown_procurement.py`,
+`key_person_minimums.py`, `vaal_central_water.py`, `fill_flat_pdf.py`) but none has the actual
+ambiguity ReDoS needs - each inner quantifier is anchored by a distinguishing literal (a specific
+word, a literal `|`, a literal `\s` boundary) that fixes where each repetition must start, so there's
+no way for the engine to try multiple overlapping splits of the same substring. Did not attempt to
+exhaustively prove safety the way the two decompression-bomb passes did (no real pathological input
+built and timed against any of these five) - this is a documented, honest "nothing found by
+inspection," not a "confirmed safe by test" result like those two passes. Worth a future pass
+actually timing these five against adversarial input if more rigor is wanted; not escalating it as a
+backlog item since inspection alone is enough to say nothing need change today.
+
+**3. Upload-filename-sanitizer consistency - found and fixed.** `app/lib/safeFileName.ts`'s own
+header comment (written when it was extracted) warned that "~8 other action files hand-rolled their
+own narrower inline version... not exploitable today... but one future edit... would reopen path
+traversal in just that file, with no shared place to fix it." Grepped every upload action file left
+in `app/app` for that exact inline pattern (`replace(/[^a-zA-Z0-9._-]/g, "_")`) rather than trusting
+the stale "~8" count: all but one have since been migrated to the shared helper. The one straggler,
+`app/app/my-cv/actions.ts`'s `uploadMyCv()`, was still hand-rolling it - not exploitable today either
+(both forms strip every `/`, confirmed: `safeFileName("../../etc/passwd")` and the inline regex both
+produce a string with no `/` in it), but it was missing the shared helper's 120-char length cap and
+its space/parenthesis allowance, exactly the drift the header comment predicted.
+
+**Fixed:** `my-cv/actions.ts` now imports and calls `safeFileName()` instead of hand-rolling its own
+regex - now identical to every other upload action in the app, and picking up the length cap for
+free. Updated `safeFileName.ts`'s own header comment to record this sweep and retire the stale "~8
+other files" count (re-grepped: zero stragglers remain after this fix).
+
+**Verified for real:** added `lib/safeFileName.spec.ts` (the shared helper itself had no dedicated
+test anywhere despite being security-relevant for 14 importers) - 4 checks: an ordinary filename
+passes through unchanged, every `/`-or-`\` form is stripped (path traversal stays impossible), a
+500-char name is capped at 120, and a genuinely-empty name (not merely all-separators, which still
+sanitizes to a non-empty string) falls back to `"document"` - caught my own first draft of that last
+check being wrong before running it (assumed `safeFileName("///")` falls back to `"document"`; it
+doesn't, `"///"` sanitizes to `"___"`, which is truthy - fixed the test to assert the real behaviour
+after checking directly with `node --experimental-strip-types`, not by guessing). `npx vitest run
+lib/safeFileName.spec.ts`: 4/4 passed. `npx tsc --noEmit`: clean. `npx eslint app/my-cv/actions.ts
+lib/safeFileName.spec.ts`: clean. Grepped all 14 importers of `safeFileName` to confirm the function
+itself was unchanged (only `my-cv/actions.ts` gained a new caller) - no risk to the other 13.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access, no PR):
+- `app/app/my-cv/actions.ts`
+- `app/lib/safeFileName.ts`
+- `app/lib/safeFileName.spec.ts`
+- `docs/specs/System-Status.md`
+
+**Backlog: 20 → 20** (standalone bug, now fixed - nothing added, nothing resolved from Sarel's own
+judgment-call list, including the still-pending `held_registrations`-vs-CV item and the 7 pending
+migrations `0096`, `0107`-`0112`).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): definitive sweep of every `people` registration/expiry field across both CV paths - dedicated-column bug class now genuinely exhausted; one new architectural gap found and flagged (not fixed)
 
 Oriented from `09a94a0` (a sibling "standing QA/robustness review" pass's own fix: ECSA's and

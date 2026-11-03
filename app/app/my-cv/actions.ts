@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
+import { safeFileName } from "@/lib/safeFileName";
 
 /**
  * Self-service actions for the My CV page (0065: employee role). Every
@@ -79,7 +80,7 @@ export async function uploadMyCv(formData: FormData) {
   if (mode !== "as_is" && mode !== "ai_extract") fail("Choose how this CV should be used: as-is or AI-extract.");
   if (!file || file.size === 0) fail("Choose a CV file to upload.");
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/people/${personId}/uploads/${randomUUID()}-${safeName}`;
 
   const { error: uploadError } = await supabase.storage
