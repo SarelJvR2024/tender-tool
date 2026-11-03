@@ -80,22 +80,26 @@ def normalize(row):
     )
 
 
-_AT_TIME = re.compile(r"\s*@\s*(\d{1,2})H(\d{2})", re.I)
+_AT_TIME = re.compile(r"\s*(?:@|at)\s*(\d{1,2})H(\d{2})", re.I)
 
 
 def _parse_dbsa_closing(s):
-    """DBSA writes closing times as '02 November 2026 @ 23H55' -
-    parse_sast() reads the day-month-year word order but not the 'H' time
-    separator, so convert '@ 23H55' to the '23:55' form parse_sast() already
-    understands (Rand Water's own format) rather than discarding it. Found
-    2026-10-29: the previous version stripped the time suffix entirely and
-    fed the bare date through iso_sast(), which defaults a time-only-unknown
-    date to SAST midnight - but DBSA HAD stated a real time here, so this
-    quietly turned a 23:55 close into a 00:00 one shown as "(Time TBC in
-    RFP)" on the same day, nearly a full day earlier than DBSA's own stated
-    deadline. Only a genuinely time-less closing (none seen in practice, but
-    not ruled out) falls back to iso_sast_closing()'s 11:00 SAST convention,
-    the same as every other confirmed date-only source."""
+    """DBSA writes closing times as '02 November 2026 @ 23H55' (or, found
+    live 2026-11-03, 'at 23H55' - DBSA switched the separator word on their
+    own page sometime after this function's own 2026-10-29 fix, silently
+    re-breaking it the same way) - parse_sast() reads the day-month-year
+    word order but not the 'H' time separator, so convert either '@ 23H55'
+    or 'at 23H55' to the '23:55' form parse_sast() already understands
+    (Rand Water's own format) rather than discarding it. The original
+    2026-10-29 finding: the pre-fix version stripped the time suffix
+    entirely and fed the bare date through iso_sast(), which defaults a
+    time-only-unknown date to SAST midnight - but DBSA HAD stated a real
+    time here, so this quietly turned a 23:55 close into a 00:00 one shown
+    as "(Time TBC in RFP)" on the same day, nearly a full day earlier than
+    DBSA's own stated deadline. Only a genuinely time-less closing (none
+    seen in practice, but not ruled out) falls back to
+    iso_sast_closing()'s 11:00 SAST convention, the same as every other
+    confirmed date-only source."""
     if not s:
         return None
     m = _AT_TIME.search(s)

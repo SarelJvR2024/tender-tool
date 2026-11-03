@@ -214,7 +214,10 @@ def test_new_sources():
     check("DBSA: a typo'd month ('Ocober') in the closing date -> unset, not a crash", rels[1]["closing_date"] is None)
     check("DBSA: single-digit hour ('9H00') parsed as 09:00, not dropped",
           dbsa_procurement._parse_dbsa_closing("9 January 2027 @ 9H00") == "2027-01-09T09:00:00+02:00")
-    check("DBSA: a genuinely date-only closing (no '@ HH:MM' seen) defaults to the 11:00 SAST "
+    check("DBSA: 'at HH'H'MM' (the live page's own wording as of 2026-11-03, replacing '@' and "
+          "silently re-breaking this exact parse until now) preserved, not dropped to None",
+          dbsa_procurement._parse_dbsa_closing("13 November 2026 at 23H55") == "2026-11-13T23:55:00+02:00")
+    check("DBSA: a genuinely date-only closing (no '@'/'at HH:MM' seen) defaults to the 11:00 SAST "
           "convention, not midnight - same as every other confirmed date-only source",
           dbsa_procurement._parse_dbsa_closing("12 October 2026") == "2026-10-12T11:00:00+02:00")
 

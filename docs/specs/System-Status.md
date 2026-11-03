@@ -14,6 +14,60 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): DBSA re-broke its own closing-time format (`@` -> `at`), silently re-opening the exact 2026-10-29 bug - fixed, and confirmed it was actively showing already-closed RFPs as open
+
+Oriented from `566d604`; `git fetch origin main` found nothing new, local already matched
+`origin/main` exactly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged since 2026-10-26, no collision.
+
+Per this pass's own rotation, tested a discovery scraper against its real live site rather than just
+its fixture - picked `engine/discovery/dbsa_procurement.py` (last fixed 2026-10-29 for discarding
+DBSA's own stated `@ 23H55` closing time; not live-tested since). Ran `fetch_releases()` against the
+real `dbsa.org/procurement` page just now: **all 14 open RFPs came back with `closing_date: None`**.
+Traced it to the raw HTML: DBSA's own page now writes `"13 November 2026 at 23H55"` - the separator
+word changed from `@` to `at` sometime after the 2026-10-29 fix was verified, and `_AT_TIME`'s regex
+only ever matched `@`, so `_parse_dbsa_closing()` fell through to `iso_sast_closing()` on the
+un-stripped `"...at 23H55"` string, which `parse_sast()`'s strict `_DMY_DT` regex can't match -> `None`.
+The exact same bug shape as 2026-10-29, re-introduced by the site itself, not by any code change here.
+
+**Worse than a display glitch, confirmed live:** `source_http.is_past(None)` returns `False` ("unknown
+is not expired"), and `is_closed = is_past(closing_date)` - so every DBSA RFP whose real deadline had
+already passed was being reported `is_closed: False` and surfaced as a still-open opportunity. Direct
+proof: re-running `fetch_releases()` after the fix below returned 12 open RFPs, not 14 - the 2 that
+dropped out are ones whose real stated deadline (now correctly parsed) is already in the past.
+
+**Fixed:** `_AT_TIME`'s regex now matches `@` OR `at` (`\s*(?:@|at)\s*(\d{1,2})H(\d{2})`, case-insensitive)
+before the `H`/`MM` time, same conversion to `parse_sast()`'s `HH:MM` form as before. One row
+(`RFP 200/2026`) still returns `None` - DBSA's own page has a literal typo there, `"23H555"` (an extra
+digit), which no sane regex should guess at; same acceptable "unparseable -> unset, not a crash"
+category the 2026-10-29 fixture already covers for a typo'd month.
+
+**Verified for real:**
+- Live: `_parse_dbsa_closing("13 November 2026 at 23H55")` -> `None` before the fix, `"2026-11-13T23:55:00+02:00"`
+  after - genuine red-to-green confirmed by stashing the fix and re-running.
+- Live: `fetch_releases()` against the real page now returns 12 open RFPs (down from the buggy 14),
+  11 of 12 with a real parsed closing time, 1 (`RFP 200/2026`) correctly `None` from DBSA's own
+  `"23H555"` typo.
+- Added a dedicated `'at HH'H'MM'` fixture assertion to `test_gov_sources.py` alongside the existing
+  `'@ HH'H'MM'` one (kept, in case DBSA reverts or mixes both). `python3 test_gov_sources.py` -> ALL
+  PASSED. Adjacent sanity sweep: `test_source_http.py`, `test_tender_updates.py` - both clean.
+  `py_compile` clean on both touched files.
+- No live-database access, no mutation - pure code/parsing fix wired through `gov_sources.py`'s
+  existing flow, nothing SQL to replay.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `engine/discovery/dbsa_procurement.py`
+- `engine/discovery/test_gov_sources.py`
+- `docs/specs/System-Status.md`
+
+**Backlog: 19 → 19** (standalone bug, now fixed - nothing added, nothing resolved from Sarel's own
+judgment-call list. Worth a general note for Sarel, not a backlog item: this is the second time this
+exact closing-time bug class has been re-triggered by a source site changing its own wording after a
+prior fix - `gov_sources`'s scrapers may be worth a periodic live-reachability/format check on a
+schedule, not just opportunistically when a pass happens to pick that file.)
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): clean sweep - exhausted the migration-0063 CIDB-column pairing check across both pack pipelines; corrected a mistaken "misordering" flag from the prior pass
 
 Oriented from `f21c0c7`; `git fetch origin main` + `git pull` found one new sibling commit since my
