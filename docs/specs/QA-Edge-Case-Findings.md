@@ -6661,3 +6661,69 @@ added before the existing try/except, ~15 lines including comment - every releas
 is already a string, real or malformed, is byte-for-byte unaffected), `engine/notify/test_digest_
 live.py` (1 new test function, 4 checks, wired into the file's own `__main__` block). No schema or
 other call-site changes.
+
+### Finding 118 (CONFIRMED, FIXED, severe - fingerprint.py's own advertised "whole-file hash" check was computed, stored, and then never once read: a real content-only template change - a label's wording, a dropdown option's own text - was completely invisible, with the tool reporting "OK: matches" and zero trace)
+
+**Where:** this cycle's SANRAL pack rotation. `engine/fingerprint.py`'s `diff()` - the template-
+change check Sarel's own standing rule ("there's always a chance a tender template has changed, so we
+must always check first") exists to enforce - plus its two real callers, `engine/intake/classify_
+tender.py`'s `check_fingerprint()` (intake time) and `engine/pack/assemble_pack.py`'s `check_template()`
+(pack-build time, `build_submission_pack()`'s own STEP 1).
+
+**What was tested:** `build_fingerprint()`'s own return dict includes `file_sha256` (the module's own
+docstring lists "whole-file hash" among what it computes and compares), but `diff()`'s actual
+comparison list - `family`, `sheet_names`, `zip_part_count`, `dropdown_counts`, `dropdown_total`,
+`named_ranges`, `cell_layout_hashes`, `macro` - never once includes it, confirmed by grep that
+`file_sha256` is read nowhere else in the whole codebase either. Reproduced directly against a real
+committed sample workbook (`templates/samples/R.334-030-2025.1F_ran.xlsm`), two ways: (1) a pure
+metadata edit (`docProps/core.xml`'s creator field only) - every structural signal identical,
+`file_sha256` differs; (2) a REAL content change (flipped one shared string's actual text, e.g. a
+label like "TENDERER NAME:") - every structural signal STILL identical (`cell_layout_hashes` tracks
+which cells are occupied, never what they say), `file_sha256` differs. Both cases: `diff()` returned
+zero changes AND zero warnings - `main()`'s own CLI would print "OK: matches" with no trace either
+case had happened at all.
+
+**Finding (CONFIRMED, severe).** A genuine SANRAL-changed label, a re-worded instruction, or a
+dropdown option's own text being silently edited between template revisions - exactly the category of
+change Sarel's own standing rule exists to catch before a pack gets built against it - was completely
+undetectable by this tool, directly contradicting the module's own stated job ("refuses to proceed
+silently on any mismatch"). Blindly promoting `file_sha256` to a BLOCKING change was ruled out: the
+metadata-only case above proves it would false-positive-block every trivial re-save (the exact "known-
+noisy signal" shape this module's own docstring already documents for three OTHER fields), which would
+likely cost Sarel's trust in the tool faster than the gap itself.
+
+**Fix:** `file_sha256` now gets the SAME non-blocking-warning treatment the module already proved out
+for `macro` - surfaced as its own warning (never blocking) whenever it differs AND no structural
+change already explains why (redundant otherwise). Both real callers were then checked for whether
+they'd actually SURFACE this new warning or silently drop it like they do today for `macro`:
+`check_fingerprint()`'s own "OK" message hard-coded "macro-only difference, known to be benign" for
+ANY non-empty warnings list - which would have silently mislabelled a real file_sha256 warning as
+benign too, exactly undoing this fix's own point - fixed to branch on which warning actually fired.
+`check_template()` computed `fingerprint.diff()`'s warnings (`soft`) and then never added them to its
+own returned `warnings` list AT ALL - the real SANRAL pack-build path was silently dropping every
+fingerprint warning, macro included, before this fix; now both flow through into `build_submission_
+pack()`'s own warnings list, the one that reaches the pack's real manifest.
+
+**Verified red-then-green.** `engine/test_fingerprint.py` (4 new checks: file_sha256-only difference
+surfaces a warning and doesn't block, no warning when nothing differs, no redundant warning when a
+real structural change already blocks); `engine/intake/test_classify_tender.py` (3 new checks: a
+file_sha256-only difference says "have a person look at this template by eye", not "known to be
+benign"; a macro-only difference is unaffected); `engine/pack/test_assemble_pack.py` (4 new checks:
+both file_sha256 and macro warnings now reach `check_template()`'s own returned warnings, neither
+blocks). Revert-and-confirm-red on all three files together: reverting reproduced exactly 1+1+2 = 4
+predicted failures across the three test files, every other check (including every pre-existing
+mismatch/corrupted-baseline/unfillable-family case) still green; restored, `0 failure(s)` across all
+three. Also confirmed end to end via the real CLI (`python3 engine/fingerprint.py`) against the real
+content-changed sample - the warning now prints exactly as designed. Regression-checked `engine/pack/
+test_process_pack_jobs.py`, `engine/general/test_requirements.py` - all pass. `py_compile` clean on
+all three touched production files.
+
+**Regression:** `engine/fingerprint.py` (`diff()`: one new conditional block, ~5 lines - every
+pre-existing comparison is byte-for-byte unaffected, confirmed by the full existing `test_fingerprint.
+py` suite including the real named-ranges disambiguation fix staying green), `engine/intake/classify_
+tender.py` (`check_fingerprint()`: the "ok" branch's message now branches on warning content instead
+of a blanket "macro-only" assumption), `engine/pack/assemble_pack.py` (`check_template()`: `soft` is
+now folded into the returned `warnings` list instead of discarded), plus the three corresponding test
+files (11 new checks total across `test_fingerprint.py`/`test_classify_tender.py`/`test_assemble_
+pack.py`). No schema or other call-site changes - both real callers' OWN return shapes are unchanged
+(same dict keys / same `(family, warnings)` tuple), only what populates them.

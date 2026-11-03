@@ -110,9 +110,46 @@ def test_check_template_refuses_an_unfillable_family():
         ap.fingerprint.build_fingerprint = original_build
 
 
+def test_check_template_surfaces_fingerprint_warnings_not_just_discards_them():
+    print("check_template(): fingerprint.diff()'s own non-blocking warnings (macro / file_sha256) now "
+          "reach this function's own returned warnings, not silently discarded")
+    # QA pass, 2026-11-03: `soft` (fingerprint.diff()'s second return value)
+    # used to be computed here and never once added to this function's own
+    # `warnings` list - so neither a macro-only nor a file_sha256-only
+    # difference ever reached build_submission_pack()'s own warnings list
+    # (what actually ends up in the real pack's manifest). Harmless for
+    # macro (already proven benign), but defeats fingerprint.py's own
+    # file_sha256 fix for this specific caller - the real SANRAL pack-build
+    # path, not just classify_tender.py's intake-time check_fingerprint().
+    store = tempfile.mkdtemp(prefix="assemble_fp_store_")
+    try:
+        real_fp = ap.fingerprint.build_fingerprint(TECH_WORKBOOK)
+        family = real_fp["family"]
+        baseline_path = os.path.join(store, family.replace(" ", "_") + ".json")
+
+        file_sha_only = dict(real_fp, file_sha256="deliberately-different-hash")
+        with open(baseline_path, "w") as f:
+            json.dump(file_sha_only, f)
+        fam, warnings = ap.check_template(TECH_WORKBOOK, store)
+        check("a file_sha256-only difference does not block the pack build", fam == family, warnings)
+        check("...but IS surfaced in this function's own returned warnings, with the real hashes named",
+              any("file_sha256" in w and "deliberately-different-hash" in w for w in warnings), warnings)
+
+        macro_only = dict(real_fp, macro={"present": True, "sha256": "deliberately-different-macro-hash"})
+        with open(baseline_path, "w") as f:
+            json.dump(macro_only, f)
+        fam, warnings = ap.check_template(TECH_WORKBOOK, store)
+        check("a macro-only difference does not block the pack build either", fam == family, warnings)
+        check("...and is also surfaced, labelled as known-noisy/benign, not silently dropped",
+              any("macro" in w and "benign" in w for w in warnings), warnings)
+    finally:
+        shutil.rmtree(store, ignore_errors=True)
+
+
 def main():
     test_check_template_no_baseline_match_mismatch_and_corrupted_baseline()
     test_check_template_refuses_an_unfillable_family()
+    test_check_template_surfaces_fingerprint_warnings_not_just_discards_them()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -243,6 +243,28 @@ def test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline(tmp
     except Exception as e:
         check("a corrupted baseline file is reported as a clean error, not raised", False, f"raised {type(e).__name__}: {e}")
 
+    # QA pass, 2026-11-03: fingerprint.diff()'s own "macro" and "file_sha256"
+    # warnings mean genuinely different things - "macro" alone is proven
+    # benign (varies per independently-saved copy, unchanged VBA); a
+    # file_sha256 difference with no structural change found CAN be a real
+    # content-only change (a label's wording, a dropdown option's own text).
+    # Reusing "macro-only difference, known to be benign" for both would
+    # silently reassure a person away from exactly the case worth checking.
+    file_sha_only = dict(real_fp, file_sha256="deliberately-different-hash")
+    with open(baseline_path, "w") as f:
+        ct.json.dump(file_sha_only, f)
+    sha_diff = ct.check_fingerprint(TECH_WORKBOOK, family, store=store)
+    check("a file_sha256-only difference still reports 'ok' (not blocking)", sha_diff["status"] == "ok", sha_diff)
+    check("...but says to have a person look at it, NOT 'known to be benign'",
+          "have a person look at this template by eye" in sha_diff["detail"] and "known to be benign" not in sha_diff["detail"], sha_diff)
+
+    macro_only = dict(real_fp, macro={"present": True, "sha256": "deliberately-different-macro-hash"})
+    with open(baseline_path, "w") as f:
+        ct.json.dump(macro_only, f)
+    macro_diff = ct.check_fingerprint(TECH_WORKBOOK, family, store=store)
+    check("a macro-only difference is still reported as benign (unchanged from before this pass)",
+          macro_diff["status"] == "ok" and "known to be benign" in macro_diff["detail"], macro_diff)
+
     import shutil
     shutil.rmtree(store, ignore_errors=True)
 

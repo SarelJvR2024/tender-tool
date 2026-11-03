@@ -101,6 +101,39 @@ changes, _ = fp.diff({**stored, "family": "x", "sheet_names": [], "zip_part_coun
 check("a change to just ONE sheet's own named range is now caught by diff() (would have been invisible before this fix)",
       any(c[0] == "named_ranges" for c in changes), changes)
 
+
+# --- diff()'s own file_sha256 handling -----------------------------------
+# QA pass, 2026-11-03 (SANRAL pack rotation): file_sha256 was computed and
+# stored by build_fingerprint() but never once read by diff() - a real
+# content-only change (a label's wording, a dropdown option's own text -
+# nothing that adds/removes an occupied cell, so cell_layout_hashes misses
+# it too) was completely invisible, diff() reporting zero changes AND zero
+# warnings. Confirmed directly against a real committed sample workbook
+# (flipping one shared string's text) before this fix, same repro redone
+# here with synthetic fixtures for a committed, offline test.
+def _base(file_sha256):
+    return {"family": "x", "sheet_names": [], "zip_part_count": 0, "dropdown_counts": {},
+            "dropdown_total": 0, "named_ranges": {}, "cell_layout_hashes": {},
+            "macro": {"present": False}, "file_sha256": file_sha256}
+
+
+changes_hash_only, warnings_hash_only = fp.diff(_base("aaa"), _base("bbb"))
+check("a file_sha256-only difference (no structural change at all) is NOT silently invisible - "
+      "it's surfaced as a warning", not changes_hash_only and len(warnings_hash_only) == 1,
+      (changes_hash_only, warnings_hash_only))
+check("...and it does NOT block (never promoted to a blocking change, unlike every structural key)",
+      changes_hash_only == [], changes_hash_only)
+
+changes_identical, warnings_identical = fp.diff(_base("aaa"), _base("aaa"))
+check("an unchanged file_sha256 produces no warning at all", warnings_identical == [], warnings_identical)
+
+stored_with_structural = {**_base("aaa"), "sheet_names": ["A"]}
+current_with_structural = {**_base("bbb"), "sheet_names": ["A", "B"]}
+changes_both, warnings_both = fp.diff(stored_with_structural, current_with_structural)
+check("when a REAL structural change already blocks, file_sha256 is not also surfaced as a "
+      "separate, redundant warning", not any("file_sha256" in str(w[0]) for w in warnings_both),
+      (changes_both, warnings_both))
+
 print(f"\n{len(FAILS)} failure(s)")
 if FAILS:
     sys.exit(1)

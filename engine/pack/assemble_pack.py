@@ -183,6 +183,21 @@ def check_template(technical_tpl, store=None):
         raise ValueError(f"Template fingerprint MISMATCH against the stored '{family}' baseline ({keys}). "
                          "SANRAL may have changed the template - not filling it. Run engine/fingerprint.py "
                          "on it for the full diff.")
+    # fingerprint.diff()'s own non-blocking warnings (macro / file_sha256)
+    # used to be computed here and then silently discarded - `soft` was
+    # never added to this function's own `warnings` return, so they never
+    # reached build_submission_pack()'s own `warnings` list (what actually
+    # ends up in the pack's manifest, the one place a person reviewing the
+    # pack looks). Harmless for "macro" (already proven benign noise), but
+    # directly defeats fingerprint.py's own file_sha256 fix (QA pass,
+    # 2026-11-03) for this specific caller - the real SANRAL pack-build
+    # path, not just classify_tender.py's intake-time check_fingerprint().
+    for key, old, new in soft:
+        if key.startswith("file_sha256"):
+            warnings.append(f"Template fingerprint: {key} (baseline {old}, this file {new}) - "
+                            "check it by eye before relying on this pack.")
+        else:
+            warnings.append(f"Template fingerprint: {key} differs from the baseline - known-noisy, benign.")
     return family, warnings
 
 

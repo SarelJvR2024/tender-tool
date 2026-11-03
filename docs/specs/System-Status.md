@@ -1097,6 +1097,58 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - fingerprint.py's own advertised "whole-file hash" check was computed, stored, and never once read: a real content-only template change (a label's wording, a dropdown option's own text) was completely invisible, reported "OK: matches" with zero trace
+
+Oriented from `4b3f334`; `git fetch origin main` found two new sibling commits since my own last push
+(`477afe4`, a docs-only/narrative-bridge log-format clean sweep; `6feba94`, a real app/TS fix -
+PayFast ITN handler never verified `amount_gross`) - neither touches `engine/fingerprint.py`,
+`engine/intake/`, or `engine/pack/`, no overlap. Fast-forwarded cleanly. Open PRs re-checked via the
+GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to SANRAL pack. `fill_docx_forms.py`/`sanral_b7.py`/`fill_authority_letter.py`/`company_
+documents.py`/`fill_tender.py` all had dedicated passes already; `sanral_fill.py` (the 586-line core
+module every filler shares) was read end to end first with nothing new found (`resolve_option()`/
+`code_alias()`/`projects_for_block()`'s own project-type matching all checked out against real
+template cell layouts), then picked `engine/fingerprint.py` (230 lines, never read end to end this
+session despite being central to Sarel's own explicit "always check the template first" rule).
+
+**Found and fixed Finding 118 (CONFIRMED, severe)**: `build_fingerprint()` computes and stores
+`file_sha256` ("whole-file hash", per the module's own docstring), but `diff()` never compares it -
+confirmed by grep it's read nowhere else in the codebase either. Reproduced directly against a real
+committed sample workbook two ways: a pure metadata-only edit, and a REAL content change (flipped one
+shared string's actual text, simulating SANRAL re-wording a label or dropdown option) - in BOTH cases
+every structural signal (`cell_layout_hashes` included - it tracks which cells are occupied, never
+what they say) stayed identical, and `diff()` reported zero changes, zero warnings: "OK: matches,"
+with no trace either had happened. Directly contradicts the module's own stated job.
+
+Ruled out promoting `file_sha256` to a blocking change (the metadata-noise case would false-positive-
+block every trivial re-save). Fixed with the same non-blocking-warning treatment already proven for
+`macro`. Then checked both REAL callers for whether they'd actually surface it: `classify_tender.py`'s
+`check_fingerprint()` hard-coded "macro-only difference, known to be benign" for ANY non-empty
+warnings list (would have mislabelled the new warning too - fixed to branch on which warning fired);
+`assemble_pack.py`'s `check_template()` computed `fingerprint.diff()`'s warnings and never added them
+to its own return value AT ALL - the real SANRAL pack-build path was silently dropping every
+fingerprint warning, macro included, before this fix.
+
+Verified red-then-green across all three touched files + their test files (11 new checks total);
+reverting reproduced exactly the predicted 4 failures (1+1+2) with every pre-existing check staying
+green; restored, `0 failure(s)` across all three. Confirmed end to end via the real CLI against the
+real content-changed sample too. Regression-checked `test_process_pack_jobs.py`, `test_requirements.
+py` - all pass; `py_compile` clean. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 118.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/fingerprint.py`
+- `engine/intake/classify_tender.py`
+- `engine/pack/assemble_pack.py`
+- `engine/test_fingerprint.py`
+- `engine/intake/test_classify_tender.py`
+- `engine/pack/test_assemble_pack.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed hardening fix, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-02, standing QA/robustness review): clean sweep - discovery rotation (cidb_tenders.py against its real live feed; the "two raw strings, one entity" bug class and a SQL/Python parallel-implementation pair both checked for drift, neither found)
 
 Oriented from `4b3f334`; `git fetch origin main` found nothing new since - local already matched

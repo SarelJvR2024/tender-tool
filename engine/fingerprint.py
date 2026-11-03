@@ -163,7 +163,23 @@ def diff(stored, current):
     """Returns (blocking_changes, warnings). 'macro' alone is demoted to a warning - it's
     known to vary per independently-saved copy even with unchanged VBA source (see module
     docstring) - but if ANYTHING else also differs, macro is folded back into the blocking
-    list too, since at that point there's no reason to extend it the benefit of the doubt."""
+    list too, since at that point there's no reason to extend it the benefit of the doubt.
+
+    'file_sha256' is NEVER promoted to a blocking change the way the structural keys above
+    are: it's noisy the same way the module docstring already documents for zip_part_count/
+    cell_layout_hashes/macro - a pure metadata re-save (confirmed directly: touching only
+    docProps/core.xml's creator field) changes it with zero structural difference. But
+    leaving it out of `diff()` entirely - which this function did until now - meant it was
+    computed, stored, and then never once read anywhere in this codebase (confirmed by
+    grep): a REAL content-only change (a label's wording, a dropdown option's own text -
+    confirmed directly: flipping one shared string's text changed file_sha256 with every
+    other signal, including cell_layout_hashes, identical, since that hash tracks which
+    cells are occupied, never what they say) was silently invisible, with `diff()` reporting
+    'OK: matches' and zero trace that the file's own bytes had changed at all - directly
+    against this module's own stated job ('refuses to proceed silently on any mismatch').
+    QA pass, 2026-11-03 (SANRAL pack rotation). Surfaced as its own warning, same
+    non-blocking treatment as macro, rather than promoted to blocking: the metadata-noise
+    case above would otherwise false-positive-block every trivial re-save."""
     changes, warnings = [], []
     for key in ("family", "sheet_names", "zip_part_count", "dropdown_counts",
                 "dropdown_total", "named_ranges"):
@@ -176,6 +192,10 @@ def diff(stored, current):
     if stored.get("macro") != current.get("macro"):
         entry = ("macro", stored.get("macro"), current.get("macro"))
         (warnings if not changes else changes).append(entry)
+    if stored.get("file_sha256") != current.get("file_sha256") and not changes:
+        warnings.append(("file_sha256 (no structural difference found - may be a content-only "
+                         "change: label wording, a dropdown option's own text, a formula - have a "
+                         "person look at this template by eye)", stored.get("file_sha256"), current.get("file_sha256")))
     return changes, warnings
 
 

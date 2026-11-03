@@ -315,9 +315,28 @@ def check_fingerprint(technical_path, family, store=None):
                           "the SANRAL pack run will STOP rather than fill a changed template. Someone must check what changed "
                           "and update the baseline (engine/fingerprint.py) before a pack can be generated.",
                 "changes": [k for k, _, _ in changes][:12]}
+    # fingerprint.diff()'s own warnings carry two genuinely different meanings
+    # this message must not conflate: "macro" alone is proven benign noise
+    # (varies per independently-saved copy with unchanged VBA source - see
+    # fingerprint.py's own docstring); "file_sha256" means the file's bytes
+    # differ with NO structural difference found, which can be the same kind
+    # of harmless metadata noise OR a real content-only change (a label's
+    # wording, a dropdown option's own text - confirmed directly: neither is
+    # caught by any of the structural signals). Reusing "known to be benign"
+    # for both would silently reassure a person away from exactly the case
+    # fixing this gap exists to surface. Found while wiring fingerprint.py's
+    # own file_sha256 fix into its real caller, QA pass 2026-11-03.
+    warning_keys = {w[0] for w in warnings}
+    if any(k.startswith("file_sha256") for k in warning_keys):
+        suffix = (" - this file's bytes differ from the baseline with no structural difference found "
+                  "(may be a content-only change: label wording, a dropdown option's own text, a formula) "
+                  "- have a person look at this template by eye before relying on it.")
+    elif warnings:
+        suffix = " - macro-only difference, known to be benign."
+    else:
+        suffix = "."
     return {"status": "ok",
-            "detail": f"Matches the stored '{family}' template (baseline {stored.get('_source_file')})"
-                      + (" - macro-only difference, known to be benign." if warnings else "."),
+            "detail": f"Matches the stored '{family}' template (baseline {stored.get('_source_file')}){suffix}",
             "changes": []}
 
 
