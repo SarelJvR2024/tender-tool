@@ -1337,6 +1337,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): clean sweep - intake rotation (classify_tender.py's real call site in process_general_jobs.py read end to end; real adversarial XML-entity-amplification/zip-based attack against a malicious .docx tried against both consumers, neither was vulnerable)
+
+Oriented from `56ef07e`; `git fetch origin main` found one new sibling commit since my own last push
+(`b69b276`, a real fix - SACNASP/SAGC registration never reached a SANRAL pack, and expiry never
+reached either CV path - directly adjacent to, and following up on, this pass's own prior Finding
+120) - touches `engine/cv/generate_cv.py`/`test_generate_cv.py` (files I'd also just touched) but no
+textual overlap, confirmed by running both test files after the fast-forward: `0 failure(s)` on both,
+plus `engine/pack/test_process_pack_jobs.py`. Open PRs re-checked via the GitHub API: `#164`/`#165`
+only, both unchanged, no collision.
+
+Rotated to intake (CV was last). `classify_tender.py` has had several dedicated passes already and was
+re-confirmed exhausted as recently as 2026-11-02 - rather than re-read it cold again, this pass instead
+read its real production call site, `process_general_jobs.py`'s `run_extraction()`/
+`register_sanral_tender()` (lines ~261-547), end to end for the first time - every `decision`/`setup`/
+`fp` field classify_tender.py returns, and how each one actually reaches `tender_packs.intake`/
+`tenders` columns. No gap found: the dict-comprehension that copies `decision` into `intake_rec`
+deliberately excludes `notes`/`sanral_files` and re-adds `notes` by hand correctly; the SANRAL-vs-
+general `family` patch logic is exhaustive over the three real family states (unset/SANRAL/general);
+the discrepancy, NRA-reference, closing-time and delivery-address notes are all correctly wired through
+with their own ambiguity flags intact.
+
+Then ran real adversarial input against the two real consumers of an uploaded `.docx`
+(`classify_tender._docx_head()` and `requirements.read_document()`), per this routine's own "construct
+real adversarial test cases... malformed/boundary input" instruction: built a genuine XML
+entity-amplification ("billion laughs") `.docx` by hand (a crafted `word/document.xml` with 10 levels
+of self-referencing entities, each multiplying by 10, inside an otherwise-valid OOXML zip) - a
+realistic attack shape against any system that opens buyer- or company-uploaded Word documents with no
+control over their content. Both consumers handled it cleanly and quickly (0.03-0.04s, no hang, no
+crash): modern libxml2's own built-in entity-amplification cap raised `XMLSyntaxError: Maximum entity
+amplification factor exceeded` immediately, and both call sites' existing generic `except Exception`
+guards (confirmed already in place for exactly this "corrupt/malicious docx" class) caught it and
+reported it as an honest "could not be opened"/`unreadable` result - the same degrade-honestly path a
+genuinely corrupt file already takes, not a new gap. Also re-checked `classify_tender.py`'s own regexes
+(`CLOSING_TIME_RE`/`DELIVERY_RE`/`NRA_RE`) for ReDoS-shaped nested-quantifier ambiguity against
+adversarial text - none found; all are linear-backtracking shapes already covered by existing
+ambiguous-time/ambiguous-address tests on realistic multi-document text.
+
+No code bug found this pass - a genuine, evidence-backed clean sweep (a real attack tried and found
+already defended, not merely "nothing looked wrong").
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - a company's own confirmed SACPCMP registration date was extracted, stored, and used by the SANRAL pack builder, but never once reached a generated CV document
 
 Oriented from `f21c0c7`; `git fetch origin main` found two new sibling commits since my own last push
