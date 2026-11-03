@@ -6727,3 +6727,58 @@ now folded into the returned `warnings` list instead of discarded), plus the thr
 files (11 new checks total across `test_fingerprint.py`/`test_classify_tender.py`/`test_assemble_
 pack.py`). No schema or other call-site changes - both real callers' OWN return shapes are unchanged
 (same dict keys / same `(family, warnings)` tuple), only what populates them.
+
+### Finding 119 (CONFIRMED, FIXED, moderate - a company's own uploaded CIDB registration/grading certificate could never reach a general (non-SANRAL) pack's "CIDB registration / grading" returnable, even when it was sitting right there in the vault - the same migration-0063 column a sibling pass independently found missing from watch_deadlines.py the same day)
+
+**Where:** this cycle's non-SANRAL pack rotation. `engine/general/build_general_pack.py`'s
+`VAULT_FILE_FOR`/`VAULT_EXPIRY_FOR`, and `engine/general/process_general_jobs.py`'s `VAULT_COLUMNS` -
+the real, live general-pack-build path (`gather_pack_inputs()` downloads each vault file;
+`build_general_pack()`'s own returnables loop, step 4, resolves one for each tender requirement).
+
+**What was tested:** `requirements.RETURNABLES` carries a real `"cidb"` key ("CIDB registration /
+grading") that every general pack's manifest can produce; `companies.cidb_document_path`/
+`cidb_expiry` are real, live columns (migration `0063_onboarding_document_scan.sql`, confirmed
+directly against the migration file and `app/lib/vaultDocuments.ts`'s own `VAULT_DOCUMENTS` catalog,
+which already lists `cidb` as one of 7 vault document kinds). But `VAULT_FILE_FOR`/`VAULT_EXPIRY_FOR`
+(5 entries each) and `VAULT_COLUMNS` (5 entries) never included it - confirmed by grep, zero mentions
+of "cidb" anywhere in `build_general_pack.py`. Reproduced directly: a company dict carrying a real
+`cidb_document_path` value, run through the exact lookup `build_general_pack()`'s own returnables
+loop performs (`VAULT_FILE_FOR.get(r["key"])` after checking for a per-tender upload), resolved to
+`None` - the vault document was never even looked for, let alone found.
+
+**Finding (CONFIRMED).** Traced the full chain, not just the mapping dict: even fixing `VAULT_FILE_
+FOR` alone would NOT have closed the gap - `process_general_jobs.py`'s own `VAULT_COLUMNS` (the list
+controlling which vault columns actually get DOWNLOADED from Storage before the pack build starts)
+was missing the same column, so the file would never even reach the local `files` dict for `VAULT_
+FILE_FOR`'s lookup to find. A company that did everything right - uploaded a real CIDB certificate to
+their vault - would see every general-tender pack claim "not uploaded for this tender" for that
+returnable, with no mention a vault copy was even possible, forever (both gaps are structural, not
+timing-dependent - this reproduces on every single affected pack build, not a rare race). Notably the
+SAME migration-0063 column (`cidb_expiry`) was independently found missing from a DIFFERENT list
+(`watch_deadlines.TRACKED_EXPIRY_FIELDS`) by a sibling QA pass earlier the same day - strong
+convergent evidence that migration 0063 introduced real, live functionality that several pre-existing
+lists across the codebase were never updated to include, a genuine "added a new column, forgot every
+downstream consumer" shape rather than two unrelated coincidences.
+
+**Fix:** added `"cidb": "cidb_document_path"` to `VAULT_FILE_FOR`, `"cidb": "cidb_expiry"` to `VAULT_
+EXPIRY_FOR` (both in `build_general_pack.py`), and `"cidb_document_path"` to `process_general_jobs.
+VAULT_COLUMNS` - the same 3-line-per-entry pattern every other vault document already uses. Swept the
+rest of `engine/` for the same 5-item vault-column list shape (grep for the other four columns
+together) to confirm no OTHER copy exists with the identical gap - `scenario_driver.py`'s own 3-column
+subset is test/demo seeding, not a completeness-critical list, left as-is.
+
+**Verified red-then-green.** Added `test_cidb_vault_document_is_now_reachable_from_a_general_pack()`
+to `engine/general/test_build_general_pack.py` (4 checks: `cidb` really is a real returnables key,
+both dicts now map it to the real columns, `VAULT_COLUMNS` now downloads it, and the exact lookup
+`build_general_pack()` itself runs now actually resolves to the vault file instead of `None`).
+Revert-and-confirm-red: reverting reproduced the exact predicted 4 failures with every pre-existing
+check in the file (the real misfiled-COID-incident case, the no-rule-for-pi_insurance/iso_9001/bank_
+letter cases) still green; restored, `0 failure(s)`. Regression-checked `engine/general/test_process_
+general_jobs.py`, `test_requirements.py` - all pass. `py_compile` clean on both touched production
+files.
+
+**Regression:** `engine/general/build_general_pack.py` (two dict entries added, ~12 lines including
+comment), `engine/general/process_general_jobs.py` (one list entry added, ~5 lines including
+comment), `engine/general/test_build_general_pack.py` (1 new test function, 4 checks, wired into
+`main()`). No schema or other call-site changes - the columns already exist (migration `0063`, live
+since it was applied); this fix only wires already-live data into an already-live code path.

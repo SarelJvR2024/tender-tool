@@ -74,6 +74,17 @@ VAULT_FILE_FOR = {
     "coid": "coid_letter_document_path",
     "bank_letter": "bank_confirmation_letter_path",
     "pi_insurance": "pi_insurance_document_path",
+    # Added by migration 0063 (2026-10-?? onboarding document scan) alongside
+    # cidb_grading's own cidb_expiry - never wired in here, so a company's
+    # own uploaded CIDB registration/grading certificate was never picked up
+    # for a general (non-SANRAL) pack's "CIDB registration / grading"
+    # returnable even when it was sitting right there in the vault; the
+    # same tender would instead claim "not uploaded for this tender" with
+    # no mention that a vault copy was even possible. Same migration-0063
+    # column, same "added later, nobody revisited this list" shape as the
+    # sibling's own watch_deadlines.py cidb_expiry fix found today - QA
+    # pass, 2026-11-03 (non-SANRAL pack rotation).
+    "cidb": "cidb_document_path",
 }
 VAULT_EXPIRY_FOR = {
     "tax_compliance": "sars_tcs_pin_expiry",
@@ -81,6 +92,7 @@ VAULT_EXPIRY_FOR = {
     "coid": "coid_letter_of_good_standing_expiry",
     "bank_letter": "bank_confirmation_letter_valid_until",
     "pi_insurance": "pi_insurance_expiry",
+    "cidb": "cidb_expiry",
 }
 
 # Real incident, 2026-10-28 (Reviewer Civils & Consulting): a file named

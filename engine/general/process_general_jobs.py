@@ -106,7 +106,12 @@ DOC_TYPES_FOR = {
 }
 
 VAULT_COLUMNS = ["sars_tcs_pin_document_path", "bee_proof_document_path", "coid_letter_document_path",
-                 "bank_confirmation_letter_path", "pi_insurance_document_path"]
+                 "bank_confirmation_letter_path", "pi_insurance_document_path",
+                 # Added by migration 0063 - was missing here, so a company's own
+                 # uploaded CIDB certificate was never even downloaded for a
+                 # general pack build, regardless of build_general_pack.py's own
+                 # VAULT_FILE_FOR mapping (fixed the same day, QA pass 2026-11-03).
+                 "cidb_document_path"]
 
 
 def _now():

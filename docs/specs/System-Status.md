@@ -1164,6 +1164,62 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - a company's own uploaded CIDB registration/grading certificate could never reach a general (non-SANRAL) pack's "CIDB registration / grading" returnable, even when it was sitting right there in the vault
+
+Oriented from `873af2d`; `git fetch origin main` found one new sibling commit since my own last push
+(`d6a449f`, a real fix - `watch_deadlines.py` never watched a CIDB grading expiry) - no overlap with
+the non-SANRAL pack files touched here. Fast-forwarded cleanly. Open PRs re-checked via the GitHub
+API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to non-SANRAL pack. `build_general_pack.py`'s `VAULT_FILE_FOR`/`VAULT_MISMATCH_KEYWORDS` dicts
+were read end to end; the `bank_letter`/`pi_insurance` mismatch-keyword gap was investigated and ruled
+out as deliberate, intentional scope (tied to one specific real incident, not accidental drift - see
+the file's own existing header comment). Compared `app/lib/vaultDocuments.ts`'s `VAULT_DOCUMENTS` (7
+entries) against Python's `VAULT_FILE_FOR` (5 entries): `cidb` was missing (`iso_9001` is correctly
+absent on the Python side - no `requirements.RETURNABLES` key uses it).
+
+**Found and fixed Finding 119 (CONFIRMED, moderate)**: `requirements.RETURNABLES` carries a real
+`"cidb"` key ("CIDB registration / grading") that every general pack's manifest can produce, and
+`companies.cidb_document_path`/`cidb_expiry` are real, live columns (migration
+`0063_onboarding_document_scan.sql`) - the same migration-0063 column a sibling pass independently
+found missing from a DIFFERENT list (`watch_deadlines.TRACKED_EXPIRY_FIELDS`) the same day, strong
+convergent evidence migration 0063 added live functionality several pre-existing lists were never
+updated for. But `VAULT_FILE_FOR`/`VAULT_EXPIRY_FOR` never mapped the key to the column (confirmed by
+grep, zero mentions of "cidb" anywhere in `build_general_pack.py`), AND `process_general_jobs.py`'s own
+`VAULT_COLUMNS` (the separate list controlling which vault columns actually get downloaded from
+Storage before the pack build starts) also never downloaded it - traced the full chain rather than
+stopping at the first gap, since fixing `VAULT_FILE_FOR` alone would not have closed it: the file would
+never even reach the local `files` dict for that mapping to find. Reproduced directly against the exact
+lookup `build_general_pack()`'s own returnables loop performs: a company dict carrying a real
+`cidb_document_path` value resolved to `None` - the vault document was never even looked for. A
+company that did everything right (uploaded a real CIDB certificate) saw every general-tender pack
+claim "not uploaded for this tender" for that returnable, forever - structural, not timing-dependent.
+
+Fixed with the same 3-line-per-entry pattern every other vault document already uses: `"cidb":
+"cidb_document_path"` added to `VAULT_FILE_FOR`, `"cidb": "cidb_expiry"` added to `VAULT_EXPIRY_FOR`
+(both in `build_general_pack.py`), and `"cidb_document_path"` added to `process_general_jobs.
+VAULT_COLUMNS`. Swept the rest of `engine/` for the same 5-item vault-column list shape to confirm no
+other copy has the identical gap - `scenario_driver.py`'s own 3-column subset is test/demo seeding, not
+a completeness-critical list, left as-is.
+
+Verified red-then-green: added `test_cidb_vault_document_is_now_reachable_from_a_general_pack()` to
+`engine/general/test_build_general_pack.py` (4 checks - the returnables key is real, both dicts now map
+it, `VAULT_COLUMNS` now downloads it, and the exact pack-build lookup now resolves to the real vault
+file instead of `None`); reverting reproduced exactly the predicted 4 failures with every pre-existing
+check in the file staying green; restored, `0 failure(s)`. Regression-checked
+`test_process_general_jobs.py`, `test_requirements.py` - all pass; `py_compile` clean on both touched
+production files. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 119.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/general/build_general_pack.py`
+- `engine/general/process_general_jobs.py`
+- `engine/general/test_build_general_pack.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - fingerprint.py's own advertised "whole-file hash" check was computed, stored, and never once read: a real content-only template change (a label's wording, a dropdown option's own text) was completely invisible, reported "OK: matches" with zero trace
 
 Oriented from `4b3f334`; `git fetch origin main` found two new sibling commits since my own last push
