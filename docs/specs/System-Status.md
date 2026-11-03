@@ -14,6 +14,51 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): closed out the regex-ReDoS loose end with real timed adversarial input instead of inspection alone; `randwater.py` retried live, still unreachable (environment TLS, not a code bug) - clean sweep, no code change
+
+Oriented from `80550b9` (my own prior pass: the last hand-rolled filename sanitizer migrated to the
+shared `safeFileName()`). `git fetch origin main` found nothing new; fast-forward confirmed explicitly
+(`git merge --ff-only`) before trusting anything, per the standing reminder from two passes ago. Open
+PRs re-checked: only `#164`/`#165`, both unchanged since 2026-10-26, no collision.
+
+Every productive bug-class sweep this session (field-stored-but-never-shown, zip/PDF/XML decompression
+bombs, job-claim TOCTOU, SECURITY DEFINER ownership checks, the 5 real LLM call sites, the
+`briefing_shortlisted` allow-list thread) is now explicitly marked exhausted in this doc's own recent
+history. The one deliberately-left-open loose end was the prior pass's regex-ReDoS sweep: 5 candidate
+files flagged by grep for a nested-quantifier *shape*, judged clean "by inspection" but honestly
+flagged as not timed against a real adversarial input the way the two decompression-bomb passes were.
+
+**Closed that out for real.** Built actual adversarial strings and timed the two most quantifier-heavy
+patterns found:
+- `capetown_procurement.py`'s `re.sub(r"(\|\s*)+", "|", flat)`: ran against 2000 repetitions of
+  `"|" + 50 spaces` with no closing match, and against a single 2000-char whitespace run after one
+  `|` - **1.3ms and 0.02ms** respectively.
+- `score_outlook.py`'s bounded lazy-quantifier/lookahead patterns (the `COMPANY_EXPERIENCE_RE` family,
+  e.g. `([^(.:;]{3,80}?)(?=\s*\(|[.:;]|\s+bidders?\b)`, and the `similar\s+(?:scope|...)` pattern with
+  its own `[^.]{0,90}` tail): ran the first against 100,000 chars that never satisfy the lookahead, and
+  the second against 500,000 chars after a real match - **0.7ms and 0.01ms**.
+
+All four finish in well under a millisecond regardless of input size, because every quantifier in
+these specific patterns is either bounded (`{3,80}`, `{0,90}` - caps worst-case work to a small
+constant multiplier, not exponential) or anchored by a literal that fixes where each repetition must
+start (`(\|\s*)+` can only begin a new repetition at a literal `|`). Confirms the prior pass's
+inspection-based conclusion with real timed evidence rather than leaving it as "probably fine."
+
+**Also retried `randwater.py` live** (flagged across several earlier passes as "unreachable this pass,
+retry later" - Rand Water is one of the 4 sources using `iso_sast_closing()`, last attempted several
+sessions ago): still fails identically - `SSL: CERTIFICATE_VERIFY_FAILED ... unable to get local
+issuer certificate` against `bids.randwater.co.za`. Consistent with the documented pattern (this
+sandbox's own TLS trust store, not a bug in the scraper or the site) - not a new finding, not escalating
+it again.
+
+**No code change this pass** - both investigations came back clean, with better evidence than before,
+not a new bug. `docs/specs/System-Status.md` updated and pushed directly to `main`.
+
+**Backlog: 20 → 20** (nothing added, nothing resolved - the 7 pending migrations `0096`, `0107`-`0112`
+and the `held_registrations`-vs-CV judgment call are unchanged and still Sarel's own call).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): three fresh angles tried (job-claim TOCTOU, regex ReDoS, upload-filename-sanitizer consistency) - the first two genuinely clean, the third found and fixed the one straggler `safeFileName.ts`'s own header comment had been warning about since it was written
 
 Oriented from `cff9cd8` (a sibling "standing QA/robustness review" pass's own fix: Finding 122,
