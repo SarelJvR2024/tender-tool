@@ -14,6 +14,54 @@
 
 ---
 
+## This pass (2026-11-03, standing solution-architect review): checked whether `caa5148`'s "one malformed row crashes the whole parse" shape recurs on any other discovery scraper - genuinely clean, no second instance found
+
+Oriented from `caa5148` (a sibling pass: `list_tenders.py`'s `_parse_row()` unpacked exactly 6 values
+from a SANRAL AJAX row with no guard against a shorter row - one malformed row crashed
+`fetch_tenders()`'s own unguarded list comprehension, losing every OTHER real tender in that same
+response too, not just the bad one; fixed with a per-row try/except). That bug's real shape is
+specific: a `normalize()`/`_parse_row()` call inside an unguarded list comprehension, fed from a row
+structure whose required field(s) can genuinely be absent - not "any parsing code could theoretically
+throw," which is true everywhere and not actionable on its own.
+
+Checked every discovery scraper with the same `[normalize(...) for r in rows]` shape
+(`cidb_tenders.py`, `dbsa_procurement.py`, `etenders_national.py`, `etenders_portal.py`,
+`award_outcomes.py`, `capetown_procurement.py`, `kouga.py`, `randwater.py`,
+`vaal_central_water.py`) for the same two ingredients SANRAL's bug needed: (1) a `normalize()` that
+indexes a required field directly (`row['x']`, not `row.get('x')`) and (2) a realistic path for that
+field to be missing by the time `normalize()` sees the row. Found:
+
+- `cidb_tenders.py`, `etenders_national.py`, `award_outcomes.py`'s `normalize_portal_award()`: every
+  field read via `.get()` throughout - a missing field becomes `None` in the output, never a crash.
+- `kouga.py`, `randwater.py`, `vaal_central_water.py`: rows are fixed-arity tuples built directly from
+  a regex's own fixed capture-group count (`CARD_RE.findall()`, `BID_BLOCK.findall()`,
+  `ROW_FIELDS.search()` unpacked once per row) - a regex match can never return the wrong number of
+  groups, so the arity SANRAL's bug depended on (a JSON array row with fewer cells than expected)
+  structurally cannot happen here.
+- `capetown_procurement.py`'s `normalize_rfq(cells, path, detail_id)` reads `cells[0..2]` directly,
+  but the call site (`... for row in parse_table(page) if len(row[0]) >= 4`) already guards the
+  length before calling it - confirmed by reading the actual filter, not assumed from the function
+  name.
+- `dbsa_procurement.py`'s `normalize(row)` reads `row['ref']`/`row['title']`/`row['closing']`/
+  `row['published']`/`row['documents']` by direct index, not `.get()` - looked the most SANRAL-shaped
+  at first glance. But `parse_table()` (this module's own row builder) always constructs all 5 keys on
+  every row it emits, `published`/`closing` included as `None` when the source cell count is short,
+  never omitted - so the KeyError this shape could otherwise raise is not reachable from this module's
+  own data.
+- `etenders_portal.py`'s `normalize(row, status_hint)` reads `row['id']` directly (twice) - the one
+  real near-miss. But `dedupe_rows()` (the function's only real caller's own pre-filter,
+  `rels = [normalize(r, status) for r in dedupe_rows(rows)]`) already does `i = r.get("id"); if i is
+  None: continue` before any row reaches `normalize()` - every surviving row is guaranteed to have a
+  non-`None` id by construction. Confirmed by reading `dedupe_rows()`'s actual body, not inferred.
+
+No second instance of `caa5148`'s bug class found. No code change this pass - a genuinely checked
+negative result, not a skipped check.
+
+**Backlog: 20 → 20** (7 pending migrations `0096`, `0107`-`0112`; the `held_registrations`-vs-CV
+judgment call from the 2026-11-03 14:16 entry - nothing added or resolved this pass).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): checked two fresh angles after `e6326f4`'s bridge-launch fix - the same "silently lost" shape does not recur elsewhere, and a real image-decompression-bomb attack on the OCR path is already safely handled - clean sweep, no code change
 
 Oriented from `e6326f4` (a sibling pass: `run_bridges.py`'s `subprocess.Popen()` itself, not just
