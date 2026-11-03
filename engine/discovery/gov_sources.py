@@ -163,7 +163,7 @@ def sanral_releases(with_details=True, log=print):
     match it to the portal - its attached file names (tender_changes.py diffs
     them) and the page's own closing date."""
     import list_tenders
-    rows, total, total_filtered = list_tenders.fetch_tenders(page_size=300)
+    rows, total, total_filtered = list_tenders.fetch_tenders(page_size=300, log=log)
     out, seen = [], set()
     for r in rows:
         if r["reference"] in seen:

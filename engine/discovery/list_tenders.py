@@ -50,6 +50,16 @@ def _clean_text(raw_html):
 
 
 def _parse_row(row):
+    # row[:6] followed by a 6-way unpack raises ValueError("not enough
+    # values to unpack") whenever a row has FEWER than 6 cells - a real,
+    # reachable shape given this module's own docstring already documents
+    # SANRAL's response as inconsistent (total_filtered not always matching
+    # the actual row count). Before this fix, one such row anywhere in the
+    # list crashed fetch_tenders()'s own list comprehension entirely -
+    # every OTHER real, well-formed tender in that same response was lost
+    # too, not just the one bad row. QA pass, 2026-11-03.
+    if len(row) < 6:
+        raise ValueError(f"row has only {len(row)} cell(s), need 6: {row!r}")
     ref_cell, project_type, province, description, queries_to, closing_date = row[:6]
     m = ROW_LINK_RE.search(ref_cell)
     href = m.group("href") if m else None
@@ -68,7 +78,7 @@ def _parse_row(row):
     }
 
 
-def fetch_tenders(page_size=200, page_index=1, search="", region_id="1", list_slug="open-tenders"):
+def fetch_tenders(page_size=200, page_index=1, search="", region_id="1", list_slug="open-tenders", log=print):
     """list_slug: SANRAL serves its other public lists from the same endpoint
     shape - "awarded-tenders" and "closed-tenders" (confirmed 2026-10-17, same
     6 columns, detail links under /awarded-tenders/<slug> and
@@ -86,7 +96,25 @@ def fetch_tenders(page_size=200, page_index=1, search="", region_id="1", list_sl
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         payload = json.load(resp)
-    rows = [_parse_row(r) for r in payload.get("tenders", [])]
+    # One malformed row (fewer than 6 cells) must not cost every OTHER real
+    # tender in the same response - same "isolate at the smallest reasonable
+    # unit" discipline this codebase applies everywhere else a batch is read
+    # from one unreliable source (one bad roster entry/job/document must not
+    # abort the rest). Before this fix, _parse_row() raising straight out of
+    # this list comprehension meant a single bad row returned ZERO SANRAL
+    # tenders for the whole run - not just that one row, every other
+    # genuinely open tender too (gov_sources.fetch_all()'s own per-source
+    # try/except then correctly alerts "SANRAL source failed", but SANRAL is
+    # a real primary source, not a minor one - losing it entirely over one
+    # bad row is a severity this cheap a guard shouldn't cost). QA pass,
+    # 2026-11-03.
+    raw_rows = payload.get("tenders", [])
+    rows = []
+    for r in raw_rows:
+        try:
+            rows.append(_parse_row(r))
+        except (ValueError, TypeError) as e:
+            log(f"  WARNING: SANRAL list row could not be parsed, skipped ({e})")
     return rows, payload.get("total"), payload.get("total_filtered")
 
 
@@ -98,7 +126,8 @@ def main():
     ap.add_argument("--out", help="write JSON list to this file instead of stdout")
     args = ap.parse_args()
 
-    rows, total, total_filtered = fetch_tenders(page_size=args.page_size, search=args.search)
+    rows, total, total_filtered = fetch_tenders(page_size=args.page_size, search=args.search,
+                                                log=lambda m: print(m, file=sys.stderr))
     print(f"Fetched {len(rows)} tenders (API total={total}, total_filtered={total_filtered})",
           file=sys.stderr)
     if len(rows) < (total_filtered or 0):

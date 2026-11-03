@@ -7026,3 +7026,60 @@ just the new one) - all pass. Revert-and-confirm-red: reverting reproduced the e
 ~20 lines including comment), `engine/worker/test_poll_loop.py` (1 new test function, wired into the
 file's own `__main__` runner). No change to the timeout/non-zero-exit handling already in place, and
 no change to `--once` mode's own existing correct behavior.
+
+### Finding 124 (CONFIRMED, FIXED, severe - one malformed row anywhere in SANRAL's own AJAX tender-list response crashed list_tenders.py's whole parse, losing every OTHER real, open tender in that response too, not just the bad row)
+
+**Where:** this cycle's discovery rotation. `engine/discovery/list_tenders.py`'s `fetch_tenders()`/
+`_parse_row()` - the reader SANRAL's own open/awarded/closed lists go through (`gov_sources.
+sanral_releases()`, the primary production call path via `watch_new_tenders.py`, and
+`award_outcomes.py`'s own paged reader).
+
+**What was tested:** `_parse_row(row)` unpacks exactly `ref_cell, project_type, province,
+description, queries_to, closing_date = row[:6]` - no test file existed for this module at all
+before this pass. The module's own docstring already documents SANRAL's response as observably
+inconsistent ("total_filtered" (observed 139) not always equal to the actual row count returned
+(observed 137) - "this script does not try to explain that discrepancy"), so a single short/malformed
+row among ~137 good ones is a realistic, not theoretical, shape for this government site to produce.
+Constructed a real adversarial payload: two genuine, well-formed 6-cell tender rows plus one
+malformed 3-cell row in between, fed through a faked `urllib.request.urlopen` (no real network
+call), and ran `fetch_tenders()` against it.
+
+**Finding (CONFIRMED, severe).** `row[:6]` on a 3-cell row is just a 3-element slice - the 6-way
+unpack then raises `ValueError: not enough values to unpack (expected 6, got 3)`, straight out of
+`fetch_tenders()`'s own list comprehension (`[_parse_row(r) for r in payload.get("tenders", [])]`).
+Confirmed directly: with the fix reverted, the SAME adversarial payload returned ZERO tenders and
+raised, rather than the two real, well-formed ones. `gov_sources.fetch_all()`'s own per-source
+try/except does catch this one level up and alert "SANRAL source failed" (via
+`watch_new_tenders.py`'s own system_alerts call) rather than crashing the whole multi-source
+discovery run - so the failure isn't silent - but the actual cost is still severe: the ENTIRE
+SANRAL source (SANRAL being the primary, highest-volume real tender source this project tracks, not
+a minor one) returns nothing for that day's run over a single bad row, discarding every other
+genuinely open tender in the same response along with it.
+
+**Fix:** added a length check to `_parse_row()` (`if len(row) < 6: raise ValueError(...)` with the
+real cell count in the message, replacing Python's own generic "not enough values to unpack"), and -
+the real fix - wrapped each row's `_parse_row(r)` call in `fetch_tenders()`'s own loop in a per-row
+`try/except (ValueError, TypeError)`, skipping and logging a warning for the one bad row while still
+returning every other real tender in the response. Added a `log=print` parameter to `fetch_tenders()`
+(every sibling scraper in this codebase - `kouga.py`, `dbsa_procurement.py`, etc. - already takes one
+for exactly this purpose; `list_tenders.py` was the one without it, so it had no way to surface a
+per-row warning to its real caller at all) and threaded it through both real call sites:
+`gov_sources.sanral_releases()` (which already receives its own `log` parameter, just never passed it
+on) and `list_tenders.main()` (now logs to stderr, matching this file's own existing stderr
+convention).
+
+**Verified red-then-green.** New file `engine/discovery/test_list_tenders.py` (3 tests: a real
+well-formed row parses correctly; a short row raises a clear, actionable `ValueError` naming the real
+cell count; a response with one bad row among two good ones returns both good tenders with exactly
+one warning logged, not a crash). Revert-and-confirm-red: reverting reproduced the exact predicted
+breakage (the unpack-crash message instead of the clearer one; `fetch_tenders()` raising `TypeError`
+for the now-unsupported `log=` kwarg, confirming the whole fix chain); restored, `0 failure(s)`.
+Regression-checked `test_gov_sources.py` and `test_award_outcomes.py` (both already real end-to-end
+test suites covering this file's own callers) - all pass, unaffected. `py_compile`/`ast.parse` clean.
+
+**Regression:** `engine/discovery/list_tenders.py` (a length check plus a per-row try/except in
+`fetch_tenders()`, a new `log` parameter, ~20 lines including comments), `engine/discovery/gov_sources.py`
+(one call site now threads its own existing `log` parameter through, 1 line),
+`engine/discovery/test_list_tenders.py` (new file, 3 tests). No change to the response shape any
+caller reads - `rows`/`total`/`total_filtered` are returned exactly as before, just now with bad rows
+skipped instead of the whole batch lost.

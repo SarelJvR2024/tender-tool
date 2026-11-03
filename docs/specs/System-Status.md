@@ -1702,6 +1702,55 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-03, standing QA/robustness review): fix - one malformed row anywhere in SANRAL's own tender-list response crashed the whole parse, discarding every other real, open tender in that same response too
+
+Oriented from `e6326f4`; `git fetch origin main` found one new sibling commit since my own last push
+(`78dbaad`, docs-only - confirmed `run_bridges.py`'s own launch-failure shape doesn't recur elsewhere,
+and a real image-decompression-bomb test on the OCR path came back clean) - no overlap with
+`engine/discovery/`. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165`
+only, both unchanged, no collision.
+
+Rotated to discovery (worker/job-queue was last), completing the full rotation. Discovery has dozens
+of scraper files and heavy sibling activity (`dbsa_procurement.py`/`randwater.py`/`kouga.py`/
+`capetown_procurement.py` all touched or re-checked very recently) - picked `list_tenders.py`
+instead: the reader behind SANRAL's own open/awarded/closed tender lists, no dedicated test file or
+QA pass found anywhere in this file's history despite being a real, primary production call path
+(`gov_sources.sanral_releases()`, `award_outcomes.py`'s own paged reader).
+
+**Found and fixed Finding 124 (CONFIRMED, severe)**: `_parse_row(row)` unpacks exactly 6 values from
+`row[:6]` - no guard against a row with fewer cells. This module's own docstring already documents
+SANRAL's response as observably inconsistent (total_filtered not always matching the real row count
+returned), so a short row is realistic, not theoretical. Constructed a real adversarial payload (two
+genuine well-formed rows plus one malformed 3-cell row) and confirmed directly: `fetch_tenders()`'s
+own list comprehension crashed on the bad row, discarding BOTH good tenders along with it - not a
+silent whole-run failure (`gov_sources.fetch_all()`'s own per-source try/except catches it one level
+up and `watch_new_tenders.py` correctly alerts "SANRAL source failed"), but still a severe cost: the
+entire primary SANRAL source returns nothing for the whole day over one bad row.
+
+Fixed with a per-row `try/except (ValueError, TypeError)` inside `fetch_tenders()`'s own loop -
+skip and log a warning for the one bad row, keep every other real tender. Added a `log=print`
+parameter to `fetch_tenders()` (every sibling scraper already has one for exactly this; this file was
+the one without it) and threaded it through both real call sites (`gov_sources.sanral_releases()`,
+which already receives its own `log` param but never passed it on; `list_tenders.main()`, now to
+stderr matching this file's existing convention).
+
+Verified red-then-green: new file `test_list_tenders.py` (3 tests - a well-formed row parses, a short
+row raises a clear error naming the real cell count, a response with one bad row among two good
+returns both good tenders with exactly one warning, not a crash). Reverting reproduced the exact
+predicted breakage; restored, `0 failure(s)`. Regression-checked `test_gov_sources.py` and
+`test_award_outcomes.py` (this file's real callers' own test suites) - both pass, unaffected.
+`py_compile`/`ast.parse` clean. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 124.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/discovery/list_tenders.py`
+- `engine/discovery/gov_sources.py`
+- `engine/discovery/test_list_tenders.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - a bridge subprocess failing to even START (not timing out, not exiting non-zero - the launch itself failing) silently aborted the whole worker cycle and reached no alert in --loop mode, the one mode the real container actually runs
 
 Oriented from `cff9cd8`; `git fetch origin main` found two new sibling commits since my own last push
