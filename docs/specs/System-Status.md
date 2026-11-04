@@ -1849,6 +1849,41 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): clean sweep - non-SANRAL pack rotation (fill_sbd_docx.py read end to end against several real adversarial shapes, no new bug found - already heavily hardened by many prior passes)
+
+Oriented from `1362081`; `git fetch origin main` found one new sibling commit since my own last push
+(`b099ce5`, a real fix - the control-character crash I found in `make_envelope_covers.py` the previous
+cycle recurred in `pdf_merge.py`'s `_contents_docx()` and `build_general_pack.py`'s `write_guide()`,
+both now fixed with the identical `_safe_text()` pattern) - directly in this cycle's own rotation area,
+so re-ran `engine/general/test_build_general_pack.py` and `engine/pack/test_pdf_merge.py` after the
+fast-forward to confirm no regression before starting: both `0 failure(s)`. Open PRs re-checked via
+the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to non-SANRAL pack (SANRAL pack was last). With the control-character bug class now swept
+twice across both pack pipelines' document-writing paths, picked a different angle: read
+`engine/general/fill_sbd_docx.py` end to end (National Treasury SBD1/4/6.1/8/9 .docx filler) - the
+file already has its own `_xml_safe()`/`_XML_UNSAFE_RE` (confirmed applied at both of its real writer
+choke points, `_set_cell()`/`_replace_paragraph_text()`, with every higher-level writer function
+routing through one or the other - no gap there, unlike the SACNASP/expiry-shaped gaps found
+elsewhere this session). Constructed and checked several real adversarial shapes: a bidder name with a
+literal backslash (already fixed, 2026-10-31, confirmed still in place and tested); a non-string
+`tender_answers.value` reaching `val.capitalize()` (traced to the real schema - `tender_answers.value`
+is a plain `text` column, so this is not reachable from the real production path, confirmed via the
+migration); `_overlap()`'s own division guard in the sibling flat-PDF filler (`fill_flat_pdf.py`) - `or
+1` already guards the zero-area case. No new bug found - this file has clearly had many dedicated QA
+passes already (numerous inline "QA pass, 2026-10-XX" comments document each one), and every lead
+traced to an already-closed gap or a path not reachable from real production data.
+
+No code bug found this pass - a genuine, evidence-backed clean sweep (several real leads traced and
+ruled out, not merely "nothing looked wrong").
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item.
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): fix - a single control character in a tender's OCR'd description or delivery address crashed all three envelope cover sheets, taking down the WHOLE SANRAL pack build - no try/except guards this step at all
 
 Oriented from `caa5148`; `git fetch origin main` found two new sibling commits since my own last push
