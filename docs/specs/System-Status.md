@@ -14,6 +14,62 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `setMemberRole()`/`removeMember()` in `team/actions.ts` had the same seat-cap-style TOCTOU race `createInvite()`'s own seat check already had, reproduced
+
+Oriented from `630f5de` (own prior pass: re-surfaced the impersonation session-refresh gap after it
+silently dropped from backlog tracking for 7+ passes). `git fetch`/`merge --ff-only` found nothing new
+beyond that, local matches `origin/main`. Open PRs re-checked: only `#164`/`#165` remain (both untouched
+since 2026-10-26), no collision.
+
+Cross-checked the current backlog list against the actual `**Backlog:**` lines across this file's
+recent history (not just copying the last entry's list forward): the counts walk consistently
+18→19→...→19→20 (`held_registrations`)→20→20→20→19 (seat race fixed)→19→20 (billing gap)→20→20→21
+(impersonation re-added) - self-consistent, nothing else appears to have silently dropped.
+
+Directed to look at team/company settings beyond invites - not yet given a dedicated pass this session.
+Read `app/app/company/team/actions.ts` end to end. `createInvite()`/`revokeInvite()` are fine (the
+seat-cap race already fixed via `create_company_invite_checked()`, 0113). But `setMemberRole()` and
+`removeMember()` both enforce "the company must always have at least one owner" the exact same
+unsafe way the OLD `createInvite()` enforced its seat cap: select count of owners, check `> 1`, THEN
+update/delete - three plain client queries, no lock between the count and the write.
+
+**Reproduced directly in a disposable scratch database** (not this app's live DB): a company with
+exactly 2 owners; two concurrent sessions each running the old `removeMember()` shape (count owners,
+check `> 1`, delete) for a DIFFERENT owner each. Both read `owner_count=2` (comfortably `> 1`) before
+either committed, and both deleted - `company_members` ended with **zero owners**, a real lockout
+(nobody left who can invite, change roles, or remove anyone - `requireCompanyAdmin()` needs role
+`owner`/`admin` on every one of these actions). The identical race applies to `setMemberRole()`
+demoting two different owners at once.
+
+**Fixed** with migration `0114`: two new `SECURITY DEFINER` functions, `set_member_role_checked()` and
+`remove_member_checked()`, each doing the whole check-then-write in one transaction with `for update`
+locking `company_subscriptions`' row for the company - the same per-company lock `0113`'s
+`create_company_invite_checked()` already proved. Both also check `tt_is_company_admin()` and the
+"not your own membership" self-lockout guard inside the function itself, not just in the Server Action,
+since both are granted to `authenticated` and therefore callable directly via `supabase.rpc()`, not only
+through `team/actions.ts`'s own wrapper - same "the Server Action's check is real but this function must
+not rely on it being the only caller" principle `0113`'s own comment already states.
+
+**Re-ran the same concurrency test against the fix**: the first caller's lock makes the second block
+until the first commits, then the second correctly sees `owner_count=1` (not `2`) and raises instead of
+deleting - exactly one owner removed, one left, never zero.
+
+**Verified for real**: replayed all 104 real migrations (including this one) against a fresh scratch
+database - clean. Re-seeded the identical 2-owner scenario and re-ran the exact concurrency test against
+`remove_member_checked()` - confirmed red-then-green (old shape: 0 owners left; new shape: 1 owner left,
+second caller's RPC call raises the expected error). `npx tsc --noEmit` and `npx eslint
+app/company/team/actions.ts` both clean. Full regression sweep (`node --test lib/*.test.ts`): 219/219,
+unaffected (this file has no dedicated TS test suite of its own, same as `0113`'s own fix - verified by
+real concurrent SQL against the actual RPC functions instead, the established pattern for this bug
+class this session). Scratch databases dropped immediately after each check, never the live DB.
+
+**Backlog: 21 → 20** (`team/actions.ts`'s last-owner race: fixed, removed. Everything else unchanged: 7
+pending migrations now `0096`, `0107`-`0114`; `company_can_request_pack()`'s TOCTOU race; the
+`held_registrations`-vs-CV judgment call; the `start_payfast_checkout()` revenue-integrity gap; the
+impersonation session-refresh gap).
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): NOT a new bug - re-surfaced a real, already-traced-to-the-SDK architectural gap (impersonation session token refresh) that silently dropped off this backlog's own carry-forward chain for 7+ passes
 
 Oriented from `e89a4e4` (a sibling pass: intake rotation re-confirmed exhausted). `git fetch`/`merge

@@ -76,14 +76,18 @@ export async function revokeInvite(formData: FormData) {
 }
 
 /**
- * Change an existing member's role. Two self-lockout guards, deliberately
- * simple: a user can't change their OWN role (so nobody accidentally
- * demotes themselves out of being able to fix it), and the company must
- * keep at least one 'owner' at all times (checked by counting owners
- * before allowing a change AWAY from 'owner' on the only one).
+ * Change an existing member's role. Two self-lockout guards - a user can't
+ * change their OWN role, and the company must keep at least one 'owner' at
+ * all times - plus the seat-cap-style TOCTOU race those checks had (found
+ * 2026-11-04: two concurrent demotions of two different owners could both
+ * pass the "count > 1" check before either committed, leaving zero owners)
+ * are all enforced in one locked SQL transaction now
+ * (set_member_role_checked, 0114), not as separate select-check-then-update
+ * client queries - same fix shape as createInvite()'s own seat-cap race
+ * (0113).
  */
 export async function setMemberRole(formData: FormData) {
-  const { companyId, userId } = await requireCompanyAdmin();
+  await requireCompanyAdmin();
   const supabase = await createClient();
 
   const memberId = str(formData, "member_id"); // company_members.id
@@ -91,50 +95,33 @@ export async function setMemberRole(formData: FormData) {
   const newRole = str(formData, "role");
   if (!memberId || !targetUserId || !newRole || !ROLES.includes(newRole)) fail("Choose a valid role.");
 
-  if (targetUserId === userId) fail("You can't change your own role - ask another owner or admin.");
-
-  const { data: current } = await supabase.from("company_members").select("role").eq("id", memberId).eq("company_id", companyId).maybeSingle();
-  if (!current) fail("That team member wasn't found.");
-
-  if (current.role === "owner" && newRole !== "owner") {
-    const { count } = await supabase
-      .from("company_members")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId)
-      .eq("role", "owner");
-    if ((count ?? 0) <= 1) fail("The company must always have at least one owner - promote someone else to owner first.");
-  }
-
-  const { error } = await supabase.from("company_members").update({ role: newRole }).eq("id", memberId).eq("company_id", companyId);
+  const { error } = await supabase.rpc("set_member_role_checked", {
+    p_member_id: memberId,
+    p_target_user_id: targetUserId,
+    p_new_role: newRole,
+  });
   if (error) fail(error.message);
 
   revalidatePath(BACK);
   redirect(`${BACK}?saved=role`);
 }
 
-/** Remove a member from the company. Same last-owner protection as above. */
+/**
+ * Remove a member from the company. Same last-owner protection and race
+ * fix as setMemberRole() above (remove_member_checked, 0114).
+ */
 export async function removeMember(formData: FormData) {
-  const { companyId, userId } = await requireCompanyAdmin();
+  await requireCompanyAdmin();
   const supabase = await createClient();
 
   const memberId = str(formData, "member_id");
   const targetUserId = str(formData, "user_id");
-  if (!memberId) redirect(BACK);
-  if (targetUserId === userId) fail("You can't remove yourself - ask another owner or admin.");
+  if (!memberId || !targetUserId) redirect(BACK);
 
-  const { data: current } = await supabase.from("company_members").select("role").eq("id", memberId).eq("company_id", companyId).maybeSingle();
-  if (!current) redirect(BACK);
-
-  if (current.role === "owner") {
-    const { count } = await supabase
-      .from("company_members")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId)
-      .eq("role", "owner");
-    if ((count ?? 0) <= 1) fail("The company must always have at least one owner - promote someone else to owner before removing this one.");
-  }
-
-  const { error } = await supabase.from("company_members").delete().eq("id", memberId).eq("company_id", companyId);
+  const { error } = await supabase.rpc("remove_member_checked", {
+    p_member_id: memberId,
+    p_target_user_id: targetUserId,
+  });
   if (error) fail(error.message);
 
   revalidatePath(BACK);
