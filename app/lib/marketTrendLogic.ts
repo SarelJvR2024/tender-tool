@@ -43,14 +43,22 @@ function num(v: number | string | null | undefined): number | null {
 
 /**
  * Turns one market_trend_for_tags() row into a MarketTrend, or null below
- * the minimum sample. Two gates, not one:
+ * the minimum sample. Three gates, not one:
  *  - the overall award count (`row.n`) must clear MARKET_TREND_MIN_SAMPLE
  *    before anything is shown at all;
  *  - the price-vs-estimate figure is additionally gated on ITS OWN sample
  *    (`pct_of_estimate_n`), since most comparable awards have no stated
  *    estimate to compare against even once the overall count clears the
  *    first gate - never show a percentage built on a handful of real
- *    estimates just because the headline count looks big.
+ *    estimates just because the headline count looks big;
+ *  - the bidder-count figure is gated the same way, on `bidder_count_n`
+ *    (2026-11-04: migration 0062's own function comment and
+ *    bidder_rows CTE - `where bidder_count > 0` - already document and
+ *    produce this as a separate, often-thinner sample than `n`, exactly
+ *    like pct_of_estimate_n; this caller just wasn't applying the gate
+ *    it to, so market-context.tsx could show "Typically N bidders" off
+ *    a one- or two-award sample even once the headline count looked
+ *    big enough).
  */
 export function gateMarketTrend(row: MarketTrendRow | null, minSample = MARKET_TREND_MIN_SAMPLE): MarketTrend | null {
   if (!row || row.n < minSample) return null;
@@ -62,7 +70,10 @@ export function gateMarketTrend(row: MarketTrendRow | null, minSample = MARKET_T
       n: row.pct_of_estimate_n,
       median: row.pct_of_estimate_n >= minSample ? num(row.pct_of_estimate_median) : null,
     },
-    bidderCount: { n: row.bidder_count_n, median: num(row.bidder_count_median) },
+    bidderCount: {
+      n: row.bidder_count_n,
+      median: row.bidder_count_n >= minSample ? num(row.bidder_count_median) : null,
+    },
     bbbeeLevelCounts: row.bbbee_level_counts ?? {},
   };
 }

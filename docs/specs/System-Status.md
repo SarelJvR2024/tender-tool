@@ -14,6 +14,58 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `gateMarketTrend()`'s bidder-count figure had no sample-size honesty gate, even though its own SQL and test-suite docstring both documented the intent for one
+
+Oriented from `7482dfb` (own prior pass). `git fetch`/`merge --ff-only`: no new commits - still `7482dfb`.
+Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26), no collision.
+
+Cross-checked the backlog chain again (now a standing discipline): self-consistent, 19 unchanged across
+the last several entries; the corrected "10 pending migrations" figure from the immediately-prior entry
+re-confirmed directly (`ls app/supabase/migrations/ | grep -E
+"^(0096|0107|0108|0109|0110|0111|0112|0113|0114|0115)_"` still returns 10).
+
+Directed to the notifications/digest pipeline, onboarding flow, or Market Intelligence scoring beyond the
+discipline-match fix. Checked `opportunityBuyerMatch.ts` first (the sibling of the just-fixed
+`opportunityDisciplineMatch.ts`) - clean: its own substring-match design is deliberately fuzzy (no
+canonical buyer taxonomy exists, unlike disciplines), `sanitizePreferredBuyers()` is called on write
+(`discovery/preferencesActions.ts`) before `matchesPreferredBuyers()` ever reads it, no gap.
+
+Moved to `marketTrendLogic.ts`'s `gateMarketTrend()` (migration `0062`'s `market_trend_for_tags()`,
+`app/app/tenders/[id]/market-context.tsx`'s own "real market, not just this tender" panel). Found: the
+function applies its documented "below MIN_SAMPLE, show nothing" honesty gate to the price-vs-estimate
+sub-metric (`pct_of_estimate_n`) but never to the bidder-count sub-metric (`bidder_count_n`), even though
+`0062`'s own SQL comment explicitly lists all three sample sizes (`n`, `pct_of_estimate_n`,
+`bidder_count_n`) as things "the caller... can apply the same MIN_SAMPLE-style gate" to, and the SQL's
+`bidder_rows` CTE (`where bidder_count > 0`) produces exactly the same "often thinner than `n`" shape as
+`pct_rows` does - most awarded tenders simply don't have a recorded bidder count, the identical reason
+most don't have a stated estimate. `market-context.tsx` renders `trend.bidderCount.median` unconditionally
+whenever it's non-null, so a trend with `n` comfortably over the gate but only 1-2 awards carrying a
+recorded bidder count would confidently show "Typically N bidders per tender" - contradicting the "we
+stop, we never guess" principle the sibling metric already enforces, and that this file's own test suite
+docstring claims to cover ("the two honesty gates the build task asked for" - only one was ever
+implemented).
+
+**Fixed**: `bidderCount.median` is now `null` unless `bidder_count_n >= minSample`, identical in shape to
+the existing `pctOfEstimate` gate. No SQL change needed - `0062`'s function already returns
+`bidder_count_n`, it just wasn't being read by the caller's gate.
+
+**Verified for real**: added 3 new tests to `marketTrendLogic.test.ts`, mirroring the existing
+`pctOfEstimate` gate tests exactly (overall count clears but bidder-count sample doesn't → no figure;
+zero recorded bidder counts → no fabricated median; bidder-count gate fires independently of
+`pctOfEstimate`'s own sample). `git stash push -- app/lib/marketTrendLogic.ts` to isolate just the fix
+with the new tests in place: confirmed genuine red (1 failure, the new "no bidder figure shown" test);
+`git stash pop` restored, confirmed genuine green (12/12 in this file). Full regression:
+`node --experimental-strip-types --test app/lib/*.test.ts` - 222/222 (was 219). `npx tsc --noEmit` and
+`npx eslint` both clean on the two touched files. No DB access - pure TypeScript logic, no migration
+needed.
+
+**Backlog: 19, unchanged** (standalone bug, fixed - not a new judgment-call item; 10 pending migrations
+`0096`/`0107`-`0115`, the `held_registrations`-vs-CV judgment call, the `start_payfast_checkout()`
+revenue-integrity gap, and the impersonation session-refresh gap all still open, needing Sarel's own call.
+None of those three touched this pass, as directed.)
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): backlog-bookkeeping fix - the "7 pending migrations" count stopped being updated as the range grew; a systematic TOCTOU sweep across every Server Action came back clean
 
 Oriented from `88c4b42` (own prior pass). `git fetch`/`merge --ff-only` picked up `b3e2d79` (a sibling

@@ -71,6 +71,33 @@ test("gateMarketTrend: zero stated estimates among the comparable awards never f
   assert.equal(trend!.pctOfEstimate.median, null);
 });
 
+test("gateMarketTrend: overall award count clears the gate but bidder-count sample does not - no bidder figure is shown", () => {
+  // bidder_rows in market_trend_for_tags() (0062) is filtered to
+  // `bidder_count > 0`, the same "often thinner than n" shape as
+  // pct_of_estimate_n - a handful of awards with a recorded bidder count
+  // must not produce a confident "Typically N bidders" once the headline
+  // award count looks big enough on its own.
+  const trend = gateMarketTrend(row({ n: 30, bidder_count_n: MARKET_TREND_MIN_SAMPLE - 1, bidder_count_median: 7 }));
+  assert.ok(trend);
+  assert.equal(trend!.n, 30);
+  assert.equal(trend!.bidderCount.median, null, "never show a bidder-count figure built on too few recorded counts");
+  assert.equal(trend!.bidderCount.n, MARKET_TREND_MIN_SAMPLE - 1);
+});
+
+test("gateMarketTrend: zero recorded bidder counts among the comparable awards never fabricates a median", () => {
+  const trend = gateMarketTrend(row({ n: 10, bidder_count_n: 0, bidder_count_median: null }));
+  assert.ok(trend);
+  assert.equal(trend!.bidderCount.n, 0);
+  assert.equal(trend!.bidderCount.median, null);
+});
+
+test("gateMarketTrend: bidder-count figure fires once its own sample clears the minimum, independent of pct_of_estimate's", () => {
+  const trend = gateMarketTrend(row({ n: 20, bidder_count_n: MARKET_TREND_MIN_SAMPLE, bidder_count_median: 3 }));
+  assert.ok(trend);
+  assert.equal(trend!.bidderCount.n, MARKET_TREND_MIN_SAMPLE);
+  assert.equal(trend!.bidderCount.median, 3);
+});
+
 test("gateMarketTrend: string numerics from Postgres (numeric/percentile_cont) are coerced to real numbers", () => {
   const trend = gateMarketTrend(row({ n: 8, pct_of_estimate_n: 8, pct_of_estimate_median: "0.87" as unknown as number, bidder_count_median: "5.5" as unknown as number }));
   assert.ok(trend);
