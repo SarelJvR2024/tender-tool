@@ -14,6 +14,78 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): NOT FIXED - a real, reproduced revenue/billing-integrity gap - `start_payfast_checkout()` grants a plan upgrade's seats/packs immediately, before PayFast ever confirms payment, with nothing to revert it if the payment never completes
+
+Oriented from `59c20a7` (my own prior pass: the control-character crash's 4th instance, in
+`sanral_fill.py`'s Excel writer). `git fetch`/`merge --ff-only` found nothing new beyond that, local
+matches `origin/main`. Open PRs re-checked: only `#164`/`#165` remain (both untouched since
+2026-10-26), no collision.
+
+Directed to do one more targeted check on whether the control-character bug class (now fixed 4 times
+this session) has a 5th instance anywhere else, before moving to a fresh area. It doesn't: grepped
+every `lxml`/`etree`-based writer codebase-wide (`engine/narrative/build_docx.py`, `engine/cv/
+generate_cv.py`, `engine/sanral_fill.py`, `engine/make_envelope_covers.py` - the only 4 files that
+import `lxml` at all) and confirmed `build_docx.py` already had its own `_safe_text()` guard on every
+one of its free-text writes, predating this session (2026-10-23) - the other 3 were this session's own
+fixes. No openpyxl-based writer exists anywhere in the repo either (`boq_extraction.py`'s own header
+comment only discusses openpyxl, never calls it; `sanral_fill.py` explicitly avoids it). Bug class
+genuinely exhausted - moved to a fresh area per the standing instruction to rotate once a class is
+closed out.
+
+Picked billing/subscription logic beyond invites and the PayFast ITN handler itself (plan upgrade/
+downgrade, never given a dedicated pass this session) and read `/api/billing/checkout/route.ts` and
+`start_payfast_checkout()` (0078/0083) end to end. Found something serious, not a code-shape bug like
+this session's recent run of fixes but a real design gap with direct revenue impact:
+
+`GET /api/billing/checkout` - hit the instant a signed-in user clicks "Upgrade"/"Downgrade"/"Subscribe"
+on `/billing`, **before** any redirect to PayFast and before any payment - calls `start_payfast_checkout
+(p_plan_tier, p_billing_interval)`, which immediately `UPDATE`s `company_subscriptions` to the NEW
+plan's `plan_tier`/`billing_interval`/`max_users`/`max_packs_per_month` (0083's `tt_plan_limits()`).
+`status` and `current_period_end` are deliberately left untouched by this call - by design, so a
+currently-'active' subscriber mid-upgrade keeps showing as paid-up while PayFast processes the real
+charge. But nothing ever reverts the plan/limits change if that charge never actually completes:
+- If the user simply never finishes the PayFast page (closes the tab, no ITN of any kind is ever
+  sent by PayFast for a transaction nobody submitted) - `company_subscriptions` is left permanently on
+  the new, higher plan's seats/packs, `status` still `'active'`, `current_period_end` still the OLD
+  (already-paid-for) date. Nothing re-checks this later. No reconciliation job exists (same absence as
+  the already-flagged Finding 97, a *different* gap about `current_period_end` lapsing silently).
+- Even if PayFast DOES send a `FAILED` ITN (a declined card), `apply_payfast_itn()`'s own normal path
+  (0078/0083/0110/0112) sets `status = 'past_due'` but still never reverts `plan_tier`/`max_users`/
+  `max_packs_per_month` - and `lib/billing.ts`'s own header comment confirms `past_due` is "a banner,
+  not a silent lock-out," so the user keeps full access at the new plan's limits regardless.
+
+**Reproduced directly** against a disposable scratch Postgres (103 migrations replayed clean, dropped
+immediately after): seeded a company `active` on Professional (`max_users=5`, `max_packs_per_month=15`,
+`current_period_end` 20 days out), called `start_payfast_checkout('business', 'monthly')` as that
+company's owner with no ITN ever following it - `company_subscriptions` immediately read back
+`plan_tier='business'`, `max_users=10`, `max_packs_per_month=30`, `status` still `'active'`,
+`current_period_end` completely unchanged (still the old Professional period). A real, free, repeatable
+self-upgrade with zero payment confirmation, exploitable by any existing active subscriber simply by
+visiting the checkout link and abandoning it - not a contrived edge case.
+
+**Not fixed - a genuine design/judgment call, not a safe one-line patch.** The architecture already
+knows the right pattern for this exact situation: `apply_payfast_itn()`'s own "rescue" path (0081/0082,
+used when a LATER checkout attempt has superseded an earlier `m_payment_id` on `company_subscriptions`)
+deliberately does NOT trust whatever plan the row currently shows - it reads the plan the payment
+attempt itself was for, from the append-only `payfast_payment_attempts` log, and only grants it on a
+confirmed `COMPLETE` ITN. The "normal" (non-superseded) path is the one place that discipline was
+never applied - it trusts `company_subscriptions.plan_tier` was already set correctly by checkout,
+because historically checkout and the eventual ITN were for the SAME still-current `m_payment_id`, with
+no notion of "this plan change hasn't been confirmed yet." Fixing this properly needs a real decision:
+whether to defer the plan/limit change until a confirmed `COMPLETE` ITN (mirroring the rescue path, but
+for the not-yet-superseded case too - a bigger behavior change than it sounds, since it also changes
+what the UI shows immediately after someone clicks "Upgrade"), add an explicit `pending_plan_tier`/
+`pending_billing_interval` column pair and a UI treatment for it, or add a reconciliation sweep that
+reverts an unconfirmed plan change after some grace window. Flagging for Sarel's own call, not guessing
+at UX/product intent for money-adjacent state.
+
+**Backlog: 19 → 20** (new item: unconfirmed plan upgrades/downgrades are granted immediately with no
+reversion if payment never completes - real, reproduced, revenue-adjacent, needs Sarel's design
+decision. 7 pending migrations `0096`, `0107`-`0113`; `company_can_request_pack()`'s own TOCTOU race
+and the `held_registrations`-vs-CV judgment call carried forward, unresolved).
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - the same control-character crash recurred a FOURTH time, on the Excel-writing side of the SANRAL pack (`sanral_fill.py`'s `Workbook.set_value()`, shared by `fill_tender.py` and `fill_conventional.py`)
 
 Oriented from `fcbe266` (a sibling pass: `fill_sbd_docx.py` re-verified end to end, already has its
