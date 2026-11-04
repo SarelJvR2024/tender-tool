@@ -1,5 +1,82 @@
 # System Status
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `create_company_and_join()` had an unguarded TOCTOU race that could give one user two companies, which every single page in the app assumes can't happen
+
+Oriented from `6e08b0c` (own prior pass: Market Intelligence's bidder-count gate). `git fetch`/`merge
+--ff-only` picked up `4303fb9` (a sibling pass: the claim-outside-try-block isolation gap swept across
+all four remaining bridges) - no collision, no duplication. Open PRs re-checked: only `#164`/`#165`
+remain (both untouched since 2026-10-26).
+
+Cross-checked the backlog chain and the corrected "10 pending migrations" figure again (now a standing
+discipline): self-consistent, 19 unchanged, `ls app/supabase/migrations/ | grep -E
+"^(0096|0107|0108|0109|0110|0111|0112|0113|0114|0115)_"` still returns 10.
+
+Directed to the onboarding flow or notifications/digest. Read `app/app/onboarding/` end to end
+(`page.tsx`, `actions.ts`, `Step1.tsx`, `AddDocumentsScreen.tsx`, `WizardShell.tsx`, `fields.tsx`) -
+the 2026-10-31 clean sweep of this area still holds, nothing new in the UI layer itself. Pivoted to the
+one privileged write it depends on, `create_company_and_join()` (0003), since that function's own
+read/write shape had never specifically been checked for the TOCTOU pattern this session has now found
+three times elsewhere (`createInvite`'s seat cap, `team/actions.ts`'s last-owner check,
+`company_can_request_pack()`'s quota).
+
+**Found**: `create_company_and_join()` checks "does this user already belong to a company" (`exists
+(select 1 from company_members where user_id = auth.uid())`) and inserts the new `company_members` row
+as two steps in the same function, with nothing locking between them. `company_members` has no unique
+constraint on `user_id` alone (only the composite `unique(company_id, user_id)` from `0001`), so two
+concurrent calls for the SAME new user (a double-click on Screen 1's "Continue" button, or a slow-
+network retry) can both pass the check before either commits, both insert - one user ends up owning TWO
+real companies. This is worse than the other three races: grepped every page that reads a user's own
+company (`AppShell.tsx`, `/billing`, `/experience`, `/my-cv`, `/onboarding` itself,
+`company/officeActions.ts`) and all seven call `.eq("user_id", ...).maybeSingle()` - PostgREST's
+`.maybeSingle()` errors the moment more than one row matches, so a user caught by this race gets a hard
+error on every single page in the app from then on, not just onboarding.
+
+**Reproduced directly** in a disposable scratch database (never the live DB): one real `auth.users`
+row, two concurrent `create_company_and_join()` calls for that same user - both succeeded, returning two
+different company ids; `select count(*) from company_members where user_id = ...` confirmed 2 rows, both
+`role = 'owner'`.
+
+**Fixed** with migration `0116`: `alter table company_members add constraint
+company_members_user_id_key unique (user_id)`. Not a SECURITY DEFINER + `for update` rewrite like
+0113/0114/0115 - there's no pre-existing row to lock on for a brand-new user, and the table's own 0001
+comment already states "v1 has one company" per the product while every read site above already
+hard-assumes it, so this formalizes an invariant the whole app already depends on rather than
+introducing a new one. A concurrent second insert now blocks on the unique index until the first
+commits, then fails with a 23505 instead of succeeding; because the whole function runs in one
+transaction, the losing call's own `companies` insert rolls back too - no orphaned, member-less company
+row left behind.
+
+While adding the constraint, found the exact same "join a second company" path already existed, un-
+raced, in `redeem_company_invite()` (0107): a user already in company A accepting an invite to company
+B previously succeeded silently as a second `company_members` row - already a live landmine against the
+same universal `.maybeSingle()` assumption, just reached a different way. The new constraint alone would
+have turned that into a raw `duplicate key value violates unique constraint` string leaking straight to
+`app/invite/actions.ts`'s `acceptInvite()`, which redirects with `error.message` shown as-is - so
+`0116` also re-creates `redeem_company_invite()` with one added check before the insert, raising a
+friendly, specific message instead. Redeeming an invite for the SAME company (re-opening an old link, a
+role change) is unaffected - still the existing on-conflict-update-role path, unchanged.
+
+**Verified for real**: replayed all 106 migrations (including `0116`) on a fresh scratch database -
+clean. Re-ran the identical two-concurrent-calls scenario against the fix: first call succeeds, second
+blocks on the lock then fails with the unique-constraint error, exactly 1 `company_members` row results,
+and the loser's own `companies` row count for that test confirmed 0 (no orphan). Separately tested
+`redeem_company_invite()`'s new guard directly: a user already owning company A, invited to company B,
+gets the friendly "You already belong to a different company..." message (not a raw constraint string);
+re-tested the SAME-company re-redemption path (re-opening an old invite link) immediately after and
+confirmed it still works unchanged - role updated via the existing `on conflict` clause. No TypeScript
+changed - both `createCompanyBasics()` and `acceptInvite()` already handle any RPC error generically, so
+no app-code change was needed either side. `npx tsc --noEmit` clean (sanity check only, nothing touched).
+Full regression `node --experimental-strip-types --test app/lib/*.test.ts` - 222/222, unaffected (as
+expected, no TS touched). Three scratch databases created and dropped immediately after each check,
+never the live DB.
+
+**Backlog: 19, unchanged** (standalone bug, fixed - not a new judgment-call item; 11 pending migrations
+now `0096`/`0107`-`0116`, the `held_registrations`-vs-CV judgment call, the `start_payfast_checkout()`
+revenue-integrity gap, and the impersonation session-refresh gap all still open, needing Sarel's own
+call. None of those three touched this pass, as directed.)
+
+---
+
 > **STANDING RULE (Sarel, 2026-10-27, after Phase 7's live-database cleanup) - read this before any
 > live-database write, every session, not just this one:** never execute a direct `DELETE`/`UPDATE`
 > (or any other mutation) against the live production database without Sarel's prior sign-off, even
