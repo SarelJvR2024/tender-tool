@@ -2153,6 +2153,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): clean sweep - compliance/reminders rotation (registration_reminders.py's own company_id-patch-up indirection traced end to end and confirmed correct, not a bug - just unusual style)
+
+Oriented from `e89a4e4`; `git fetch origin main` found one new sibling commit since my own last push
+(`bc90e2b`, a real app/TS fix - `setMemberRole()`/`removeMember()` had the same last-owner TOCTOU race
+`createInvite()`'s seat cap already had) - no overlap with `engine/compliance/`. Fast-forwarded
+cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to compliance/reminders (intake was last). `watch_deadlines.py` has had heavy, repeated
+attention this session (CIDB/ECSA/SACPCMP/SACNASP/SAGC expiry additions) - picked
+`registration_reminders.py` instead, the one file in this directory never touched since its original
+build (2026-10-27).
+
+Noticed its two functions (`find_due_registrations()`/`find_due_property_documents()`) call
+`watch_deadlines._expiry_window()` WITHOUT passing `company_id` directly - unlike every one of
+`watch_deadlines.py`'s own three sibling functions (`find_due_documents()`/
+`find_due_person_credentials()`/`find_due_tasks()`), which all pass `company_id=...` straight into
+`_expiry_window()`'s own parameter for exactly that purpose. Instead, `registration_reminders.py` uses
+a separate `_mark_company()` patch-up step after the fact. Since `save_seen_db()`'s own comment is
+explicit ("every entry carries its company_id... one without is skipped with a message rather than
+guessed") and a seen-store entry that never persists means that expiry gets re-reported on EVERY run
+forever rather than once per lead-time window - exactly the silent-wrong-behaviour class this whole
+file exists to prevent - this was worth tracing all the way through rather than assuming the
+indirection was broken just because it looked unusual.
+
+**Traced and confirmed correct, not a bug.** `_mark_company()`'s key reconstruction
+(`f"{prefix}::{expiry}::{status}"`) matches `_expiry_window()`'s own `seen_key` exactly (same prefix,
+same expiry value, same status - the latter is the literal value `_expiry_window()` just returned in
+the same call), so the lookup always finds the dict `_expiry_window()` just wrote, in the same
+synchronous call, before any persistence happens - confirmed `held_registrations.company_id` is `not
+null` at the schema level (migration `0050`), so the value `_mark_company()` patches in is never
+itself falsy. Also checked both real call sites (`watch_deadlines.main()`, `daily_digest.py`'s live
+mode) pass the SAME shared `seen` dict through to `save_seen_db()`/`load_seen_db()` correctly, with
+correctly-separated consumer names (`watch_deadlines` vs `daily_digest`) - no cross-contamination.
+Also checked `send_digest_emails.py`'s own rendering of a `held_registrations`-sourced
+`person_credential` item against Finding 113's own fix (the `person_name`/`label` chain) - already
+correctly wired, same parity as the ECSA/SACPCMP items that finding originally fixed.
+
+No code bug found this pass - a genuine, evidence-backed clean sweep (an unusual-looking indirection
+traced end to end and confirmed correct, not assumed broken from its shape alone).
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item.
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): clean sweep - intake rotation re-confirmed exhausted (classify_tender.py's workbook-open path, duplicate-document ambiguity, and classify_documents()'s own per-document loop all re-checked; one trivial, non-production-impacting lead found and deliberately not fixed)
 
 Oriented from `57d1fef`; `git fetch origin main` found one new sibling commit since my own last push
