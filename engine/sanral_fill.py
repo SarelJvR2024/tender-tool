@@ -24,6 +24,24 @@ PNS = "http://schemas.openxmlformats.org/package/2006/relationships"
 N = {"m": NS}
 MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
+# QA pass, 2026-11-04: this module writes raw XML directly (see its own header
+# comment on why it avoids openpyxl), via lxml - the same library python-docx
+# is built on, and the same "All strings must be XML compatible: Unicode or
+# ASCII, no NULL bytes or control characters" ValueError this session already
+# found and fixed three times over in the docx-writing side of these same
+# pack pipelines (make_envelope_covers.py, pdf_merge.py, build_general_pack.py)
+# is just as reachable here: set_value() below is this file's one real
+# free-text writer, called by both fill_tender.py and fill_conventional.py
+# (every key person's name/description, project client/contact fields,
+# qualification text - the same uncontrolled, often OCR'd/human-typed sources)
+# with zero sanitization before this fix. Confirmed directly: lxml raises the
+# identical ValueError on a bare control character in an element's .text.
+_XML_INVALID_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+def _safe_text(value):
+    return _XML_INVALID_RE.sub("", value)
+
 
 def col2n(c):
     n = 0
@@ -305,7 +323,7 @@ class Workbook:
         else:
             c.set("t", "inlineStr")
             t = etree.SubElement(etree.SubElement(c, "{%s}is" % NS), "{%s}t" % NS)
-            t.text = str(value)
+            t.text = _safe_text(str(value))
             t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
         self.log.append((sheet, ref, value))
 

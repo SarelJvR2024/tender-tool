@@ -14,6 +14,61 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - the same control-character crash recurred a FOURTH time, on the Excel-writing side of the SANRAL pack (`sanral_fill.py`'s `Workbook.set_value()`, shared by `fill_tender.py` and `fill_conventional.py`)
+
+Oriented from `fcbe266` (a sibling pass: `fill_sbd_docx.py` re-verified end to end, already has its
+own `_xml_safe()` at both real choke points, no gap, no code change). `git fetch`/`merge --ff-only`
+found nothing new beyond that, local now matches `origin/main`. Open PRs re-checked: only `#164`/`#165`
+remain (both untouched since 2026-10-26), no collision.
+
+Directed to check whether the control-character-crashes-docx-generation shape (now fixed three times
+this session, each in a different docx-writing path) has an equivalent on the Excel-writing side -
+`fill_tender.py`/`fill_conventional.py`, the RRM/Conventional Technical Submission workbook fillers.
+They don't go through openpyxl at all - `sanral_fill.py`'s own header comment explains why (openpyxl
+silently drops this workbook's data-validation/conditional-format extensions and doesn't understand
+its 873 form-control dropdowns) - they write the `.xlsm`'s raw sheet XML directly via `lxml`, the same
+library python-docx is built on. Confirmed directly: `lxml.etree.Element().text = "bad\x0bchar"`
+raises the identical `ValueError: All strings must be XML compatible: Unicode or ASCII, no NULL bytes
+or control characters`. `sanral_fill.Workbook.set_value()` is this file's one real free-text writer
+(the other two `.text` assignments in the same function are always a bare `"0"`/`"1"` or a `repr()`'d
+float, never arbitrary text) - called by both `fill_tender.py` and `fill_conventional.py` for every key
+person's name/description, project client/contact fields, and qualification text, the same kind of
+often-OCR'd/human-typed data this bug class has already been found to crash on elsewhere. Zero
+sanitization before this fix - confirmed by reproducing the crash directly against a real synthetic
+`.xlsm` built with `openpyxl` (used only to construct a minimal valid file for `sanral_fill.Workbook`
+to open; the actual write path under test never touches openpyxl).
+
+This is arguably the most severe instance of the four found this session: unlike the three docx covers/
+contents-page/guide fixes (cosmetic documents, caught after the technical fill already succeeded),
+`assemble_pack.py`'s own call to `FILLERS[family].main(...)` (the real Technical Submission workbook
+fill, step 2 of the SANRAL pack build) has **no try/except around it at all** - a single control
+character anywhere in a key person's name, a project's client name, or any other free-text field would
+have crashed the whole pack build before a single form was filled.
+
+Fixed with the identical `_XML_INVALID_RE`/`_safe_text()` pattern already proven three times this
+session, added directly in `sanral_fill.py` (not imported, since this module deliberately has no
+dependency on `generate_cv.py`/`pdf_merge.py`) and applied at `set_value()`'s one free-text write.
+
+**Verified red-then-green for real**: reproduced the crash against a real (synthetic but valid)
+`.xlsm` via `sanral_fill.Workbook.set_value()` directly - raised the real `ValueError` pre-fix, wrote
+`"badchar"` (control character stripped, real text untouched) post-fix. Added a new
+`engine/test_sanral_fill.py` (no dedicated test existed for this file before) that reproduces the same
+crash against a real **committed** SANRAL sample (`templates/samples/R.334-030-2025.1F_ran.xlsm`),
+including a check that an ordinary name with no control characters is written completely unchanged
+(no over-stripping) - `set_value()` only edits the in-memory XML tree, never writes back to the sample
+file on disk. Stashed the fix and confirmed the new test genuinely fails red (2 of 4 checks) on the
+pre-fix code, restored and confirmed all 4 pass. Full regression sweep: `test_sanral_fill.py`,
+`test_fill_tender.py`, `test_fill_b7_legacy_precedence.py`, `test_sanral_b7.py` (the last two already
+drive this exact `Workbook` class against real committed templates) - all `0 failure(s)`/`ALL PASSED`.
+`ast.parse` clean; `ruff check` - confirmed the only findings near the touched lines are pre-existing
+code shifted by the new lines added, not introduced by this fix. No DB access, no live data.
+
+**Backlog: 19 → 19** (standalone bug, fixed - nothing added/resolved on Sarel's judgment-call list.
+7 pending migrations `0096`, `0107`-`0113`; `company_can_request_pack()`'s own TOCTOU race and the
+`held_registrations`-vs-CV judgment call carried forward, unresolved).
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - `1362081`'s "control character in OCR'd text crashes docx generation" shape recurred in BOTH pack pipelines' shared contents-page builder and the general pack's own completion guide
 
 Oriented from `1362081` (a sibling pass: a control character anywhere in a tender's own OCR'd
