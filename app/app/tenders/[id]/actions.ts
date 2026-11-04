@@ -201,18 +201,16 @@ export async function requestSubmissionPack(formData: FormData) {
     }
   }
 
-  // Billing (0083): company_can_request_pack() is the one source of truth
-  // for both the trial's one-pack-total cap and an active plan's monthly
-  // allowance - never re-derived here.
-  const { data: canRequest } = await supabase.rpc("company_can_request_pack", { p_company_id: companyId });
-  if (!canRequest) fail("You've reached your plan's bid pack limit for this period - upgrade on the Billing page to generate more.");
-
-  const { error } = await supabase.from("pack_generation_jobs").insert({
-    company_id: companyId,
-    tender_id: tenderId,
-    tender_pack_id: tenderPackId,
-    status: "requested",
-    readiness_snapshot: {
+  // Billing (0083/0115): company_can_request_pack()'s own quota logic is
+  // checked and the job inserted in ONE locked transaction via
+  // request_submission_pack_checked() - a separate check-then-insert here
+  // (the original shape) raced two concurrent requests past the same cap,
+  // reproduced and fixed 2026-11-04, same pattern as 0113/0114.
+  const { error } = await supabase.rpc("request_submission_pack_checked", {
+    p_company_id: companyId,
+    p_tender_id: tenderId,
+    p_tender_pack_id: tenderPackId,
+    p_readiness_snapshot: {
       checked: readiness.checked,
       mandatory_missing: readiness.mandatoryMissing,
       missing: readiness.missing,
@@ -220,15 +218,14 @@ export async function requestSubmissionPack(formData: FormData) {
       unfilled_positions: readiness.unfilledPositions,
       form_b7: { status: b7.applies.status, reason: b7.applies.reason, plan_mode: b7.plan?.mode ?? null, warnings: b7.warnings },
     },
-    acknowledged_gaps: hasGaps && acknowledged,
+    p_acknowledged_gaps: hasGaps && acknowledged,
     // Audit copy of the review this request relied on (0059) - set once here, never updated afterwards.
-    reviewed_at: reviewRow?.reviewed_at ?? null,
-    reviewed_by: reviewRow?.reviewed_by ?? null,
-    requested_by: user?.id ?? null,
+    p_reviewed_at: reviewRow?.reviewed_at ?? null,
+    p_reviewed_by: reviewRow?.reviewed_by ?? null,
   });
   if (error) {
-    console.error("pack_generation_jobs insert failed", error);
-    fail("Could not request this submission pack - try again. If it keeps happening, let us know.");
+    console.error("request_submission_pack_checked failed", error);
+    fail(error.message || "Could not request this submission pack - try again. If it keeps happening, let us know.");
   }
   // Pipeline board (0021): asking for a pack means we're bidding.
   await advanceFoundToAssessing(supabase, tenderPackId!);

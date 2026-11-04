@@ -10,7 +10,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { safeFileName } from "@/lib/safeFileName";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
-import { GENERAL_ENGINE, JOBS_TABLE, UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
+import { UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
 import { advanceFoundToAssessing } from "@/lib/pipeline";
 
 async function requireMember() {
@@ -148,7 +148,7 @@ export async function uploadTenderDocument(formData: FormData) {
  * a draft with blanks, by design) - this only blocks an UNREVIEWED compile.
  */
 async function requestJob(formData: FormData, kind: "extract_requirements" | "generate_pack") {
-  const { supabase, userId, companyId } = await requireMember();
+  const { supabase, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/dashboard");
   if (kind === "generate_pack") {
@@ -161,27 +161,26 @@ async function requestJob(formData: FormData, kind: "extract_requirements" | "ge
     if (!reviewRow?.reviewed_at) {
       redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
     }
-    // Billing (0083): company_can_request_pack() covers both engines (no
-    // `engine` filter in its own count query) - the same monthly/trial
-    // allowance requestSubmissionPack() (actions.ts) checks for SANRAL.
-    const { data: canRequest } = await supabase.rpc("company_can_request_pack", { p_company_id: companyId });
-    if (!canRequest) {
-      redirect(back(tenderId, `?error=${encodeURIComponent("You've reached your plan's bid pack limit for this period - upgrade on the Billing page to generate more.")}`));
-    }
   }
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();
-  const { error } = await supabase.from(JOBS_TABLE).insert({
-    engine: GENERAL_ENGINE,
-    company_id: companyId,
-    tender_id: tenderId,
-    tender_pack_id: (pack?.id as string | undefined) ?? null,
-    kind,
-    requested_by: userId,
+  // Billing (0083/0115): company_can_request_pack()'s own quota logic
+  // (generate_pack only - extract_requirements has never been quota-gated)
+  // is checked and the job inserted in ONE locked transaction via
+  // request_general_job_checked() - a separate check-then-insert here
+  // raced two concurrent requests past the same cap, reproduced and fixed
+  // 2026-11-04, same pattern as 0113/0114. Still tolerant of "one already
+  // open" the same way (on conflict do nothing inside the function, not a
+  // 23505 caught here) - a null return means nothing new was queued
+  // because one already was, not an error.
+  const { error } = await supabase.rpc("request_general_job_checked", {
+    p_company_id: companyId,
+    p_tender_id: tenderId,
+    p_tender_pack_id: (pack?.id as string | undefined) ?? null,
+    p_kind: kind,
   });
-  // 23505 = one already open (unique partial index) - that's fine, it's queued.
-  if (error && error.code !== "23505") {
-    console.error("pack_generation_jobs insert failed for general engine", error);
-    redirect(back(tenderId, `?error=${encodeURIComponent("Could not queue this job - try again. If it keeps happening, let us know.")}`));
+  if (error) {
+    console.error("request_general_job_checked failed", error);
+    redirect(back(tenderId, `?error=${encodeURIComponent(error.message || "Could not queue this job - try again. If it keeps happening, let us know.")}`));
   }
   // Pipeline board (0021): asking for a pack means we're bidding.
   if (kind === "generate_pack" && pack?.id) {
@@ -242,7 +241,7 @@ export async function saveSignatoryCapacity(formData: FormData) {
  * copy of the requirements is cleared, since it may quote the removed file).
  */
 export async function removePrivateTenderDocument(formData: FormData) {
-  const { supabase, userId, companyId } = await requireMember();
+  const { supabase, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   const docId = formData.get("document_id") as string | null;
   if (!tenderId || !docId) redirect("/dashboard");
@@ -270,12 +269,15 @@ export async function removePrivateTenderDocument(formData: FormData) {
   if (pack && (count ?? 0) === 0) {
     await supabase.from("tender_packs").update({ document_requirements: null, intake: null }).eq("id", pack.id as string);
   } else if (pack) {
-    const { error: jobErr } = await supabase.from(JOBS_TABLE).insert({
-      engine: GENERAL_ENGINE, company_id: companyId, tender_id: tenderId, tender_pack_id: pack.id as string,
-      kind: "extract_requirements", requested_by: userId,
+    // 0115: same atomic checked-insert as requestJob() - extract_requirements
+    // has no quota gate either way, but this keeps every real pack_generation_jobs
+    // insert behind the one shared path instead of a third hand-rolled copy.
+    const { error: jobErr } = await supabase.rpc("request_general_job_checked", {
+      p_company_id: companyId, p_tender_id: tenderId, p_tender_pack_id: pack.id as string,
+      p_kind: "extract_requirements",
     });
-    if (jobErr && jobErr.code !== "23505") {
-      console.error("pack_generation_jobs insert failed after removing private document", jobErr);
+    if (jobErr) {
+      console.error("request_general_job_checked failed after removing private document", jobErr);
       redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Document removed, but the re-read could not be queued - try again. If it keeps happening, let us know.")}#private-documents`);
     }
   }

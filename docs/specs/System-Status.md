@@ -14,6 +14,97 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `company_can_request_pack()`'s own TOCTOU race (two callers), finally closed; AND a real, not-yet-live regression that silently reverted 0084's own prior fix
+
+Oriented from `bc90e2b` (own prior pass: `team/actions.ts`'s last-owner race). `git fetch`/`merge
+--ff-only` picked up `3e56a7b` (a sibling QA/robustness pass: compliance/reminders rotation, no code
+change). Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26), no collision.
+
+Cross-checked the backlog chain again (now a standing discipline after the impersonation-gap drop):
+self-consistent, 18→...→21 (impersonation re-added)→20 (seat/owner race)→20 (discipline-match
+fix)→20 (billing gap, unresolved)→20. Nothing else has quietly dropped.
+
+Directed to reconsider `company_can_request_pack()`'s own TOCTOU race with fresh eyes, now that
+0113/0114 have twice proven the SECURITY DEFINER + `for update` pattern. Read `app/app/tenders/[id]/
+actions.ts`'s `requestSubmissionPack()` and `app/app/tenders/[id]/general-actions.ts`'s `requestJob()`/
+`removePrivateTenderDocument()` end to end - this one really does have two (in fact three) different
+callers inserting structurally different `pack_generation_jobs` rows (a SANRAL request carries a large,
+TypeScript-computed `readiness_snapshot` JSON; the general engine's two call sites insert a simpler row,
+one of them quota-gated only for `kind = 'generate_pack'`, the other (`extract_requirements` after
+removing a private document) never quota-gated at all) - genuinely more work than 0113/0114's single
+simple insert each, but mechanically the identical pattern, not a different one. Not blocked - fixed it.
+
+**Also found, while reading `company_can_request_pack()`/`company_packs_this_period()` closely enough
+to design the fix**: a real regression, not yet live (`0096` and `0109` are both still on the pending-
+migrations list, so this has caused no production harm yet - but would the moment they're applied in
+numeric order, without this fix alongside them). `0084` (2026-10-29ish) found and fixed a real,
+reproduced quota-bypass: both functions only counted `status = 'ready'` packs, so any number of packs
+could be requested in parallel before the first one ever finished - fixed by counting `requested`/
+`generating` too. `0109` (2026-10-31, adding the `is_company_member()` ownership guard found in this
+session's own SECURITY DEFINER audit) did `create or replace function` on both functions **from
+scratch** to add that guard - and in doing so silently reverted `0084`'s in-flight-counting fix back to
+`status = 'ready'` only, on BOTH the trial and active-plan paths. Confirmed by reading `0109`'s actual
+SQL, not assumed from its title (which only mentions the membership check).
+
+**Reproduced both findings directly in a disposable scratch database** (not this app's live DB, dropped
+immediately after each check): (1) the regression - a trialing company (one pack total) with ONE
+`requested` job already in flight still got `company_can_request_pack() = true` under `0109`'s current
+(pending) definition; an active Professional company with the same one in-flight job got
+`company_packs_this_period() = 0` (should be 1). Both axes of `0084`'s original fix, regressed. (2) the
+race itself - two concurrent `requestSubmissionPack()`-shaped calls for two DIFFERENT tenders (the
+existing per-tender "already queued" guard only blocks a second request for the SAME tender) on a
+zero-usage trialing company both read "0 in flight, cap is 1" before either committed, both inserted -
+two real jobs against a one-pack-total trial.
+
+**Fixed with migration `0115`**: re-merged `0084`'s in-flight counting + `0096`'s trial-expiry lapse +
+`0109`'s membership guard into one correct body for both functions (nothing here changes any of those
+three fixes' own intent - this only re-combines them after one rewrite accidentally dropped a different
+one's change). Added two new `SECURITY DEFINER` functions - `request_submission_pack_checked()` (SANRAL,
+takes the full `readiness_snapshot` JSON as a parameter) and `request_general_job_checked()` (general
+engine, both `kind`s, quota-gated only for `generate_pack` same as the existing TypeScript) - each doing
+the whole check-then-insert in one transaction with `for update` locking `company_subscriptions`' row,
+the same per-company lock `0113`/`0114` already proved. `request_general_job_checked()` mirrors the
+existing unique partial index's own "already queued, that's fine" semantics with `on conflict do
+nothing` rather than raising, matching what the calling TypeScript already treated as a non-error
+(`23505`). Both read `auth.uid()` directly for `requested_by`, never a parameter, and enforce
+`is_company_member()` themselves - both are granted to `authenticated` and callable directly via
+`supabase.rpc()`, not only through these Server Actions.
+
+Rewired all three real call sites (`actions.ts`'s `requestSubmissionPack()`, `general-actions.ts`'s
+`requestJob()` and `removePrivateTenderDocument()`) to call these RPCs instead of the old separate
+check-then-insert, removing now-dead `userId`/`JOBS_TABLE`/`GENERAL_ENGINE` references along the way.
+
+**One deliberate, narrow behaviour change, named plainly rather than swept under the rug**: a trialing
+company that is already at its one-pack-total cap and re-requests the SAME tender it already has queued
+now gets an explicit "you've reached your plan's bid pack limit" error (the quota check runs before the
+`on conflict do nothing` can even apply) instead of the old silent "redirect as if it succeeded, nothing
+actually happens" - the old behaviour never explained why nothing changed; the new one does. For every
+non-exhausted-trial case (any active plan with room, or a trialing company's genuine first request), the
+dedup-on-same-tender behaviour is unchanged, verified directly below.
+
+**Verified for real**: replayed all 105 real migrations (104 + `0115`) against a fresh scratch database -
+clean. Re-seeded the exact regression scenario against `0115`'s new bodies - confirmed fixed (trialing +
+1 in-flight -> `false`, not `true`; active + 1 in-flight -> `company_packs_this_period() = 1`, not `0`).
+Re-ran the exact two-different-tenders concurrency test against `request_submission_pack_checked()` -
+the first call succeeds, the second blocks on the lock then correctly raises instead of inserting -
+exactly one job, not two. Separately verified `request_general_job_checked()`: a trialing company's
+first `generate_pack` request succeeds; a second request for a DIFFERENT tender correctly raises (quota);
+on an ACTIVE company with real capacity, a second request for the SAME tender correctly returns `null`
+(the `on conflict do nothing` dedup path, unaffected by this fix) with exactly one row landing, not two;
+`extract_requirements` still has no quota gate at all, confirmed separately. `npx tsc --noEmit` and `npx
+eslint` on both touched action files - clean. Full regression (`node --test lib/*.test.ts`): 219/219,
+unaffected. Scratch databases dropped immediately after each check, never the live DB.
+
+**Backlog: 20 → 19** (`company_can_request_pack()`'s TOCTOU race: fixed, removed - the LAST of the three
+TOCTOU races this session found via the SECURITY DEFINER-audit thread, now all three closed the same
+proven way. 7 pending migrations now `0096`, `0107`-`0115`. The not-yet-live quota-counting regression
+this pass also found is fixed in the same migration, not a separate backlog item - it never shipped.
+Everything else unchanged: the `held_registrations`-vs-CV judgment call, the `start_payfast_checkout()`
+revenue-integrity gap, and the impersonation session-refresh gap, all still open, needing Sarel's own
+call.)
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - `setMemberRole()`/`removeMember()` in `team/actions.ts` had the same seat-cap-style TOCTOU race `createInvite()`'s own seat check already had, reproduced
 
 Oriented from `630f5de` (own prior pass: re-surfaced the impersonation session-refresh gap after it
