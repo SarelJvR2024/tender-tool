@@ -7305,3 +7305,49 @@ lines including comment each); `engine/pack/test_process_pack_jobs.py`,
 `engine/general/test_process_general_jobs.py`, `engine/narrative/test_process_narrative_jobs.py`,
 `engine/onboarding/test_process_onboarding_jobs.py` (1-2 new test functions each, wired into each
 file's existing `main()`). No change to any already-handled failure path in any of the four bridges.
+
+### Finding 129 (CONFIRMED, FIXED, moderate - a real, numbered BOQ line item whose description happens to start with the word "Total" was silently dropped from the parsed schedule entirely, mistaken for a running subtotal row)
+
+**Area:** discovery (`engine/discovery/boq_extraction.py` - deterministic BOQ/priced-schedule line-item
+parsing off a buyer's own .xlsx/.xlsm workbook).
+
+**Scenario:** `_SKIP_ROW_RE` exists to stop a workbook's own running subtotal/grand-total/carried-forward
+rows (real rows in the sheet, never real priced line items - e.g. `["Sub Total", None, None, None,
+302760]`) from being counted as items. Its `total`/`sub total`/`grand total` branches were a bare PREFIX
+match (`^(sub[\s-]?)?total\b`, no end anchor) against the row's cleaned description. A genuine, numbered
+line item whose description happens to start with the word "Total" - entirely ordinary civil-engineering
+BOQ phrasing, e.g. `"Total length of guardrail to be supplied and installed"` (unit `m`, qty `850`, rate
+`320`, amount `272000`) or `"Total area of paving to be removed and relaid"` - matched the same prefix
+and was silently skipped in `extract_items_from_grid()`, with no trace in the parsed `items` list or the
+workbook's own `note` - the module's own stated "we stop, we never guess" discipline guards against
+*fabricating* an item, but this bug went the other way and *dropped* a real, correctly-priced one,
+understating the scope a human reviewer or a downstream financial summary would see.
+
+```python
+>>> import boq_extraction as boq
+>>> bool(boq._SKIP_ROW_RE.match("Total length of guardrail to be supplied and installed"))
+True   # wrongly treated as a subtotal row and dropped
+```
+
+**Fix:** tightened only the `total`/`sub total`/`grand total` branches of `_SKIP_ROW_RE` to require the
+REST of the cleaned description (after the matched keyword) to be nothing but trailing punctuation or a
+currency marker (`:`, `-`, `(R)`) and then end-of-string - matching how a real subtotal row's description
+cell actually looks (just the bare label, e.g. `"Total"`, `"Sub Total"`, `"Total (R)"`). The other skip
+phrases (`vat`, `page N`, `carried forward`/`brought down`, `c/f`/`b/f`, `notes`) were deliberately left as
+prefix matches, unchanged - none of them is a plausible first words of a real line-item description, so
+there is no equivalent false-positive risk there to fix.
+
+**Verified red-then-green.** Added `test_real_item_description_starting_with_the_word_total_is_not_dropped_
+as_a_subtotal_row()` to `engine/discovery/test_boq_extraction.py` - a sheet with two real "Total ..."
+line items plus a genuine bare `"Sub Total"` row, asserting both real items are kept AND the bare
+subtotal row is still correctly excluded. Revert-and-confirm-red on `boq_extraction.py` alone: the new
+test failed exactly as predicted (`got []` - both real items dropped), the bare-"Sub Total"-still-excluded
+assertion still passed; restored, `0 failure(s)` across the full file (14 tests). `py_compile` clean on
+both touched files. Regression: re-ran `test_list_tenders.py` (discovery rotation's other recent touch
+point) and imported `transnet_etenders.py` cleanly - both unaffected, confirming no stray import/syntax
+issue from this change.
+
+**Regression:** `engine/discovery/boq_extraction.py` (`_SKIP_ROW_RE`, ~10 lines including comment);
+`engine/discovery/test_boq_extraction.py` (one new test function, wired into `main()`). No change to the
+`vat`/`page`/`carried forward`/`brought down`/`notes` skip branches, the numeric-quantity-ratio check, or
+any other guard in the module.

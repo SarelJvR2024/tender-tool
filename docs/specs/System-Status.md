@@ -2410,6 +2410,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04/05, standing QA/robustness review): fix - a real, numbered BOQ line item whose description starts with the word "Total" was silently dropped from the parsed schedule, mistaken for a running subtotal row
+
+Oriented from `598b277` (a sibling "standing solution-architect review" pass's own fix - an onboarding
+TOCTOU race, `app/` only, no overlap with `engine/discovery/`). Fast-forwarded cleanly. Open PRs
+re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision. Re-checked again
+immediately before this push - still clean.
+
+Rotated to discovery (worker/job-queue was last). Checked `transnet_etenders.py` first - already
+well-defended (per-document isolation in `fetch_releases()`, defensive `.get()` throughout
+`normalize()`); no finding, nothing to log. Moved to `boq_extraction.py` (the deterministic BOQ/priced-
+schedule line-item parser reused by `gov_sources.py`'s scope-enrichment chain) and read it in full.
+
+**Found and fixed Finding 129 (CONFIRMED, moderate)**: `_SKIP_ROW_RE`'s `total`/`sub total`/`grand total`
+branches were a bare prefix match against the row's cleaned description, with no end anchor. A genuine,
+numbered line item whose description happens to start with the word "Total" - ordinary civil-
+engineering BOQ phrasing, e.g. `"Total length of guardrail to be supplied and installed"` (unit `m`, qty
+`850`, rate `320`, amount `272000`) - matched the same prefix as a bare `"Sub Total"` row and was
+silently skipped in `extract_items_from_grid()`, with no trace anywhere in the result. Confirmed live:
+`boq._SKIP_ROW_RE.match("Total length of guardrail to be supplied and installed")` → `True`. This is the
+inverse of the module's own stated "we stop, we never guess" discipline (which guards against
+*fabricating* an item) - here a real, correctly-priced item was *dropped*, understating scope for
+whoever reads `tender_scope_records.boq_summary` next.
+
+**Fix:** tightened only the `total`/`sub total`/`grand total` branches to require the rest of the
+description (after the matched keyword) be nothing but trailing punctuation/currency marker and then
+end-of-string - matching how a real subtotal row's own description cell actually looks. Left `vat`/
+`page N`/`carried forward`/`brought down`/`c/f`/`b/f`/`notes` as prefix matches, unchanged - none of
+those is a plausible first words of a real line-item description, so there's no equivalent risk to fix
+there.
+
+**Verified red-then-green.** New test
+`test_real_item_description_starting_with_the_word_total_is_not_dropped_as_a_subtotal_row()` in
+`engine/discovery/test_boq_extraction.py` - asserts two real "Total ..." items are kept AND a genuine
+bare "Sub Total" row in the same sheet is still correctly excluded. Reverted `boq_extraction.py` alone:
+failed exactly as predicted (both real items came back `[]`); restored: `0 failure(s)` across all 14
+tests in the file. `py_compile` clean on both touched files. Regression: re-ran `test_list_tenders.py`
+and imported `transnet_etenders.py` cleanly - both unaffected.
+
+Backlog: unchanged at 18 items - this is a contained parsing fix, not one of Sarel's own 18 numbered
+backlog items.
+
+Verify yourself: `cd engine/discovery && python3 test_boq_extraction.py` → `0 failure(s)` (29 checks,
+14 tests). Diff: `git show <this commit> -- engine/discovery/boq_extraction.py` (one tightened regex,
+~10 lines including comment).
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): fix - the deliberate sweep: "claim call outside its own try block, no per-item isolation in the polling loop" (Findings 123/126's bug class) found in all FOUR remaining job-queue bridges
 
 Oriented from `b3e2d79`; `git fetch origin main` found two new sibling commits since my own last push

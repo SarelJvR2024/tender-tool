@@ -161,7 +161,17 @@ def detect_header_row(grid):
 # ---------------------------------------------------------------------------
 
 _SKIP_ROW_RE = re.compile(
-    r"^(sub[\s-]?)?total\b|^grand\s+total\b|^vat\b|^page\s+\d+\b|"
+    # "total"/"sub total"/"grand total" require the REST of the description to be
+    # nothing but trailing punctuation/currency marker ("Total", "Sub Total:", "Total
+    # (R)") - a real subtotal row's description cell holds only the label itself. A
+    # prefix match here would also swallow a genuine, numbered line item whose own
+    # description happens to start with the word "Total" ("Total length of guardrail
+    # to be supplied and installed in m" is a real BOQ row, not a subtotal) and drop
+    # it from the schedule with no trace. The other skip phrases below (carried
+    # forward/brought down/page N/notes) stay prefix-matched - none of them is a
+    # plausible first words of a real line-item description.
+    r"^(sub[\s-]?)?total\b\s*[:\-]?\s*(\(?r\)?)?\s*$|^grand\s+total\b\s*[:\-]?\s*(\(?r\)?)?\s*$|"
+    r"^vat\b|^page\s+\d+\b|"
     r"^carried\s+(forward|down)\b|^brought\s+(forward|down)\b|^c/f\b|^b/f\b|^notes?:?\s*$",
     re.I,
 )

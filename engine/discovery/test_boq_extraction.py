@@ -287,6 +287,25 @@ def test_all_lump_sum_preliminaries_bill_is_not_rejected():
     check(result["items"][0]["quantity"] is None, "quantity genuinely wasn't given - must stay null, never guessed")
 
 
+def test_real_item_description_starting_with_the_word_total_is_not_dropped_as_a_subtotal_row():
+    """A real, numbered BOQ line whose description happens to start with the word
+    "Total" ("Total length of guardrail...", a real quantity item, not a running
+    subtotal) must still be kept - the subtotal/total skip pattern must only fire
+    when the description cell holds nothing but the bare total label itself."""
+    data = make_workbook_bytes({"BOQ": [
+        ["Description", "Unit", "Qty", "Rate", "Amount"],
+        ["Total length of guardrail to be supplied and installed", "m", 850, 320, 272000],
+        ["Total area of paving to be removed and relaid", "m2", 60, 410, 24600],
+        ["Sub Total", None, None, None, 296600],
+    ]})
+    result = boq.parse_boq_workbook(io.BytesIO(data))
+    check(len(result["items"]) == 2, f"both real 'Total ...' line items should be kept, got {result['items']}")
+    descs = [it["description"] for it in result["items"]]
+    check("Total length of guardrail to be supplied and installed" in descs, f"first real item dropped: {descs}")
+    check("Total area of paving to be removed and relaid" in descs, f"second real item dropped: {descs}")
+    check("Sub Total" not in descs, "the real 'Sub Total' row must still be excluded as a subtotal")
+
+
 def main():
     test_basic_boq_parsed_with_totals_excluded()
     test_header_wording_variants_still_detected()
@@ -297,6 +316,7 @@ def main():
     test_skips_cover_sheet_and_finds_the_real_table_on_a_later_sheet()
     test_unreadable_file_returns_honest_note_never_crashes()
     test_formula_error_cell_is_null_not_a_fabricated_zero()
+    test_real_item_description_starting_with_the_word_total_is_not_dropped_as_a_subtotal_row()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
