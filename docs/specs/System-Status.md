@@ -14,6 +14,43 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): backlog-bookkeeping fix - the "7 pending migrations" count stopped being updated as the range grew; a systematic TOCTOU sweep across every Server Action came back clean
+
+Oriented from `88c4b42` (own prior pass). `git fetch`/`merge --ff-only` picked up `b3e2d79` (a sibling
+pass: a cancelled workflow run never recorded a heartbeat finish) - no collision, no duplication.
+
+Doing the backlog cross-check this session has now made a standing discipline (an item silently dropped
+out of it once before, a few passes ago, and was caught and restored) turned up a different kind of
+drift this time: not a dropped item, a stale count. `0113`/`0114`/`0115` were each added as a new real
+pending migration over the last several passes, correctly widening the quoted range each time
+(`0107`-`0113`, then `-0114`, then `-0115`) - but every one of those same entries kept saying "**7**
+pending migrations" without the count itself ever being bumped past the point it was last genuinely 7
+(back when the range really was `0107`-`0112`: 6 + `0096` = 7). Checked directly against the real
+migrations directory rather than trusting the prose: `ls app/supabase/migrations/ | grep -E
+"^(0096|0107|0108|0109|0110|0111|0112|0113|0114|0115)_"` returns all 10 files. The actual count has been
+10, not 7, since `0113` landed - this entry is the correction, not a new backlog item.
+
+Also did the sweep the parent's own directive asked for: having found 3 real TOCTOU races this session
+via the identical "SQL function does select/count-then-insert/update/delete across separate client
+queries, no DB-side lock" shape (`createInvite`'s seat cap, `team/actions.ts`'s last-owner check,
+`company_can_request_pack()`'s quota), grepped every one of the app's 22 `actions.ts` Server Action
+files for the same shape before considering it exhausted. Found nothing else matching it: `people/
+actions.ts`, `experience/actions.ts`, `document-scan/actions.ts`, `pipeline/actions.ts` and the rest
+either have no count-then-write pattern at all, or the one borderline case
+(`admin/taxonomy/actions.ts`'s `sort_order` assignment - reads the current max, then inserts one higher)
+is an admin-only, purely cosmetic ordering field with no security or billing consequence, not the same
+class of bug. `onboarding/actions.ts`'s company creation already goes through one atomic RPC
+(`create_company_and_join`), never a client-side check-then-insert, confirmed by reading it directly.
+No new bug found; this bug class is now genuinely exhausted across the whole Server Action surface, not
+just the three sites already fixed.
+
+**Backlog: 19, unchanged** (docs-only correction, not a new item - 10 pending migrations `0096`,
+`0107`-`0115` [not 7, see above]; the `held_registrations`-vs-CV judgment call, the
+`start_payfast_checkout()` revenue-integrity gap, and the impersonation session-refresh gap all still
+open, needing Sarel's own call. None of those three touched this pass, as directed.)
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - `company_can_request_pack()`'s own TOCTOU race (two callers), finally closed; AND a real, not-yet-live regression that silently reverted 0084's own prior fix
 
 Oriented from `bc90e2b` (own prior pass: `team/actions.ts`'s last-owner race). `git fetch`/`merge
