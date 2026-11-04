@@ -1,5 +1,34 @@
 # System Status
 
+## 2026-11-04: Sarel applied all 11 pending migrations (`0096`, `0107`-`0116`) to production directly via the Supabase SQL editor
+
+Before running them, Sarel ran the read-only duplicate check this session flagged as a precondition
+for `0116`'s new `unique(user_id)` constraint on `company_members` (`select user_id, count(*) from
+company_members group by user_id having count(*) > 1;`) - it returned 0 rows, so no existing user had
+already been caught by the race `0116` fixes. All 11 files were then pasted and run in order via the
+SQL editor (CLI migration push wasn't set up locally). Sarel confirmed completion in chat.
+
+**This resolves the single largest item on the standing backlog** - every fix this session produced
+via a migration file (the PayFast amount-verification check, 0112; three separate TOCTOU races -
+invite seats 0113, team ownership 0114, pack-quota 0115; the onboarding one-company-per-user race,
+0116; the cross-tenant billing-state leak closed by 0109; the trial-lapse bypass closed by 0096; the
+lifecycle-unsubscribe-token leak closed by 0108; the submitted-tender nagging/stage-split fixes in
+0107/0110/0111) is now live, not just written-and-verified-on-a-scratch-database. None of this was
+previously in effect in production.
+
+**Not independently re-verified against the live database from here** - this session has no live
+Supabase credentials and never did; Sarel's own "done" is the only confirmation, same as every other
+fact in this doc that depends on an action only he can take. If anything looks off in production
+behavior after this (an invite, role change, or pack request erroring unexpectedly), check these 11
+functions/constraints first - they're all new as of today.
+
+**Backlog: 19 unchanged in count, but the "10 pending migrations" item is now resolved** - nothing
+currently pending. Still open: `held_registrations`-vs-CV (needs a design decision),
+`start_payfast_checkout()`'s revenue-integrity gap (grants plan/limits before payment confirms - needs
+Sarel's own call on the fix approach), and the impersonation session-refresh gap (needs live Supabase
+credentials no session here has had, to verify refresh-token-rotation behavior before a fix can be
+written with confidence).
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - `create_company_and_join()` had an unguarded TOCTOU race that could give one user two companies, which every single page in the app assumes can't happen
 
 Oriented from `6e08b0c` (own prior pass: Market Intelligence's bidder-count gate). `git fetch`/`merge
