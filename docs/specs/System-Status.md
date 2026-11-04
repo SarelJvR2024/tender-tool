@@ -2040,6 +2040,48 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): clean sweep - intake rotation re-confirmed exhausted (classify_tender.py's workbook-open path, duplicate-document ambiguity, and classify_documents()'s own per-document loop all re-checked; one trivial, non-production-impacting lead found and deliberately not fixed)
+
+Oriented from `57d1fef`; `git fetch origin main` found one new sibling commit since my own last push
+(`caaca20`, a real app/TS fix - discipline-interest matching ignored `matched_by_group_tag`) - no
+overlap with `engine/intake/`. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API:
+`#164`/`#165` only, both unchanged, no collision.
+
+Rotated to intake (CV was last). With `classify_tender.py` already swept hard the previous intake
+cycle (real entity-amplification attack built and run against both consumers of an uploaded `.docx`),
+checked three different angles this time: (1) `sanral_fill.Workbook.__init__()`'s handling of a
+password-protected `.xlsm` - a real OOXML-with-a-password is stored as a Compound File Binary
+container, not a valid zip at all, so `zipfile.ZipFile(path)` raises `BadZipFile` - already caught by
+`classify_workbook()`'s own blanket `except Exception`, no gap; (2) `classify_documents()`'s own
+per-document loop for a missing-key crash shape (same "one bad item kills the batch" class as
+Findings 123/126) - `classify_workbook()` already never raises (its own internal try/except always
+returns a dict), and `d["name"]` is a guaranteed-present field on every real manifest document entry
+(used as the primary identifier by virtually every downstream consumer already read this session), so
+no realistic crash path exists there; (3) two differently-named but byte-identical uploaded workbooks
+- the existing AMBIGUOUS tie-break logic already handles this correctly (reports both names, picks one
+by mtime), just not optimally worded for the "actually identical content" sub-case - not worth a fix
+on its own.
+
+One trivial, deliberately-not-fixed lead: `classify_tender.py`'s own CLI `main()` ("local check, no
+Supabase" per its own docstring - a manual debugging tool, not the real production path, which is
+`process_general_jobs.py`'s `run_extraction()` and manages its own work directories independently)
+only cleans up its temp work dir at the very end, after `read_setup()`/`assess_fit_from_text()` could
+already have raised - a crash mid-run leaks a `/tmp` directory. Not fixed: this only affects a human
+manually running the debug CLI, never a real company's pack job, and the OS already reaps `/tmp` on
+its own schedule - not worth a `try/finally` for a tool whose own docstring already scopes it to
+manual debugging.
+
+No code bug found this pass - a genuine, evidence-backed clean sweep (three real leads traced and
+ruled out, one trivial non-production lead explicitly left alone with reasoning, not merely "nothing
+looked wrong").
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md`
+
+No new backlog item.
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): fix - a transient claim failure on one CV upload silently skipped every OTHER genuinely pending upload in the same batch
 
 Oriented from `fcbe266`; `git fetch origin main` found two new sibling commits since my own last push
