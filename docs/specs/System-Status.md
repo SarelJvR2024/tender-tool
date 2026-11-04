@@ -14,6 +14,63 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): NOT a new bug - re-surfaced a real, already-traced-to-the-SDK architectural gap (impersonation session token refresh) that silently dropped off this backlog's own carry-forward chain for 7+ passes
+
+Oriented from `e89a4e4` (a sibling pass: intake rotation re-confirmed exhausted). `git fetch`/`merge
+--ff-only` found nothing new beyond that, local matches `origin/main`. Open PRs re-checked: only
+`#164`/`#165` remain (both untouched since 2026-10-26), no collision.
+
+Directed to look at the admin portal / impersonation / audit-log area - not yet given a dedicated pass
+this session. Read `app/app/admin/customers/impersonation-actions.ts` and `app/lib/impersonation.ts`
+end to end. Both are carefully built (immutable audit log, service-role key never leaves this one file,
+admin's own `sb-*` session never touched) - no new bug there.
+
+**But**: a real, already-found gap in the SAME feature - documented in full back on 2026-10-27
+(commit `9bd4b55`, "trace impersonation's 4-hour claim against the actual SDK, flag a real gap") - has
+not been mentioned anywhere in this file's own last 7+ passes' worth of "backlog, carried forward"
+paragraphs (confirmed by grep - zero hits for "impersonat" anywhere in the most recent ~800 lines of
+this file, despite every other open item from that era, e.g. the ISO 9001 UX question, surviving every
+single pass's carry-forward). That's this backlog's own tracking failing silently, the same class of
+bug this routine exists to catch in the *product* - worth naming plainly rather than letting it stay
+lost.
+
+**Re-confirmed the underlying gap is still 100% real, against the CURRENT code** (not re-reading the
+old finding and assuming it still applies):
+- `lib/impersonation.ts`'s `IMPERSONATION_MAX_AGE_SECONDS` (4 hours) is still only the cookie's own
+  `maxAge` - the actual Supabase session tokens it carries are not that long-lived.
+- `lib/supabase/server.ts`'s `createClient()` still builds a fresh `autoRefreshToken: false,
+  persistSession: false` client on every single request and calls `setSession()` with the SAME
+  access/refresh token pair read back from the cookie - written once, at mint time
+  (`startImpersonation()`), never updated anywhere.
+- The file the original finding named as the fix location, `middleware.ts`, no longer exists at all -
+  it was removed (`22b99f7`, "Remove middleware.ts (superseded by proxy.ts, missed in the previous
+  commit)") and replaced by `app/proxy.ts`, which refreshes the ADMIN's own real `sb-*` session cookies
+  correctly but has zero mentions of `tt_impersonation` anywhere in it (confirmed by reading the whole
+  file, not grepping a name that might have changed) - the identical gap, just relocated to a renamed
+  file, never closed.
+- `proxy.ts`'s own route-guarding logic (redirect-to-login, redirect-to-onboarding) is unaffected by
+  this - it always authenticates against the admin's own real session, by design, never the
+  impersonation overlay - so this is specifically and only about the impersonated session silently
+  dying mid-use, not a route-guard bug.
+
+**Not fixed, for the same reason the original finding gave**: the correct fix needs the refreshed token
+pair captured and re-persisted into the `tt_impersonation` cookie from `proxy.ts` (the one place that
+already does this for the admin's own `sb-*` cookies) - real surface area on a security-sensitive path,
+and this sandbox still has no live Supabase credentials to verify end-to-end that Supabase's own
+refresh-token-rotation behaviour (a per-project Auth setting, not purely a code question) doesn't
+produce a subtly different failure shape once "fixed." Re-added to the backlog below rather than
+guessed at or rushed.
+
+**QA tooling**: `npx tsc --noEmit` clean. No application code touched this pass (investigation and
+backlog-integrity correction only).
+
+**Backlog: 20 → 21** (re-adding the impersonation session-refresh gap, dropped from tracking since
+~2026-10-27 despite never being fixed - everything else unchanged: 7 pending migrations `0096`,
+`0107`-`0113`; `company_can_request_pack()`'s TOCTOU race; the `held_registrations`-vs-CV judgment
+call; the `start_payfast_checkout()` revenue-integrity gap from two passes ago).
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - `matchesInterestedDisciplines()` expanded a company's selected GROUP to every one of its children, ignoring `matched_by_group_tag` - the same split engine/discovery/taxonomy.py's `fit_overlap()` already makes between "exact" and "peripheral"
 
 Oriented from `57d1fef` (a sibling pass: a transient claim failure on one CV upload used to skip the
