@@ -14,6 +14,55 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `team/actions.ts`'s seat-limit check was a real, reproduced TOCTOU race, not just a theoretical one
+
+Oriented from `ab65776`; `git fetch`/`merge --ff-only` found nothing new, local already matched
+`origin/main`. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26), no
+collision. Picked up one of two already-flagged-but-never-fixed TOCTOU races from earlier in this
+session (`app/app/company/team/actions.ts`'s seat-limit check and `company_can_request_pack()`'s two
+callers) - the team one specifically, since it's a single call site with a single insert, the same
+shape 0107's `redeem_company_invite()` fix already had a proven template for; `company_can_request_pack()`
+has two separate callers and stays an open, unfixed judgment call.
+
+`createInvite()` enforced a plan's seat cap (`max_users`, 0083) with three separate client queries -
+select `max_users`, count `company_members` + pending `company_invites`, compare, then insert - no
+lock between the count and the insert. **Reproduced the race directly** in a disposable scratch
+database (not this app's live DB, dropped immediately after): a company with `max_users=2` and 1
+existing member (room for exactly 1 more), the old three-query shape run from two concurrent `psql`
+sessions with a `pg_sleep` between the count and the insert to widen the window - both sessions read
+count=1 (under the cap), both passed the check, both inserted. Result: 2 pending invites against a
+company that already had its 1 remaining seat - the real bug, not assumed from reading the code.
+
+Fixed with migration `0113_create_invite_seat_check_race.sql`: new SECURITY DEFINER function
+`create_company_invite_checked()` that does the whole check-then-insert inside one transaction, with
+`for update` locking the company's `company_subscriptions` row for the duration (the exact pattern
+0107 already proved for `redeem_company_invite()`). Also checks `tt_is_company_admin()` (0050) and
+reads `invited_by` from `auth.uid()` directly rather than a caller-supplied parameter - this function
+is granted to `authenticated` and therefore callable directly via `supabase.rpc()`, not only through
+this app's own Server Action, so it can't rely on the action's own admin check being the only caller
+(the same "never trust a parameter for identity, never assume the SQL function has only one caller"
+convention this session's SECURITY DEFINER audits already established). `createInvite()` now calls
+this one RPC instead of three separate queries.
+
+**Re-ran the exact same concurrency test against the fix**: same starting state (1 member, room for 1
+more), two concurrent `create_company_invite_checked()` calls - the first succeeded (returned a real
+new invite id), the second blocked on the lock until the first committed, then correctly saw the seat
+as taken and raised `P0004` ("Your plan allows 2 people...") instead of inserting. Exactly 1 pending
+invite resulted, matching the real 1 free seat - not 2.
+
+Verified for real: replayed all 103 real migrations (102 + this one) against a disposable scratch
+database via `engine/security/replay_schema.sh` - clean. `npx tsc --noEmit` and `npx eslint
+app/company/team/actions.ts` both clean. No dedicated test file existed for this action file before
+or after (none added - the real Postgres concurrency test above is the actual verification artifact,
+not a substitute unit test). Scratch database dropped immediately after.
+
+**Backlog: 20 → 19** (`team/actions.ts` seat-limit TOCTOU race: fixed, removed. 7 pending migrations
+`0096`, `0107`-`0113` now - `0113` added to that list, same "written, verified, not applied" status as
+the other 6, nothing live changes until Sarel runs it. `company_can_request_pack()`'s own separate
+TOCTOU race and the `held_registrations`-vs-CV judgment call carried forward, unresolved).
+
+---
+
 ## This pass (2026-11-03, standing solution-architect review): checked whether `caa5148`'s "one malformed row crashes the whole parse" shape recurs on any other discovery scraper - genuinely clean, no second instance found
 
 Oriented from `caa5148` (a sibling pass: `list_tenders.py`'s `_parse_row()` unpacked exactly 6 values
