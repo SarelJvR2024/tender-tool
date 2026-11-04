@@ -14,6 +14,70 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `matchesInterestedDisciplines()` expanded a company's selected GROUP to every one of its children, ignoring `matched_by_group_tag` - the same split engine/discovery/taxonomy.py's `fit_overlap()` already makes between "exact" and "peripheral"
+
+Oriented from `57d1fef` (a sibling pass: a transient claim failure on one CV upload used to skip the
+whole batch). `git fetch`/`merge --ff-only` found nothing new beyond that, local matches `origin/main`.
+Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26), no collision.
+
+Directed to look once more at billing/subscription logic beyond the already-flagged
+`start_payfast_checkout()` gap (plan downgrade handling, trial-to-paid transition, any other
+confirmation-skipped state change in `apply_payfast_itn()`). Found nothing new there - a downgrade
+shares the exact same unconfirmed-grant gap already flagged (same function, either direction), never
+force-removes an existing member over a new lower `max_users` (intentional, not a bug: `create_
+company_invite_checked()`, 0113, only blocks *new* invites over the cap), and `apply_payfast_itn()`'s
+rescue path already has the discipline the normal path lacks (0112's amount check applies to both).
+Billing is genuinely exhausted for this session - moved to a fresh area.
+
+Read `app/lib/opportunityDisciplineMatch.ts` (Discovery's sort-boost for a company's stated discipline
+interest, never given a dedicated pass this session) against its own stated model and
+`engine/discovery/taxonomy.py`'s `fit_overlap()`, the Python engine it's meant to approximate.
+`matched_by_group_tag` (`discipline_categories`, 0058) exists specifically so a company tagged with a
+GROUP doesn't count as claiming every one of that group's children - `taxonomy.py`'s own docstring
+names the canonical example ("a company tagged professional_services is not thereby a property
+valuer"), and `fit_overlap()` puts that case in its own "peripheral" bucket, distinct from "exact".
+`expandDisciplines()` (`disciplineTaxonomy.ts`), the shared helper `matchesInterestedDisciplines()`
+calls on BOTH sides, expands a group to every child unconditionally - the flag is read and stored
+(`DisciplineCategory.matched_by_group_tag`) but never actually consulted anywhere in the TS taxonomy
+module. Confirmed this isn't a theoretical gap: the live seed (`config/discipline_taxonomy.json`) has
+17 real children with the flag off, e.g. `rail_infrastructure` under `roads_civil`
+(`{"slug": "rail_infrastructure", "parent": "roads_civil", "group_tag_match": false, ...}`, read
+directly from the seed file) - a company that selected just "Roads & Civil" had every
+`rail_infrastructure`-tagged tender sorted to the top of Discovery as a confident match, contradicting
+the real fit-scoring engine's own deliberate "peripheral, not exact" treatment of the identical pair.
+
+Checked the one real caller (`app/app/discovery/page.tsx`) first to confirm the blast radius: both of
+its two use sites (the sort comparator, and `outsideInterest`'s "sorted lower, explained why" flag) are
+genuinely additive/cosmetic, never hiding or filtering a row - this file's own header comment's promise
+("never removes a row, never changes verdict") holds, confirmed by reading the call sites, not assumed.
+Also checked `expandDisciplines()`'s other 5 call sites (`compliance-data.ts`, `market-context.tsx`,
+`discovery/page.tsx`'s own market-pricing lookup, `experience/page.tsx` x2) before touching anything -
+all unrelated to discipline-interest matching (compliance checks, pricing segment lookup, Experience
+Library), so the shared function itself was deliberately left untouched to avoid changing their
+behaviour; the fix is scoped to `opportunityDisciplineMatch.ts` alone, via a new, narrowly-named
+`expandGroupTagMatchingInterests()` used only for the INTEREST side. The TENDER's own categories still
+expand via the unrestricted `expandDisciplines()`, unchanged - a tender known only at group level still
+broadly matches a company's specific child interest (`taxonomy.py`'s "broad" bucket, never excluded by
+the Python engine either, so this fix must not and does not touch that direction).
+
+**Verified for real:** added 4 new assertions to `opportunityDisciplineMatch.test.ts` (a `rail_
+infrastructure`/`matched_by_group_tag: false` row added to the test taxonomy, matching the live seed's
+real shape) - genuine red-then-green confirmed by `git stash push -- lib/opportunityDisciplineMatch.ts`
+(keeping the new tests, reverting only the fix): 1 failure pre-fix (exactly the new "does NOT match"
+case), restored and reconfirmed 11/11 green. Also added a negative control confirming the "broad
+bucket, tender tagged only with the group, company holds the specific off-flag child" direction still
+matches, unaffected by this fix, and that an existing `matched_by_group_tag: true` child
+(`road_maintenance`) is unaffected too. Full regression: `node --experimental-strip-types --test lib/
+*.test.ts` - 219/219 passed (was 208; 11 new, 0 regressed). `npx tsc --noEmit` and `npx eslint lib/
+opportunityDisciplineMatch.ts lib/opportunityDisciplineMatch.test.ts` both clean.
+
+**Backlog: 20, unchanged** (standalone bug, fixed - not a new judgment-call item. 7 pending migrations
+`0096`, `0107`-`0113`; `company_can_request_pack()`'s TOCTOU race, the `held_registrations`-vs-CV
+judgment call, and the `start_payfast_checkout()` revenue-integrity gap from the prior pass all carried
+forward, unresolved).
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): NOT FIXED - a real, reproduced revenue/billing-integrity gap - `start_payfast_checkout()` grants a plan upgrade's seats/packs immediately, before PayFast ever confirms payment, with nothing to revert it if the payment never completes
 
 Oriented from `59c20a7` (my own prior pass: the control-character crash's 4th instance, in
