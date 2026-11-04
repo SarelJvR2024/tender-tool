@@ -56,7 +56,7 @@ ENGINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ENGINE_DIR, "cv"))
 sys.path.insert(0, os.path.join(ENGINE_DIR, "pack_generator"))
 sys.path.insert(0, ENGINE_DIR)
-from generate_cv import _convert_to_pdf, SAST  # noqa: E402
+from generate_cv import _convert_to_pdf, SAST, _safe_text  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -163,18 +163,30 @@ def _set_widths(table, inches):
 
 
 def _contents_docx(path, heading_lines, rows, notes, title="SUBMISSION PACK - CONTENTS AND CHECKLIST"):
-    """rows: every checklist row in submission order (included and not)."""
+    """rows: every checklist row in submission order (included and not).
+
+    QA pass, 2026-11-04: heading_lines/rows[]['title']/rows[]['note']/notes
+    all ultimately trace back to a tender's own buyer-published/OCR'd text
+    (contract_no/buyer/description from build_general_pack.py's and
+    assemble_pack.py's own heading, and omitted/warning reasons that quote
+    real document content) - the same uncontrolled source
+    engine/make_envelope_covers.py's sibling fix (2026-11-04) already found
+    capable of a stray control character, which python-docx rejects with a
+    raw ValueError. This is the one contents-page builder BOTH the general
+    and SANRAL pack pipelines call, so sanitizing here with the identical
+    _XML_INVALID_RE/_safe_text() pattern (generate_cv.py) covers every pack's
+    contents page in one place, not just this file's own direct callers."""
     d = docx.Document()
     s = d.sections[0]
     s.top_margin = s.bottom_margin = Inches(0.7)
     s.left_margin = s.right_margin = Inches(0.8)
 
-    p = d.add_paragraph(title)
+    p = d.add_paragraph(_safe_text(str(title)))
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].bold = True
     p.runs[0].font.size = Pt(15)
     for line in heading_lines:
-        p = d.add_paragraph(line)
+        p = d.add_paragraph(_safe_text(str(line)))
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(0)
 
@@ -204,13 +216,13 @@ def _contents_docx(path, heading_lines, rows, notes, title="SUBMISSION PACK - CO
             merged.paragraphs[0].runs[0].bold = True
         row = t.add_row().cells
         row[0].text = str(n)
-        row[1].text = r["title"]
+        row[1].text = _safe_text(str(r["title"]))
         if r["status"] == "not_included":
             row[2].text = "-"
-            row[3].text = f"NOT INCLUDED: {r['note']}"
+            row[3].text = _safe_text(f"NOT INCLUDED: {r['note']}")
         else:
             row[2].text = (f"{r['start']}" if r["start"] == r["end"] else f"{r['start']}-{r['end']}")
-            row[3].text = f"INCLUDED - WARNING: {r['note']}" if r["status"] == "included_warning" else "Included"
+            row[3].text = _safe_text(f"INCLUDED - WARNING: {r['note']}") if r["status"] == "included_warning" else "Included"
         if r["status"] != "included":
             flagged.append((row[3], r["status"]))
     _set_widths(t, (0.4, 3.9, 0.7, 1.9))
@@ -228,7 +240,7 @@ def _contents_docx(path, heading_lines, rows, notes, title="SUBMISSION PACK - CO
     if notes:
         d.add_paragraph()
     for note in notes:
-        p = d.add_paragraph(note)
+        p = d.add_paragraph(_safe_text(str(note)))
         p.runs[0].font.size = Pt(8.5)
         p.runs[0].italic = True
     d.save(path)

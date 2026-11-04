@@ -14,6 +14,56 @@
 
 ---
 
+## This pass (2026-11-04, standing solution-architect review): fixed - `1362081`'s "control character in OCR'd text crashes docx generation" shape recurred in BOTH pack pipelines' shared contents-page builder and the general pack's own completion guide
+
+Oriented from `1362081` (a sibling pass: a control character anywhere in a tender's own OCR'd
+`description`/`nra_ref`/`delivery_address` crashed every `make_envelope_covers.py` envelope cover,
+fixed with a `_XML_INVALID_RE`/`_safe_text()` sanitizer borrowed from `generate_cv.py`). `git fetch`/
+`merge --ff-only` found nothing new beyond that, local now matches `origin/main`. Open PRs re-checked:
+only `#164`/`#165` remain (both untouched since 2026-10-26), no collision.
+
+Directed to check whether that exact "untrusted OCR/extracted text reaches a document-generation path
+with no sanitization" shape recurs elsewhere text flows from a tender's own record into a generated
+docx. It does, twice, in code that runs on **every single pack build, both pipelines**:
+
+- `engine/pack/pdf_merge.py`'s `_contents_docx()` - the one contents-page builder BOTH
+  `build_general_pack.py` and `assemble_pack.py` (SANRAL) call (confirmed by grepping every
+  `merge_with_contents()` call site). `heading_lines` (a pack's own `contract_no`/`buyer`/
+  `description`/company `legal_name`), `rows[]['title']`/`rows[]['note']` (section titles and
+  included/warning/not-included reasons, which can quote real document content) and `notes` were all
+  written via `add_paragraph()`/`cell.text =` with zero sanitization - the identical crash
+  `make_envelope_covers.py` had, just one level up in the shared merger every pack's contents page
+  goes through.
+- `engine/general/build_general_pack.py`'s `write_guide()` - the general pack's own Completion Guide
+  (`00b_Completion_guide.docx`, generated unconditionally for every general pack, no try/except around
+  the call site, same blast radius as the envelope-covers bug: one bad character takes down the whole
+  pack build, not just this one cosmetic document). `t.get('contract_no')`/`t.get('buyer')`/
+  `t['description'][:300]` in the header, and every `guide_rows()` value (company/tender/answers data)
+  in the table, were unsanitized.
+
+Fixed both with the identical `_XML_INVALID_RE`/`_safe_text()` pattern, imported from `generate_cv.py`
+(already on `sys.path` in both files; `pdf_merge.py` already imported two other names from it).
+Sanitizing `pdf_merge.py`'s shared builder in one place covers both pipelines' contents pages without
+touching `assemble_pack.py` at all.
+
+**Verified red-then-green for real**: reproduced the exact crash directly - `docx.Document().add_paragraph("bad\x0bchar")` raises `ValueError: All strings must be XML compatible...` (confirmed
+directly, matching the sibling pass's own finding). Stashed each fix file individually and re-ran a
+hand-built control-character input against both `_contents_docx()` and `write_guide()` - both raised
+the real `ValueError` pre-fix, both returned cleanly post-fix. Added two new tests to
+`engine/pack/test_pdf_merge.py` (neither function had one before) proving the same red-then-green by
+the repo's own test harness, not just my own ad-hoc script. Full regression sweep:
+`test_pdf_merge.py`, `test_build_general_pack.py`, `test_assemble_pack.py` (checks `pdf_merge`'s shared
+builder from the SANRAL side) - all `0 failure(s)`. `ast.parse` clean on every touched file; `ruff
+check` - confirmed byte-for-byte against the pre-fix baseline that zero *new* findings were introduced
+(22 pre-existing in the two source files, unchanged; 2 pre-existing in the test file, unchanged after
+fixing one new import-order nit my own edit introduced). No DB access, no live data.
+
+**Backlog: 19 → 19** (standalone bug, fixed - nothing added/resolved on Sarel's judgment-call list.
+7 pending migrations `0096`, `0107`-`0113`; `company_can_request_pack()`'s own TOCTOU race and the
+`held_registrations`-vs-CV judgment call carried forward, unresolved).
+
+---
+
 ## This pass (2026-11-04, standing solution-architect review): fixed - `team/actions.ts`'s seat-limit check was a real, reproduced TOCTOU race, not just a theoretical one
 
 Oriented from `ab65776`; `git fetch`/`merge --ff-only` found nothing new, local already matched

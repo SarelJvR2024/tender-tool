@@ -16,6 +16,7 @@ ENGINE = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ENGINE, "cv"))
 sys.path.insert(0, os.path.join(ENGINE, "pack_generator"))
+sys.path.insert(0, os.path.join(ENGINE, "general"))
 sys.path.insert(0, ENGINE)
 import pdf_merge  # noqa: E402
 import process_pack_jobs as ppj  # noqa: E402
@@ -129,10 +130,51 @@ def test_sync_position_suggestions_skips_a_tender_closed_real_yesterday():
           written == 0 and client.inserts == [], (written, client.inserts))
 
 
+def test_contents_docx_survives_a_control_character_in_tender_text():
+    print("_contents_docx(): a control character anywhere in a tender's own text must not crash the contents page")
+    # Finding (2026-11-04): heading_lines/rows[]['title']/rows[]['note']/notes
+    # all ultimately trace back to a tender's own buyer-published/OCR'd text
+    # - the same uncontrolled source engine/make_envelope_covers.py's sibling
+    # fix (2026-11-04) already found capable of a stray control character,
+    # which python-docx rejects with a raw ValueError. This is the one
+    # contents-page builder BOTH the general and SANRAL pack pipelines call.
+    import tempfile
+    rows = [{"envelope": "Company documents", "title": "A doc\x0btitle", "status": "not_included",
+             "note": "reason with a \x0bcontrol char", "start": 0, "end": 0}]
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "contents.docx")
+        try:
+            pdf_merge._contents_docx(path, ["Heading with a \x0bcontrol char"], rows, ["a note with \x0bcontrol too"])
+            ok = os.path.exists(path)
+        except ValueError:
+            ok = False
+        check("a control character in heading/row/note text does not crash docx generation", ok)
+
+
+def test_write_guide_survives_a_control_character_in_tender_text():
+    print("build_general_pack.write_guide(): a control character in the tender's own description/buyer must not crash the completion guide")
+    import tempfile
+
+    import build_general_pack as bgp
+    manifest = {"forms": []}
+    ctx = {"tender": {"contract_no": "C1", "buyer": "A \x0bbuyer", "description": "a desc\x0bription"},
+           "company": {}, "answers": {}, "signatory": {}}
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "guide.docx")
+        try:
+            bgp.write_guide(path, manifest, ctx, {}, [])
+            ok = os.path.exists(path)
+        except ValueError:
+            ok = False
+        check("a control character in contract_no/buyer/description does not crash the completion guide", ok)
+
+
 def main():
     test_expiry_warning_catches_a_document_expired_real_yesterday()
     test_expiry_warning_does_not_false_flag_a_document_valid_today()
     test_sync_position_suggestions_skips_a_tender_closed_real_yesterday()
+    test_contents_docx_survives_a_control_character_in_tender_text()
+    test_write_guide_survives_a_control_character_in_tender_text()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
