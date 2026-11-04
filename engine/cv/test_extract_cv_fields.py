@@ -508,6 +508,37 @@ def test_queue(docx_path, tmp):
     finally:
         x.supabase_request = real_request
 
+    # Finding 126 (2026-11-04): claim_upload() sits BEFORE process_upload()'s
+    # own try block, so a transient failure there (a network blip, a 500)
+    # used to raise straight out of poll_once()'s own for loop, uncaught -
+    # aborting the whole cycle and skipping every OTHER upload still
+    # waiting, not just the one whose claim failed. Same "one bad item must
+    # not cost everyone else in the same pass" discipline this codebase
+    # already applies elsewhere (daily_digest.py's own per-roster-entry
+    # isolation, run_bridges.py's own per-bridge isolation).
+    db.tables["cv_uploads"].append(dict(base, id="u7", storage_path="c1/people/p1/uploads/a-naledi_cv.docx", created_at="7"))
+    db.tables["cv_uploads"].append(dict(base, id="u8", storage_path="c1/people/p1/uploads/a-naledi_cv.docx", created_at="8"))
+    alerts7 = []
+    real_record7 = x.system_alerts.record
+    x.system_alerts.record = lambda *a, **kw: alerts7.append((a, kw)) or "test-alert"
+
+    def claim_fails_for_u7(url, key, method, path, body=None):
+        if method == "PATCH" and path == "cv_uploads?id=eq.u7&status=eq.extraction_requested":
+            raise RuntimeError("simulated transient Supabase failure while claiming u7")
+        return real_request(url, key, method, path, body)
+    x.supabase_request = claim_fails_for_u7
+    try:
+        handled7 = x.poll_once("u", "k", quiet_when_empty=True, client_factory=lambda: stub)
+    finally:
+        x.supabase_request = real_request
+        x.system_alerts.record = real_record7
+    st7 = {r["id"]: r["status"] for r in db.tables["cv_uploads"]}
+    check(st7["u7"] == "extraction_requested", "u7 (claim failed) is left as-is, not stuck half-claimed")
+    check(st7["u8"] == "extracted" and handled7 >= 1,
+          "u8 (the OTHER upload in the same batch) is STILL processed, not skipped (the bug this test guards)")
+    check(any(a[0][0] == "cv_extract" and a[0][2] == "error" and "u7" in a[0][1] for a in alerts7),
+          f"u7's own claim failure is still reported as its own alert, not silently lost ({alerts7})")
+
 
 def test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written():
     print("5b. fail_stale_uploads(): a stale row whose cv_extraction_results row already exists "

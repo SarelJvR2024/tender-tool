@@ -7137,3 +7137,57 @@ for the now-missing `_safe_text` on the fourth; restored, `0 failure(s)`. Regres
 6 call sites wrapped), `engine/test_make_envelope_covers.py` (new file, 4 tests). No change to any
 cover's visible text for the overwhelmingly common case (no control characters) - confirmed by the new
 no-op regression test.
+
+### Finding 126 (CONFIRMED, FIXED, moderate - a transient claim failure on one CV upload aborted the whole extraction cycle, silently skipping every OTHER genuinely pending upload in the same batch, not just the one whose claim failed)
+
+**Where:** this cycle's CV rotation. `engine/cv/extract_cv_fields.py`'s `poll_once()`.
+
+**What was tested:** `process_upload()` already has thorough per-exception handling (`SetupError`/
+`TransientError`/`ExtractionFailed`/generic `Exception`, each with its own recovery path) - but all of
+it lives INSIDE a `try:` block that starts AFTER `claim_upload(url, key, upload)` is called. Reproduced
+directly: monkeypatched `claim_upload`'s own `supabase_request()` call to raise `RuntimeError`
+(simulating a transient Supabase blip - a real, realistic failure mode, the same shape `run_bridges.py`'s
+own Finding 123 guarded against for a bridge's subprocess launch) for the first of two queued uploads,
+and ran `poll_once()` against both.
+
+**Finding (CONFIRMED, moderate).** The `RuntimeError` propagated straight out of `process_upload()`,
+uncaught by any of its own exception handlers (all scoped to after the claim), and then straight out of
+`poll_once()`'s own `for up in uploads:` loop - which had NO per-item isolation at all. Confirmed: only
+the first upload was even attempted; the second, genuinely pending, otherwise-fine upload was never
+even reached that cycle. Same "one bad item must not cost everyone else in the same pass" bug class
+this codebase has already found and fixed repeatedly (`daily_digest.py`'s own per-roster-entry
+isolation, explicitly citing "one bad roster entry must not cost everyone else their digest";
+`run_bridges.py`'s own per-bridge isolation, Finding 123, the previous cycle). In `--loop` mode this
+particular instance is at least correctly alerted (unlike Finding 123's `run_bridges.py` gap -
+`extract_cv_fields.py`'s own `run()` already passes `alert_source="cv_extract"` to `poll_forever()`),
+so it isn't silent, but it still means every other pending company's CV extraction request waits an
+extra cycle (or indefinitely, if the same upload keeps sorting first and keeps failing) for no reason
+tied to their own request at all.
+
+**Fix:** wrapped the `process_upload(...)` call inside `poll_once()`'s own loop in a `try/except`,
+alerting under `"cv_extract"` and continuing to the next upload - mirroring the exact pattern
+`daily_digest.py`/`run_bridges.py` already use. Deliberately re-raises `SetupError` specifically rather
+than swallowing it: a `SetupError` (missing API key, package not installed) means the WHOLE bridge is
+broken, not one bad item, and `process_upload()` already re-raises it on purpose for exactly that
+reason (its own comment: "recorded by whoever runs the pass") - catching it here too would have masked
+that distinction, having every subsequent upload in the batch independently retry and alert on the
+same already-known-broken setup instead of stopping the pass cleanly. `TransientError`/
+`ExtractionFailed` were already fully handled inside `process_upload()` itself (never re-raised), so
+this new catch only ever reaches the specific gap this finding guards: `claim_upload()`'s own call
+site and any other code outside `process_upload()`'s own try block.
+
+**Verified red-then-green.** Added a new scenario to `test_queue()` in `test_extract_cv_fields.py`
+(using the file's existing `MemoryDb`/`flaky_request`-monkeypatching convention): one upload (`u7`)
+whose claim raises, one (`u8`) that should still succeed in the same cycle. 3 checks: `u7` is left
+`extraction_requested` (not stuck half-claimed); `u8` is still processed (the bug this test guards);
+`u7`'s own failure is still reported as its own alert, not silently lost. Also verified separately
+that `SetupError` still propagates correctly out of `poll_once()` (the whole-bridge-broken case must
+not be swallowed). Revert-and-confirm-red: reverting reproduced the exact predicted uncaught
+`RuntimeError`, with the traceback landing precisely at `claim_upload()`'s own call site; restored, ALL
+PASSED (every pre-existing check in this file's large test suite, unaffected). `py_compile`/
+`ast.parse` clean.
+
+**Regression:** `engine/cv/extract_cv_fields.py` (one `try/except` added around the per-upload loop
+body in `poll_once()`, ~15 lines including comment), `engine/cv/test_extract_cv_fields.py` (1 new
+scenario inside the existing `test_queue()` function, 3 checks). No change to any already-handled
+failure path (`SetupError`/`TransientError`/`ExtractionFailed` all behave exactly as before).

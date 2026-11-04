@@ -949,8 +949,28 @@ def poll_once(url, key, quiet_when_empty=False, client_factory=default_llm_clien
         return 0
     handled = 0
     for up in uploads:
-        if process_upload(url, key, up, client_factory=client_factory):
-            handled += 1
+        # process_upload() already has its own thorough try/except for every
+        # expected failure once it's past claim_upload() - but claim_upload()
+        # itself sits BEFORE that try block, so a transient failure there
+        # (a network blip, a 500) raised straight out of process_upload(),
+        # uncaught - aborting this whole cycle and skipping every OTHER
+        # upload still waiting in `uploads`, not just the one whose claim
+        # failed. Confirmed directly with a simulated claim failure: only
+        # the first upload was even attempted. Same "one bad item must not
+        # cost everyone else in the same pass" discipline this codebase
+        # already applies elsewhere (daily_digest.py's own per-roster-entry
+        # isolation, run_bridges.py's own per-bridge isolation) - this loop
+        # had none. QA pass, 2026-11-04.
+        try:
+            if process_upload(url, key, up, client_factory=client_factory):
+                handled += 1
+        except SetupError:
+            raise  # the whole bridge is broken (bad key, missing package) - not one bad item; let it propagate
+        except Exception as e:
+            system_alerts.record("cv_extract", f"Could not even attempt cv_upload {up['id']}: "
+                                 f"{type(e).__name__}: {e}", "error", exc=e,
+                                 context={"cv_upload_id": up.get("id"), "company_id": up.get("company_id")})
+            print(f"[skipped] cv_upload {up['id']}: {type(e).__name__}: {e} - the rest of this pass continues")
     return handled
 
 

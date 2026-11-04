@@ -1976,6 +1976,59 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): fix - a transient claim failure on one CV upload silently skipped every OTHER genuinely pending upload in the same batch
+
+Oriented from `fcbe266`; `git fetch origin main` found two new sibling commits since my own last push
+(`59c20a7`, a real fix - the control-character crash recurred a 4th time, in the SANRAL pack's Excel
+filler; `f982fa4`, a docs-only pass flagging a real revenue-integrity gap - plan upgrades grant seats
+before payment confirms, backlog item 20, not a safe one-line fix) - neither touches `engine/cv/`, no
+overlap. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both
+unchanged, no collision.
+
+Rotated to CV (non-SANRAL pack was last). `generate_cv.py`/`process_cv_jobs.py` have had several
+dedicated passes already this session (Findings 120/121 plus a sibling's own SACNASP/SAGC fix) -
+picked `extract_cv_fields.py` (the AI-extraction bridge, 37 prior mentions in this findings doc but no
+pass in several days) instead. Read the LLM-call path first (`call_llm()`'s own strict JSON-schema
+structured output closes off a `normalise_date()`-crashes-on-a-non-string lead before it became a
+finding - the API itself guarantees `string`/`null` for every date field, confirmed against
+`output_schema()`), then `find_and_redact_sa_ids()`/`_luhn_ok()`/`_plausible_sa_id()` (already
+carefully bounded, no gap), then `process_upload()`'s own per-exception handling.
+
+**Found and fixed Finding 126 (CONFIRMED, moderate)**: `claim_upload(url, key, upload)` is called
+BEFORE `process_upload()`'s own try block starts - every one of its thorough exception handlers
+(`SetupError`/`TransientError`/`ExtractionFailed`/generic `Exception`) only guards code AFTER the
+claim. Reproduced directly: a simulated transient `RuntimeError` on the first of two queued uploads'
+claim calls propagated straight out of `process_upload()`, then straight out of `poll_once()`'s own
+`for up in uploads:` loop, which had no per-item isolation at all - confirmed only the first upload
+was even attempted, the second, genuinely pending upload was never reached that cycle. Same "one bad
+item must not cost everyone else in the same pass" bug class already fixed in `daily_digest.py`
+(per-roster-entry) and `run_bridges.py` (per-bridge, Finding 123, the previous cycle) - `alert_source`
+is at least already set here (unlike Finding 123's gap), so it's reported, not silent, but every other
+pending company's request still waits an avoidable extra cycle, or longer if the same bad upload
+keeps sorting first.
+
+Fixed by wrapping the `process_upload(...)` call in `poll_once()`'s loop in its own `try/except`,
+alerting under `"cv_extract"` and continuing to the next upload. Deliberately re-raises `SetupError`
+specifically (the whole-bridge-broken case, which `process_upload()` already re-raises on purpose) -
+catching it too would have masked that distinction and had every later upload independently retry and
+alert on the same already-known-broken setup.
+
+Verified red-then-green: added a new scenario to `test_queue()` (the file's existing `MemoryDb`/
+`flaky_request` convention) - one upload whose claim fails, one that should still succeed in the same
+cycle, 3 checks. Also verified `SetupError` still correctly propagates (not swallowed). Reverting
+reproduced the exact predicted uncaught `RuntimeError`, traceback landing precisely at
+`claim_upload()`'s own call site; restored, ALL PASSED. `py_compile`/`ast.parse` clean. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md` Finding 126.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/cv/extract_cv_fields.py`
+- `engine/cv/test_extract_cv_fields.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): clean sweep - non-SANRAL pack rotation (fill_sbd_docx.py read end to end against several real adversarial shapes, no new bug found - already heavily hardened by many prior passes)
 
 Oriented from `1362081`; `git fetch origin main` found one new sibling commit since my own last push
