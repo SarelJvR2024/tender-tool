@@ -320,7 +320,26 @@ def poll_once(url, key, out_dir):
     fail_stale_jobs(url, key)
     jobs = supabase_request(url, key, "GET", "narrative_documents?status=eq.requested&select=*&order=requested_at.asc")
     for job in jobs:
-        process_one(url, key, job, out_dir)
+        # process_one()'s own claim_job() sits BEFORE its try block, and
+        # every exception process_one() itself handles (TransientError/
+        # GenerationFailed/generic Exception) is already caught inside -
+        # except SetupError, which it deliberately re-raises (the whole
+        # bridge is broken, not one bad job). Before this fix, a transient
+        # claim failure (a network blip, a 500) propagated straight out of
+        # this loop, aborting the whole pass: every OTHER pending narrative
+        # job was skipped that cycle too, not just the one whose claim
+        # failed - same bug class as Finding 123 (run_bridges.py) and
+        # Finding 126 (extract_cv_fields.py), now swept across every
+        # remaining bridge. QA pass, 2026-11-04.
+        try:
+            process_one(url, key, job, out_dir)
+        except SetupError:
+            raise  # the whole bridge is broken (bad key, missing package) - not one bad item; let it propagate
+        except Exception as e:
+            system_alerts.record("narrative", f"Could not even attempt narrative job {job['id']}: "
+                                 f"{type(e).__name__}: {e}", "error", exc=e,
+                                 context={"job_id": job.get("id"), "company_id": job.get("company_id")})
+            print(f"[skipped] narrative {job['id']}: {type(e).__name__}: {e} - the rest of this pass continues")
     return len(jobs)
 
 
@@ -339,7 +358,17 @@ def main():
 
     with tempfile.TemporaryDirectory() as out_dir:
         if args.loop:
-            poll_forever(lambda: poll_once(url, key, out_dir), interval=args.interval)
+            # name/alert_source were missing here - every sibling bridge
+            # (cv_extract, pack, general, onboarding) already passes both to
+            # its own poll_forever() call, so an unhandled exception from
+            # poll_once() (anything this file's own per-job isolation above
+            # doesn't already catch, e.g. a SetupError) would have been
+            # swallowed by poll_forever()'s own generic per-cycle catch with
+            # only a print() - never reaching system_alerts, the one real
+            # failure-notification channel, in this bridge's own standalone
+            # --loop mode. QA pass, 2026-11-04.
+            poll_forever(lambda: poll_once(url, key, out_dir), interval=args.interval,
+                        name="process_narrative_jobs", alert_source="narrative")
         else:
             handled = poll_once(url, key, out_dir)
             # "No pending ..." (not "Processed 0 job(s).") so run_bridges.py's

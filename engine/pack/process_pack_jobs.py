@@ -959,7 +959,23 @@ def process_pending(client, work_root, keep=False, quiet_when_empty=False):
     if not jobs and not quiet_when_empty:
         print("No pending pack_generation_jobs.")
     for job in jobs:
-        process_job(client, job, work_root, keep)
+        # process_job()'s own claim (client.update(...)) sits BEFORE its try
+        # block, and process_job() itself never re-raises (its own blanket
+        # except Exception always marks the job failed and returns) - so
+        # the only way a job here could still raise is that claim call
+        # itself (a network blip, a 500). Before this fix, that propagated
+        # straight out of this loop, aborting the whole pass: every OTHER
+        # pending pack job was skipped that cycle too, not just the one
+        # whose claim failed - same bug class as Finding 123
+        # (run_bridges.py) and Finding 126 (extract_cv_fields.py), now
+        # swept across every remaining bridge. QA pass, 2026-11-04.
+        try:
+            process_job(client, job, work_root, keep)
+        except Exception as e:
+            system_alerts.record("pack", f"Could not even attempt pack_generation_job {job['id']}: "
+                                 f"{type(e).__name__}: {e}", "error", exc=e,
+                                 context={"job_id": job.get("id"), "company_id": job.get("company_id")})
+            print(f"[skipped] {job['id']}: {type(e).__name__}: {e} - the rest of this pass continues")
     return len(jobs)
 
 

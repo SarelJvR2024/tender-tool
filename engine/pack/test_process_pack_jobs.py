@@ -133,9 +133,52 @@ def test_adapt_person_carries_sacnasp_and_sagc_through():
     check("sagc_* keys are present (as None) rather than absent", "sagc_number" in q, q)
 
 
+def test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
+    print("process_pending(): a crash on one job's own claim does not skip every OTHER pending job")
+    # Finding (2026-11-04): process_job()'s own claim (client.update(...))
+    # sits BEFORE its try block, and process_job() itself never re-raises
+    # (its own blanket except Exception always marks the job failed and
+    # returns) - so the only way a job could still raise here is that claim
+    # call itself (a network blip, a 500). Before this fix, that propagated
+    # straight out of process_pending()'s own for loop, aborting the whole
+    # pass: every OTHER pending pack job was skipped that cycle too, not
+    # just the one whose claim failed - same bug class as Finding 123
+    # (run_bridges.py) and Finding 126 (extract_cv_fields.py).
+    rows = [
+        {"id": "job-flaky", "status": "requested", "engine": "sanral", "requested_at": "1",
+         "company_id": "co-a", "tender_id": "t-a"},
+        {"id": "job-ok", "status": "requested", "engine": "sanral", "requested_at": "2",
+         "company_id": "co-a", "tender_id": "t-b"},
+    ]
+    client = FakeClient(rows)
+    attempted = []
+    real_process_job = ppj.process_job
+
+    def flaky_process_job(client, job, work_root, keep=False):
+        attempted.append(job["id"])
+        if job["id"] == "job-flaky":
+            raise RuntimeError("simulated transient Supabase failure while claiming job-flaky")
+        return None
+    ppj.process_job = flaky_process_job
+    alerts = []
+    real_record = ppj.system_alerts.record
+    ppj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        n = ppj.process_pending(client, "/tmp/test_process_pending_work_root")
+    finally:
+        ppj.process_job = real_process_job
+        ppj.system_alerts.record = real_record
+    check("process_pending() returns the total job count, no crash", n == 2, n)
+    check("BOTH jobs were attempted - job-ok was not skipped because job-flaky's claim failed",
+          attempted == ["job-flaky", "job-ok"], attempted)
+    check("the failing job's own claim failure is reported as its own alert, not silently lost",
+          any(a[0][0] == "pack" and a[0][2] == "error" and "job-flaky" in a[0][1] for a in alerts), alerts)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
+    test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

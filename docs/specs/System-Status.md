@@ -2333,6 +2333,60 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): fix - the deliberate sweep: "claim call outside its own try block, no per-item isolation in the polling loop" (Findings 123/126's bug class) found in all FOUR remaining job-queue bridges
+
+Oriented from `b3e2d79`; `git fetch origin main` found two new sibling commits since my own last push
+(`6e08b0c`, a real app/TS fix - `gateMarketTrend()` never sample-gated the bidder-count figure;
+`7482dfb`, a docs-only pass correcting a stale "7 pending migrations" count and confirming a TOCTOU
+sweep across every Server Action came back clean) - neither touches `engine/pack/`, `engine/general/`,
+`engine/narrative/`, or `engine/onboarding/`, no overlap. Fast-forwarded cleanly. Open PRs re-checked
+via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to worker/job-queue (notify was last). Yesterday's own Finding 126 report explicitly flagged
+this exact shape ("a claim call sitting outside its own try block, with no per-item isolation in the
+caller's loop") as having now turned up twice (`run_bridges.py`'s Finding 123, `extract_cv_fields.py`'s
+Finding 126) and worth a deliberate sweep rather than finding a third instance one file at a time - did
+exactly that sweep this cycle, checking all four remaining `process_*_jobs.py` bridges.
+
+**Found and fixed Finding 128 (CONFIRMED, moderate - found in all four)**: `process_pack_jobs.py`'s
+`process_job()`, `process_general_jobs.py`'s `process_job()`, `process_narrative_jobs.py`'s
+`process_one()`, and `process_onboarding_jobs.py`'s `process_upload()` ALL have the identical shape -
+thorough exception handling for everything after the claim, but the claim call itself sits before any
+try block, and the polling loop around it has zero per-item isolation. Reproduced directly for each: a
+simulated transient claim failure on the first of two queued items propagated straight out of the
+loop, aborting the whole pass - the second, genuinely pending item was never even attempted, in all
+four cases. Also found a related, independent gap specific to `process_narrative_jobs.py`: its own
+standalone `--loop` mode's `poll_forever()` call never passed `name`/`alert_source` at all (every
+sibling bridge already does) - the same class of gap Finding 123 fixed for `run_bridges.py`.
+
+Fixed all four with the identical per-item `try/except` pattern already proven in Findings 123/126,
+alerting under each bridge's own existing `system_alerts` source and continuing to the next item.
+`process_narrative_jobs.py`/`process_onboarding_jobs.py` deliberately re-raise `SetupError`/
+`cd.SetupError` specifically (the whole-bridge-broken case each already re-raises on purpose), not
+swallowing it. Added the missing `name`/`alert_source` to `process_narrative_jobs.py`'s own `--loop`
+mode call too.
+
+Verified red-then-green, all four, independently: one new test per bridge (plus a second,
+SetupError-still-propagates test for the two LLM-backed ones), each confirming both items in a batch
+are attempted and the failing one gets its own alert. Reverting each of the four production files
+individually reproduced the exact predicted uncaught exception at precisely the claim call site;
+restored, `0 failure(s)` on all four. Full regression sweep across every bridge touched this session
+(`run_bridges.py`, `extract_cv_fields.py`, and all four fixed here) - all clean. `py_compile` clean on
+all eight touched files. Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 128.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/pack/process_pack_jobs.py`, `engine/pack/test_process_pack_jobs.py`
+- `engine/general/process_general_jobs.py`, `engine/general/test_process_general_jobs.py`
+- `engine/narrative/process_narrative_jobs.py`, `engine/narrative/test_process_narrative_jobs.py`
+- `engine/onboarding/process_onboarding_jobs.py`, `engine/onboarding/test_process_onboarding_jobs.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug class, not a judgment call for Sarel. This bug class
+(claim-outside-try, no per-item isolation) is now exhausted across every job-queue bridge in the
+repo - confirmed by this cycle's own deliberate, exhaustive sweep rather than assumed.
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): fix - a CANCELLED notification workflow run never recorded a heartbeat "finish" at all, across all 10 notification-sending workflows
 
 Oriented from `3e56a7b`; `git fetch origin main` found one new sibling commit since my own last push

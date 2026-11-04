@@ -334,6 +334,63 @@ def test_process_upload_classification_failed_marks_the_row_failed_without_raisi
           row["status"] == "classification_failed" and row.get("classification_error") == "not readable", row)
 
 
+def test_poll_once_does_not_abort_the_whole_pass_when_one_uploads_claim_fails():
+    print("poll_once(): a crash on one upload's own claim does not skip every OTHER pending upload")
+    # Finding (2026-11-04): process_upload()'s own claim_upload() sits
+    # BEFORE its try block - so the only way an upload could still raise
+    # here (other than a deliberate cd.SetupError, covered separately
+    # below) is that claim call itself (a network blip, a 500). Before
+    # this fix, that propagated straight out of poll_once()'s own for
+    # loop, aborting the whole pass: every OTHER pending onboarding upload
+    # was skipped that cycle too, not just the one whose claim failed -
+    # same bug class as Finding 123 (run_bridges.py) and Finding 126
+    # (extract_cv_fields.py).
+    db = FakeDB([
+        {"id": "upload-flaky", "company_id": "co-1", "status": "classification_requested"},
+        {"id": "upload-ok", "company_id": "co-1", "status": "classification_requested"},
+    ])
+    original_db, original_process_upload = poj.supabase_request, poj.process_upload
+    poj.supabase_request = db
+    attempted = []
+
+    def flaky_process_upload(url, key, upload, client_factory=None):
+        attempted.append(upload["id"])
+        if upload["id"] == "upload-flaky":
+            raise RuntimeError("simulated transient Supabase failure while claiming upload-flaky")
+        return True
+    poj.process_upload = flaky_process_upload
+    alerts = []
+    real_record = poj.system_alerts.record
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        n = poj.poll_once("url", "key")
+    finally:
+        poj.supabase_request, poj.process_upload = original_db, original_process_upload
+        poj.system_alerts.record = real_record
+    check("poll_once() returns the count of uploads it actually handled, no crash", n == 1, n)
+    check("BOTH uploads were attempted - upload-ok was not skipped because upload-flaky's claim failed",
+          sorted(attempted) == ["upload-flaky", "upload-ok"], attempted)
+    check("the failing upload's own claim failure is reported as its own alert, not silently lost",
+          any(a[0][0] == "onboarding_scan" and a[0][2] == "error" and "upload-flaky" in a[0][1] for a in alerts), alerts)
+
+
+def test_poll_once_still_propagates_setup_error():
+    print("poll_once(): a genuine SetupError from process_upload() still aborts the whole pass on purpose")
+    db = FakeDB([{"id": "u1", "company_id": "co-1", "status": "classification_requested"}])
+    original_db, original_process_upload = poj.supabase_request, poj.process_upload
+    poj.supabase_request = db
+    poj.process_upload = lambda url, key, upload, client_factory=None: (_ for _ in ()).throw(cd.SetupError("no API key"))
+    try:
+        raised = False
+        try:
+            poj.poll_once("url", "key")
+        except cd.SetupError:
+            raised = True
+    finally:
+        poj.supabase_request, poj.process_upload = original_db, original_process_upload
+    check("SetupError still propagates out of poll_once(), not swallowed", raised is True)
+
+
 def main():
     test_legit_double_dot_filename_is_not_rejected_by_the_guard()
     test_real_traversal_via_dotdot_segment_is_still_rejected()
@@ -345,6 +402,8 @@ def main():
     test_process_upload_happy_path_writes_classified_with_every_result_field()
     test_process_upload_setup_error_releases_and_reraises_but_transient_error_releases_quietly()
     test_process_upload_classification_failed_marks_the_row_failed_without_raising()
+    test_poll_once_does_not_abort_the_whole_pass_when_one_uploads_claim_fails()
+    test_poll_once_still_propagates_setup_error()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

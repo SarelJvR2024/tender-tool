@@ -218,8 +218,27 @@ def poll_once(url, key, quiet_when_empty=False, client_factory=cd.default_llm_cl
         return 0
     handled = 0
     for up in uploads:
-        if process_upload(url, key, up, client_factory=client_factory):
-            handled += 1
+        # process_upload()'s own claim_upload() sits BEFORE its try block,
+        # and every exception process_upload() itself handles (TransientError/
+        # ExtractionFailed/generic Exception) is already caught inside -
+        # except cd.SetupError, which it deliberately re-raises (the whole
+        # bridge is broken, not one bad upload). Before this fix, a
+        # transient claim failure (a network blip, a 500) propagated
+        # straight out of this loop, aborting the whole pass: every OTHER
+        # pending onboarding upload was skipped that cycle too, not just
+        # the one whose claim failed - same bug class as Finding 123
+        # (run_bridges.py) and Finding 126 (extract_cv_fields.py), now
+        # swept across every remaining bridge. QA pass, 2026-11-04.
+        try:
+            if process_upload(url, key, up, client_factory=client_factory):
+                handled += 1
+        except cd.SetupError:
+            raise  # the whole bridge is broken (bad key, missing package) - not one bad item; let it propagate
+        except Exception as e:
+            system_alerts.record("onboarding_scan", f"Could not even attempt onboarding_upload {up['id']}: "
+                                 f"{type(e).__name__}: {e}", "error", exc=e,
+                                 context={"onboarding_upload_id": up.get("id"), "company_id": up.get("company_id")})
+            print(f"[skipped] onboarding_upload {up['id']}: {type(e).__name__}: {e} - the rest of this pass continues")
     return handled
 
 

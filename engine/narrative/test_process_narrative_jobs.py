@@ -400,6 +400,64 @@ def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
           printed.startswith("No pending"), printed)
 
 
+def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
+    print("poll_once(): a crash on one job's own claim does not skip every OTHER pending job")
+    # Finding (2026-11-04): process_one()'s own claim_job() sits BEFORE its
+    # try block - so the only way a job could still raise here (other than
+    # a deliberate SetupError, covered separately below) is that claim call
+    # itself (a network blip, a 500). Before this fix, that propagated
+    # straight out of poll_once()'s own for loop, aborting the whole pass:
+    # every OTHER pending narrative job was skipped that cycle too, not
+    # just the one whose claim failed - same bug class as Finding 123
+    # (run_bridges.py) and Finding 126 (extract_cv_fields.py).
+    db = FakeDB({"narrative_documents": [
+        {"id": "job-flaky", "status": "requested"},
+        {"id": "job-ok", "status": "requested"},
+    ]})
+    original_db, original_process_one = pnj.supabase_request, pnj.process_one
+    pnj.supabase_request = db
+    attempted = []
+
+    def flaky_process_one(url, key, job, out_dir):
+        attempted.append(job["id"])
+        if job["id"] == "job-flaky":
+            raise RuntimeError("simulated transient Supabase failure while claiming job-flaky")
+    pnj.process_one = flaky_process_one
+    alerts = []
+    real_record = pnj.system_alerts.record
+    pnj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        n = pnj.poll_once("url", "key", "/tmp")
+    finally:
+        pnj.supabase_request, pnj.process_one = original_db, original_process_one
+        pnj.system_alerts.record = real_record
+    check("poll_once() returns the total job count, no crash", n == 2, n)
+    check("BOTH jobs were attempted - job-ok was not skipped because job-flaky's claim failed",
+          sorted(attempted) == ["job-flaky", "job-ok"], attempted)
+    check("the failing job's own claim failure is reported as its own alert, not silently lost",
+          any(a[0][0] == "narrative" and a[0][2] == "error" and "job-flaky" in a[0][1] for a in alerts), alerts)
+
+
+def test_poll_once_still_propagates_setup_error():
+    print("poll_once(): a genuine SetupError from process_one() still aborts the whole pass on purpose")
+    # The new per-item isolation above must not swallow SetupError - that
+    # means the whole bridge is broken (bad key, missing package), not one
+    # bad job, same reasoning process_one() itself already uses.
+    db = FakeDB({"narrative_documents": [{"id": "job-1", "status": "requested"}]})
+    original_db, original_process_one = pnj.supabase_request, pnj.process_one
+    pnj.supabase_request = db
+    pnj.process_one = lambda url, key, job, out_dir: (_ for _ in ()).throw(pnj.SetupError("no API key"))
+    try:
+        raised = False
+        try:
+            pnj.poll_once("url", "key", "/tmp")
+        except pnj.SetupError:
+            raised = True
+    finally:
+        pnj.supabase_request, pnj.process_one = original_db, original_process_one
+    check("SetupError still propagates out of poll_once(), not swallowed", raised is True)
+
+
 def main():
     test_load_key_people_computes_years_experience_from_graduation_date()
     test_load_key_people_handles_missing_graduation_date()
@@ -414,6 +472,8 @@ def main():
     test_process_one_happy_path_writes_ready_with_every_generation_field()
     test_process_one_transient_error_requeues_quietly_but_setup_error_requeues_and_raises()
     test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
+    test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
+    test_poll_once_still_propagates_setup_error()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

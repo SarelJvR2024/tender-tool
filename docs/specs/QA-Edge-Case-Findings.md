@@ -7246,3 +7246,62 @@ change, only the YAML callers' own trigger conditions). `py_compile` clean on th
 message reworded per file - no change to any already-correct `success()` path or to the business-logic
 steps themselves), `engine/notify/record_heartbeat.py` (docstring count correction only, no logic
 change). No change to `record_heartbeat.py`'s own `finish()` function or its accepted `status` values.
+
+### Finding 128 (CONFIRMED, FIXED, moderate - the deliberate sweep: the "claim call sits outside its own try block, with no per-item isolation in the polling loop" bug class, found and fixed once in run_bridges.py (Finding 123) and once in extract_cv_fields.py (Finding 126), was present in all FOUR remaining job-queue bridges too)
+
+**Where:** this cycle's worker/job-queue rotation. `engine/pack/process_pack_jobs.py`'s `process_pending()`,
+`engine/general/process_general_jobs.py`'s `poll_once()`, `engine/narrative/process_narrative_jobs.py`'s
+`poll_once()`, `engine/onboarding/process_onboarding_jobs.py`'s `poll_once()` - every remaining
+`process_*_jobs.py` bridge besides the two already fixed this session.
+
+**What was tested:** explicitly flagged in Finding 126's own write-up as worth a deliberate sweep
+rather than finding a fourth instance one file at a time - checked all four remaining bridges for the
+identical shape: a `claim_job()`/`claim_upload()`/`client.update(...)` claim call sitting BEFORE its
+own function's `try:` block, with the per-job/per-upload polling loop having no isolation of its own
+around that call.
+
+**Finding (CONFIRMED, moderate - found in all four).** Every one of the four had the exact same shape:
+`process_job()`/`process_one()`/`process_upload()` already has thorough exception handling for
+everything AFTER the claim (each one's own blanket `except Exception`, or - in
+`process_narrative_jobs.py`/`process_onboarding_jobs.py`, which call an LLM - a deliberately re-raised
+`SetupError`/`cd.SetupError` on top of that, same reasoning as Finding 126), but the claim call itself
+is unguarded, and the polling loop around it (`process_pending()`'s/`poll_once()`'s own `for job in
+jobs:`/`for up in uploads:`) has zero per-item isolation. Reproduced directly for each: a simulated
+transient claim failure (a network blip, a 500) on the FIRST of two queued items propagated straight
+out of the loop, aborting the whole pass - confirmed the SECOND, genuinely pending item was never even
+attempted in all four cases. Also found a related, independent gap specific to
+`process_narrative_jobs.py`: its own standalone `--loop` mode's `poll_forever()` call never passed
+`name`/`alert_source` at all (every sibling bridge - `cv_extract`/`pack`/`general`/`onboarding` -
+already does), so an exception that genuinely escapes this bridge's own new per-item isolation (a
+`SetupError`) would have been swallowed by `poll_forever()`'s own generic catch with only a `print()`
+in that mode - the same class of gap Finding 123 fixed for `run_bridges.py`.
+
+**Fix:** wrapped the per-item call in each of the four polling loops in its own `try/except`, alerting
+under that bridge's own existing `system_alerts` source (`"pack"`/`"general"`/`"narrative"`/
+`"onboarding_scan"`) and continuing to the next item - identical pattern to Findings 123/126.
+`process_narrative_jobs.py` and `process_onboarding_jobs.py` deliberately re-raise `SetupError`/
+`cd.SetupError` specifically (the whole-bridge-broken case each file's own `process_one()`/
+`process_upload()` already re-raises on purpose), not swallowing it. Also added the missing
+`name="process_narrative_jobs", alert_source="narrative"` to that file's own standalone `--loop` mode
+`poll_forever()` call.
+
+**Verified red-then-green, all four, independently.** Added one new test per bridge (`test_process_pack_jobs.py`,
+`test_process_general_jobs.py`, `test_process_narrative_jobs.py`, `test_process_onboarding_jobs.py`),
+each monkeypatching the bridge's own `process_job`/`process_one`/`process_upload` to fail for one item
+and succeed for a second, confirming BOTH items are attempted and the failing one gets its own alert.
+`process_narrative_jobs.py`/`process_onboarding_jobs.py` each got a second test confirming `SetupError`/
+`cd.SetupError` still correctly propagates out of `poll_once()` rather than being swallowed by the new
+isolation. Revert-and-confirm-red on each of the four production files individually: each reproduced
+the exact predicted uncaught exception at precisely the claim call site; restored, `0 failure(s)` on
+all four, plus every pre-existing check in each file's test suite unaffected. Full regression sweep
+across every bridge touched this session (`run_bridges.py`/`test_poll_loop.py`,
+`extract_cv_fields.py`/`test_extract_cv_fields.py`, and all four fixed here) - all clean.
+`py_compile` clean on all eight touched files.
+
+**Regression:** `engine/pack/process_pack_jobs.py`, `engine/general/process_general_jobs.py`,
+`engine/narrative/process_narrative_jobs.py` (plus its missing `alert_source`),
+`engine/onboarding/process_onboarding_jobs.py` (one `try/except` added per file's own polling loop, ~15
+lines including comment each); `engine/pack/test_process_pack_jobs.py`,
+`engine/general/test_process_general_jobs.py`, `engine/narrative/test_process_narrative_jobs.py`,
+`engine/onboarding/test_process_onboarding_jobs.py` (1-2 new test functions each, wired into each
+file's existing `main()`). No change to any already-handled failure path in any of the four bridges.

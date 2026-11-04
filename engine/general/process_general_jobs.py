@@ -864,7 +864,23 @@ def poll_once(client, work_root, fetch=None):
         return 0
     n = 0
     for job in sorted(jobs, key=lambda j: (j["kind"] != "extract_requirements", j.get("requested_at") or "")):
-        n += 1 if process_job(client, job, work_root, fetch) else 0
+        # process_job()'s own claim (client.update(...)) sits BEFORE its try
+        # block, and process_job() itself never re-raises (its own blanket
+        # except Exception always marks the job failed and returns True) -
+        # so the only way a job here could still raise is that claim call
+        # itself (a network blip, a 500). Before this fix, that propagated
+        # straight out of this loop, aborting the whole pass: every OTHER
+        # pending general-engine job was skipped that cycle too, not just
+        # the one whose claim failed - same bug class as Finding 123
+        # (run_bridges.py) and Finding 126 (extract_cv_fields.py), now
+        # swept across every remaining bridge. QA pass, 2026-11-04.
+        try:
+            n += 1 if process_job(client, job, work_root, fetch) else 0
+        except Exception as e:
+            system_alerts.record("general", f"Could not even attempt job {job['id']}: {type(e).__name__}: {e}",
+                                 "error", exc=e, context={"job_id": job.get("id"), "kind": job.get("kind"),
+                                                          "company_id": job.get("company_id")})
+            print(f"[skipped] {job['kind']} {job['id']}: {type(e).__name__}: {e} - the rest of this pass continues")
     return n
 
 
