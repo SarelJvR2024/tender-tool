@@ -18,10 +18,35 @@ Usage:
         --closing-date "2026-10-22" --closing-time "11:00 (TIME NOT CONFIRMED - check Book 1/Tender Data C2.15)"
 """
 import json
+import re
 import argparse
 import docx
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+# QA pass, 2026-11-04: python-docx (via lxml) raises ValueError("All strings
+# must be XML compatible...") on a control character/NULL byte - confirmed
+# directly. Every text field this file prints is read from a real,
+# uncontrolled source: `description`/`nra_ref`/`delivery_address` are read
+# straight out of a tender's own scanned/OCR'd document text
+# (classify_tender.find_nra_reference()/find_delivery_address(), the same
+# OCR path already confirmed capable of misreading characters - see
+# generate_cv.py's own identically-named fix for the sibling bug this exact
+# codebase already found and fixed once in a different file), and
+# `contract_no` is read from the template's own SETUP cell. Before this fix,
+# a single stray control character anywhere in any of those fields crashed
+# EVERY paragraph in all three envelope covers (outer + both inner) - not a
+# minor cosmetic miss: assemble_pack.py's own envelope-covers step has no
+# try/except around it, so this took down the WHOLE pack build (every form,
+# every returnable, the merged PDF), not just the cover sheets.
+_XML_INVALID_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+def _safe_text(value):
+    """Never called on None - every call site below already only calls
+    this with a string (truthiness-checked first where the field is
+    optional), same convention as generate_cv.py's own _safe_text()."""
+    return _XML_INVALID_RE.sub("", value)
 
 
 def _set_margins(d):
@@ -65,17 +90,17 @@ def _addressee_block(d, delivery_address=None):
     file = no address printed (the pack says to write it on), never a guess."""
     lines = ["The South African National Roads Agency SOC Limited"] + [l for l in (delivery_address or []) if l]
     for line in lines:
-        p = d.add_paragraph(line)
+        p = d.add_paragraph(_safe_text(line))
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
 def _tender_block(d, contract_no, nra_ref, description, closing_date, closing_time):
     for line in [f"CONTRACT {contract_no}", nra_ref, description.upper()]:
-        p = d.add_paragraph(line)
+        p = d.add_paragraph(_safe_text(line))
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.runs[0].bold = True
     d.add_paragraph()
-    p = d.add_paragraph(f"TENDER CLOSES: {closing_date} AT {closing_time}")
+    p = d.add_paragraph(_safe_text(f"TENDER CLOSES: {closing_date} AT {closing_time}"))
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].bold = True
 
@@ -84,13 +109,13 @@ def _bidder_block(d, comp):
     d.add_paragraph()
     p = d.add_paragraph("TENDERER:")
     p.runs[0].bold = True
-    d.add_paragraph(comp["legal_name"])
+    d.add_paragraph(_safe_text(comp["legal_name"]))
     # only what is on file - an empty address / "CIPC Registration No: " line
     # used to be printed for a company without them
     if comp.get("registered_address"):
-        d.add_paragraph(comp["registered_address"])
+        d.add_paragraph(_safe_text(comp["registered_address"]))
     if comp.get("cipc_registration_number"):
-        d.add_paragraph(f"CIPC Registration No: {comp['cipc_registration_number']}")
+        d.add_paragraph(_safe_text(f"CIPC Registration No: {comp['cipc_registration_number']}"))
 
 
 def make_outer(profile, logo_path, out_dir, contract_no, nra_ref, description,

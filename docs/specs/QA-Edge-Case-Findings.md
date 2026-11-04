@@ -7083,3 +7083,57 @@ test suites covering this file's own callers) - all pass, unaffected. `py_compil
 `engine/discovery/test_list_tenders.py` (new file, 3 tests). No change to the response shape any
 caller reads - `rows`/`total`/`total_filtered` are returned exactly as before, just now with bad rows
 skipped instead of the whole batch lost.
+
+### Finding 125 (CONFIRMED, FIXED, severe - a single control character anywhere in a tender's OCR'd description or delivery address crashed ALL THREE envelope cover sheets, taking down the WHOLE SANRAL pack build - not a cosmetic miss, since assemble_pack.py's own envelope-covers step has no try/except around it)
+
+**Where:** this cycle's SANRAL pack rotation. `engine/make_envelope_covers.py` - no dedicated test
+file or QA pass found anywhere in this file's history, despite being a real production call site
+(`assemble_pack.py`'s own envelope-covers step, step 6 of `build_submission_pack()`).
+
+**What was tested:** read the file end to end. Every text field it prints into a cover (`contract_no`,
+`nra_ref`, `description`, `delivery_address` lines, the company's own `legal_name`/
+`registered_address`/`cipc_registration_number`) is read from a real, uncontrolled source -
+`description`/`nra_ref`/`delivery_address` straight out of a tender's own scanned/OCR'd document text
+(`classify_tender.find_nra_reference()`/`find_delivery_address()`, confirmed by reading those
+functions' own call chain back to `requirements.py`'s OCR path). This codebase has already found and
+fixed the identical bug class once before, in a different file: `generate_cv.py`'s own `_safe_text()`
+exists specifically because python-docx (via lxml) raises `ValueError("All strings must be XML
+compatible...")` on a control character, confirmed there as a realistic OCR artifact. `make_envelope_
+covers.py` had no equivalent sanitizer at all - confirmed directly: `python3 -c "import docx; docx.
+Document().add_paragraph('Routine ad-hoc\x0bmaintenance...')"` raises that exact `ValueError`.
+
+**Finding (CONFIRMED, severe).** `_addressee_block()`/`_tender_block()`/`_bidder_block()` all call
+`d.add_paragraph(...)` directly on these externally-sourced strings with no sanitization. Traced the
+real caller rather than stopping at "python-docx can raise here": `assemble_pack.py`'s own
+envelope-covers step (building `covers = {"outer": make_envelope_covers.make_outer(...), "technical":
+..., "financial": ...}`) has **no try/except around it at all** - unlike the file's own financial/C2.4
+print step just above it, which already degrades gracefully with a warning on failure. A single
+control character anywhere in a tender's description or delivery address (both read from OCR'd
+document text, the exact source this codebase already knows is capable of misreading characters)
+would crash `make_outer()` on its very first paragraph, propagating straight out of
+`build_submission_pack()` and failing the ENTIRE pack job - every form, every returnable, the merged
+PDF - not just the three cover sheets, which are a minor, cosmetic part of a SANRAL submission pack
+next to the technical/financial workbook and returnables.
+
+**Fix:** added the identical `_XML_INVALID_RE`/`_safe_text()` pattern `generate_cv.py` already uses
+(same regex, same approach - strip control characters rather than crash or silently truncate), applied
+to every `add_paragraph()` call on an externally-sourced string: `contract_no`/`nra_ref`/`description`
+(folded into one interpolated string in `_tender_block()`), every `delivery_address` line, the
+`closing_date`/`closing_time` line, and the company's `legal_name`/`registered_address`/
+`cipc_registration_number`. Did not touch the two fixed, hardcoded pricing-statement strings or the
+envelope heading text - those are never externally sourced.
+
+**Verified red-then-green.** New file `engine/test_make_envelope_covers.py` (4 tests, no network, no
+real docx template needed: a control character in `description` doesn't crash `make_outer()`; one in a
+`delivery_address` line doesn't crash `make_inner()`; one in each of the three company fields doesn't
+crash `make_outer()` and is stripped from the real output while the surrounding real text survives
+intact; ordinary clean text is returned byte-identical, no over-stripping). Revert-and-confirm-red:
+reverting reproduced the exact predicted `ValueError` on all three crash tests plus an `AttributeError`
+for the now-missing `_safe_text` on the fourth; restored, `0 failure(s)`. Regression-checked
+`engine/pack/test_assemble_pack.py` (this file's own real caller's test suite) - all pass, unaffected.
+`py_compile` clean.
+
+**Regression:** `engine/make_envelope_covers.py` (one new regex + helper, ~22 lines including comment;
+6 call sites wrapped), `engine/test_make_envelope_covers.py` (new file, 4 tests). No change to any
+cover's visible text for the overwhelmingly common case (no control characters) - confirmed by the new
+no-op regression test.

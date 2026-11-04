@@ -1799,6 +1799,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): fix - a single control character in a tender's OCR'd description or delivery address crashed all three envelope cover sheets, taking down the WHOLE SANRAL pack build - no try/except guards this step at all
+
+Oriented from `caa5148`; `git fetch origin main` found two new sibling commits since my own last push
+(`ab65776`, a docs-only pass confirming the SANRAL list-parse bug class doesn't recur elsewhere;
+`a7841e5`, a real app/TS fix - a seat-limit TOCTOU race in `createInvite()`) - neither touches
+`engine/`, no overlap. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165`
+only, both unchanged, no collision.
+
+Rotated to SANRAL pack (discovery was last, completing the full rotation). Most of this area's files
+(`fill_a_forms.py`, `fill_tender.py`, `fingerprint.py`, `sanral_fill.py`, `sanral_b7.py`) have had
+dedicated passes already - picked `make_envelope_covers.py` instead: zero mentions anywhere in this
+session's own findings history despite being a real step in `assemble_pack.build_submission_pack()`
+(step 6, the three outer/technical/financial cover sheets).
+
+**Found and fixed Finding 125 (CONFIRMED, severe)**: every text field this file prints - `contract_no`,
+`nra_ref`, `description`, `delivery_address` lines, the company's own `legal_name`/
+`registered_address`/`cipc_registration_number` - is read from a real, uncontrolled source, several of
+them straight out of a tender's own OCR'd document text (`classify_tender.find_nra_reference()`/
+`find_delivery_address()`). This codebase already found and fixed the identical bug class once, in
+`generate_cv.py`: python-docx raises `ValueError("All strings must be XML compatible...")` on a
+control character, confirmed directly. `make_envelope_covers.py` had no equivalent sanitizer at all.
+Traced the real caller rather than stopping at "python-docx can raise here": `assemble_pack.py`'s own
+envelope-covers step has **no try/except around it**, unlike the file's own financial/C2.4 print step
+just above it, which already degrades gracefully on failure. A single control character anywhere in a
+tender's description or delivery address would crash the WHOLE pack job - every form, every
+returnable, the merged PDF - over three minor, cosmetic cover sheets.
+
+Fixed with the identical `_XML_INVALID_RE`/`_safe_text()` pattern `generate_cv.py` already uses,
+applied to every externally-sourced string this file prints. Did not touch the two fixed,
+hardcoded pricing-statement strings or envelope headings - never externally sourced.
+
+Verified red-then-green: new file `test_make_envelope_covers.py` (4 tests, no network/template
+needed - a control character in `description`/`delivery_address`/each company field doesn't crash;
+clean text is unchanged, no over-stripping). Reverting reproduced the exact predicted `ValueError`s
+plus an `AttributeError` for the missing helper; restored, `0 failure(s)`. Regression-checked
+`engine/pack/test_assemble_pack.py` - all pass, unaffected. `py_compile` clean. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md` Finding 125.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- `engine/make_envelope_covers.py`
+- `engine/test_make_envelope_covers.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-03, standing QA/robustness review): fix - one malformed row anywhere in SANRAL's own tender-list response crashed the whole parse, discarding every other real, open tender in that same response too
 
 Oriented from `e6326f4`; `git fetch origin main` found one new sibling commit since my own last push
