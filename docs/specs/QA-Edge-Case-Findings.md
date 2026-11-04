@@ -7191,3 +7191,58 @@ PASSED (every pre-existing check in this file's large test suite, unaffected). `
 body in `poll_once()`, ~15 lines including comment), `engine/cv/test_extract_cv_fields.py` (1 new
 scenario inside the existing `test_queue()` function, 3 checks). No change to any already-handled
 failure path (`SetupError`/`TransientError`/`ExtractionFailed` all behave exactly as before).
+
+### Finding 127 (CONFIRMED, FIXED, moderate - a CANCELLED notification workflow run never recorded a heartbeat "finish" at all, in all 10 of the notification-sending GitHub Actions workflows, leaving it stuck showing "running" until a generic staleness timeout, instead of correctly and immediately reported as cancelled)
+
+**Where:** this cycle's notify rotation. All 10 notification-sending GitHub Actions workflows
+(`.github/workflows/{compliance-alerts,corrigendum-alerts,daily-digest,daily-discovery,
+deadline-reminders,founder-digest,onboarding-nudges,operational-alerts,returnables-digest,
+scout-alerts}.yml`) and `engine/notify/record_heartbeat.py`'s own module docstring.
+
+**What was tested:** `record_heartbeat.py`'s own docstring claims it is "wired as the FIRST and LAST
+steps of each of the 9 notification-sending workflows." Counted directly (`grep -l "record_heartbeat.py
+start" .github/workflows/*.yml`): 10, not 9 - a separate, minor, pre-existing drift, not something
+this pass introduced. Read each of the 10 real workflows' own heartbeat wiring end to end: each has a
+"Record heartbeat (start)" step first, then two separate "finish" steps at the end - one
+`if: success()`, one `if: failure()` - with each file's own comment explicitly explaining WHY two
+steps instead of one `if: always()` ("GitHub Actions has no single 'did the job pass' value available
+mid-job, only the success()/failure() context functions on separate steps"). This same codebase
+already independently discovered and documented, in a DIFFERENT workflow (`bridge-worker-ci.yml`,
+2026-10-19), that GitHub Actions' own `cancelled()` context function is a THIRD, SEPARATE state from
+`success()`/`failure()` - but that lesson was never carried over to these 10 heartbeat `if: failure()`
+conditions.
+
+**Finding (CONFIRMED, moderate).** Per GitHub Actions' own documented semantics (confirmed consistent
+with this repo's own prior, independent discovery of the exact same distinction in
+`bridge-worker-ci.yml`): `success()` is true only when nothing before it failed or was cancelled;
+`failure()` is true only when something before it genuinely failed; NEITHER is true when the run was
+CANCELLED (a concurrency-group supersede, a manual cancel from the Actions UI, GitHub's own
+workflow-level timeout). So a cancelled run of any of these 10 workflows never ran either "finish"
+step at all - its heartbeat's own "start" row was left showing "running" forever, with no finish call
+ever recording what actually happened. Each workflow's own comment already notes the admin UI has a
+staleness check that eventually flags a stuck "running" row - so this isn't a silently-lost-forever
+failure, but it means a cancelled run is reported late and as a generic "stuck," not immediately and
+correctly as "cancelled," even though GitHub itself already knows precisely what happened at the
+moment it happens.
+
+**Fix:** changed the "Record heartbeat (failure)" step's condition from `if: failure()` to `if:
+failure() || cancelled()` in all 10 workflows, and updated each file's own comment to explain the
+cancelled() gap explicitly (mirroring the reasoning already proven correct in `bridge-worker-ci.yml`).
+Also reworded each failure step's own `--error` message from "One or more steps in this job failed"
+to "One or more steps in this job failed or the run was cancelled" so the recorded reason stays
+accurate for both causes under the one `"failed"` status value (no new status value needed -
+`record_heartbeat.py`'s own `finish()` already only accepts `success`/`failed`). Separately corrected
+`record_heartbeat.py`'s own docstring from "9" to "10" notification-sending workflows.
+
+**Verified.** These are GitHub Actions YAML workflow files, not Python under unit test - verified by
+(1) parsing all 10 with `yaml.safe_load()` after editing (all valid), (2) confirming the new
+`if: failure() || cancelled()` syntax matches GitHub Actions' own documented, standard expression
+grammar and this repo's own already-proven `cancelled()` usage pattern in `bridge-worker-ci.yml`
+exactly, (3) re-running `engine/notify/test_record_heartbeat.py` after the docstring edit to
+`record_heartbeat.py` itself - `9 passed, 0 failed`, unaffected (the Python logic itself didn't
+change, only the YAML callers' own trigger conditions). `py_compile` clean on the Python file.
+
+**Regression:** 10 workflow YAML files (one condition changed, one comment expanded, and one error
+message reworded per file - no change to any already-correct `success()` path or to the business-logic
+steps themselves), `engine/notify/record_heartbeat.py` (docstring count correction only, no logic
+change). No change to `record_heartbeat.py`'s own `finish()` function or its accepted `status` values.

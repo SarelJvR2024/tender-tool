@@ -2244,6 +2244,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-04, standing QA/robustness review): fix - a CANCELLED notification workflow run never recorded a heartbeat "finish" at all, across all 10 notification-sending workflows
+
+Oriented from `3e56a7b`; `git fetch origin main` found one new sibling commit since my own last push
+(`88c4b42`, a real fix - `company_can_request_pack()`'s own TOCTOU race closed, plus a not-yet-live
+quota-counting regression) - no overlap with `.github/workflows/` or `engine/notify/`. Fast-forwarded
+cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to notify (compliance/reminders was last). `send_digest_emails.py`/`daily_digest.py` have had
+several dedicated passes this session (Finding 122, two cycles ago) - picked
+`engine/notify/record_heartbeat.py` and its real callers instead: the 10 notification-sending GitHub
+Actions workflows (`.github/workflows/*.yml`), never reviewed this session. The module's own docstring
+claims "9 notification-sending workflows" - counted directly (`grep -l "record_heartbeat.py start"`):
+10, a separate, minor, pre-existing drift, corrected while already in this exact context.
+
+**Found and fixed Finding 127 (CONFIRMED, moderate)**: each of the 10 workflows' own heartbeat
+"finish" step uses two separate steps (`if: success()`, `if: failure()`) with its own comment
+correctly explaining why (no single mid-job "did it pass" value in GitHub Actions) - but `failure()`
+alone misses a THIRD, SEPARATE GitHub Actions job-conclusion state: a CANCELLED run (a
+concurrency-group supersede, a manual cancel, GitHub's own workflow timeout). Confirmed this exact
+distinction was already independently discovered and correctly handled ELSEWHERE in this same repo
+(`bridge-worker-ci.yml`, 2026-10-19, its own `!cancelled()` steps) - just never carried over to these
+10 heartbeat conditions. A cancelled run of any of these 10 workflows never ran EITHER finish step,
+leaving its heartbeat's own "start" row stuck showing "running" until the admin UI's own staleness
+check eventually (and only generically) flags it, rather than being correctly and immediately reported
+as cancelled the moment GitHub itself already knew exactly what happened.
+
+Fixed by changing the failure step's condition to `if: failure() || cancelled()` in all 10 workflows,
+updating each one's own comment to explain the gap (mirroring the reasoning already proven correct in
+`bridge-worker-ci.yml`), and rewording each failure step's `--error` message to cover both causes.
+Separately corrected `record_heartbeat.py`'s own docstring count from 9 to 10.
+
+Verified: these are YAML workflow files, not Python under unit test, so verification was (1) `yaml.
+safe_load()` on all 10 after editing - all valid; (2) confirming the new condition matches GitHub
+Actions' own documented grammar and this repo's own already-proven `cancelled()` pattern exactly; (3)
+re-running `test_record_heartbeat.py` after the docstring edit - `9 passed, 0 failed`, unaffected (no
+logic change in the Python file itself). `py_compile` clean. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md` Finding 127.
+
+Committed and pushed directly to `main` (small, fully verified, no live-DB access needed):
+- 10 `.github/workflows/*.yml` files (listed in the findings doc entry)
+- `engine/notify/record_heartbeat.py`
+- `docs/specs/QA-Edge-Case-Findings.md`
+
+No new backlog item - a standalone, now-fixed bug, not a judgment call for Sarel.
+
+---
+
 ## This pass (2026-11-04, standing QA/robustness review): clean sweep - compliance/reminders rotation (registration_reminders.py's own company_id-patch-up indirection traced end to end and confirmed correct, not a bug - just unusual style)
 
 Oriented from `e89a4e4`; `git fetch origin main` found one new sibling commit since my own last push

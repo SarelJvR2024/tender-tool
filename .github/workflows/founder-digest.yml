@@ -68,7 +68,14 @@ jobs:
 
       # Two steps, not one if: always() - GitHub Actions has no single
       # "did the job pass" value available mid-job, only the success()/
-      # failure() context functions on separate steps.
+      # failure() context functions on separate steps. failure() alone
+      # misses a CANCELLED run (a concurrency-group supersede, a manual
+      # cancel, GitHub's own workflow timeout) - neither success() nor
+      # failure() is true then, so this heartbeat's own "finish" call never
+      # fired, leaving its start row stuck showing "running" until the
+      # admin UI's own staleness check eventually flags it as generically
+      # stuck rather than correctly as cancelled, even though GitHub
+      # already told us exactly what happened. QA pass, 2026-11-04.
       - name: Record heartbeat (success)
         if: success()
         working-directory: ${{ github.workspace }}
@@ -78,9 +85,9 @@ jobs:
         run: python3 engine/notify/record_heartbeat.py finish --key founder_digest --status success
 
       - name: Record heartbeat (failure)
-        if: failure()
+        if: failure() || cancelled()
         working-directory: ${{ github.workspace }}
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python3 engine/notify/record_heartbeat.py finish --key founder_digest --status failed --error "One or more steps in this job failed - see the run log"
+        run: python3 engine/notify/record_heartbeat.py finish --key founder_digest --status failed --error "One or more steps in this job failed or the run was cancelled - see the run log"
