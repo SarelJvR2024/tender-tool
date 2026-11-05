@@ -1,5 +1,50 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - `daily_digest.py`'s live mode checked for a second missing `find_*()` call beyond the one just fixed; none found. `/sanral-schedules` (a genuinely light-mention corner) read end to end and its two unscoped-looking Supabase queries confirmed tenant-safe via real RLS policies, not assumed
+
+Oriented from `cfad2f9` (own prior pass: `dispatchDashboard.ts`/`command-center.tsx` checked for a
+second digital-submission fallback gap). `git fetch`/`merge --ff-only` picked up `390532e` (a sibling
+pass: `daily_digest.py`'s live mode never called `find_documents_lapsing_before_closing()`) - no
+collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog
+chain re-confirmed: 19 total, 3 genuinely open.
+
+**Checked the directive's suggested angle first**: whether `daily_digest.py`'s live mode is missing
+any OTHER `watch_deadlines.py`/`registration_reminders.py` `find_*()` call its own tests exercise.
+Listed every `find_*` function in both modules (`find_due_documents`, `find_due_person_credentials`,
+`find_documents_lapsing_before_closing`, `find_due_tasks`, `find_due_registrations`,
+`find_due_property_documents`) and confirmed all six are now called somewhere in live mode's `main()`
+after the prior fix - genuinely closed, no second instance. Also checked `--mode local`'s own
+narrower scope (`local_document_expiry()`/`local_person_credential_expiry()`, reading a local JSON
+profile instead of Supabase): its own code comments already document `tender_tasks`/
+`readiness_changes`/`tender_updates`/`reassessed` as deliberately "Supabase-only, no local fixture" -
+not a parity bug, documented scaffolding for offline dev.
+
+**Picked a fresh area**: grepped `System-Status.md`'s own history for mention-count across every
+`app/app/` route folder to find a genuinely light corner - `/sanral-schedules` (9 mentions, versus 85+
+for most other routes) stood out; its only prior pass was PR #143 (2026-10-24), a presentation-only
+fix, never a security/correctness read.
+
+Read `app/app/sanral-schedules/page.tsx` end to end. Its two Supabase queries looked concerning at
+first glance - `tenders.select(..., tender_packs!inner(id)).eq("family", SANRAL_CONVENTIONAL_FAMILY)`
+(an inner join with no explicit `company_id` filter) and a separate `pack_generation_jobs.select(...)
+.in("tender_id", tenderIds)` (also no `company_id` filter) - since `tenders` itself is a shared,
+cross-company catalog table (any company can see any discovered tender), an unscoped join against it
+could plausibly leak another company's `tender_packs`/`pack_generation_jobs` rows.
+
+**Checked, not assumed**: read the real RLS policies directly. `tender_packs` has `"tenant isolation"`
+(0001): `for all to authenticated using (is_company_member(company_id))` - covers `select`, so the
+inner join is naturally scoped to the caller's own company's packs by Postgres RLS itself, regardless
+of the query having no explicit filter. `pack_generation_jobs` has its own `"members can select"`
+policy (0026), same effect. Both confirmed real tenant-isolation policies, not inferred from naming -
+the page is safe as written.
+
+**No code change** - the one real finding checked out safe; the daily_digest sweep found nothing new.
+
+**Backlog: 19, unchanged.** `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and
+the impersonation session-refresh gap all untouched, as directed.
+
+Docs-only this pass - no source file changed.
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - the two files that actually CONSUME `dispatchTriage.ts`'s output (`dispatchDashboard.ts`, `components/tt/command-center.tsx`) checked end to end for a second instance of the digital-submission fallback gap just fixed upstream; none found, and the earlier fix was confirmed to actually reach the live dashboard
 
 Oriented from `4bfac8c` (own prior pass: `operationalStatusMessage()`'s digital-submission fallback).
