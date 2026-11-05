@@ -1,5 +1,25 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - re-verified the claim-outside-try-block job-isolation sweep is NOW genuinely exhausted across all 7 bridge/job-processor files after `d44f7d1` found Finding 128's own sweep had missed one; `/experience` (company experience library) read end to end, genuinely clean
+
+Oriented from `d2f1692` (own prior pass). `git fetch` picked up `d44f7d1` (a sibling pass: `process_cv_jobs.py`'s `poll_once()` had the identical claim-outside-try-block gap Finding 128's own "deliberate sweep" missed) - caught and corrected a real mistake of my own mid-pass: I ran `git fetch` but not `git merge --ff-only` before my first read of `process_cv_jobs.py`, so I was looking at the stale pre-fix file and nearly reported a false negative. Merged properly, re-read the real current file, confirmed the fix is genuinely in place. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26) - no collision. Backlog cross-checked: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
+
+**Re-verified the directive's suggested angle**: since Finding 128's own sweep had just been shown to have missed a real instance, re-checked ALL 7 files in this bug class by reading each one directly, not trusting the prior "exhausted" claims: `run_bridges.py`'s `BridgeRunner.run_once()` (the original Finding 123 site - per-bridge `Popen()` already wrapped in its own `try/except OSError`, `continue`s to the next bridge, confirmed by its own 2026-11-03 QA-pass comment), `process_cv_jobs.py` (just fixed, re-confirmed on the correct post-fix commit), `process_pack_jobs.py`, `process_general_jobs.py`, `process_narrative_jobs.py`, `process_onboarding_jobs.py`, and `extract_cv_fields.py` - all 7 genuinely have their per-item claim+process call wrapped in `try`/`except Exception` (or `except SetupError: raise` / `except Exception` for the two bridges with a "the whole thing is broken, not one item" distinction), each alerting via `system_alerts.record()` and continuing to the next item. This bug class is now genuinely exhausted, confirmed by direct code reading across every file, not by repeating the prior passes' own "exhausted" claim.
+
+**Picked `/experience`** (the company experience library, `0012_experience_items.sql`) - genuinely under-covered (real dedicated passes exist only for two `value_rm` negative-value fixes, 2026-10-30; never a full end-to-end read). Read `actions.ts`, `lib/experience.ts`, and the real `0012` migration SQL.
+
+Two things specifically checked, not assumed:
+- `saveExperienceTags()`'s `value_rm` validation (`Number.isNaN(value) || value < 0`) - already closed, per its own 2026-10-30 comment citing the identical gap in `people/actions.ts`'s `saveProject()`. Still correct.
+- `findMatchingExperience()`'s real SQL function, `experience_matches(p_company_id uuid, ...)` (0012) - a caller-supplied `p_company_id` with no explicit `is_company_member()` check inside the function body looked, at first glance, like the exact cross-tenant-leak shape this session found twice before in billing RPCs. Checked, not assumed: the function is declared plain `language sql stable` - **not** `security definer` - so it runs under the caller's own RLS, and `experience_items` has a real `"experience_items: tenant isolation"` policy (`for all ... using (is_company_member(company_id))`) covering `select`. A caller passing another company's id gets zero rows back regardless, enforced by Postgres RLS itself, not by anything in the function. Genuinely safe.
+
+No code change - the sweep re-verification and the `/experience` read both came back clean with real evidence.
+
+**Backlog: 19, unchanged.** `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation session-refresh gap all untouched, as directed.
+
+Docs-only this pass - no source file changed.
+
+---
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - `/analytics` and `/market-intelligence` read end to end (both genuinely light-mention corners), a plausible SACNASP/SAGC self-service gap on `/my-cv` investigated and correctly ruled out as deliberate scope, not a bug
 
 Oriented from `83077a5` (own prior pass). `git fetch`/`merge --ff-only` found no new commits; open PRs re-checked, still only `#164`/`#165` (unchanged since 2026-10-26) - no collision. Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
