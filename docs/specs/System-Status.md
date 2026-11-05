@@ -1,5 +1,23 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - `/analytics` and `/market-intelligence` read end to end (both genuinely light-mention corners), a plausible SACNASP/SAGC self-service gap on `/my-cv` investigated and correctly ruled out as deliberate scope, not a bug
+
+Oriented from `83077a5` (own prior pass). `git fetch`/`merge --ff-only` found no new commits; open PRs re-checked, still only `#164`/`#165` (unchanged since 2026-10-26) - no collision. Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
+
+Grepped route-folder mention counts across this doc's full history to find genuinely under-covered ground: `/analytics` (17) and `/market-intelligence` (6 for the literal folder name, though its underlying `marketPricing.ts` has had multiple dedicated passes) stood out below the 100+ mentions most routes carry. Read both `page.tsx` files end to end.
+
+**`/analytics`**: already carefully audited in its own header comment (spec §10 honesty requirement cited directly) and already fixed twice this session's history (a date-logic extraction into `lib/dates.ts`, and an unbounded-read→paginated-via-`fetchAllRows()` fix, both referenced in its own code comments). Checked the one structural assumption not yet explicitly verified - that `tender_packs?.[0]` safely picks "this company's own pack" with no risk of silently grabbing a different one - against the real schema: `tender_packs` has `unique (company_id, tender_id)` (migration `0001`), so RLS-scoped nested reads can return at most one row per company per tender. Confirmed safe, not assumed.
+
+**`/market-intelligence`**: also carefully audited (its own header comment records Sarel's exact 2026-10-22 instruction authorizing the feature, and the SANRAL-terms question that blocked it). Its win/loss-trend-style "real info hidden behind hover-only `title=`" bug class - fixed three times elsewhere this session (`PrimaryPackActionLink`, Discovery's readiness blockers, Analytics' own win/loss trend) - is already closed here too, per its own comment citing all three priors. No fourth instance found; genuinely already fixed.
+
+**`/my-cv` investigation** (not a backlog item, ruled out): noticed `saveMyDetails()`'s self-service field set has ECSA/SACPCMP fields but not SACNASP/SAGC - the exact "field missing from a form a session already fixed elsewhere" shape that produced 4+ real bugs earlier in this session (CV/pack generation paths). Before reporting it as a fifth instance, read `actions.ts`'s own header comment directly: "A deliberately small set of self-editable identity/qualification fields" - an explicit scope decision, not an oversight. Confirmed the admin-side fix-point actually exists and isn't itself missing the fields: `app/app/people/[id]/page.tsx`/`people/actions.ts` both genuinely support SACNASP/SAGC editing (grep-confirmed) - an owner/admin can set these for any employee; the employee's own self-service page just doesn't duplicate every admin-editable field, by design. Not a bug; correctly not elevated to a finding.
+
+No code change - all three checks came back clean with real evidence, not assumed. `tsc --noEmit` not re-run (no files touched).
+
+**Backlog: unchanged at 19** (3 genuinely open: `start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV - none touched, as directed).
+
+---
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - the per-recipient "one failure kills every subsequent send" isolation bug class checked across every notification/digest-send loop; the password-reset flow (forgot-password → auth/callback → reset-password) read end to end; both genuinely clean, no code change
 
 Oriented from `ff5c856` (own prior pass: `daily_digest.py` live-mode gap re-check,
