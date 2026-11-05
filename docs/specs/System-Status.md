@@ -1,5 +1,65 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): fixed - the B-BBEE preference points calculator's own displayed reference table disagreed with the number it actually computes, on Level 3 under 90/10
+
+Oriented from `b511f6f` (own prior pass: recorded that Sarel applied all 11 pending migrations to
+production). `git fetch`/`merge --ff-only`: no new commits - still `b511f6f`. Open PRs re-checked: only
+`#164`/`#165` remain (both untouched since 2026-10-26), no collision.
+
+Cross-checked the backlog chain (standing discipline): self-consistent - 19 total, only 3 genuinely
+open (`held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, the impersonation
+session-refresh gap), the 11-migration item correctly marked resolved by the immediately-prior entry.
+
+This session has now covered most obvious areas at least once (billing, team/invites, onboarding, pack
+generation x2, CV generation, discovery scrapers, Market Intelligence, admin/impersonation,
+document-generation security, notifications/digest, the full SQL-ownership audit). Grepped
+`System-Status.md`'s own history for every top-level route under `app/app/` to find a genuinely
+uncovered corner: `/toolkit` and `/tools` (the public B6/BEE/CIDB/deadline calculator lead-magnet
+tools) had zero mentions. Confirmed `/toolkit` isn't dead code or a stale duplicate of `/tools` - it's
+the deliberate signed-in-app embed of the exact same Client components `/tools` renders publicly
+(spec v3 O03), so checking one checks both.
+
+`publicHolidays.ts` (deadline calculator) - read end to end, ran its own test suite (11/11 pass),
+spot-checked `holidaysForYear()` for 2028/2030 (works correctly beyond the "2025-2027" the header
+comment mentions - a stale comment, not a bug, not touched). Clean.
+
+**Found, in `preferencePoints.ts`/`BeePreferencePointsClient.tsx` (BEE calculator)**:
+`BeePreferencePointsClient.tsx`'s own displayed "B-BBEE status-level points table" (a static,
+hand-typed array at the bottom of the page, shown for reference alongside the live calculator above
+it) read `[3, 14, 7]` for Level 3 - but `preferencePoints.ts`'s real `BEE_POINTS_TABLE`, the one the
+calculator actually computes from, has Level 3 at `{ points8020: 14, points9010: 6 }`. A user entering
+Level 3 and the 90/10 system got a live answer of 6 points while the reference table on the same page,
+one scroll down, said 7 - the same "two places claim different numbers for the same fact" shape this
+session has repeatedly found and fixed elsewhere.
+
+**Verified which number is actually correct, from three independent sources already in this repo**,
+not assumed: `preferencePoints.test.ts`'s own existing test (`assert.equal(beeGoalsPoints("90/10", 3),
+6)`) already asserted 6; `docs/specs/Tender-Regulatory-Compliance-Review.md` (line 290) independently
+cites the same SANRAL Policy §6.4.1 Table 1 / R.396 Book 1 source as "L3 6/14" (its own notation is
+90/10-value first); every other level across both the component's table and the library agreed. Only
+Level 3's 90/10 cell was wrong, and it was wrong in the display, not the calculation.
+
+**Fixed** by deriving the displayed table directly from `beeGoalsPoints()` (now imported) instead of a
+second hardcoded literal array - `[1,2,3,4,5,6,7,8].map((lvl) => beeGoalsPoints("80/20", lvl)` /
+`beeGoalsPoints("90/10", lvl))` for each row. This is the stronger fix: a literal-value correction
+(7->6) would have left the same "two copies of one fact" structure in place, able to drift again the
+next time either number changes; deriving from the one real source makes that structurally impossible
+now, not just corrected once.
+
+**Verified for real**: `node --experimental-strip-types -e` confirmed `beeGoalsPoints()` returns
+`14, 6` for Level 3 exactly as the fix now displays. `npx tsc --noEmit` and `npx eslint` both clean on
+the touched file. Full regression `node --experimental-strip-types --test app/lib/*.test.ts` - 222/222,
+unaffected (no library logic changed, only the component's own display derivation). Checked for an
+existing component-test convention to extend (none exists anywhere in this app - every test file is a
+pure-logic `.test.ts`, zero `.test.tsx`/`.spec.tsx` in the whole repo) before concluding the derivation
+fix itself, not a new test, is the right and sufficient remediation.
+
+**Backlog: 19, unchanged** (standalone bug, fixed - not a new judgment-call item; `held_registrations`-
+vs-CV, `start_payfast_checkout()`'s revenue-integrity gap, and the impersonation session-refresh gap all
+still open, needing Sarel's own call. None of those three touched this pass, as directed.)
+
+---
+
 ## 2026-11-04: Sarel applied all 11 pending migrations (`0096`, `0107`-`0116`) to production directly via the Supabase SQL editor
 
 Before running them, Sarel ran the read-only duplicate check this session flagged as a precondition

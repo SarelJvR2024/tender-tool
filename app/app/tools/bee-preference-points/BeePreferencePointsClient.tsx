@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PPR_2022_THRESHOLD_ZAR, calculatePreferencePoints, systemForValue, type BeeLevel } from "@/lib/preferencePoints";
+import { PPR_2022_THRESHOLD_ZAR, beeGoalsPoints, calculatePreferencePoints, systemForValue, type BeeLevel } from "@/lib/preferencePoints";
 import { formatZAR } from "@/lib/formatZAR";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
@@ -204,6 +204,16 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
       <div className={CARD}>
         <div className="mb-2.5 text-[13px] font-bold text-foreground">B-BBEE status-level points table</div>
         <div className="-mx-5 overflow-x-auto px-5">
+          {/* Standing review, 2026-11-05: this reference table used to be a
+              second, hand-typed copy of lib/preferencePoints.ts's own
+              BEE_POINTS_TABLE - and had drifted from it (Level 3/90-10 read
+              7 here, 6 in the function that actually computes the result
+              above, confirmed against docs/specs/Tender-Regulatory-
+              Compliance-Review.md's own cited SANRAL table and
+              preferencePoints.test.ts's reference values). Now reads
+              beeGoalsPoints() directly for every cell so this display and
+              the live calculation can never show two different numbers for
+              the same level again. */}
           <table className="w-full min-w-[320px] border-collapse text-[13px]">
             <thead>
               <tr className="text-left text-muted-foreground">
@@ -213,13 +223,11 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
               </tr>
             </thead>
             <tbody>
-              {[
-                [1, 20, 10], [2, 18, 9], [3, 14, 7], [4, 12, 5], [5, 8, 4], [6, 6, 3], [7, 4, 2], [8, 2, 1],
-              ].map(([lvl, p80, p90]) => (
+              {([1, 2, 3, 4, 5, 6, 7, 8] as const).map((lvl) => (
                 <tr key={lvl} className="border-t border-border text-foreground">
                   <td className="py-1.5 pr-3">Level {lvl}</td>
-                  <td className="py-1.5 pr-3">{p80}</td>
-                  <td className="py-1.5">{p90}</td>
+                  <td className="py-1.5 pr-3">{beeGoalsPoints("80/20", lvl)}</td>
+                  <td className="py-1.5">{beeGoalsPoints("90/10", lvl)}</td>
                 </tr>
               ))}
               <tr className="border-t border-border text-foreground">
