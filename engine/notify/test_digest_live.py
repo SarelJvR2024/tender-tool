@@ -387,7 +387,45 @@ def test_orphaned_field_provenance_owner_not_silently_dropped():
           f"...and that skip is now visible in the run's own output, not silent ({out!r})")
 
 
+def test_document_expiry_signals_includes_documents_lapsing_before_a_tenders_closing():
+    """Finding 132 (2026-11-05): watch_deadlines.find_documents_lapsing_before_closing()
+    was built, tested (test_watch_deadlines_urgency.py) and even wired into
+    watch_deadlines.py's own --out report, but daily_digest.py's live mode -
+    the thing that actually reaches a real company's inbox via
+    send_digest_emails.py - never called it at all. A company could have a
+    document inside the normal 60-day "fine for now" window that will
+    genuinely have expired by a tender's own closing date, and the one
+    automated channel meant to warn them of exactly that never did."""
+    print("\ndocument_expiry_signals(): a document outside the normal lead window but before a pursued tender's closing date is included")
+    pgrest.ROWS.clear()
+    today = datetime.date(2026, 11, 5)
+    d = lambda n: (today + datetime.timedelta(days=n)).isoformat()  # noqa: E731
+    pgrest.ROWS.update({
+        "companies": [{"id": "co-lapse", "legal_name": "Lapsing Test Co",
+                       "sars_tcs_pin_expiry": d(90)}],  # outside the 60-day window...
+        "tender_packs": [{"company_id": "co-lapse", "tender_id": "t-lapse"}],
+        "tenders": [{"id": "t-lapse", "contract_no": "L.001-2026", "title": "closes in 100 days",
+                    "closing_date": d(100) + "T10:00:00+00:00", "status": "open"}],  # ...but before this closes
+    })
+    watch_deadlines.supabase_request = pgrest.fake_request
+
+    seen = {}
+    items = daily_digest.document_expiry_signals("u", "k", seen, today, watch_deadlines.DEFAULT_DOC_LEAD_DAYS)
+    before = [i for i in items if i.get("status") == "lapses_before_closing"]
+    check(len(before) == 1, f"the lapses-before-closing item reaches document_expiry_signals(), got {items}")
+    if before:
+        check(before[0]["company_id"] == "co-lapse" and before[0]["tender_id"] == "t-lapse",
+              f"it names the right company and tender ({before[0]})")
+        check(before[0]["tender_label"] == "L.001-2026", f"it carries the tender's own label ({before[0]})")
+
+    # A second call with the same `seen` dict (same day) must report nothing
+    # new - this function must not bypass the seen-store's own de-dup.
+    items2 = daily_digest.document_expiry_signals("u", "k", seen, today, watch_deadlines.DEFAULT_DOC_LEAD_DAYS)
+    check(items2 == [], f"a second run the same day reports nothing new (already seen), got {items2}")
+
+
 if __name__ == "__main__":
     test_submission_due_signals_survives_a_non_string_closing_date()
     test_orphaned_field_provenance_owner_not_silently_dropped()
+    test_document_expiry_signals_includes_documents_lapsing_before_a_tenders_closing()
     main()

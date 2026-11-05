@@ -52,11 +52,14 @@ What this script reuses rather than reimplements, concretely:
     imported from watch_new_tenders.py, not re-declared, so "report-worthy"
     means the same thing in both places.
   - Document expiry + tender tasks: engine/compliance/watch_deadlines.py's
-    find_due_documents()/find_due_person_credentials()/find_due_tasks() are
-    called directly, unchanged. Per-person registrations (ECSA/SACPCMP,
-    0035) ride in the document_expiry section as type "person_credential":
-    full_cycle sees them, cv_admin sees only them, finance never sees them,
-    viewer gets them in the count.
+    find_due_documents()/find_due_person_credentials()/find_due_tasks()/
+    find_documents_lapsing_before_closing() are called directly, unchanged
+    (the last one added 2026-11-05, QA Finding 132 - it existed and was
+    tested well before this, just never reached this script's own live
+    mode). Per-person registrations (ECSA/SACPCMP, 0035) ride in the
+    document_expiry section as type "person_credential": full_cycle sees
+    them, cv_admin sees only them, finance never sees them, viewer gets
+    them in the count.
     This script does NOT re-read companies/tender_tasks itself - whatever
     watch_deadlines.py's own TRACKED_EXPIRY_FIELDS list covers (today: just
     COID Letter of Good Standing - see that script's own docstring and
@@ -392,6 +395,34 @@ def submission_due_signals(scored, lead_days=14):
 # row on every run.
 # ---------------------------------------------------------------------------
 
+def document_expiry_signals(url, key, seen, today, lead_days):
+    """The document_expiry section's full content: company documents, per-
+    person registrations (ECSA/SACPCMP/SACNASP/SAGC), the shared registrations
+    catalog (0050) and property documents, plus a document that is fine today
+    but will have lapsed by the closing date of a tender being prepared.
+    Extracted from main() (QA pass, 2026-11-05, Finding 132) so this can be
+    exercised directly in a test without running the whole live-mode CLI."""
+    return (watch_deadlines.find_due_documents(url, key, seen, today, lead_days)
+            + watch_deadlines.find_due_person_credentials(url, key, seen, today, lead_days)
+            # 0050: catalog registrations (company -> "document", person/director ->
+            # "person_credential") and property documents, same routing
+            + watch_deadlines.registration_reminders.find_due_registrations(url, key, seen, today, lead_days)
+            + watch_deadlines.registration_reminders.find_due_property_documents(url, key, seen, today, lead_days)
+            # Finding 132 (QA pass, 2026-11-05): watch_deadlines.py's own
+            # find_documents_lapsing_before_closing() - a document that is fine
+            # today but will have lapsed by the closing date of a tender the
+            # company is preparing - was built, tested (test_watch_deadlines_
+            # urgency.py) and even wired into watch_deadlines.py's own --out
+            # report, but never into THIS script's live mode, which is what
+            # actually reaches a real company's inbox via send_digest_emails.py.
+            # Confirmed by grep before this fix: zero references anywhere in
+            # engine/notify/. A company could have a document inside the normal
+            # 60-day "fine for now" window that will genuinely have expired by a
+            # tender's own closing date, and the one automated channel meant to
+            # warn them of exactly that never did.
+            + watch_deadlines.find_documents_lapsing_before_closing(url, key, seen, today, lead_days))
+
+
 def find_readiness_changes(url, key, seen, today, owners=None):
     rows = watch_deadlines.supabase_request(
         url, key, "field_provenance?select=id,tender_pack_id,field_key,status,reason,updated_at"
@@ -703,12 +734,7 @@ def main():
         seen, seen_loaded = watch_deadlines.load_seen_db(client, DIGEST_CONSUMER)
         readiness_seen, readiness_loaded = load_readiness_seen_db(client)
         owners = {}
-        document_expiry = (watch_deadlines.find_due_documents(url, key, seen, today, args.doc_lead_days)
-                           + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days)
-                           # 0050: catalog registrations (company -> "document", person/director ->
-                           # "person_credential") and property documents, same routing
-                           + watch_deadlines.registration_reminders.find_due_registrations(url, key, seen, today, args.doc_lead_days)
-                           + watch_deadlines.registration_reminders.find_due_property_documents(url, key, seen, today, args.doc_lead_days))
+        document_expiry = document_expiry_signals(url, key, seen, today, args.doc_lead_days)
         tender_tasks = watch_deadlines.find_due_tasks(url, key, seen, today, args.task_lead_days)
         readiness_changes = find_readiness_changes(url, key, readiness_seen, today, owners)
         # Updates the tender-update watch already alerted on, not yet in a

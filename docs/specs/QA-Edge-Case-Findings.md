@@ -7467,3 +7467,68 @@ including comments); `engine/pack/pdf_merge.py` (`_pdf_text()`, ~10 lines includ
 test_pdf_merge.py` (1 new test function, wired into `main()`). No change to either module's own
 text-measurement (`text_width()`/`_fit()`), placement-geometry, or verification-box logic - only the
 final character encoding and the verify-step's own comparison string.
+
+### Finding 132 (CONFIRMED, FIXED, severe - a real, already-built, already-tested compliance check (a document that is fine today but will have lapsed by a tender's own closing date) never actually reached a real company's inbox, because `daily_digest.py`'s live mode - the automated pipeline that actually sends the digest email - never called it)
+
+**Area:** compliance/reminders (`engine/notify/daily_digest.py` / `engine/notify/send_digest_emails.py`,
+found while confirming `engine/compliance/watch_deadlines.py`/`registration_reminders.py` were already
+exhausted for this rotation).
+
+**Scenario:** `watch_deadlines.find_documents_lapsing_before_closing()` is a real, carefully-built
+function (added 2026-10-17, hardened again 2026-10-24 for a SAST closing-time edge case) that catches
+exactly the gap a plain 60-day expiry window can't see: a document that is still "fine" by the normal
+measure today, but will already have expired by the closing date of a tender the company is actively
+preparing (a `tender_packs` row exists for it). It is fully tested
+(`engine/compliance/test_watch_deadlines_urgency.py`) and already wired into `watch_deadlines.py`'s own
+`--out` JSON report. But `daily_digest.py` - the script whose live mode actually builds the automated
+digest email every opted-in company receives via `send_digest_emails.py` - built its `document_expiry`
+section from `find_due_documents()` + `find_due_person_credentials()` + the two registration-catalog
+functions (`registration_reminders.find_due_registrations()`/`find_due_property_documents()`), and
+never called `find_documents_lapsing_before_closing()` at all. Confirmed by grep before this fix: zero
+references to it anywhere under `engine/notify/`.
+
+End to end: a company could have, say, a SARS Tax Compliance Status PIN expiring in 90 days - genuinely
+outside the normal 60-day "renew soon" window, so `find_due_documents()` has nothing to report - while
+preparing a tender closing in 100 days. The one automated channel built specifically to catch this exact
+risk (a document that will be expired on submission day, even though it looks perfectly fine today)
+computes the right answer every time `watch_deadlines.py` runs, but that answer never reaches the
+company's actual inbox - only a separate, non-automated channel (an external scheduled session reading
+`watch_deadlines.py --out report.json` directly, per that script's own docstring) would ever see it. A
+company relying on the real digest email alone would have no warning at all until the document was
+already inside the normal 60-day window - by which point, on this scenario, the tender would already be
+closed.
+
+**Fix:** extracted the inline `document_expiry` build in `daily_digest.py`'s live mode into a new,
+directly-testable `document_expiry_signals(url, key, seen, today, lead_days)` function, and added the
+missing `+ watch_deadlines.find_documents_lapsing_before_closing(...)` call to it (same pattern every
+other function in that chain already follows: same `seen` store, same `lead_days`, same per-company
+narrowing via `company_signals()`'s existing `own()` filter - no new plumbing needed). Updated the
+module's own docstring, which explicitly enumerated only the three older functions, to match.
+`send_digest_emails.py`'s `render_text()` was also fixed: a `document_before_closing` item (`status`
+`"lapses_before_closing"`) used to fall through to the exact same generic `"label (expiry_date)"`
+rendering as every other `document_expiry` item, with no indication anywhere in the sent email of the
+one fact this check exists to report - WHICH tender it will have lapsed before, and when that tender
+closes. Now it reads "`<label> - will have lapsed before <tender_label> closes (<closing_date>)`".
+
+**Verified red-then-green, both files, independently.** `engine/notify/test_digest_live.py`: new
+`test_document_expiry_signals_includes_documents_lapsing_before_a_tenders_closing()`, calling the new
+`document_expiry_signals()` directly against a fresh in-memory PostgREST fixture (a company with a
+document expiring in 90 days, a tender closing in 100 days) - asserts the item reaches the function's
+output, names the right company/tender, and that a second same-day run reports nothing new (the seen-
+store still de-dupes correctly). `engine/notify/test_send_digest_emails.py`: new
+`test_render_text_shows_which_tender_a_document_will_have_lapsed_before()`, asserting the rendered email
+text names the specific tender and its closing date, and that an ordinary `renew_soon`/`expired` item's
+own rendering is completely unaffected. Reverted each file individually: `daily_digest.py`'s revert
+raised `AttributeError: module 'daily_digest' has no attribute 'document_expiry_signals'` exactly as
+predicted; `send_digest_emails.py`'s revert failed the two new assertions exactly as predicted; both
+restored to `0 failure(s)`. `py_compile` clean on all four touched files. Regression:
+`test_send_digest_emails.py`, `test_digest_opt_in.py`, `test_send_pack_ready_email.py`,
+`test_watch_deadlines_urgency.py`, `test_reminder_seen_db.py`, `test_watch_person_credentials.py`,
+`test_watch_conditional_registrations.py` and `test_principals_registrations.py` all re-ran clean.
+
+**Regression:** `engine/notify/daily_digest.py` (new `document_expiry_signals()` function, ~25 lines
+including comments, extracted from `main()`'s own inline build with no behaviour change beyond the one
+added call; module docstring updated); `engine/notify/send_digest_emails.py` (`render_text()`, ~15 lines
+including comments); `engine/notify/test_digest_live.py` (1 new test function); `engine/notify/
+test_send_digest_emails.py` (1 new test function). No change to `watch_deadlines.py`,
+`registration_reminders.py`, or any other `document_expiry` item's own rendering.

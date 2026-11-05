@@ -2798,6 +2798,74 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): fix - a real, already-built, already-tested compliance check (document lapsing before a tender's closing date) never actually reached a real company's inbox, because daily_digest.py's live mode never called it
+
+Oriented from `1f15ad9` (own prior pass: intake rotation clean sweep). `git fetch`/`merge --ff-only`
+found one new sibling commit (`cfad2f9` - a docs-only pass checking `dispatchDashboard.ts`/`command-
+center.tsx` for a second digital-submission fallback gap, none found; no overlap with `engine/`).
+Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no
+collision. Re-checked again immediately before this push - still clean.
+
+Rotated to compliance/reminders (intake was last). `registration_reminders.py` (5 mentions) read first
+and re-confirmed clean (`_mark_company()`'s own indirection already traced correct by an earlier pass).
+Moved to `watch_deadlines.py` (33 mentions) looking for an under-reviewed function - read
+`find_documents_lapsing_before_closing()` in full and noticed it is the ONLY "before closing" check in
+the whole module: no equivalent exists for per-person credentials (ECSA/SACPCMP/SACNASP/SAGC). Traced
+that specific gap first: the Tender Workspace's own compliance report
+(`app/lib/tenderCompliance.ts`'s `checkRegistration()`/`registrationValidity()`) already covers person
+credentials reactively, correctly scoped per assigned key person via `tender_pack_assignments` - so this
+is a real but LOWER-severity asymmetry (reactive-only, not missing everywhere), and implementing it
+properly needs a new join this cycle didn't have time to build and test as carefully as the existing
+code - flagged, not fixed, below.
+
+**Found and fixed Finding 132 (CONFIRMED, severe)**: while confirming the company-level "before closing"
+check itself was sound, traced WHERE its output actually goes and found it never reaches a real
+customer. `watch_deadlines.find_documents_lapsing_before_closing()` is fully tested
+(`test_watch_deadlines_urgency.py`) and wired into `watch_deadlines.py`'s own `--out` report - but
+`daily_digest.py`'s live mode, the script that actually builds the automated digest email every
+opted-in company receives via `send_digest_emails.py`, built its `document_expiry` section from the
+other four functions only (confirmed by grep: zero references to the fifth anywhere under
+`engine/notify/`). A company could have a document outside the normal 60-day window but genuinely
+expiring before a specific tender's closing date, and the one automated channel built to catch exactly
+that never would have.
+
+**Fix:** extracted the inline `document_expiry` build into a new, directly-testable
+`document_expiry_signals()` function in `daily_digest.py` and added the missing call - same pattern,
+same `seen` store, no new plumbing. `send_digest_emails.py`'s `render_text()` also fixed: this item type
+used to render with the exact same generic "label (expiry_date)" text as an ordinary renew-soon item,
+with no indication of WHICH tender it would lapse before or when that tender closes.
+
+**Verified red-then-green, both files, independently.** New tests in `test_digest_live.py` (calls
+`document_expiry_signals()` directly against a fresh in-memory fixture) and `test_send_digest_emails.py`
+(asserts the rendered email names the tender and closing date). Reverting `daily_digest.py` raised
+`AttributeError` exactly as predicted; reverting `send_digest_emails.py` failed the two new assertions
+exactly as predicted; both restored to `0 failure(s)`. `py_compile` clean on all four touched files.
+Regression: 8 related compliance/notify test files all re-ran clean.
+
+**Flagged, not fixed - a related, lower-severity architectural gap**: no equivalent of
+`find_documents_lapsing_before_closing()` exists for per-person professional registrations at all (not
+just missing from the digest - the underlying check doesn't exist in `watch_deadlines.py` either). A key
+person's ECSA/SACPCMP/SACNASP/SAGC registration expiring before a SPECIFIC tender's closing date is only
+caught reactively, when someone opens that tender's own compliance report in the app
+(`tenderCompliance.ts`'s `checkRegistration()`, correctly scoped to the assigned key person via
+`tender_pack_assignments`) - never proactively, by email, the way the company-document version (now)
+is. Implementing it properly needs the same `tender_pack_assignments` join the TS side already gets
+right, extended across all four person-credential fields (and arguably the `held_registrations` catalog
+too) - a genuinely new function, not a one-line wiring fix like Finding 132, and risked being rushed
+without the same careful testing the existing code has. Sarel's own call on priority: this is a real
+compliance risk (a submitted tender could be disqualified over a lapsed key-person registration nobody
+was proactively warned about) but not yet acted on.
+
+Backlog: unchanged at 18 items - Finding 132 is a contained fix, not one of Sarel's own 18 numbered
+backlog items; the flagged person-credential gap is new information worth his own judgment call, not yet
+added as a numbered item.
+
+Verify yourself: `cd engine/notify && python3 test_digest_live.py && python3 test_send_digest_emails.py`
+-> both `0 failure(s)`. Diff: `git show <this commit> -- engine/notify/daily_digest.py
+engine/notify/send_digest_emails.py` (one extracted+fixed function, one rendering branch).
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): clean sweep - intake rotation re-confirmed exhausted (classify_tender.py read end to end again; scenario_driver.py re-confirmed harness-only), no new reachable bug found
 
 Oriented from `a8fef8c` (own prior pass: CV rotation clean sweep). `git fetch`/`merge --ff-only` picked

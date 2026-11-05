@@ -221,6 +221,35 @@ def test_render_text_shows_why_a_tender_was_reassessed():
           "  - Addendum 3.pdf" in update_body and "unrelated document summary text" not in update_body)
 
 
+def test_render_text_shows_which_tender_a_document_will_have_lapsed_before():
+    print("render_text(): a document_before_closing line names WHICH tender it will have lapsed before, and when it closes")
+    # Finding 132 (2026-11-05): watch_deadlines.find_documents_lapsing_before_closing()
+    # items carry "status": "lapses_before_closing" plus "tender_label"/"closing_date" -
+    # the one fact that makes this line different from an ordinary renew-soon/expired
+    # document_expiry line (same label/expiry_date shape as every other one). Before
+    # this fix it fell through to the exact same generic rendering, so a sent digest
+    # never actually said WHICH tender was at risk or when it closes - just a document
+    # label and an expiry date that, on its own, still looks comfortably far away.
+    items = [{"type": "document_before_closing", "label": "SARS Tax Compliance Status PIN",
+              "expiry_date": "2027-01-15", "status": "lapses_before_closing",
+              "tender_label": "R.396-010-2025/1F", "closing_date": "2027-01-05"}]
+    body = sde.render_text(_digest(document_expiry=items))
+    check("the line names the specific tender it will have lapsed before",
+          "R.396-010-2025/1F" in body)
+    check("the line says the document will have lapsed, not just shows a bare label+expiry",
+          "will have lapsed before R.396-010-2025/1F closes" in body)
+    check("the tender's own closing date appears too", "2027-01-05" in body)
+
+    # An ordinary renew-soon/expired document_expiry item (no "lapses_before_closing"
+    # status) must render exactly as before - this only changes the new status's own line.
+    ordinary = [{"type": "document", "label": "COID Letter of Good Standing",
+                "expiry_date": "2026-11-10", "status": "renew_soon"}]
+    ordinary_body = sde.render_text(_digest(document_expiry=ordinary))
+    check("an ordinary renew_soon item is unaffected", "  - COID Letter of Good Standing" in ordinary_body)
+    check("no 'will have lapsed before' text leaks into an unrelated item",
+          "will have lapsed before" not in ordinary_body)
+
+
 # --- send_one(): every status path, no real network -------------------------
 
 def test_send_one_skips_cleanly_without_email_or_content():
@@ -388,6 +417,7 @@ def main():
     test_render_text_names_the_person_on_a_person_credential_item()
     test_render_text_shows_what_actually_changed_on_a_listing_change()
     test_render_text_shows_why_a_tender_was_reassessed()
+    test_render_text_shows_which_tender_a_document_will_have_lapsed_before()
     test_send_one_skips_cleanly_without_email_or_content()
     test_send_one_dry_run_never_touches_the_network()
     test_send_one_reports_sent_on_a_real_looking_success()

@@ -208,6 +208,23 @@ def render_text(digest):
                 # file's own test guarding that case).
                 if (item.get("change_type") or item.get("was_verdict")) and item.get("summary"):
                     bit = f"{bit}: {item['summary']}"
+                # Finding 132 (2026-11-05): a document_before_closing item
+                # (watch_deadlines.find_documents_lapsing_before_closing(),
+                # status "lapses_before_closing") carries the one fact that
+                # makes it a DIFFERENT warning from an ordinary renew-soon/
+                # expired line - WHICH tender it will have lapsed before,
+                # and when that tender closes. Without this, it fell through
+                # to the exact same generic "label (expiry_date)" rendering
+                # as every other document_expiry item, with no indication
+                # anywhere in the sent email of the one thing this section
+                # exists to say: that the document is still "fine" by the
+                # normal 60-day measure, but will already be expired by a
+                # specific tender's own closing day. No other section sets
+                # "tender_label" (confirmed by grep), so this only changes
+                # document_before_closing's own rendering.
+                if item.get("status") == "lapses_before_closing" and item.get("tender_label"):
+                    bit = (f"{bit} - will have lapsed before {item['tender_label']} closes "
+                           f"({item.get('closing_date') or 'closing date on file'})")
                 date = _item_date(item)
                 lines.append(f"  - {bit}" + (f" ({date})" if date else ""))
             if len(items) > 10:
