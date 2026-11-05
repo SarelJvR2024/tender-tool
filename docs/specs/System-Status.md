@@ -1,6 +1,19 @@
 # System Status
 
-## This pass (2026-11-05, standing solution-architect review): clean sweep - re-verified the claim-outside-try-block job-isolation sweep is NOW genuinely exhausted across all 7 bridge/job-processor files after `d44f7d1` found Finding 128's own sweep had missed one; `/experience` (company experience library) read end to end, genuinely clean
+## This pass (2026-11-05, standing solution-architect review): clean sweep - `transnet_etenders.py` re-tested against its real live site, genuinely clean (last dedicated live check was 2026-11-01)
+
+Oriented from `13f3f4d` (sibling pass: `eskom_bulletin.py`'s `base_reference()` missed truncated notice words at Eskom's own 20-character REFERENCE field limit, orphaning over a quarter of real notices from their tender - a genuinely significant discovery-scraper bug found by live-testing against the real site rather than only the committed fixture). `git fetch`/`merge --ff-only` confirmed clean, no collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
+
+Given `13f3f4d`'s find, checked which discovery scrapers have gone longest since their last dedicated live-site test: `sars_procurement.py`, `lephalale.py`, `vaal_central_water.py`, `capetown_procurement.py`, `kouga.py`, and `transnet_etenders.py` were all last live-tested on 2026-11-01, four calendar days stale relative to today - the same kind of gap that let DBSA's site silently re-break its own closing-time format days after an earlier fix. Picked `transnet_etenders.py` (clean on 2026-11-01, never re-checked since).
+
+Ran it live (`--no-documents`): 105 real open tenders fetched successfully, no crash. Checked the real output for the shapes this session's other live-test passes have actually found bugs in: zero null `closing_date`/`title`/`contract_number`/`buyer` across all 105 rows; zero "closing date in the past but `is_closed` still False" contradictions; all 7 real division codes present in the live data (`TNPA`/`TFR`/`TPT`/`TE`/`TPL`/`TCC`/`TP`) map cleanly through `DIVISIONS`, zero falling through to the generic `"Transnet (inst)"` fallback (which would signal an unmapped new division name); no field-length-truncation pattern in `normalize()` resembling Eskom's 20-char `REFERENCE` bug (`[:300]`/`[:50]` uses are venue-text and print-display only, not data-affecting). Genuinely clean against real current live data, not just the fixture.
+
+No code change. `test_transnet_etenders.py` doesn't exist as a separate file (this source's coverage lives elsewhere, e.g. `test_gov_sources.py`'s own shared-infra tests) - not chased further since the live-data check is itself the dispositive evidence for this kind of site-format-drift bug class.
+
+**Backlog: 19, unchanged.** `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation session-refresh gap all untouched, as directed.
+
+---
+
 
 Oriented from `d2f1692` (own prior pass). `git fetch` picked up `d44f7d1` (a sibling pass: `process_cv_jobs.py`'s `poll_once()` had the identical claim-outside-try-block gap Finding 128's own "deliberate sweep" missed) - caught and corrected a real mistake of my own mid-pass: I ran `git fetch` but not `git merge --ff-only` before my first read of `process_cv_jobs.py`, so I was looking at the stale pre-fix file and nearly reported a false negative. Merged properly, re-read the real current file, confirmed the fix is genuinely in place. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26) - no collision. Backlog cross-checked: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
 
