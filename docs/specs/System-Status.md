@@ -1,5 +1,65 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - checked `request_general_job_checked()`'s (0115) quota-vs-"already queued" interaction for a double-click regression; confirmed unchanged, pre-existing behaviour, not a new bug
+
+Oriented from `9d43a72` (own prior pass: permanent tenant-isolation coverage for the 6 newest
+`SECURITY DEFINER` RPCs). `git fetch`/`merge --ff-only` picked up `a8fef8c` (a sibling pass: CV
+rotation re-confirmed exhausted, no new reachable bug) - no collision. Open PRs re-checked: only
+`#164`/`#165` remain (both untouched since 2026-10-26). Backlog chain re-confirmed: 19 total, 3
+genuinely open.
+
+This deep into the session, almost every obvious area (billing, team/invites, onboarding, pack
+generation, CV generation, discovery scrapers, Market Intelligence, admin/impersonation,
+document-generation security, notifications/digest, SQL ownership audit, public `/tools`
+calculators, pack QA/verify code, tenant-isolation coverage) has had at least one dedicated pass.
+Read `app/app/discovery/actions.ts` end to end (thin `supabase.rpc()` wrappers around
+`SECURITY DEFINER` functions that already check membership themselves, proper `{ok}`-returning
+error handling for optimistic UI, open-redirect protection on `return_to` via regex) - genuinely
+clean, nothing to fix.
+
+Took the directive's suggested angle instead: a closer look at this session's own new `0115`
+functions beyond cross-tenant tampering (already covered by `9d43a72`'s new test section). Noticed
+`request_general_job_checked()`'s quota check runs *before* its own `on conflict do nothing` insert
+- the migration's own header comment says that clause exists so a genuine "already queued, that's
+fine" duplicate request is a silent non-error, mirroring the pre-existing unique partial index's own
+semantics. Traced a concrete scenario where that intent could be defeated: a trialing company (one
+pack total) double-clicking "Generate pack" for the SAME tender - does the second call see its own
+first job counted against the quota and raise "limit reached" instead of hitting the silent
+on-conflict path?
+
+**Reproduced directly in a disposable scratch database** (106 migrations replayed, dropped after
+use): seeded a trialing company, called `request_general_job_checked()` once for a tender (succeeds,
+job queued), called it again immediately for the SAME tender - raised
+`"You've reached your plan's bid pack limit for this period..."` instead of silently no-opping.
+Confirmed this looked like a real UX defect at first.
+
+**Then checked whether this is NEW (introduced by 0115's atomic rewrite) or pre-existing** - it's
+pre-existing, unchanged. Called `company_can_request_pack()` directly against the identical seeded
+state (the exact function the pre-0115 TypeScript called before ever reaching its own separate
+insert): it already returns `false` here too. The quota gate has never distinguished "this in-flight
+job is for the SAME tender I'm now re-requesting" from "this in-flight job is for a different one" -
+that's true of `0084`'s original in-flight-counting fix, `0096`'s trial-lapse layer, and `0115`'s
+re-merge of both; `0115` didn't introduce this interaction, it faithfully preserved behaviour that
+already existed. The `on conflict do nothing` path's real, working purpose is the different scenario
+it was actually built for - an ACTIVE company comfortably under its monthly quota hitting a genuine
+double-click race, where the quota check still passes on the second call and the unique index/
+on-conflict-do-nothing correctly prevents a duplicate row, silently. Not independently re-verified
+with its own scratch-DB reproduction this pass (already covered conceptually by `9d43a72`'s broader
+"the atomic lock pattern works as designed" verification) - the trial-cap case above was the one
+genuinely worth tracing, since it's the one where the "silent no-op" promise could plausibly fail.
+
+**No code change** - investigated a plausible-looking concern, traced it to ground, confirmed it's
+unchanged pre-existing behaviour rather than a regression this session introduced. Worth a line for
+whoever next touches billing UX (a double-click on an at-cap trial account does show a real error,
+not a silent "already queued" - whether that's the right user-facing message is a product call, not
+a bug), but not elevating it to a formal backlog item since nothing here changed behaviour or
+introduced new risk.
+
+**Backlog: 19, unchanged.** `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and
+the impersonation session-refresh gap all untouched, as directed.
+
+Docs-only this pass - no source file changed.
+
 ## This pass (2026-11-05, standing solution-architect review): re-ran the full tenant-isolation suite against the NOW-LIVE schema (106 migrations), and added permanent coverage for the 6 newest SECURITY DEFINER RPCs it never exercised
 
 Oriented from `ed18f54` (own prior pass). `git fetch`/`merge --ff-only` found nothing new - still at
