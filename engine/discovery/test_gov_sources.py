@@ -62,6 +62,21 @@ ESKOM_NOTICES = [
     ("E2778DXGOURegretLett", "E2778DXGOU - REGRET LETTER THE SUPPLY, DELIVERY AN", "regret", "E2778DXGOU"),
     # a real tender whose title contains "EXTENSION" (a building extension) - not a notice
     ("E3464CXMWPERE", "NTCSA EXECUTIVE OFFICE EXTENSION AT MEGAWATT PARK (MWP) AND", "tender", None),
+    # Real live rows, 2026-11-05 (QA pass): REFERENCE truncates at 20 characters, so a
+    # long enough glued notice word gets cut mid-word and the old REF_NOTICE_WORDS list
+    # never matched the surviving fragment - refers_to_reference ended up as the WHOLE
+    # glued string (notice word and all), which then matches no real tender's own clean
+    # reference, silently orphaning the notice from the tender it was about.
+    ("E2116DXFSOURValidit", "Validity Extension 2-Integrated Security System Technology Proposal fo",
+     "validity_extension", "E2116DXFSOUR"),  # "Validity" cut to "Validit" - missing its own last letter
+    ("E2292GXMPKRINOTIFICA", "Notification of Award to Successful and Regret to Unsuccessful Tendere",
+     "award", "E2292GXMPKRI"),  # "Notification" cut to "NOTIFICA" - a word this list never had at all
+    # "name" (singular - the list only had plural "names") fixes the same shape for a
+    # "Name of..."/"...Name" glued prefix/suffix.
+    ("NAMEOFE2818GXMPARNR", "Name of the Bidders for Provision of Air Heater Air in Leaka",
+     "bidders_list", "E2818GXMPARNR"),
+    ("BIDDERSNAME1404GXPOU", "BIDDERS NAME FOR CONTROL AND INSTRUMENTATION SITE INSTALLATI",
+     "bidders_list", "1404GXPOU"),  # "bidders" alone left "NAME" glued to the real reference behind it
 ]
 TRANSNET_ROW = {"nameOfTender": "BT1TRIMRFPWR2 Orchard", "descriptionOfTender": "TRIMMING OF VEGETATION ALONG THE RAIL RESERVE - ORCHARD", "tenderNumber": "TFR/2026/08/0004/114727/RFP", "briefingDate": "10/28/2026 11:00:00 AM", "briefingDetails": "A non-compulsory briefing session will be conducted via Microsoft Teams", "closingDate": "11/30/2026 10:00:00 AM", "publishedDate": "9/23/2026 5:08:39 PM", "tenderType": "RFP", "locationOfService": "Western Cape", "nameOfInstitution": "TFR", "tenderCategory": "Services", "tenderStatus": "Open", "rowKey": "114727"}
 CAPETOWN_RFQ_HTML = """<table><tr><th>Reference Number</th><th>Title</th><th>Category</th><th>Closing Date</th><th>Closing Date Sortable</th><th>Posted Date</th><th>Posted Date Sortable</th><th></th></tr>

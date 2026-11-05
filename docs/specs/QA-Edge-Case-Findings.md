@@ -7627,3 +7627,61 @@ exhausted.
 **Regression:** `engine/cv/process_cv_jobs.py` (`poll_once()`, ~15 lines including comment);
 `engine/cv/test_process_cv_jobs.py` (1 new test function). No change to `process_job()`'s own exception
 handling, `claim_job()`'s own call shape, or `fail_stale_jobs()`.
+
+### Finding 135 (CONFIRMED, FIXED, severe - Eskom's own REFERENCE field truncates at 20 characters, cutting a glued notice word mid-word on a real, live bulletin entry; the old word list never matched the surviving fragment, so `refers_to_reference` for over a quarter of all real notice entries checked could never match any real tender, silently orphaning the notice)
+
+**Area:** discovery (`engine/discovery/eskom_bulletin.py` - Eskom's own Tender Bulletin reader, zero
+mentions in this file and zero dedicated test coverage before this pass beyond the shared
+`test_gov_sources.py` fixture).
+
+**Scenario:** `base_reference()` recovers the real tender a notice entry (cancellation, award, regret,
+validity extension, bidders list, ...) refers to, by stripping Eskom's own glued notice word off its
+`REFERENCE` field (e.g. `"E3484CXMWPList of bidders"` -> `"E3484CXMWP"`). `tender_changes.py` then uses
+that recovered reference to attach the notice, as a change event, onto the REAL tender a customer is
+already seeing - the whole point of reading this notice at all.
+
+Fetched the real, live bulletin (322 entries, 2026-11-05) to check this against actual production data,
+not a constructed scenario. Confirmed: Eskom's `REFERENCE` field truncates at exactly 20 characters - so
+when a notice word glued onto a long enough base reference would push the combined string past that
+limit, the notice word itself gets CUT MID-WORD:
+
+```
+'E2116DXFSOURValidit'    - "Validity" missing its own final letter
+'E2292GXMPKRINOTIFICA'   - "Notification" cut to 8 letters ("NOTIFICA") - a word this list never had at all
+'NAMEOFE2818GXMPARNR'    - the list only had plural "names", not singular "name"
+'BIDDERSNAME1404GXPOU'   - "bidders" alone stripped, leaving "NAME" glued to the real reference behind it
+```
+
+None of these matched any word already in `REF_NOTICE_WORDS`, so `base_reference()` fell through to
+returning the WHOLE original string unchanged - still carrying the notice word - which then matches no
+real tender's own clean reference. Scanning all 139 real notice entries in the live fetch: **38 of them**
+(over a quarter) came back with a `refers_to_reference` that could never match anything, silently
+orphaning the notice - the cancellation/award/validity-extension event gets computed but never reaches
+the tender it was actually about, exactly the "silently wrong data" risk this whole module exists to
+avoid.
+
+**Fix:** added `"validit"` (after the existing full `"validity"` - Python's `re` module tries
+alternatives left to right and stops at the FIRST match, not the longest, so order matters: the longer
+word must be tried first or the shorter one wins and leaves a trailing character glued to what
+follows), `"notifica"` (new - `"notification"` was never in the list), and `"nameof"`/`"name"` (the list
+only had plural `"names"`; `"nameof"` must precede the shorter `"name"` for the same left-to-right
+reason). Confirmed by re-fetching the live bulletin after the fix: 38 of the 41 originally-broken cases
+now resolve correctly. The remaining 3 (`REGRETLETTERA`, `CANCELLATIONTLETTER`, `CancellationLetter`)
+have ZERO digits in their own `REFERENCE` field at all - the real tender reference exists only inside
+`HEADER_DESC` text (e.g. `"CANCELLATION-E2126DXKZN-The establishment..."`) - genuinely unfixable from
+`base_reference(ref)` alone, since it only ever receives the reference string, never the header. Left
+as a known, smaller, separate gap (would need `HEADER_DESC` parsing, a bigger scope change) rather than
+widening this fix to chase it.
+
+**Verified red-then-green.** Four new rows added to `test_gov_sources.py`'s own `ESKOM_NOTICES` fixture
+(already used by `test_eskom()`), using the exact real `REFERENCE`/`HEADER_DESC` pairs confirmed from
+the live bulletin - asserting both the correct `classify()` kind and the correct recovered
+`base_reference()`. Revert-and-confirm-red on the production file alone: all four new checks failed
+exactly as predicted (`refers to E2116DXFSOUR`, `refers to E2292GXMPKRI`, `refers to E2818GXMPARNR`,
+`refers to 1404GXPOU`); restored: `ALL PASSED`. `py_compile` clean on both touched files. Regression:
+`test_tender_updates.py` and `test_download_discovered_documents.py` both re-ran clean.
+
+**Regression:** `engine/discovery/eskom_bulletin.py` (`REF_NOTICE_WORDS`, 4 words added/reordered, ~20
+lines including comments); `engine/discovery/test_gov_sources.py` (4 new fixture rows in
+`ESKOM_NOTICES`). No change to `classify()`'s own pattern matching, `normalize()`, or any other
+notice-word list's ordering.

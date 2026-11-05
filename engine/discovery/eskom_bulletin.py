@@ -79,12 +79,37 @@ NOTICE_PATTERNS = [
     ("addendum", re.compile(r"addend|amendment|clarification", re.I)),
 ]
 # Notice words Eskom glues onto (or in front of) the original reference,
-# longest first, removed as plain substrings ("CANCELLAE3122GXGPLET",
-# "AWARDE1535GXGPLETR", "E3386CXMWPBIDDERSLIS", "E2778DXGOURegretLett").
+# LONGEST FIRST (Python's re tries alternatives left to right and stops at the
+# first one that matches - NOT longest-match - so a shorter alternative listed
+# before a longer one that also fits here would win and leave the rest of the
+# longer word glued to whatever follows), removed as plain substrings
+# ("CANCELLAE3122GXGPLET", "AWARDE1535GXGPLETR", "E3386CXMWPBIDDERSLIS",
+# "E2778DXGOURegretLett").
+#
+# "nameof"/"name"/"validit"/"notifica" added 2026-11-05 (QA pass) after
+# checking against the real, live bulletin: the REFERENCE field truncates at
+# 20 characters, so a long enough glued suffix is cut mid-word
+# ("E2116DXFSOURValidit" - "Validity" missing its last letter;
+# "E2292GXMPKRINOTIFICA" - "Notification" cut to 8 letters, a notice word this
+# list never had at all) and the old word list simply never matched the
+# surviving fragment, leaving the whole glued string - including the notice
+# word - as `refers_to_reference`, which then matches NO real tender's own
+# clean reference. tender_changes.py's one job is to attach a notice to the
+# tender it refers to; a `refers_to_reference` that can never match anything
+# silently orphans the notice - the cancellation/award/notification event is
+# computed but never reaches the tender it was actually about. "nameof"/
+# "name" (the list only had plural "names") fix the same shape for
+# "NAMEOFE2818GXMPARNR" and "BIDDERSNAME1404GXPOU" (the latter: "bidders"
+# alone stripped the first word but left "NAME" glued to the real reference
+# behind it) - "nameof" must come before the shorter "name" (see ordering
+# note above) so "NAMEOF..." doesn't match "name" alone and leave "OF" glued
+# to the front of what's left. "validit" is listed AFTER the full "validity"
+# for the same reason - it only ever fires when Eskom's own 20-char cap has
+# already cut the trailing "y" off, and must never pre-empt the full word.
 REF_NOTICE_WORDS = re.compile("|".join([
     "cancellation", "cancellatio", "cancella", "cancel", "bidderslist", "bidders", "bidder", "list",
-    "regretlett", "regret", "validity", "award", "publication", "publish", "extension", "names",
-    "updated", "update"]), re.I)
+    "regretlett", "regret", "validity", "validit", "award", "publication", "publish", "extension",
+    "names", "nameof", "name", "notifica", "updated", "update"]), re.I)
 
 
 def classify(entry):

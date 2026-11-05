@@ -2935,6 +2935,57 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): fix - Eskom's own REFERENCE field truncates at 20 characters, cutting a glued notice word mid-word on real live bulletin entries; over a quarter of all real notices checked had a `refers_to_reference` that could never match any real tender
+
+Oriented from `d44f7d1` (own prior pass: Finding 134, process_cv_jobs.py). `git fetch`/`merge --ff-only`
+found one new sibling commit (`46f96ac` - re-verified my own Finding 134 fix closes the claim-outside-
+try-block bug class across all 7 files, plus an `/experience` read; no overlap). Fast-forwarded cleanly.
+Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision. Re-checked
+again immediately before this push - still clean.
+
+Rotated back to discovery (worker/job-queue was last, completing the full rotation once). Checked
+findings-doc mention counts across every `engine/discovery/*.py` file; `eskom_bulletin.py` had zero
+mentions. Read it in full (191 lines) and, since this is a live-scraped buyer feed with real network
+access available in this environment, fetched the REAL live bulletin (322 entries) to check adversarial
+cases against actual production data rather than constructed scenarios - this session's own standing
+discipline (confirm against real data, as the intake/classify_tender.py rotation did last time with the
+combined-SANRAL-forms hypothesis that got correctly ruled out for lack of evidence).
+
+**Found and fixed Finding 135 (CONFIRMED, severe)**: `base_reference()` strips a glued notice word off a
+notice entry's `REFERENCE` field so `tender_changes.py` can attach the notice to the real tender it's
+about. Confirmed live: Eskom's `REFERENCE` field truncates at exactly 20 characters, so a glued notice
+word that would push the combined string past that limit gets cut MID-WORD ("Validity" -> "Validit",
+missing its own last letter; "Notification" -> "NOTIFICA", a word the list never had at all; plus the
+list only ever had plural "names", never singular "name"). None of these truncated/missing fragments
+matched the existing word list, so `base_reference()` fell through to returning the whole original
+string - notice word and all - which then matches no real tender. Scanned all 139 real live notice
+entries: **38 of them (over a quarter)** had a `refers_to_reference` that could never match anything,
+silently orphaning the notice from the tender it was actually about.
+
+**Fix:** added `"validit"` (ordered AFTER the full `"validity"` - Python's `re` tries alternatives left
+to right and stops at the first match, not the longest, so order matters here), `"notifica"` (new), and
+`"nameof"`/`"name"` (`"nameof"` before the shorter `"name"`, same ordering reason) to
+`REF_NOTICE_WORDS`. Re-fetched the live bulletin after the fix: 38 of the 41 originally-broken cases now
+resolve correctly. The remaining 3 have ZERO digits in their `REFERENCE` field at all (the real tender
+reference lives only in `HEADER_DESC` text) - genuinely unfixable from `base_reference(ref)` alone since
+it never receives the header; flagged as a smaller, separate, known gap rather than widening this fix to
+chase it.
+
+**Verified red-then-green.** Four new rows added to `test_gov_sources.py`'s own `ESKOM_NOTICES` fixture,
+using the exact real `REFERENCE`/`HEADER_DESC` pairs from the live bulletin. Reverted the production
+file alone: all four new checks failed exactly as predicted; restored: `ALL PASSED`. `py_compile` clean
+on both files. Regression: `test_tender_updates.py`/`test_download_discovered_documents.py` both re-ran
+clean.
+
+Backlog: unchanged at 18 items - a contained data-quality fix, not one of Sarel's own 18 numbered
+backlog items.
+
+Verify yourself: `cd engine/discovery && python3 test_gov_sources.py` -> `ALL PASSED`. Diff: `git show
+<this commit> -- engine/discovery/eskom_bulletin.py` (4 words added/reordered in `REF_NOTICE_WORDS`,
+~20 lines including comments).
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): fix - Finding 128's own "deliberate sweep" of the claim-outside-try-block bug class missed a fifth bridge, `process_cv_jobs.py` (CV document GENERATION, distinct from extract_cv_fields.py's extraction bridge)
 
 Oriented from `4ec1338` (own prior pass: Finding 133, send_pack_ready_email.py). `git fetch`/
