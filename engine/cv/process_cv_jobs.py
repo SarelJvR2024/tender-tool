@@ -431,8 +431,26 @@ def poll_once(url, key, out_dir, quiet_when_empty=False):
         print("No pending generated_cvs jobs.")
     handled = 0
     for job in jobs:
-        if process_job(url, key, job, out_dir):
-            handled += 1
+        # process_job()'s own claim (claim_job()) sits BEFORE its try block, and
+        # process_job() itself never re-raises (its own blanket except Exception
+        # always marks the job failed and returns True) - so the only way a job
+        # here could still raise is that claim call itself (a network blip, a
+        # 500). Before this fix, that propagated straight out of this loop,
+        # aborting the whole pass: every OTHER pending CV job was skipped that
+        # cycle too, not just the one whose claim failed - same bug class as
+        # Finding 123 (run_bridges.py), Finding 126 (extract_cv_fields.py) and
+        # Finding 128's own sweep across process_pack_jobs.py/
+        # process_general_jobs.py/process_narrative_jobs.py/
+        # process_onboarding_jobs.py - missed for THIS bridge at the time.
+        # QA pass, 2026-11-05.
+        try:
+            if process_job(url, key, job, out_dir):
+                handled += 1
+        except Exception as e:
+            system_alerts.record("cv", f"Could not even attempt generated_cvs job {job['id']}: "
+                                 f"{type(e).__name__}: {e}", "error", exc=e,
+                                 context={"job_id": job.get("id"), "company_id": job.get("company_id"),
+                                          "person_id": job.get("person_id")})
     return handled
 
 

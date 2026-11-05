@@ -7584,3 +7584,46 @@ file alone: failed exactly as predicted (`sent_to == ['a@example.com']`, recipie
 loop, ~20 lines including comments); `engine/notify/test_send_pack_ready_email.py` (1 new test function,
 wired into `main()`). No change to `claim_notification()`'s own timing, the missing-API-key check, or
 `_send_via_resend()`'s own failure handling.
+
+### Finding 134 (CONFIRMED, FIXED, severe - the "claim call sits outside its own try block, no per-item isolation in the polling loop" bug class, Finding 128's own "deliberate sweep", missed `process_cv_jobs.py` - the one real CV-document-GENERATION bridge - at the time)
+
+**Area:** worker/job-queue (`engine/cv/process_cv_jobs.py` - CV document generation, distinct from
+`extract_cv_fields.py`'s own CV-field-EXTRACTION bridge, which Finding 126 already fixed for this exact
+shape).
+
+**Scenario:** Finding 128 (2026-11-04) explicitly declared this bug class "exhausted" after sweeping
+every remaining `process_*_jobs.py` bridge: `process_pack_jobs.py`, `process_general_jobs.py`,
+`process_narrative_jobs.py`, `process_onboarding_jobs.py`. `process_cv_jobs.py` - a fifth, distinct
+bridge in the same family (`generated_cvs` jobs, polled by `poll_once()`, each one claimed by
+`claim_job()` before `process_job()`'s own try block) - was never included in that sweep's file list,
+and turned out to have the identical shape: `claim_job()` sits BEFORE `process_job()`'s own `try:`, and
+`poll_once()`'s own `for job in jobs: if process_job(...): handled += 1` has no try/except around the
+call either. `process_job()` itself never re-raises (its blanket `except Exception` always marks the
+job failed and returns `True`) - so the only way a job here could still raise is `claim_job()`'s own
+`supabase_request()` call (a network blip, a 500). Before this fix, that propagated straight out of
+`poll_once()`'s loop, aborting the whole pass: a second, genuinely pending CV generation job was never
+even attempted that cycle, not just the one whose claim failed.
+
+Confirmed live: two queued `generated_cvs` jobs, `claim_job()` made to raise for the first -
+`poll_once()` crashed with an uncaught `RuntimeError` before ever reaching the second job's own claim
+attempt.
+
+**Fix:** wrapped the per-item `process_job(...)` call in `poll_once()`'s own loop in `try/except`,
+alerting under the bridge's existing `system_alerts` source (`"cv"`) and continuing to the next job -
+identical pattern to Findings 123/126/128.
+
+**Verified red-then-green.** New test
+`test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()` in
+`engine/cv/test_process_cv_jobs.py`, monkeypatching the real `supabase_request`/`fetch_job_context` to
+make the first of two queued jobs' claim raise while the second succeeds - confirms the second job is
+still attempted (and its own, separate in-`process_job()` failure is handled normally) and the claim
+failure gets its own alert. Revert-and-confirm-red on the production file alone: reproduced the exact
+predicted uncaught `RuntimeError` at the claim call site; restored, `0 failure(s)` across the whole
+file. `py_compile` clean on both touched files. Full regression sweep across every bridge touched this
+session (`run_bridges.py`/`test_poll_loop.py`, `extract_cv_fields.py`/`test_extract_cv_fields.py`, and
+all four of Finding 128's own fixes) - all clean, this bridge is now the last one of six, genuinely
+exhausted.
+
+**Regression:** `engine/cv/process_cv_jobs.py` (`poll_once()`, ~15 lines including comment);
+`engine/cv/test_process_cv_jobs.py` (1 new test function). No change to `process_job()`'s own exception
+handling, `claim_job()`'s own call shape, or `fail_stale_jobs()`.

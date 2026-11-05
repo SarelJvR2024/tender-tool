@@ -162,10 +162,53 @@ def test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through():
           person["qualifications"].get("sacpcmp_expiry") == "2027-09-30", person["qualifications"])
 
 
+def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
+    print("poll_once(): a crash on one job's own claim does not skip every OTHER pending job")
+    # Finding 134 (2026-11-05): process_job()'s own claim (claim_job()) sits
+    # BEFORE its try block, and process_job() itself never re-raises (its own
+    # blanket except Exception always marks the job failed and returns True) -
+    # so the only way a job could still raise here is that claim call itself
+    # (a network blip, a 500). Before this fix, that propagated straight out
+    # of poll_once()'s own for loop, aborting the whole pass: every OTHER
+    # pending CV job was skipped that cycle too, not just the one whose claim
+    # failed - same bug class as Finding 123 (run_bridges.py), Finding 126
+    # (extract_cv_fields.py) and Finding 128's own sweep (pack/general/
+    # narrative/onboarding) - missed for THIS bridge at the time.
+    jobs = [{"id": "job-flaky", "format": "sanral_keyperson", "detail": "full", "company_id": "c1", "person_id": "p1"},
+            {"id": "job-ok", "format": "sanral_keyperson", "detail": "full", "company_id": "c1", "person_id": "p2"}]
+
+    def flaky_request(url, key, method, path, body=None):
+        if method == "GET" and path.startswith("generated_cvs?status=eq.requested"):
+            return list(jobs)
+        if method == "GET" and path.startswith("generated_cvs?status=eq.generating"):
+            return []
+        if method == "PATCH" and "id=eq.job-flaky" in path and "status=eq.requested" in path:
+            raise RuntimeError("simulated transient Supabase failure while claiming job-flaky")
+        if method == "PATCH" and "id=eq.job-ok" in path and "status=eq.requested" in path:
+            return [{"id": "job-ok"}]
+        return []
+
+    original_request, original_fetch = pcj.supabase_request, pcj.fetch_job_context
+    pcj.supabase_request = flaky_request
+    pcj.fetch_job_context = lambda url, key, job: (_ for _ in ()).throw(RuntimeError("stop before real work"))
+    alerts = []
+    original_record = pcj.system_alerts.record
+    pcj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        n = pcj.poll_once("u", "k", "/tmp/test_poll_once_work_root")
+    finally:
+        pcj.supabase_request, pcj.fetch_job_context = original_request, original_fetch
+        pcj.system_alerts.record = original_record
+    check("poll_once() returns the count of jobs it actually handled, no crash", n == 1, n)
+    check("the failing job's own claim failure is reported as its own alert, not silently lost",
+          any(a[0][0] == "cv" and a[0][2] == "error" and "job-flaky" in a[0][1] for a in alerts), alerts)
+
+
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
 test_adapt_person_row_carries_sacpcmp_date_through()
 test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()
+test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 
 print(f"\n{len(FAILS)} failure(s)")
 if FAILS:

@@ -2915,6 +2915,50 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): fix - Finding 128's own "deliberate sweep" of the claim-outside-try-block bug class missed a fifth bridge, `process_cv_jobs.py` (CV document GENERATION, distinct from extract_cv_fields.py's extraction bridge)
+
+Oriented from `4ec1338` (own prior pass: Finding 133, send_pack_ready_email.py). `git fetch`/
+`merge --ff-only` found two new sibling commits (`83077a5` - checked this exact bug class across every
+notification sender after my own Finding 133, confirmed closed, plus a password-reset flow read;
+`d2f1692` - `/analytics`/`/market-intelligence` read end to end, clean; no overlap with `engine/`).
+Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no
+collision. Re-checked again immediately before this push - still clean.
+
+Rotated to worker/job-queue (notify was last). This bug class was declared "exhausted" after Finding
+128's sweep of `process_pack_jobs.py`/`process_general_jobs.py`/`process_narrative_jobs.py`/
+`process_onboarding_jobs.py` - but that sweep's own file list never included `process_cv_jobs.py` (CV
+document GENERATION, a fifth, distinct `process_*_jobs.py` bridge in the same family - not
+`extract_cv_fields.py`'s CV-field-EXTRACTION bridge, which Finding 126 already covered). Read it fresh
+and found the identical shape.
+
+**Found and fixed Finding 134 (CONFIRMED, severe)**: `claim_job()` sits before `process_job()`'s own try
+block, and `poll_once()`'s own `for job in jobs: if process_job(...): ...` has no try/except around the
+call - so a transient claim failure (network blip, 500) on one job propagated straight out of the whole
+polling pass, silently skipping every OTHER genuinely pending CV generation job that cycle too.
+Confirmed live: two queued jobs, the first one's claim made to raise - `poll_once()` crashed with an
+uncaught `RuntimeError` before the second job was ever even attempted.
+
+**Fix:** identical pattern to Findings 123/126/128 - wrapped the per-item `process_job(...)` call in
+`poll_once()`'s own loop in `try/except`, alerting under the `"cv"` system_alerts source and continuing
+to the next job.
+
+**Verified red-then-green.** New test in `engine/cv/test_process_cv_jobs.py`, monkeypatching
+`supabase_request`/`fetch_job_context` so the first of two queued jobs' claim raises while the second
+succeeds - confirms the second job is still attempted. Reverted the production file alone: reproduced
+the exact predicted uncaught `RuntimeError`; restored: `0 failure(s)`. `py_compile` clean on both
+files. Full regression across every bridge touched this session (6 files/test suites) - all clean.
+This bug class is now genuinely exhausted across all FIVE `process_*_jobs.py` bridges plus
+`run_bridges.py` and `extract_cv_fields.py` - six files total.
+
+Backlog: unchanged at 18 items - a contained per-item isolation fix, not one of Sarel's own 18 numbered
+backlog items.
+
+Verify yourself: `cd engine/cv && python3 test_process_cv_jobs.py` -> `0 failure(s)`. Diff: `git show
+<this commit> -- engine/cv/process_cv_jobs.py` (one `try/except` added inside `poll_once()`'s loop, ~15
+lines including comment).
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): fix - a transient failure recording ONE recipient's pack-ready email permanently lost the email for every OTHER recipient too, on a one-shot notification with no second chance
 
 Oriented from `390532e` (own prior pass: Finding 132, daily_digest.py's missing live-mode call).
