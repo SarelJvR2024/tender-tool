@@ -1,5 +1,59 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - the two files that actually CONSUME `dispatchTriage.ts`'s output (`dispatchDashboard.ts`, `components/tt/command-center.tsx`) checked end to end for a second instance of the digital-submission fallback gap just fixed upstream; none found, and the earlier fix was confirmed to actually reach the live dashboard
+
+Oriented from `4bfac8c` (own prior pass: `operationalStatusMessage()`'s digital-submission fallback).
+`git fetch`/`merge --ff-only` found nothing new - still at `4bfac8c`. Open PRs re-checked: only
+`#164`/`#165` remain (both untouched since 2026-10-26), no collision. Backlog chain re-confirmed: 19
+total, 3 genuinely open.
+
+Took the directive's suggested angle: a deeper pass on the submission-logistics/Tender Command Center
+area rather than a brand-new corner, since the prior pass found a real bug there. `dispatchTriage.ts`
+itself (the pure-logic module) has no third function with the same gap -
+`printSignDeadline()`/`departureDeadline()`/`hoursUntilPrintSignDeadline()` are legitimately
+physical-only concepts (null for a digital submission is correct, not a bug); both real callers
+(`classifyDispatchBucket()`, `operationalStatusMessage()`) already handle the digital fallback
+themselves after the last fix.
+
+**Found the real consumers were never checked**: grepped for every call site of
+`classifyDispatchBucket`/`operationalStatusMessage` across `app/app/` - only `operationalStatusMessage`
+is called directly, from `tenders/[id]/page.tsx` (already covered). `classifyDispatchBucket` and
+`deriveDecisionNeeded` are called from a THIRD file never examined this session: `lib/dispatchDashboard.ts`
+(`loadDispatchCards()`, the dashboard's own server-side data loader), which in turn feeds
+`components/tt/command-center.tsx`'s four lane components, wired into the live dashboard
+(`app/app/dashboard/page.tsx:250`, confirmed by reading the real call site, not assumed).
+
+**Checked both end to end for the identical bug shape** (a UI reading a `printDeadline`/urgency value
+that's null for digital submissions, without the same fallback `classifyDispatchBucket()`/
+`operationalStatusMessage()` already have): genuinely clean.
+- `CriticalDispatchBanner`'s own sort-by-urgency already has an explicit, commented fallback to
+  `daysUntil(closingDate)` for a digital submission (predates this session, written correctly from the
+  start), and its message line calls `operationalStatusMessage()` directly - so the fix from the prior
+  pass flows straight through to the live Critical banner, confirmed by reading the call site rather
+  than assumed.
+- `UrgentActionsLane` reads `card.printDeadline` (null for digital) but correctly guards it
+  (`{deadlineText &amp;&amp; (...)}`) - a digital-submission card simply omits the "Print &amp; bind cutoff" line
+  while the real "Tender box deadline" (`closingDate`) is still always shown. This is correct behaviour
+  for a submission type with no print step, not the same bug - checked, not assumed.
+- `NeedsDecisionLane`/`RadarSection`/`DispatchLane` don't touch `printDeadline` or recompute urgency at
+  all; they read `bucket`/`decisionNeeded` as already-classified fields.
+
+**One honest, non-blocking observation** (not elevated to a backlog item): `DispatchLane`'s own filter
+(`c.dispatchStatus !== "not_ready" || c.submissionType === "physical_box"`) shows every `physical_box`
+tender unconditionally, even one whose dispatch hasn't started - but the lane's own `EmptyState` copy
+says "Once a pack is ready to print, it shows up here," which reads as stronger than what the code
+actually does. Plausibly deliberate (so a compiler can set courier/delivery details ahead of the print
+step), but worth a glance if anyone's ever confused why a not-yet-ready physical tender appears here.
+
+**No code change** - the earlier fix was the real bug in this area; this pass confirms it actually
+reaches the live dashboard and that no second instance exists in the two consuming files. `tsc --noEmit`
+clean (no files touched, ambient check only).
+
+**Backlog: 19, unchanged.** `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and
+the impersonation session-refresh gap all untouched, as directed.
+
+Docs-only this pass - no source file changed.
+
 ## This pass (2026-11-05, standing solution-architect review): fixed - `dispatchTriage.ts`'s `operationalStatusMessage()` stayed silent on a digital submission `classifyDispatchBucket()` already classified "critical", because only the physical-box path computed an urgency deadline
 
 Oriented from `8ba8a2b` (own prior pass: the double-click quota investigation). `git fetch`/
