@@ -1,5 +1,59 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - the per-recipient "one failure kills every subsequent send" isolation bug class checked across every notification/digest-send loop; the password-reset flow (forgot-password → auth/callback → reset-password) read end to end; both genuinely clean, no code change
+
+Oriented from `ff5c856` (own prior pass: `daily_digest.py` live-mode gap re-check,
+`/sanral-schedules` RLS verification). `git fetch`/`merge --ff-only` picked up `4ec1338` (a sibling
+pass: `send_pack_ready_email.py`'s `record_notification_sent()` call had no per-recipient guard, so a
+transient failure on it for the first recipient lost the send for every recipient after them) - no
+collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog
+chain re-confirmed: 19 total, 3 genuinely open.
+
+**Checked the directive's suggested angle first**: whether that same "one item's transient failure
+aborts every remaining item in the loop" shape recurs in any other notification/digest-send loop.
+Checked every file in `engine/notify/` plus every caller of `app/lib/notificationEngine.ts`'s
+`sendNotification()`:
+- `send_digest_emails.py`'s per-digest loop in `main()` - already guarded (own `try`/`except` per
+  digest, dated "Enterprise-readiness audit round 2, 2026-10-20" in its own comment - a prior fix for
+  the identical bug class).
+- `daily_digest.py`'s per-roster-entry loop (`for p in roster`) - already guarded, same 2026-10-20
+  audit comment.
+- `app/lib/notificationEngine.ts`'s `sendNotification()` itself - read the full function body: every
+  `supabase.rpc()` call and `sendTransactionalEmail()` call is explicitly `error`-checked, with zero
+  `throw` statements anywhere in the function (confirmed by reading `resendEmail.ts` too - its own
+  header comment states it "returns without sending or throwing" on purpose). This function cannot
+  propagate an exception to a caller's loop, by construction, regardless of whether the caller wraps
+  each call in its own `try`/`except`.
+- Its real per-recipient-loop callers - `send-onboarding-nudges.ts`'s `sendToRecipients()`,
+  `send-scout-alerts.ts`'s two claim/send loops, `send-founder-digest.ts` - every RPC call inside each
+  loop is already `error`-checked the same way, never left to throw.
+
+Genuinely exhausted: the exact bug class `4ec1338` just fixed had already been closed twice before
+(2026-10-20) in the two other Python batch-senders, and the shared TypeScript entrypoint was built
+safe from the start. No second instance found.
+
+**Picked a fresh area**: grepped `System-Status.md`'s own history for mention-count across every
+`app/app/` route to find a genuinely light corner that's also security-relevant - the password-reset
+flow (`/forgot-password`, `/reset-password`, `app/auth/callback/route.ts`) had essentially no prior
+dedicated mentions. Read all three end to end.
+
+**Genuinely clean**: `forgot-password/page.tsx` correctly shows the same "check your email" message
+regardless of whether the address is actually registered (no account-enumeration leak), uses
+`window.location.origin` for the redirect target rather than a hardcoded value, and validates the
+email client-side. `reset-password/page.tsx` correctly relies on `auth/callback` having already
+exchanged the recovery code for a session, and degrades to a clean "link expired" message (with a
+re-request link) rather than crashing if `updateUser()` is called with no valid session. `auth/callback
+/route.ts` already validates its own `next` redirect target via `safeRedirectPath()` - its own header
+comment documents this was already fixed in a 2026-10-23 QA pass (the classic "redirect sink trusting
+only an upstream caller's filter" gap already closed here).
+
+**No code change** - both investigations came back clean.
+
+**Backlog: 19, unchanged.** `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and
+the impersonation session-refresh gap all untouched, as directed.
+
+Docs-only this pass - no source file changed.
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - `daily_digest.py`'s live mode checked for a second missing `find_*()` call beyond the one just fixed; none found. `/sanral-schedules` (a genuinely light-mention corner) read end to end and its two unscoped-looking Supabase queries confirmed tenant-safe via real RLS policies, not assumed
 
 Oriented from `cfad2f9` (own prior pass: `dispatchDashboard.ts`/`command-center.tsx` checked for a
