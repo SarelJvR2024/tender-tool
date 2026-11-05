@@ -2692,6 +2692,50 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): clean sweep - intake rotation re-confirmed exhausted (classify_tender.py read end to end again; scenario_driver.py re-confirmed harness-only), no new reachable bug found
+
+Oriented from `a8fef8c` (own prior pass: CV rotation clean sweep). `git fetch`/`merge --ff-only` picked
+up `8ba8a2b` (a sibling pass: investigated a plausible double-click regression, confirmed pre-existing -
+docs-only, no overlap with `engine/intake/`). Fast-forwarded cleanly. Open PRs re-checked via the GitHub
+API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to intake (CV was last). `engine/intake/` holds exactly two files: `classify_tender.py` (45
+mentions in the findings doc - the real production intake engine, run by `extract_requirements` jobs)
+and `scenario_driver.py` (1 mention - a local dev scenario-test driver against a scratch Postgres, no
+CI wiring, already confirmed harness-only by an earlier pass, 2026-11-02). Read `classify_tender.py` in
+full (542 lines, every function) looking for a fresh angle rather than re-confirming settled ground.
+Three specific leads were traced to a concrete conclusion, not just skimmed past:
+
+- `classify_documents()`'s per-document SANRAL-form matching (`SANRAL_DOCX`, `for doc_type, pat in
+  SANRAL_DOCX: if pat.search(head): ...; break`) treats doc_type assignment as mutually exclusive per
+  physical file - a single .docx combining C.1.1.1 Form of Offer AND C.1.2.3 Contract Data text would
+  only ever register under the first matching doc_type, silently reporting the other as "not found"
+  even though it was present. Checked whether this is a real shape: every one of the 6 real sample
+  contracts in `templates/forms/` (`R.334-030`, `R.343-020`, `R.352-020`, `R.352-030`, `R.394-010`,
+  `R.396-010`) ships these as three SEPARATE .docx files (`A_Forms.docx`, `C.1.1.1_Form_of_Offer.docx`,
+  `C.1.2.3_Contract_Data.docx`), with zero exceptions - no evidence anywhere in this repo's own real
+  samples of SANRAL (or a bidder) ever combining them into one file. Per this codebase's own standing
+  discipline of confirming a scenario against real files before fixing it (not fabricating a theoretical
+  one), this is NOT a finding - no evidence it's a real shape.
+- `find_closing_time()`'s AM/PM conversion (fixed 2026-11-02) and `find_nra_reference()`/
+  `find_delivery_address()`'s ambiguity-surfacing (2026-10-23/24) were re-read end to end - both remain
+  correct, no new gap found in either.
+- `check_fingerprint()`'s three-way asymmetric-guard handling (build failure / missing baseline /
+  corrupted baseline file) and `classify_documents()`'s tie-break-vs-reporting consistency (`winners[doc_type]`
+  used everywhere a prior QA pass's own fix requires, never the pre-tie-break `tech[0]`) were both
+  re-verified correct by direct reading, not reflexively trusted.
+
+`scenario_driver.py` re-read in full (158 lines) to re-confirm the harness-only conclusion still holds:
+no CI workflow references it (`grep -rl scenario_driver .github/workflows/` - empty), and it requires a
+scratch Postgres via `INTAKE_PSQL`, never run against production data.
+
+No code changed this pass - genuinely clean, not a skipped lead. QA: no suite re-run needed (nothing
+touched); PR/collision checks as above.
+
+Backlog: unchanged at 18 items.
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): clean sweep - CV rotation re-confirmed exhausted (extract_cv_fields.py/generate_cv.py/process_cv_jobs.py), no new reachable bug found
 
 Oriented from `f3898f8` (own prior pass: Finding 131, fill_flat_pdf.py/pdf_merge.py). `git fetch`/
