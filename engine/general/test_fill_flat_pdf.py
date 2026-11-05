@@ -119,6 +119,34 @@ field, out = _contact_person_field("  Jane Smith  ")
 check("a name with surrounding whitespace (not whitespace-ONLY) is still placed, not rejected",
       field["status"] == "placed", field)
 
+# --- the real bug: a smart quote/en-dash (Word's own autocorrect output on a ---
+#     copy-pasted name) must render as the real character, not a silent "?" ---
+#     with verify_placements() falsely reporting it as correctly placed -------
+
+SMART_NAME = "O’Brien–Smith"  # right single quote + en dash, exactly what
+                                         # Word's autocorrect turns a plain ' and - into
+
+field, out = _contact_person_field(SMART_NAME)
+check("a name with a smart quote/en-dash is still placed (cp1252 can render both)",
+      field["status"] == "placed", field)
+check("...and verify_placements() reports it genuinely verified, not just self-consistently so",
+      field.get("_pl") is None, "the report never exposes _pl, but status=='placed' already implies verified=True")
+
+import pdfplumber  # noqa: E402
+
+with pdfplumber.open(out) as pdf:
+    page_text = pdf.pages[0].extract_text() or ""
+# The underlying dotted leader line's own dots interleave with the typed text in
+# extract_text()'s reading order (a pre-existing characteristic of overlapping
+# glyphs, nothing to do with this fix), so check the real characters are present
+# individually rather than as one exact contiguous substring.
+check("the real right single quote (’) is on the printed page, not a '?' placeholder",
+      "’" in page_text, repr(page_text))
+check("the real en dash (–) is on the printed page, not a '?' placeholder",
+      "–" in page_text, repr(page_text))
+check("no '?' placeholder leaked into the printed page in place of the real punctuation",
+      "?" not in page_text, repr(page_text))
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)

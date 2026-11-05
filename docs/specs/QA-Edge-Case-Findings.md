@@ -7397,3 +7397,73 @@ contracts) and `pack/test_assemble_pack.py` both re-ran clean, unaffected.
 **Regression:** `engine/fill_financial.py` (`main()`, ~15 lines including comments); new file
 `engine/test_fill_financial.py` (4 tests). No change to `row_for_position()`, the SANRAL-confirmed row
 mapping, or `assemble_pack.py`'s own existing `except ValueError` handling.
+
+### Finding 131 (CONFIRMED, FIXED, moderate - found in TWO files - a smart quote/en-dash in a copy-pasted company or signatory name rendered as a silent "?" on a real printed MBD/SBD form and on every SANRAL pack's own page-number stamp, with the self-verification check fooled into reporting it as correctly placed)
+
+**Area:** non-SANRAL pack (`engine/general/fill_flat_pdf.py`'s `_pdf_str()`/`verify_placements()`) and,
+found in the same sweep, SANRAL pack (`engine/pack/pdf_merge.py`'s `_pdf_text()` - explicitly named by
+`fill_flat_pdf.py`'s own docstring as "the same technique" this module borrowed its overlay-text
+approach from).
+
+**Scenario:** both files draw text onto a PDF page with a hand-built `/Type1 /BaseFont /Helvetica`
+overlay font whose `/Encoding` is declared `/WinAnsiEncoding` - i.e. cp1252. But the helper that escapes
+the text for the `Tj` operator (`_pdf_str()` in `fill_flat_pdf.py`, `_pdf_text()` in `pdf_merge.py`) encoded
+with Python's `"latin-1"` codec instead - a DIFFERENT single-byte encoding that disagrees with cp1252 in
+the 0x80-0x9F byte range, where WinAnsi/cp1252 places the right/left single and double smart quotes
+(`'`/`'`/`"`/`"`), en/em dashes, bullets and the trademark sign. None of those characters is encodable in
+latin-1 at all (its range is only U+0000-U+00FF; a smart quote is U+2019, far outside it), so
+`.encode("latin-1", "replace")` silently replaced every one of them with a literal `"?"` - and this is
+NOT an exotic input: it is exactly what Microsoft Word's own autocorrect puts into a copy-pasted company
+or signatory name the moment someone types a plain apostrophe or hyphen ("O'Brien's Construction" typed
+in Word becomes `O'Brien's Construction`, a company name South African tender-prep staff paste into the
+Tender Workspace from a Word document routinely).
+
+Confirmed live:
+```python
+>>> "O’Brien’s Construction – Civils".encode("latin-1", "replace")
+b'O?Brien?s Construction ? Civils'
+```
+
+Worse, `fill_flat_pdf.py`'s own `verify_placements()` - the "nothing is assumed to have worked" read-back
+check this module's whole docstring is built around, and the exact mechanism the 2026-10-29 whitespace-
+only finding already caught being fooled once - re-derived its comparison string by applying the SAME
+lossy `.encode("latin-1", "replace")` to `pl.value` before comparing. So the degraded `"?"` on both sides
+of the comparison matched each other, and the field was reported `"placed"` (verified, correctly done)
+even though the real printed MBD 1 / Form of Offer / CEQ showed `"O?Brien?s Construction"` instead of
+the company's real legal name - silently wrong data on a real buyer-facing submission, with the report
+actively vouching for it.
+
+`pdf_merge.py`'s `_pdf_text()` has the identical shape in its page-number stamp (`_stamp()`), used on
+every page of every SANRAL and general pack this engine builds. Its current caller only ever passes a
+plain contract number (`stamp_label`, e.g. `"R.334-030-2025.1F"`), so it isn't yet reachable through
+today's one call site - but the helper itself is general-purpose, carries the exact same docstring-cited
+"same technique" relationship to `fill_flat_pdf.py`, and the same fix costs nothing extra once the shape
+is already understood, so it was fixed in the same pass rather than left for a future caller to
+rediscover.
+
+**Fix:** both helpers now encode with `"cp1252"` first (what the declared `/WinAnsiEncoding` font
+encoding actually means) and then decode those bytes with `"latin-1"` - a byte-value-preserving
+round-trip, so the later plain `.encode("latin-1")` deeper in each module still succeeds trivially and
+reproduces the exact correct cp1252 bytes. `fill_flat_pdf.py`'s `verify_placements()` was also fixed to
+compare against the TRUE `pl.value` directly, not a re-degraded copy of it - so a character genuinely
+outside cp1252's own repertoire (true non-Western script, an emoji) now correctly FAILS verification
+(`"written but did not read back from the PDF - check by eye"`) instead of silently "passing" because
+both sides of the comparison lost the same character the same way.
+
+**Verified red-then-green, both files, independently.** `engine/general/test_fill_flat_pdf.py`: new
+smart-quote/en-dash case added to the existing real-synthetic-MBD1 harness, placing `"O'Brien-Smith"`
+as the signatory's contact-person value and reading the REAL output PDF back with `pdfplumber` to assert
+the genuine `'`/`-` characters are present and no `"?"` leaked in. `engine/pack/test_pdf_merge.py`: new
+`test_stamp_renders_a_smart_quote_en_dash_as_the_real_glyph_not_a_question_mark()`, calling `_stamp()`
+directly on a real blank page and reading the written PDF back with `pdfplumber`. Reverted each file
+individually: both failed exactly as predicted (`'O?Brien?Smith Civils'` / the flat-PDF equivalent with
+`"?"` in place of both real characters); restored: `0 failure(s)` on both test files. `py_compile` clean
+on all four touched files. Regression: `test_form_field_audit.py` (fill_sbd_docx/fill_flat_pdf's
+Klipcorp-divergent audit) and `pack/test_assemble_pack.py` both re-ran clean.
+
+**Regression:** `engine/general/fill_flat_pdf.py` (`_pdf_str()`, `verify_placements()`, ~20 lines
+including comments); `engine/pack/pdf_merge.py` (`_pdf_text()`, ~10 lines including comments);
+`engine/general/test_fill_flat_pdf.py` (4 new checks on the existing harness); `engine/pack/
+test_pdf_merge.py` (1 new test function, wired into `main()`). No change to either module's own
+text-measurement (`text_width()`/`_fit()`), placement-geometry, or verification-box logic - only the
+final character encoding and the verify-step's own comparison string.

@@ -2556,6 +2556,59 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): fix - a smart quote/en-dash in a copy-pasted company or signatory name rendered as a silent "?" on a real printed form, with the self-verification check fooled into reporting it correctly placed (found in two files)
+
+Oriented from `a882a5e` (own prior pass: Finding 130, `fill_financial.py`). `git fetch`/`merge --ff-only`
+found one new sibling commit (`ba39ba1` - a real pack fix extending my OWN just-reported Finding 130
+shape to `fill_tender.py`/`fill_conventional.py`; confirmed no overlap, that pass already handled it).
+Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no
+collision. Re-checked again immediately before this push - still clean.
+
+Rotated to non-SANRAL pack (SANRAL pack was last). Checked findings-doc mention counts across
+`engine/general/*.py`; picked `fill_flat_pdf.py` (fewest mentions among files not already exhaustively
+covered) and read the whole 1000+-line module.
+
+**Found and fixed Finding 131 (CONFIRMED, moderate, found in TWO files)**: both `fill_flat_pdf.py`'s
+`_pdf_str()` and `pack/pdf_merge.py`'s `_pdf_text()` (explicitly named by `fill_flat_pdf.py`'s own
+docstring as "the same technique" it borrowed) draw text with an overlay font declared `/Encoding
+/WinAnsiEncoding` (cp1252), but encoded the actual text with Python's `"latin-1"` codec - a DIFFERENT
+single-byte encoding that disagrees with cp1252 in the 0x80-0x9F range, where WinAnsi places smart
+quotes and en/em dashes. Those characters are UNENCODABLE in latin-1 at all, so they were silently
+replaced with a literal `"?"` - not an exotic input: exactly what Word's own autocorrect produces from a
+plain apostrophe/hyphen in a copy-pasted company name ("O'Brien's Construction" -> `O'Brien's
+Construction`). Confirmed live: `"O’Brien’s".encode("latin-1", "replace")` ->
+`b'O?Brien?s'`. Worse: `fill_flat_pdf.py`'s own `verify_placements()` - its "nothing is assumed to have
+worked" read-back check, already caught being fooled once (2026-10-29, whitespace-only values) - applied
+the SAME lossy encoding to its own comparison value, so the degraded `"?"` matched on both sides and the
+field was reported `"placed"`/verified even though the real printed form showed `"?"` instead of the
+company's real name.
+
+**Fix:** both helpers now encode `"cp1252"` first (what `/WinAnsiEncoding` actually means), then decode
+those bytes as `"latin-1"` - a byte-value-preserving round-trip, so the later plain `.encode("latin-1")`
+in each module still reproduces the correct cp1252 bytes. `verify_placements()` now compares against the
+TRUE value directly, so a character genuinely outside cp1252 (true non-Western script) now correctly
+fails verification instead of silently "passing". `pdf_merge.py`'s `_stamp()` isn't reachable through
+today's one call site (it only ever receives a plain contract number) but carries the identical shape and
+cost nothing extra to fix now rather than leave for a future caller to rediscover.
+
+**Verified red-then-green, both files, independently.** New smart-quote/en-dash cases in
+`engine/general/test_fill_flat_pdf.py` (extends the existing real-synthetic-MBD1 harness, reads the
+written PDF back with `pdfplumber`) and a new dedicated test in `engine/pack/test_pdf_merge.py`
+(`_stamp()` called directly on a real blank page, read back with `pdfplumber`). Reverted each file
+individually: both failed exactly as predicted (`"?"` in place of both real characters); restored:
+`0 failure(s)` on both. `py_compile` clean on all four touched files. Regression: `test_form_field_audit.py`
+and `pack/test_assemble_pack.py` both re-ran clean.
+
+Backlog: unchanged at 18 items - a contained encoding fix, not one of Sarel's own 18 numbered backlog
+items.
+
+Verify yourself: `cd engine/general && python3 test_fill_flat_pdf.py` and `cd engine/pack && python3
+test_pdf_merge.py` -> both `ALL PASSED`/`0 failure(s)`. Diff: `git show <this commit> --
+engine/general/fill_flat_pdf.py engine/pack/pdf_merge.py` (two near-identical encoding fixes, ~30 lines
+including comments total).
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): fix - a malformed pack.yaml made `fill_financial.py` raise a raw `KeyError` instead of the `ValueError` its own caller specifically catches, crashing the whole SANRAL pack build for one bad field in one sheet
 
 Oriented from `acd630a` (own prior pass: Finding 129, boq_extraction.py). `git fetch`/`merge --ff-only`

@@ -169,12 +169,43 @@ def test_write_guide_survives_a_control_character_in_tender_text():
         check("a control character in contract_no/buyer/description does not crash the completion guide", ok)
 
 
+def test_stamp_renders_a_smart_quote_en_dash_as_the_real_glyph_not_a_question_mark():
+    print("_stamp()/_pdf_text(): a smart quote/en-dash in the stamp text must render as the real character")
+    # Finding 131 (2026-11-05, same bug class as engine/general/fill_flat_pdf.py's
+    # own _pdf_str() fix): the stamp's overlay font declares /Encoding
+    # /WinAnsiEncoding (cp1252), but _pdf_text() used to encode with "latin-1" -
+    # a different single-byte encoding that silently replaces a smart quote/
+    # en-dash (U+2019/U+2013) with "?" instead of the real cp1252 glyph.
+    # stamp_label is normally just a plain contract number, but _pdf_text()
+    # itself is general-purpose, so this proves the fix directly, not via a
+    # caller that happens never to pass one of these characters today.
+    import tempfile
+
+    import pdfplumber
+    from pypdf import PageObject, PdfWriter
+
+    page = PageObject.create_blank_page(width=300, height=100)
+    pdf_merge._stamp(page, "O’Brien–Smith Civils")
+    writer = PdfWriter()
+    writer.add_page(page)
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "stamp.pdf")
+        with open(out, "wb") as fh:
+            writer.write(fh)
+        with pdfplumber.open(out) as pdf:
+            text = pdf.pages[0].extract_text() or ""
+    check("the real right single quote (’) is on the stamped page, not a '?' placeholder", "’" in text, repr(text))
+    check("the real en dash (–) is on the stamped page, not a '?' placeholder", "–" in text, repr(text))
+    check("no '?' placeholder leaked into the stamp in place of the real punctuation", "?" not in text, repr(text))
+
+
 def main():
     test_expiry_warning_catches_a_document_expired_real_yesterday()
     test_expiry_warning_does_not_false_flag_a_document_valid_today()
     test_sync_position_suggestions_skips_a_tender_closed_real_yesterday()
     test_contents_docx_survives_a_control_character_in_tender_text()
     test_write_guide_survives_a_control_character_in_tender_text()
+    test_stamp_renders_a_smart_quote_en_dash_as_the_real_glyph_not_a_question_mark()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

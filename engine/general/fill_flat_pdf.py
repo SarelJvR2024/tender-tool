@@ -79,7 +79,22 @@ def text_width(s, size):
 
 
 def _pdf_str(s):
-    s = s.encode("latin-1", "replace").decode("latin-1")
+    # The overlay font below declares /Encoding /WinAnsiEncoding (cp1252), but this
+    # used to encode with "latin-1" - a DIFFERENT single-byte encoding that disagrees
+    # with cp1252 in the 0x80-0x9F range, where WinAnsi/cp1252 places smart quotes
+    # ('‘'/'’'/'“'/'”'), en/em dashes, bullets and the trademark
+    # sign. Those are exactly the characters Word's own autocorrect puts into a
+    # copy-pasted company/signatory name ("O'Brien's Construction" typed in Word
+    # becomes O’Brien’s) - all of which are UNENCODABLE in latin-1 (its
+    # range is only U+0000-U+00FF) and so were silently replaced with "?" on the
+    # real printed form, with no warning anywhere in the report.
+    # cp1252-encode first (what the declared font encoding actually means), then
+    # decode those bytes as latin-1 - a byte-value-preserving round-trip, so the
+    # text this function returns still encodes losslessly via plain "latin-1"
+    # further down in _overlay_page()/stream.set_data(), but the BYTES that ends
+    # up with are the correct cp1252 ones the PDF viewer will decode back to the
+    # real glyph.
+    s = s.encode("cp1252", "replace").decode("latin-1")
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
@@ -957,7 +972,16 @@ def verify_placements(pdf_path, placements):
                 continue
             crop = pg.within_bbox((max(0, x0 - 2), max(0, top - 4), min(pg.width, x1 + 2), min(pg.height, bottom + 4)))
             got = re.sub(r"\s+", "", "".join(c["text"] for c in crop.chars if c.get("fontname", "").endswith("Helvetica")))
-            want = re.sub(r"\s+", "", pl.value.encode("latin-1", "replace").decode("latin-1"))
+            # Compare against the REAL intended value, not a degraded re-encoding of
+            # it - re-applying _pdf_str()'s own lossy fallback here (as this used to,
+            # with "latin-1") makes this check self-fooling: a value this module
+            # can't actually render loses the SAME characters on both sides of the
+            # comparison, so `want in got` is vacuously true and "verified" is
+            # reported even though the real printed form shows "?" instead of the
+            # genuine character. Comparing the true value means a character cp1252
+            # genuinely can't represent (true non-Western script, an emoji) now
+            # correctly fails verification instead of silently passing.
+            want = re.sub(r"\s+", "", pl.value)
             pl.verified = want in got
 
 

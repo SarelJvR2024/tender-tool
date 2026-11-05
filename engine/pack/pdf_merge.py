@@ -64,7 +64,18 @@ from generate_cv import _convert_to_pdf, SAST, _safe_text  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _pdf_text(s):
-    s = s.encode("latin-1", "replace").decode("latin-1")
+    # Same gap as engine/general/fill_flat_pdf.py's own _pdf_str() (QA pass,
+    # 2026-11-05, Finding 131): the overlay font below declares /Encoding
+    # /WinAnsiEncoding (cp1252), but this encoded with "latin-1" - a different
+    # single-byte encoding that disagrees with cp1252 in the 0x80-0x9F range,
+    # silently replacing a smart quote/en-dash with "?" instead of the real
+    # glyph. `stamp_label` is normally just a contract number, but this helper
+    # is general-purpose (any text a future caller passes), so it gets the
+    # identical fix for the same reason: cp1252-encode (what the declared font
+    # encoding actually means), then decode those bytes as latin-1 - a byte-
+    # value-preserving round-trip so the later plain ".encode('latin-1')" still
+    # reproduces the correct cp1252 bytes.
+    s = s.encode("cp1252", "replace").decode("latin-1")
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
