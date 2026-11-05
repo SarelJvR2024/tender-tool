@@ -1,5 +1,62 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): fixed - the same raw-KeyError-on-malformed-pack shape `fill_financial.py` was just fixed for (`a882a5e`) also existed in `fill_tender.py` and `fill_conventional.py`, worse: no caller catches it gracefully
+
+Oriented from `2b72bbf` (own prior pass: the BEE preference-points calculator's displayed table). `git
+fetch`/`merge --ff-only` picked up `a882a5e` (a sibling pass: `fill_financial.py`'s raw KeyError on a
+malformed pack, converted to the module's own clean `ValueError` contract) - no collision. Open PRs
+re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog chain re-confirmed:
+19 total, 3 genuinely open.
+
+Directed to check whether `a882a5e`'s bug class recurs elsewhere in pack generation. It does, in both
+remaining SANRAL Technical Submission fillers: `fill_tender.py` (RRM) and `fill_conventional.py`
+(Conventional) each do `pack["people"][a["person"]]` unguarded inside the key-persons loop -
+identical shape to the just-fixed `fill_financial.py` site, same real failure mode (a `key_persons`
+entry naming a person key absent from `pack.yaml`'s own `people` map).
+
+**Worse than `fill_financial.py`'s pre-fix behaviour**: `assemble_pack.py`'s own call to
+`FILLERS[family].main()` (the line that reaches this code) has no `try`/`except` around it at all -
+confirmed by reading the call site directly, line 289. `fill_financial.py`'s own caller specifically
+catches `ValueError` and degrades gracefully (`"fill_financial.py refused: ..."`, pack build continues
+with everything else). Here, nothing local catches anything - the exception propagates up through
+`assemble_pack.py` uncaught until `process_pack_jobs.py`'s generic `except Exception` (confirmed by
+reading several real catch sites there) stops it at the JOB level. That keeps the worker itself from
+crashing, but means: (1) the operator/company sees a raw `KeyError: 'xyz'`, not this codebase's own
+established "refused: &lt;clean reason&gt;" convention, and (2) unlike `fill_financial.py`'s
+degrade-and-continue path, the ENTIRE SANRAL pack (Technical + Financial + reports + envelope covers)
+is lost for one bad `key_persons` entry, not just one sheet - this is the primary Technical Submission
+workbook, a strictly worse blast radius than the Financial workbook `a882a5e` already fixed.
+
+**Fixed** both files with the identical guard `fill_financial.py` already uses: look the person up with
+`.get()`, raise a clean `ValueError` naming the dangling person key and the position, before ever
+reaching `fill_person()`.
+
+**Verified for real**: new `engine/test_fill_key_persons_malformed.py` drives `fill_conventional.py`
+end to end against the real committed SANRAL sample
+(`templates/samples/R.334-030-2025.1F_ran.xlsm`, `packs/r334-030-2025-1f.yaml` - the same template
+`test_fill_b7_legacy_precedence.py` already uses) - a real malformed `key_persons` entry. `git stash`
+of just `fill_conventional.py`'s fix confirmed genuine red (`raised raw KeyError('nonexistent_person_
+key')`) before the fix, genuine green (clean `ValueError` naming the key) after; a second test confirms
+the real, unmodified base pack still fills with zero exceptions (no over-tightening). No RRM-family
+sample workbook is committed to this repo to drive `fill_tender.py` the same way end to end (same
+documented limit `test_fill_tender.py`'s and `test_fill_b7_legacy_precedence.py`'s own docstrings
+already state) - its identical fix (same code shape, same guard, same message convention) is covered by
+direct code inspection instead, consistent with this repo's own established precedent for that file.
+
+Full regression: `test_fill_tender.py`, `test_fill_b7_legacy_precedence.py`, `test_fill_financial.py`
+all `0 failure(s)`, unaffected. `ast.parse` clean on both touched files. `ruff check` clean on both
+touched source files (the new test file's 4 findings match the sibling `test_fill_b7_legacy_
+precedence.py`'s own existing baseline exactly - an established style convention, not a new issue).
+
+**Backlog: 19, unchanged** - standalone bug, fixed; not a new judgment-call item. `held_registrations`-
+vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation session-refresh gap all carried
+forward, untouched as directed.
+
+Committed and pushed directly to `main`:
+- `engine/fill_tender.py`
+- `engine/fill_conventional.py`
+- `engine/test_fill_key_persons_malformed.py` (new)
+
 ## This pass (2026-11-05, standing solution-architect review): fixed - the B-BBEE preference points calculator's own displayed reference table disagreed with the number it actually computes, on Level 3 under 90/10
 
 Oriented from `b511f6f` (own prior pass: recorded that Sarel applied all 11 pending migrations to

@@ -145,9 +145,23 @@ def main(tpl, pack_path, out, log=None):
     # Key persons
     notes = list(front_notes)
     for a in pack["key_persons"]:
+        person_key = a.get("person")
+        person = (pack.get("people") or {}).get(person_key)
+        if person is None:
+            # Same malformed-pack shape fill_financial.py (2026-11-05) was just
+            # fixed for: a raw pack["people"][...] KeyError here crashes the
+            # whole SANRAL pack job (no caller around FILLERS[family].main()
+            # in assemble_pack.py catches ValueError the way fill_financial.py's
+            # own caller does - process_pack_jobs.py's generic except Exception
+            # stops the worker crashing, but with an unhelpful raw KeyError
+            # instead of this clean, actionable message).
+            raise ValueError(
+                f"key_persons entry for position '{a.get('position')}' references person '{person_key}', which "
+                "has no entry in pack.yaml's own people map - fill the name in by hand"
+            )
         bases = [a["block_row"]] if a.get("block_row") else blocks_for(wb, a["position"])
         for base in bases:
-            notes += fill_person(wb, base, pack["people"][a["person"]], pack.get("projects", {}), a.get("position"))
+            notes += fill_person(wb, base, person, pack.get("projects", {}), a.get("position"))
     notes = list(dict.fromkeys(notes))  # an ALT slot repeats its primary's block notes
 
     wb.save(out)
