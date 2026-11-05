@@ -7351,3 +7351,49 @@ issue from this change.
 `engine/discovery/test_boq_extraction.py` (one new test function, wired into `main()`). No change to the
 `vat`/`page`/`carried forward`/`brought down`/`notes` skip branches, the numeric-quantity-ratio check, or
 any other guard in the module.
+
+### Finding 130 (CONFIRMED, FIXED, moderate - a malformed pack.yaml made `fill_financial.py` raise a raw `KeyError` instead of the `ValueError` its own caller specifically catches, crashing the WHOLE SANRAL pack build for one bad field in one sheet)
+
+**Area:** SANRAL pack (`engine/fill_financial.py` - mechanical-field filler for the Financial Submission
+workbook; had zero mentions in this file and no dedicated test at all before this pass).
+
+**Scenario:** `main()` already raises a clean `ValueError` for one data-shaped refusal ("Position '...'
+has no row on this Financial workbook's TENDERER INPUT DATA sheet") - and `pack/assemble_pack.py`'s own
+caller (line ~318) specifically catches `ValueError` around `fill_financial.main()` and degrades
+gracefully (`financial_out, financial_note = None, f"fill_financial.py refused: {e}"`, pack build
+continues with the Technical workbook, Forms B1-B7, envelope covers all still produced). But three OTHER
+equally-real malformed-pack shapes went through plain dict/key lookups with no guard at all, so they
+raised a raw `KeyError` instead:
+  - `pack["company"]["name"]` when the pack has no `company.name`;
+  - `pack["people"][kp["person"]]` when a `key_persons` entry references a person key absent from the
+    pack's own `people` map (a stale/inconsistent pack - the key_persons list and people map falling out
+    of sync, e.g. a person removed or renamed upstream without updating both);
+  - `person["name"]` when a `people` entry exists but has no `name` field.
+
+A raw `KeyError` is NOT a `ValueError`, so `assemble_pack.py`'s existing catch never fires - it propagates
+straight out of `main()` and crashes the entire SANRAL pack assembly (not just the Financial workbook)
+for what should have been one gracefully-degraded sheet, exactly the "one contained module's own data
+problem takes down the whole pack build" shape already fixed twice this session (Finding 125:
+`make_envelope_covers.py`; Finding 128's sweep: the job-queue bridges).
+
+**Fix:** wrapped the `company.name` lookup in its own `try/except KeyError` raising a clear `ValueError`
+naming the gap; replaced the two unguarded `people`-map lookups with `.get()` + an explicit `None`/falsy
+check, each raising a `ValueError` that names the dangling person key or missing field. All three now
+match the module's own existing "data problem, not a worker crash" contract that `assemble_pack.py`
+already relies on - no change needed in `assemble_pack.py` itself, since its existing `except ValueError`
+now correctly catches all four refusal shapes instead of just one.
+
+**Verified red-then-green.** New dedicated test file `engine/test_fill_financial.py` (none existed
+before this pass) against the real shipped template
+(`templates/samples/financial/R.334-030-2025.1F_Financial_Submission_ran.xlsm`, not a hand-built
+fixture) - one happy-path test plus three adversarial-pack tests, each asserting a `ValueError` (naming
+the bad field) is raised, not a raw `KeyError`. Revert-and-confirm-red on `fill_financial.py` alone: all
+three adversarial tests failed exactly as predicted (`raised a raw KeyError instead of ValueError:
+KeyError('ghost')` / `KeyError('name')` / `KeyError('name')`), the happy-path test still passed; restored,
+`0 failure(s)` across all four tests. `py_compile` clean on both touched files. Regression:
+`test_form_field_audit.py` (exercises `fill_financial.row_for_position()` against all 6 real sample
+contracts) and `pack/test_assemble_pack.py` both re-ran clean, unaffected.
+
+**Regression:** `engine/fill_financial.py` (`main()`, ~15 lines including comments); new file
+`engine/test_fill_financial.py` (4 tests). No change to `row_for_position()`, the SANRAL-confirmed row
+mapping, or `assemble_pack.py`'s own existing `except ValueError` handling.

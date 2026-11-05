@@ -2499,6 +2499,55 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): fix - a malformed pack.yaml made `fill_financial.py` raise a raw `KeyError` instead of the `ValueError` its own caller specifically catches, crashing the whole SANRAL pack build for one bad field in one sheet
+
+Oriented from `acd630a` (own prior pass: Finding 129, boq_extraction.py). `git fetch`/`merge --ff-only`
+found two new sibling commits (`b511f6f`, docs-only - recorded that Sarel applied all 11 pending
+migrations to production; `2b72bbf`, a real app/TS fix - the BEE preference points calculator's own
+reference table disagreed with its live calculation on Level 3/90-10) - neither touches `engine/`, no
+overlap. Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both
+unchanged, no collision. Re-checked again immediately before this push - still clean.
+
+Rotated to SANRAL pack (discovery was last). Checked findings-doc mention counts across every
+`engine/fill_*.py` module to find the freshest ground: `fill_financial.py` had ZERO mentions in
+`QA-Edge-Case-Findings.md` and no dedicated test file at all (confirmed: `test_fill_financial.py` didn't
+exist anywhere in the repo - only indirect coverage of `row_for_position()` via
+`test_form_field_audit.py`). Read it in full (81 lines).
+
+**Found and fixed Finding 130 (CONFIRMED, moderate)**: `main()` already has one clean, deliberate
+`ValueError` refusal ("Position '...' has no row...") that `pack/assemble_pack.py`'s own caller
+specifically catches to degrade gracefully (Financial workbook skipped, pack build continues with the
+Technical workbook/reports/envelope covers) rather than crash the whole pack. But three other equally
+plausible malformed-pack shapes - no `company.name`, a `key_persons` entry pointing at a person key
+absent from the pack's own `people` map (a stale/inconsistent pack), a `people` entry with no `name` -
+went through unguarded dict lookups and raised a raw `KeyError` instead. A `KeyError` is not a
+`ValueError`, so `assemble_pack.py`'s existing catch never fires: it propagates and crashes the ENTIRE
+SANRAL pack assembly for one bad field in one sheet - the identical "one contained module's own data
+problem takes down the whole pack build" shape already fixed twice this session (Finding 125:
+`make_envelope_covers.py`; Finding 128: the job-queue bridges).
+
+**Fix:** `company.name` lookup wrapped in `try/except KeyError` raising a clear `ValueError`; both
+`people`-map lookups replaced with `.get()` + an explicit missing/falsy check, each raising a `ValueError`
+naming the dangling person key or missing field - matching the module's own existing refusal contract, so
+no change was needed in `assemble_pack.py` itself.
+
+**Verified red-then-green.** New dedicated test file `engine/test_fill_financial.py` against the real
+shipped template (`templates/samples/financial/R.334-030-2025.1F_Financial_Submission_ran.xlsm`, not a
+hand-built fixture) - one happy-path test, three adversarial-pack tests. Reverted `fill_financial.py`
+alone: all three failed exactly as predicted (raw `KeyError('ghost')`/`KeyError('name')` instead of
+`ValueError`); restored: `0 failure(s)` across all four. `py_compile` clean on both touched files.
+Regression: `test_form_field_audit.py` (all 6 real sample contracts) and `pack/test_assemble_pack.py`
+both re-ran clean.
+
+Backlog: unchanged at 18 items - a contained data-validation fix, not one of Sarel's own 18 numbered
+backlog items.
+
+Verify yourself: `cd engine && python3 test_fill_financial.py` → `0 failure(s)` (4 tests). Diff: `git
+show <this commit> -- engine/fill_financial.py` (one try/except + two `.get()` guards, ~15 lines
+including comments).
+
+---
+
 ## This pass (2026-11-04/05, standing QA/robustness review): fix - a real, numbered BOQ line item whose description starts with the word "Total" was silently dropped from the parsed schedule, mistaken for a running subtotal row
 
 Oriented from `598b277` (a sibling "standing solution-architect review" pass's own fix - an onboarding

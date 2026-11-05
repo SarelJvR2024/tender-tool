@@ -59,7 +59,16 @@ def main(tpl, pack_path, out):
     pack = yaml.safe_load(open(pack_path))
     wb = Workbook(tpl)
 
-    wb.set_value(SHEET, "D1", pack["company"]["name"])
+    try:
+        company_name = pack["company"]["name"]
+    except KeyError as e:
+        # A missing company name is a bad pack.yaml, not a worker crash -
+        # assemble_pack.py's own caller already catches ValueError here and
+        # degrades to "Financial workbook: fill_financial.py refused: ..."
+        # rather than losing the whole pack build; a raw KeyError bypassed
+        # that and crashed the entire SANRAL pack, not just this one sheet.
+        raise ValueError(f"pack.yaml has no company.name ({e}) - cannot fill the Financial workbook") from e
+    wb.set_value(SHEET, "D1", company_name)
 
     for kp in pack["key_persons"]:
         row = row_for_position(wb, kp.get("position"))
@@ -68,8 +77,19 @@ def main(tpl, pack_path, out):
                 f"Position '{kp.get('position')}' has no row on this Financial workbook's TENDERER INPUT DATA sheet "
                 "(its column B lists the tender's key positions) - fill the name in by hand"
             )
-        person = pack["people"][kp["person"]]
-        wb.set_value(SHEET, f"C{row}", person["name"])
+        person_key = kp.get("person")
+        person = (pack.get("people") or {}).get(person_key)
+        if person is None:
+            raise ValueError(
+                f"key_persons entry for position '{kp.get('position')}' references person '{person_key}', which "
+                "has no entry in pack.yaml's own people map - fill the name in by hand"
+            )
+        name = person.get("name")
+        if not name:
+            raise ValueError(
+                f"person '{person_key}' (position '{kp.get('position')}') has no name in pack.yaml - fill it in by hand"
+            )
+        wb.set_value(SHEET, f"C{row}", name)
 
     wb.save(out)
     print(f"Wrote {out}: {len(wb.log)} cell writes (mechanical fields only - "
