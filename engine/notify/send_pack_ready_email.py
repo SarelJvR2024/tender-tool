@@ -130,17 +130,38 @@ def send_pack_ready_email(client, job, page_count, app_url):
 
         for to in recipients:
             result = _send_via_resend(to, email["subject"], email["html"], email["text"])
-            client.rpc("record_notification_sent", {
-                "p_idempotency_key": idempotency_key,
-                "p_notification_type": "pack_ready",
-                "p_recipient_email": to,
-                "p_company_id": company_id,
-                "p_tender_id": tender_id,
-                "p_subject": email["subject"],
-                "p_status": result["status"],
-                "p_resend_id": result.get("resend_id"),
-                "p_error": result.get("error"),
-            })
+            # QA pass, 2026-11-05: record_notification_sent() is a real network
+            # RPC call with no guard of its own - a transient blip on IT (not
+            # the Resend send, which _send_via_resend() already never lets
+            # raise) used to abort this whole loop via the outer except below,
+            # silently losing every OTHER recipient too, not just this one.
+            # Since claim_notification above is a one-shot token and this job
+            # never runs again for the same job id, that permanently lost the
+            # rest of the company's "pack ready" email - the exact bug class
+            # this file's own claim-timing fixes (2026-10-28, 2026-10-30)
+            # already exist to avoid, just not closed for a per-recipient
+            # failure after the claim has already succeeded. The Resend send
+            # itself already happened for `to` by this point regardless of
+            # whether the audit write below succeeds - only the record of it
+            # is at risk, so this recipient's own alert names that precisely.
+            try:
+                client.rpc("record_notification_sent", {
+                    "p_idempotency_key": idempotency_key,
+                    "p_notification_type": "pack_ready",
+                    "p_recipient_email": to,
+                    "p_company_id": company_id,
+                    "p_tender_id": tender_id,
+                    "p_subject": email["subject"],
+                    "p_status": result["status"],
+                    "p_resend_id": result.get("resend_id"),
+                    "p_error": result.get("error"),
+                })
+            except Exception as e:
+                system_alerts.record(
+                    "general", f"pack_ready email for job {job.get('id')} was sent to {to} (status "
+                    f"{result['status']!r}) but recording it failed: {type(e).__name__}: {e} - the send itself "
+                    "already happened; only its audit log entry may be missing", "warning", exc=e,
+                    context={"job_id": job.get("id"), "company_id": company_id, "tender_id": tender_id, "recipient": to})
     except Exception as e:  # noqa: BLE001 - see this function's own docstring
         system_alerts.record("general", f"pack_ready email failed for job {job.get('id')}: {type(e).__name__}: {e}",
                              "warning", exc=e, context={"job_id": job.get("id"), "company_id": company_id, "tender_id": tender_id})

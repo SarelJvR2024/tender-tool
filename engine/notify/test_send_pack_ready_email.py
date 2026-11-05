@@ -240,6 +240,66 @@ def test_render_failure_never_wastes_the_one_time_claim():
           recipients_idx != -1 and recipients_idx < claim_idx, call_order)
 
 
+def test_one_recipients_record_notification_sent_failure_does_not_lose_the_rest():
+    """QA pass, 2026-11-05: record_notification_sent() is a real network RPC
+    call with no guard of its own, inside a for loop with no per-item
+    isolation - a transient failure on it for the FIRST recipient (not the
+    Resend send itself, which _send_via_resend() already never lets raise)
+    used to abort the whole loop via the outer except, silently losing every
+    OTHER recipient's email too. Since claim_notification() is a one-time
+    token and this job never runs again for the same job id, that
+    permanently lost the rest of the company's "pack ready" email - the
+    exact bug class this file's own claim-timing fixes (2026-10-28,
+    2026-10-30) already exist to avoid, just not closed for a per-recipient
+    failure after the claim already succeeded."""
+    client = _base_client(recipients=[
+        {"email": "a@example.com", "daily_digest_opt_in": True},
+        {"email": "b@example.com", "daily_digest_opt_in": True},
+    ])
+
+    def flaky_record(args):
+        if args["p_recipient_email"] == "a@example.com":
+            raise RuntimeError("simulated transient Supabase blip")
+        return None
+    client.rpc_responses["record_notification_sent"] = flaky_record
+
+    rendered = {"subject": "s", "html": "<p>h</p>", "text": "t"}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        return FakeCompletedProcess(0, stdout=json.dumps(rendered))
+
+    sent_to = []
+
+    class FakeResp:
+        def read(self):
+            return json.dumps({"id": "resend-1"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout):
+        sent_to.append(json.loads(req.data.decode())["to"][0])
+        return FakeResp()
+
+    monkeypatch_module(pr.subprocess, "run", fake_run)
+    monkeypatch_module(pr.urllib.request, "urlopen", fake_urlopen)
+
+    raised = False
+    try:
+        pr.send_pack_ready_email(client, _job(), 42, "https://tenderready.app")
+    except Exception:
+        raised = True
+    check("a per-recipient record_notification_sent failure never raises into the caller", raised is False)
+    check("BOTH recipients still got a real Resend send attempt, not just the one before the failure",
+          sent_to == ["a@example.com", "b@example.com"], sent_to)
+    log_calls = [c[1]["p_recipient_email"] for c in client.rpc_calls if c[0] == "record_notification_sent"]
+    check("record_notification_sent was attempted for both recipients (the second one succeeding)",
+          log_calls == ["a@example.com", "b@example.com"], log_calls)
+
+
 def monkeypatch_module(obj, attr, value, env=None):
     """Minimal manual monkeypatch (no pytest fixture available in this plain-script test harness) - every patch here is process-local and this test file is always run as its own fresh interpreter, so there's nothing to restore."""
     if env is not None:
@@ -255,6 +315,7 @@ def main():
     test_happy_path_renders_sends_and_logs(None)
     test_render_failure_is_caught_and_never_raises(None)
     test_render_failure_never_wastes_the_one_time_claim()
+    test_one_recipients_record_notification_sent_failure_does_not_lose_the_rest()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

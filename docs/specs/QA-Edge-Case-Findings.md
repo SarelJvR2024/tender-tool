@@ -7532,3 +7532,55 @@ added call; module docstring updated); `engine/notify/send_digest_emails.py` (`r
 including comments); `engine/notify/test_digest_live.py` (1 new test function); `engine/notify/
 test_send_digest_emails.py` (1 new test function). No change to `watch_deadlines.py`,
 `registration_reminders.py`, or any other `document_expiry` item's own rendering.
+
+### Finding 133 (CONFIRMED, FIXED, severe - a transient failure recording ONE recipient's pack-ready email permanently lost the email for every OTHER recipient too, on a one-shot notification that never gets a second chance)
+
+**Area:** notify (`engine/notify/send_pack_ready_email.py` - the Bid Pack Compilation Complete email,
+sent right after a `generate_pack` job goes `ready`).
+
+**Scenario:** this file's own history already fixed this exact bug CLASS twice - `claim_notification()`
+(a one-time-only token; this job id never runs again) used to be called too early, so a failure in the
+recipients lookup/render/tender-select (2026-10-30) or a missing API key (2026-10-28) would burn the
+claim with nothing ever sent. Both fixes moved the claim to immediately before the first real send. But
+the per-recipient loop AFTER that claim has its own, un-isolated version of the identical risk:
+
+```python
+for to in recipients:
+    result = _send_via_resend(to, email["subject"], email["html"], email["text"])
+    client.rpc("record_notification_sent", {...})   # a real network RPC call, no guard
+```
+
+`_send_via_resend()` already never raises (its own blanket except converts every failure to a
+`{"status": "failed", ...}` dict) - but `record_notification_sent()`'s own RPC call can genuinely fail
+transiently (a network blip, a Supabase hiccup), and when it does for the FIRST recipient, the exception
+propagates out of the loop into the function's OUTER `except Exception`, which returns - the loop never
+reaches the SECOND (or any later) recipient at all. Since the claim is already consumed and this job id
+never runs again, every recipient after the one whose audit-write happened to fail would PERMANENTLY
+never receive the pack-ready email, with no retry possible.
+
+Confirmed live: a fake client with two opted-in recipients, where `record_notification_sent` raises only
+for the first recipient's call - the real Resend send was attempted for recipient 1 only; recipient 2
+got nothing at all, silently, with just one generic `"pack_ready email failed for job ..."` alert giving
+no hint that a second person was also owed an email and never got one.
+
+**Fix:** wrapped only the `record_notification_sent()` call (not `_send_via_resend()`, which can't raise)
+in its own `try/except` inside the loop, recording a per-recipient `system_alerts` warning that
+explicitly says the send itself already happened and only the audit-log write may be missing, then
+continuing to the next recipient - same per-item isolation pattern as every "claim call sits outside its
+own try block" fix this session (Findings 123/126/128), applied here to an audit-write failure rather
+than a claim failure, inside a loop that this file's own commit history already protected the OUTSIDE
+of twice.
+
+**Verified red-then-green.** New test
+`test_one_recipients_record_notification_sent_failure_does_not_lose_the_rest()` in
+`engine/notify/test_send_pack_ready_email.py` - two opted-in recipients, `record_notification_sent`
+monkeypatched to raise only for the first; asserts BOTH recipients get a real Resend send attempt and
+both get a `record_notification_sent` call attempted (the second succeeding). Reverted the production
+file alone: failed exactly as predicted (`sent_to == ['a@example.com']`, recipient b lost); restored:
+`0 failure(s)` across all 7 tests in the file. `py_compile` clean on both touched files. Regression:
+`process_general_jobs.py`'s own test suite (the real caller) re-ran clean.
+
+**Regression:** `engine/notify/send_pack_ready_email.py` (one `try/except` added inside the per-recipient
+loop, ~20 lines including comments); `engine/notify/test_send_pack_ready_email.py` (1 new test function,
+wired into `main()`). No change to `claim_notification()`'s own timing, the missing-API-key check, or
+`_send_via_resend()`'s own failure handling.

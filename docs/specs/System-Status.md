@@ -2843,6 +2843,51 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): fix - a transient failure recording ONE recipient's pack-ready email permanently lost the email for every OTHER recipient too, on a one-shot notification with no second chance
+
+Oriented from `390532e` (own prior pass: Finding 132, daily_digest.py's missing live-mode call).
+`git fetch`/`merge --ff-only` found one new sibling commit (`ff5c856` - confirmed my own Finding 132
+fix is now complete, no second missing `find_*()` call; also a `/sanral-schedules` RLS-safety read,
+docs-only, no overlap). Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165`
+only, both unchanged, no collision. Re-checked again immediately before this push - still clean.
+
+Rotated to notify (compliance/reminders was last). Checked findings-doc mention counts across
+`engine/notify/*.py`; picked `send_pack_ready_email.py` (fewest mentions, 7) and read the whole
+147-line module - its own history already shows two dated fixes (2026-10-28, 2026-10-30) for the exact
+same bug CLASS this pass found a third instance of.
+
+**Found and fixed Finding 133 (CONFIRMED, severe)**: the per-recipient send loop, which runs AFTER
+`claim_notification()`'s one-time-only claim, calls `record_notification_sent()` - a real network RPC
+with no guard of its own - right after each Resend send. A transient failure on THAT call for the first
+recipient propagated out of the loop into the function's outer `except`, which returns - every
+SUBSEQUENT recipient never even got a Resend send attempted. Since the claim is already consumed and
+this job id never runs again, every recipient after the unlucky first one would permanently lose their
+pack-ready email, with no retry possible - the identical "claim is one-shot, a later failure burns it"
+risk this file's own prior two fixes closed for the claim's OWN timing, just not yet for a per-recipient
+failure after the claim had already succeeded. Confirmed live with a two-recipient fake client: the
+second recipient got nothing at all, silently.
+
+**Fix:** wrapped only the `record_notification_sent()` call in its own `try/except` inside the loop
+(not `_send_via_resend()`, which already can't raise), alerting per-recipient with wording that makes
+clear the send itself already happened and only the audit-log write may be missing, then continuing to
+the next recipient - same per-item isolation pattern as Findings 123/126/128 this session, applied to an
+audit-write failure instead of a claim failure.
+
+**Verified red-then-green.** New test in `engine/notify/test_send_pack_ready_email.py` - two opted-in
+recipients, `record_notification_sent` raising only for the first; asserts both still get a real Resend
+send attempt. Reverted the production file alone: failed exactly as predicted (recipient 2 lost);
+restored: `0 failure(s)` across all 7 tests. `py_compile` clean on both files. Regression:
+`process_general_jobs.py`'s own test suite (the real caller) re-ran clean.
+
+Backlog: unchanged at 18 items - a contained per-item isolation fix, not one of Sarel's own 18 numbered
+backlog items.
+
+Verify yourself: `cd engine/notify && python3 test_send_pack_ready_email.py` -> `0 failure(s)` (7
+tests). Diff: `git show <this commit> -- engine/notify/send_pack_ready_email.py` (one `try/except`
+added inside the per-recipient loop, ~20 lines including comments).
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): fix - a real, already-built, already-tested compliance check (document lapsing before a tender's closing date) never actually reached a real company's inbox, because daily_digest.py's live mode never called it
 
 Oriented from `1f15ad9` (own prior pass: intake rotation clean sweep). `git fetch`/`merge --ff-only`
