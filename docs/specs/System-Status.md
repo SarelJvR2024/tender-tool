@@ -1,5 +1,35 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): clean sweep - the pack pipeline's own verify/check functions don't have the "verify re-applies the same lossy transform" shape `f3898f8` just fixed, and the two remaining public `/tools` calculators are structurally immune to the BEE-table drift bug class
+
+Oriented from `ba39ba1` (own prior pass: the raw-KeyError shape recurring in `fill_tender.py`/
+`fill_conventional.py`). `git fetch`/`merge --ff-only` picked up `f3898f8` (a sibling pass: a smart
+quote/en-dash silently rendered as "?" on real printed forms, with `fill_flat_pdf.py`'s own
+`verify_placements()` fooled into reporting success because it re-applied the identical lossy encoding
+to its own comparison value) - no collision. Open PRs re-checked: only `#164`/`#165` remain (both
+untouched since 2026-10-26). Backlog chain re-confirmed: 19 total, 3 genuinely open.
+
+Directed to check whether `f3898f8`'s "verify is fooled because it re-derives its comparison value the
+same broken way the write happened" shape exists anywhere else in the pack pipeline's own QA code.
+Checked every verify/check function reachable from a real pack build: `pdf_merge.verify_pack()` (reads
+the real rendered PDF bytes back via `PdfReader`/`extract_text()` - no second lossy re-encoding to
+agree with itself), `assemble_pack.check_template()` (fingerprint-diff based, no text-rendering
+involved), `sanral_b7.check_plan()` (structural plan validation, not text rendering). `general/
+build_general_pack.py` reuses the same shared `pdf_merge.verify_pack()`, not a separate copy.
+`general_harness.py` is itself a dev regression harness, not production QA. Genuinely clean - no second
+instance.
+
+Pivoted to the two public `/tools` calculators not yet checked against the BEE-preference-points
+display-table-drift bug class found earlier today (`2b72bbf`): `cidb-grade` and `b6-estimator`. Both
+read `CIDB_GRADING_TABLE`/`estimateSanralConventional()` directly - the identical source their own live
+calculation uses - with no second hardcoded copy anywhere in either component, so the specific "display
+table silently drifts from the real answer" shape is structurally impossible here, not just currently
+correct. `node --test lib/cidbGrading.test.ts`: 5/5 pass.
+
+**No code change, no commit needed for code** - two genuine clean sweeps in one pass. Backlog unchanged
+at 19 (3 genuinely open: `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, the
+impersonation session-refresh gap - none touched, as directed).
+
 ## This pass (2026-11-05, standing solution-architect review): fixed - the same raw-KeyError-on-malformed-pack shape `fill_financial.py` was just fixed for (`a882a5e`) also existed in `fill_tender.py` and `fill_conventional.py`, worse: no caller catches it gracefully
 
 Oriented from `2b72bbf` (own prior pass: the BEE preference-points calculator's displayed table). `git
