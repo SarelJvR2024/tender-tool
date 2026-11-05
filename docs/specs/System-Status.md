@@ -1,5 +1,51 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): re-ran the full tenant-isolation suite against the NOW-LIVE schema (106 migrations), and added permanent coverage for the 6 newest SECURITY DEFINER RPCs it never exercised
+
+Oriented from `ed18f54` (own prior pass). `git fetch`/`merge --ff-only` found nothing new - still at
+`ed18f54`. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog
+chain cross-checked across the visible history - self-consistent, 19 total, 3 genuinely open.
+
+This deep into the session, almost every obvious area has had a dedicated pass (checked via grep
+against every `app/app/` route folder's mention count in this doc's own history). Took the directive's
+suggested angle instead: re-run `engine/security/test_tenant_isolation.py` in full against a scratch
+Postgres replaying all 106 migrations - the schema now matches what's actually live in production,
+not a pending-migration approximation. `ALL PASSED` across both parts (service-role bridges,
+database-layer RLS for every tenant table, shared templates, deletion, employee role).
+
+That existing suite's own matrix (uploads, packs, documents, admin console, employee role) never once
+exercised the 6 newest `SECURITY DEFINER` RPCs this session's own TOCTOU-race fixes added -
+`create_company_invite_checked()`, `set_member_role_checked()`, `remove_member_checked()`,
+`company_can_request_pack()`, `request_submission_pack_checked()`, `request_general_job_checked()`
+(0113-0116) - even though every one is callable directly via `supabase.rpc()` by any signed-in user,
+exactly the shape this whole suite exists to catch. Ran real adversarial calls by hand first (company
+A's owner against company B, under real RLS with `set role authenticated` + `auth.uid()`): all six
+correctly rejected - `remove_member_checked`/`set_member_role_checked`/`create_company_invite_checked`
+raise "Only an owner or admin..."; `company_can_request_pack` returns `null`, not a readable
+true/false, per 0109's own design; `request_submission_pack_checked`/`request_general_job_checked`
+raise "not a member of this company". Genuinely clean - not assumed from reading the SQL, each one
+independently exercised.
+
+Rather than leave this as a one-off manual check, added it as a permanent new section (`[19]`) to
+`test_tenant_isolation.py` itself, following the file's own established pattern (`check()`/`refused()`
+helpers, a self-contained fixture - NOT `seed_db()`, which can only be called once per database run
+since its `admin_harness_runs` insert uses fixed values; every other `part2_*` function already builds
+its own fixture for the same reason, confirmed by reading the file before reusing it). Verified the
+new section for real: ran the full suite three times against three separate fresh scratch databases
+(replayed clean each time, dropped after use) - the first run reused a database my own manual
+adversarial probing had already written into and correctly failed on a duplicate-key collision
+(`seed_db()`'s own fixed-value insert, not a bug in my test); the second attempt, written to reuse
+`seed_db()` directly, hit the same collision for the reason above; the third, with its own
+self-contained fixture, passed clean - 7/7 new checks, `ALL PASSED` overall. `ast.parse` clean;
+`ruff check` - 12 pre-existing findings, all below line 650, none in the new section (added past
+line 1000).
+
+**Backlog: 19, unchanged** - this closes a real test-coverage gap, not a judgment-call item.
+`held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation
+session-refresh gap all untouched, as directed.
+
+Committed and pushed directly to `main`: `engine/security/test_tenant_isolation.py`.
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - the pack pipeline's own verify/check functions don't have the "verify re-applies the same lossy transform" shape `f3898f8` just fixed, and the two remaining public `/tools` calculators are structurally immune to the BEE-table drift bug class
 
 Oriented from `ba39ba1` (own prior pass: the raw-KeyError shape recurring in `fill_tender.py`/

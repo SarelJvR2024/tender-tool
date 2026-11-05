@@ -1001,6 +1001,48 @@ select 1;""")
     check(db.one(f"select count(*) from companies where id = '{other}'", uEmp) == "0", "employee sees 0 of an unrelated company")
 
 
+def part2_team_billing_rpcs(db):
+    """Standing review, 2026-11-05: 0113-0116 (invite seat cap, last-owner
+    race, pack-quota race, one-company-per-user) each added a new SECURITY
+    DEFINER *_checked() RPC - all callable directly via supabase.rpc() by
+    any signed-in user, not just through this app's own Server Actions. This
+    suite's own matrix (uploads, packs, documents, admin, employee role)
+    never exercised them for cross-tenant tampering, even though every one
+    of them is exactly the shape [8]-[18] above exist to catch. Added after
+    confirming by hand that company A's owner can't act on company B via any
+    of them - this makes that check permanent and repeatable instead of a
+    one-off manual run."""
+    print("\n[19] Team/billing RPCs (0113-0116): A's owner can't act on B's company through any of them")
+    i = {k: str(uuid.uuid4()) for k in ("uA", "uB", "A", "B", "t", "packB", "bOwnerMember")}
+    A, B, uA, uB, tS, packB, bOwnerMember = i["A"], i["B"], i["uA"], i["uB"], i["t"], i["packB"], i["bOwnerMember"]
+    db.one(f"""
+insert into auth.users (id, email) values ('{uA}', 'iso19a@example.test'), ('{uB}', 'iso19b@example.test');
+insert into companies (id, legal_name) values ('{A}', 'Iso19 A'), ('{B}', 'Iso19 B');
+insert into company_members (id, company_id, user_id, role) values ('{bOwnerMember}', '{B}', '{uB}', 'owner');
+insert into company_members (company_id, user_id, role) values ('{A}', '{uA}', 'owner');
+insert into tenders (id, slug, title, closing_date, family) values
+  ('{tS}', 'iso19-{tS[:8]}', 'Iso19 shared tender', now() + interval '30 days', 'Conventional Consultant Tender');
+insert into tender_packs (id, company_id, tender_id) values ('{packB}', '{B}', '{tS}');
+select 1;""")
+
+    bad, _ = refused(db, f"select remove_member_checked('{bOwnerMember}', '{uB}')", uA)
+    check(bad, "A can't remove B's owner via remove_member_checked")
+    bad, _ = refused(db, f"select set_member_role_checked('{bOwnerMember}', '{uB}', 'member')", uA)
+    check(bad, "A can't demote B's owner via set_member_role_checked")
+    bad, _ = refused(db, f"select create_company_invite_checked('{B}', 'attacker@example.test', 'owner', null)", uA)
+    check(bad, "A can't create an invite into B via create_company_invite_checked")
+    check(db.one(f"select coalesce(company_can_request_pack('{B}')::text, 'null')", uA) == "null",
+          "A learns nothing of B's real quota state via company_can_request_pack (null, not true/false)")
+    bad, _ = refused(db, f"select request_submission_pack_checked('{B}', '{tS}', '{packB}', null, null, null, null)", uA)
+    check(bad, "A can't queue a SANRAL pack job for B via request_submission_pack_checked")
+    bad, _ = refused(db, f"select request_general_job_checked('{B}', '{tS}', '{packB}', 'generate_pack')", uA)
+    check(bad, "A can't queue a general pack job for B via request_general_job_checked")
+
+    print("  -- the same calls succeed for B's own owner acting on B (the checks aren't over-tight) --")
+    ok, _, err = db.run(f"select create_company_invite_checked('{B}', 'legit@example.test', 'member', null)", uB)
+    check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1009,6 +1051,7 @@ def main():
         part2_shared_templates(Db(psql))
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
+        part2_team_billing_rpcs(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
