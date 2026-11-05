@@ -1,5 +1,57 @@
 # System Status
 
+## This pass (2026-11-05, standing solution-architect review): fixed - `dispatchTriage.ts`'s `operationalStatusMessage()` stayed silent on a digital submission `classifyDispatchBucket()` already classified "critical", because only the physical-box path computed an urgency deadline
+
+Oriented from `8ba8a2b` (own prior pass: the double-click quota investigation). `git fetch`/
+`merge --ff-only` picked up `1f15ad9` (a sibling pass: intake rotation re-confirmed exhausted, no new
+bug) - no collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26).
+Backlog chain re-confirmed: 19 total, 3 genuinely open.
+
+This deep into the session almost every obvious area has had a dedicated pass. Grepped
+`System-Status.md`'s own history for mention counts across `app/app/`/`engine/` file names to find a
+genuinely light corner: the Tender Command Center's submission-logistics feature (migration `0090`,
+`lib/dispatchTriage.ts`) had only passing mentions, never its own pass. Read the module end to end -
+it's carefully written, with an unusually explicit header comment about what it deliberately does
+NOT try to derive and why (no second, drift-prone copy of `blocking_items`/`decision_needed`).
+
+**Found a real, reachable inconsistency between two sibling functions in the same file.**
+`classifyDispatchBucket()` has an explicit digital-submission fallback: when `printSignDeadline()` is
+null (submission type isn't `physical_box`, so there's no print/transit buffer to compute), it falls
+back to the closing date itself for the same 48-hour urgency window, so an eTenders-portal upload
+closing soon still lands in the dashboard's Critical lane. `operationalStatusMessage()` - the same
+module's "system speaks to you" status line, called from the real tender workspace page
+(`app/app/tenders/[id]/page.tsx`, confirmed by grep, not assumed) - has no equivalent fallback: it
+only ever computes `deadline`/`hoursLeft` from `printSignDeadline()`, which is always null for a
+digital submission. The result: a tender genuinely bucketed "critical" could have its own status
+line say nothing urgent at all, or show an unrelated blocking summary with no mention of the real
+48-hour deadline.
+
+**Verified directly, not assumed**: ran both functions against the identical input (an `etenders_
+portal` tender closing in 20 hours, not yet dispatched) - `classifyDispatchBucket()` correctly
+returned `"critical"`; `operationalStatusMessage()` returned `null`.
+
+**Fixed** by adding the same digital-submission fallback to `operationalStatusMessage()`, mirroring
+`classifyDispatchBucket()`'s own 48-hour window and `notYetDispatched` guard exactly (reusing the
+same `DISPATCHED_STATUSES` constant already in the module) - closing-based wording ("until closing")
+rather than print-cutoff wording, since a digital submission has no print step, plus a new
+`"SUBMISSION OVERDUE"` message mirroring the existing `"PRINT OVERDUE"` one for the past-closing case.
+
+**Verified for real**: manually ran 5 scenarios directly against the fixed functions (critical with
+no blocking summary, critical with one, overdue, already-dispatched inside the window - correctly
+stays silent, outside the 48h window - correctly stays silent) before writing tests. Added 4 new
+tests to `dispatchTriage.test.ts` covering the same scenarios. `git stash` of just the source fix
+(keeping the new tests) confirmed genuine red - 2/28 failing - then genuine green restored, 28/28.
+Full regression `node --experimental-strip-types --test lib/*.test.ts`: 226/226 (was 222, +4 new),
+unaffected. `tsc --noEmit` and `eslint` both clean on both touched files.
+
+**Backlog: 19, unchanged** - standalone bug, fixed; not a new judgment-call item. `held_registrations`-
+vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation session-refresh gap all carried
+forward, untouched as directed.
+
+Committed and pushed directly to `main`:
+- `app/lib/dispatchTriage.ts`
+- `app/lib/dispatchTriage.test.ts`
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - checked `request_general_job_checked()`'s (0115) quota-vs-"already queued" interaction for a double-click regression; confirmed unchanged, pre-existing behaviour, not a new bug
 
 Oriented from `9d43a72` (own prior pass: permanent tenant-isolation coverage for the 6 newest

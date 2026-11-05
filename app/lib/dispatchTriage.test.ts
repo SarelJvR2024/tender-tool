@@ -190,3 +190,65 @@ test("operationalStatusMessage: null when nothing urgent and nothing blocking - 
   const msg = operationalStatusMessage(baseLogistics, null, now);
   assert.equal(msg, null);
 });
+
+test("operationalStatusMessage: a digital submission within 48h of closing must say CRITICAL too, not stay silent just because it has no print/transit buffer", () => {
+  // 2026-11-05 finding: printSignDeadline()/hoursUntilPrintSignDeadline() are
+  // always null for a non-physical submission, so this function used to fall
+  // straight through to blockingSummary/null with no urgency wording at all -
+  // even though classifyDispatchBucket() already buckets the identical input
+  // "critical" via its own digital-submission fallback. A tender shown in the
+  // dashboard's Critical lane had its own status line say nothing was urgent.
+  const now = new Date("2026-11-05T12:00:00Z");
+  const digital: DispatchLogisticsInput = {
+    closingDate: new Date(now.getTime() + 20 * 60 * 60 * 1000).toISOString(),
+    submissionType: "etenders_portal",
+    estimatedPrintHours: 4,
+    estimatedTransitHours: 2,
+    dispatchStatus: "not_ready",
+  };
+  assert.equal(
+    operationalStatusMessage(digital, null, now),
+    "CRITICAL: you have 20 hours until closing. Confirm the submission is ready.",
+  );
+  assert.equal(
+    operationalStatusMessage(digital, "Need the audited financials.", now),
+    "CRITICAL: you have 20 hours until closing. Need the audited financials.",
+  );
+});
+
+test("operationalStatusMessage: SUBMISSION OVERDUE once a digital submission's own closing time has passed", () => {
+  const now = new Date("2026-11-05T12:00:00Z");
+  const digital: DispatchLogisticsInput = {
+    closingDate: new Date(now.getTime() - 60 * 60 * 1000).toISOString(),
+    submissionType: "email",
+    estimatedPrintHours: 4,
+    estimatedTransitHours: 2,
+    dispatchStatus: "not_ready",
+  };
+  assert.equal(operationalStatusMessage(digital, null, now), "SUBMISSION OVERDUE - the closing time has already passed.");
+});
+
+test("operationalStatusMessage: a digital submission already dispatched doesn't falsely claim CRITICAL, even inside the 48h window", () => {
+  const now = new Date("2026-11-05T12:00:00Z");
+  const digital: DispatchLogisticsInput = {
+    closingDate: new Date(now.getTime() + 20 * 60 * 60 * 1000).toISOString(),
+    submissionType: "other_digital",
+    estimatedPrintHours: 4,
+    estimatedTransitHours: 2,
+    dispatchStatus: "submitted_and_receipted",
+  };
+  assert.equal(operationalStatusMessage(digital, null, now), null);
+});
+
+test("operationalStatusMessage: a digital submission outside the 48h window is unaffected, same as the physical case", () => {
+  const now = new Date("2026-11-05T12:00:00Z");
+  const digital: DispatchLogisticsInput = {
+    closingDate: new Date(now.getTime() + 100 * 60 * 60 * 1000).toISOString(),
+    submissionType: "etenders_portal",
+    estimatedPrintHours: 4,
+    estimatedTransitHours: 2,
+    dispatchStatus: "not_ready",
+  };
+  assert.equal(operationalStatusMessage(digital, null, now), null);
+  assert.equal(operationalStatusMessage(digital, "Ready for pricing.", now), "Ready for pricing.");
+});

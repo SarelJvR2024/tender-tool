@@ -170,6 +170,27 @@ export function operationalStatusMessage(input: DispatchLogisticsInput, blocking
         ? `CRITICAL: you have ${hoursText} until the print cutoff. ${blockingSummary}`
         : `CRITICAL: you have ${hoursText} until the print cutoff. Confirm the pack is ready to print.`;
     }
+  } else if (input.submissionType !== "physical_box" && input.closingDate && !DISPATCHED_STATUSES.includes(input.dispatchStatus)) {
+    // Standing review, 2026-11-05: a digital submission (etenders_portal/email/
+    // other_digital, 0090) has no print/transit buffer, so deadline/hoursLeft
+    // above are always null for it - this function fell straight through to
+    // the blockingSummary/null branches below with no urgency wording at all,
+    // even though classifyDispatchBucket()'s own identical digital-submission
+    // fallback (same 48h window, same notYetDispatched guard) could correctly
+    // bucket the same tender "critical". A tender shown in the dashboard's
+    // Critical lane had its own "system speaks to you" status line say
+    // nothing about being critical. Mirrored here so the two can't disagree.
+    const closing = new Date(input.closingDate);
+    if (!Number.isNaN(closing.getTime())) {
+      const closingHours = (closing.getTime() - now.getTime()) / (60 * 60 * 1000);
+      if (closingHours <= 0) return "SUBMISSION OVERDUE - the closing time has already passed.";
+      if (closingHours <= 48) {
+        const hoursText = closingHours < 1 ? "under an hour" : `${Math.floor(closingHours)} hour${Math.floor(closingHours) === 1 ? "" : "s"}`;
+        return blockingSummary
+          ? `CRITICAL: you have ${hoursText} until closing. ${blockingSummary}`
+          : `CRITICAL: you have ${hoursText} until closing. Confirm the submission is ready.`;
+      }
+    }
   }
   if (blockingSummary) return blockingSummary;
   if (input.dispatchStatus === "printed_and_bound" || input.dispatchStatus === "out_for_delivery") {
