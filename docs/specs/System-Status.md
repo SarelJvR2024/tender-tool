@@ -2632,6 +2632,60 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-05, standing QA/robustness review): clean sweep - CV rotation re-confirmed exhausted (extract_cv_fields.py/generate_cv.py/process_cv_jobs.py), no new reachable bug found
+
+Oriented from `f3898f8` (own prior pass: Finding 131, fill_flat_pdf.py/pdf_merge.py). `git fetch`/
+`merge --ff-only` found one new sibling commit (`9d43a72` - test-only, adds permanent tenant-isolation
+coverage for 6 SECURITY DEFINER RPCs; no overlap with `engine/cv/`). Fast-forwarded cleanly. Open PRs
+re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+
+Rotated to CV (non-SANRAL pack was last). All three files in this area are already heavily reviewed
+this session (41/41/61 mentions in the findings doc for `extract_cv_fields.py`/`process_cv_jobs.py`/
+`generate_cv.py` respectively) - read all three in full looking for a genuinely new, reachable angle
+rather than re-litigating settled ground. Several specific leads were traced to a concrete conclusion
+and ruled out, not just skimmed past:
+
+- `build_world_bank()`'s Employment Record loop uses `proj.get('client_and_number', '')` (not `or ''`,
+  unlike every sibling field on the same line, already fixed for that exact reason) - looks like the
+  same "dict.get default only fires when the key is ABSENT, not when present-but-None" bug class fixed
+  repeatedly in this file already. Traced to the DB schema: `projects.client_and_number` is `text not
+  null` (migration 0001, unchanged by any later migration) and `extract_cv_fields.py`'s own
+  `validate_proposal()` already drops any project with an empty client before it's ever stored - so a
+  real, DB-sourced project row can never have this column null or empty. The gap is real only through
+  `generate_cv.py`'s OWN standalone JSON-profile CLI path (`load_person()`/`generate()`/`main()`), which
+  `process_cv_jobs.py` (the real production bridge) never calls at all - confirmed by grep: `load_person`
+  has exactly one call site, inside `generate()`, itself only reachable from `main()`'s own CLI argument
+  parsing. Not fixed: same precedent as the `classify_tender.py` CLI temp-dir leak (2026-11-04) - a
+  debug-only local tool path with no production reachability.
+- `_luhn_ok()`/`_plausible_sa_id()`'s calendar-date check (`1 <= dd <= 31`, no days-per-month table) would
+  accept an impossible date like "30 February" as a plausible ID checksum match - a real gap in
+  strictness, but only a FALSE-POSITIVE risk (treating a non-ID 13-digit number as an ID, requiring it to
+  ALSO pass the Luhn checksum, itself only a 1-in-10 chance on random digits) - too speculative/low-value
+  to pursue as a real finding on this pass.
+- `process_cv_jobs.py`'s own `fail_stale_jobs()` has no self-heal check for "the result was already
+  written, just not linked" the way `extract_cv_fields.py`'s sibling `fail_stale_uploads()` was given
+  2026-11-02 (ported from Finding 114) - traced the actual write shape and confirmed the two pipelines
+  genuinely differ: CV extraction writes an intermediate `cv_extraction_results` row BEFORE its own status
+  flip (so a crash in between leaves a real, inconsistent "result exists but status says pending" state
+  worth self-healing); CV GENERATION's `process_job()` does all its storage uploads and then ONE single
+  final PATCH that writes status+both storage paths together - there is no intermediate DB write to
+  self-heal FROM, so a crash before that PATCH just leaves orphaned storage files (wasteful, not wrong) and
+  marking the job "failed" is already correct, not a UI double-truth bug. Genuinely not the same shape -
+  nothing to port here.
+- `call_llm()`'s own retry/timeout/schema-size handling (the LLM call itself, read per CLAUDE.md's own
+  standing instruction to check `AI-Call-Quality-Standard.md` before touching one) and
+  `fail_stale_uploads()`'s self-heal logic are both already mature from prior passes - no new gap found.
+- `generate_as_is()`'s dispatch gap (no `"as_is"` key in `process_job()`'s builder dict) was already
+  investigated and ruled out by an earlier pass (comment at `process_cv_jobs.py:33-39`): confirmed by grep
+  that no real call site anywhere sends an as-is job through this bridge at all.
+
+No code changed this pass - genuinely clean, not a skipped lead. QA: no suite re-run needed (nothing
+touched); PR/collision checks as above.
+
+Backlog: unchanged at 18 items.
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): fix - a smart quote/en-dash in a copy-pasted company or signatory name rendered as a silent "?" on a real printed form, with the self-verification check fooled into reporting it correctly placed (found in two files)
 
 Oriented from `a882a5e` (own prior pass: Finding 130, `fill_financial.py`). `git fetch`/`merge --ff-only`
