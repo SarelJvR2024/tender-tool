@@ -28,11 +28,22 @@ export async function updateCompanyProfile(companyId: string, formData: FormData
     redirect(`/company?edit=1&error=${encodeURIComponent(validationError)}`);
   }
 
-  const { error } = await supabase.from("companies").update(update).eq("id", companyId);
+  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own "companies: members
+  // can update" (0001, using (is_company_member(id)), re-evaluated against
+  // the OLD row) no longer matches - e.g. another admin's removeMember()
+  // (0114) revoking this user's own company_members row between the edit
+  // form loading and this submit. No destructive consequence here (no file
+  // upload precedes this write), but still a real silent-false-success
+  // ("saved" shown when nothing was written) - same "plain update twin"
+  // shape as saveProperty()/savePrincipal(), and this file's own sibling
+  // uploadVaultDocument() below already had the real fix - this plain
+  // update was never swept for it (standing review, 2026-11-06).
+  const { data: updated, error } = await supabase.from("companies").update(update).eq("id", companyId).select("id").maybeSingle();
 
-  if (error) {
+  if (error || !updated) {
     console.error("companies update failed", error);
-    redirect(`/company?error=${encodeURIComponent("Could not save your company profile - try again. If it keeps happening, let us know.")}`);
+    redirect(`/company?error=${encodeURIComponent("Your company profile is no longer there - refresh and try again.")}`);
   }
 
   revalidatePath("/company");

@@ -190,3 +190,47 @@ describe("uploadVaultDocument - real update still succeeds", () => {
     expect(removedPaths).toContain("company-1/vault/iso_9001/old-uuid-old.pdf"); // previous file correctly swapped out
   });
 });
+
+// updateCompanyProfile() - the "plain update twin" of uploadVaultDocument()
+// above, in this SAME file: `supabase.from("companies").update(update).eq(
+// "id", companyId)` checked only `error`, no destructive consequence (no
+// file upload precedes it), but still a real silent-false-success. Found
+// re-reading this whole file end to end for siblings of its own
+// already-fixed uploadVaultDocument() (standing review, 2026-11-06) - this
+// function was never swept before this pass.
+describe("updateCompanyProfile - membership revoked mid-request (companies update matches zero rows)", () => {
+  it("does not report success when the update matches zero rows", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: null, error: null }], // update().select("id").maybeSingle() - zero-row RLS match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { updateCompanyProfile } = await import("./actions");
+
+    const fd = formDataWith({ legal_name: "Klip Corp (Pty) Ltd" });
+    const url = await expectRedirect(updateCompanyProfile("company-1", fd));
+
+    expect(url).not.toContain("saved=1");
+    expect(url).toContain("/company?error=");
+  });
+});
+
+describe("updateCompanyProfile - real update still succeeds", () => {
+  it("saves normally when the update genuinely matches the row", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { id: "company-1" }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { updateCompanyProfile } = await import("./actions");
+
+    const fd = formDataWith({ legal_name: "Klip Corp (Pty) Ltd" });
+    const url = await expectRedirect(updateCompanyProfile("company-1", fd));
+
+    expect(url).toBe("/company?saved=1");
+  });
+});

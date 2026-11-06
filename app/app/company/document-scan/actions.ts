@@ -399,7 +399,19 @@ export async function discardOnboardingDocument(formData: FormData) {
   if (!resultId) fail("Missing document.");
   const result = await loadPendingResult(supabase, companyId, resultId!);
   const upload = result.onboarding_uploads;
-  await supabase.from("onboarding_document_results").update({ review_status: "discarded" }).eq("id", result.id);
+  // .select("id").maybeSingle() here matters, same shape as
+  // confirmVaultDocument()/confirmIdDocument() above: without it, a
+  // membership-revoked-mid-request zero-row match on this update still let
+  // the unconditional storage removal below destroy the upload's only copy,
+  // while onboarding_document_results stayed stuck on "pending_review" with
+  // nothing left to ever review (found re-reading this file end to end for
+  // siblings of its own already-fixed functions, standing review,
+  // 2026-11-06 - never swept before this pass).
+  const { data: updated, error } = await supabase.from("onboarding_document_results").update({ review_status: "discarded" }).eq("id", result.id).select("id").maybeSingle();
+  if (error || !updated) {
+    console.error("onboarding_document_results discard update failed", error);
+    fail("This document is no longer there - refresh and try again.");
+  }
   if (upload?.storage_path) await supabase.storage.from(ONBOARDING_BUCKET).remove([upload.storage_path]);
   const back = backTo(formData);
   revalidatePath(back);

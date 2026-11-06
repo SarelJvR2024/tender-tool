@@ -100,10 +100,20 @@ export async function savePerson(formData: FormData) {
     }
     personId = data!.id;
   } else {
-    const { error } = await supabase.from("people").update(row).eq("id", id);
-    if (error) {
+    // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+    // `error: null` and zero rows affected when RLS's own "people: tenant
+    // isolation" (0001, using (is_company_member(company_id)), re-evaluated
+    // against the OLD row) no longer matches - e.g. another admin's
+    // removeMember() (0114) revoking this user's own company_members row
+    // between the edit form loading and this submit. No destructive
+    // consequence here (no file upload precedes this write), but still a
+    // real silent-false-success ("saved" shown when nothing was written) -
+    // same "plain update twin" shape as saveProperty()/savePrincipal()
+    // (standing review, 2026-11-06).
+    const { data: updated, error } = await supabase.from("people").update(row).eq("id", id).select("id").maybeSingle();
+    if (error || !updated) {
       console.error("people update failed", error);
-      redirect(`/people/${id}?error=${encodeURIComponent("Could not save this person - try again. If it keeps happening, let us know.")}`);
+      redirect(`/people/${id}?error=${encodeURIComponent("This person is no longer there - refresh and try again.")}`);
     }
   }
 
@@ -130,9 +140,14 @@ export async function deletePerson(formData: FormData) {
   const { data: person } = await supabase.from("people").select("id").eq("id", id).eq("company_id", companyId).maybeSingle();
   if (!person) redirect("/people");
 
-  const [{ data: uploads }, { data: generated }] = await Promise.all([
+  // Gather every real file path FIRST (read-only - safe regardless of what
+  // happens below), but don't destroy anything yet. Registration
+  // certificates this person held (0050 held_registrations, company-
+  // documents bucket): the rows cascade with the person, the files don't.
+  const [{ data: uploads }, { data: generated }, { data: regs }] = await Promise.all([
     supabase.from("cv_uploads").select("storage_path").eq("person_id", id).eq("company_id", companyId),
     supabase.from("generated_cvs").select("storage_path_docx, storage_path_pdf").eq("person_id", id).eq("company_id", companyId),
+    supabase.from("held_registrations").select("storage_path").eq("person_id", id).eq("company_id", companyId),
   ]);
   const paths = new Set<string>();
   for (const u of uploads ?? []) if (u.storage_path) paths.add(u.storage_path as string);
@@ -146,26 +161,43 @@ export async function deletePerson(formData: FormData) {
     for (const f of files ?? []) if (f.name) paths.add(`${folder}/${sub}/${f.name}`);
   }
   const own = [...paths].filter((p) => p.startsWith(`${companyId}/`));
+  const regPaths = (regs ?? []).map((r) => r.storage_path as string | null).filter((p): p is string => !!p && p.startsWith(`${companyId}/`));
+
+  // The row delete now runs BEFORE any storage removal, and is checked by
+  // `.select("id").maybeSingle()`, not just `error` - reordered 2026-11-06.
+  // PostgREST returns a 2xx with `error: null` and zero rows affected when
+  // RLS's own "people: tenant isolation" (0001, using
+  // (is_company_member(company_id)), re-evaluated against the OLD row) no
+  // longer matches - e.g. another admin's removeMember() (0114) revoking
+  // this user's own company_members row during this function's own earlier
+  // reads/storage listings above (a real, multi-round-trip window, not a
+  // narrow one). With the delete run LAST (the previous order), that race
+  // already destroyed every one of this person's real CV/generated-CV/
+  // registration-certificate files from storage - unconditionally, before
+  // ever confirming the person row itself was actually deleted - leaving
+  // the person very much alive with every storage_path column on their
+  // cascading rows now pointing at nothing. Checking the delete first and
+  // gating all storage removal on it having actually matched means a
+  // revoked membership now fails cleanly, before destroying anything.
+  const { data: deleted, error } = await supabase.from("people").delete().eq("id", id).eq("company_id", companyId).select("id").maybeSingle();
+  if (error || !deleted) {
+    console.error("people delete failed", error);
+    redirect(`/people/${id}?error=${encodeURIComponent("This person is no longer there - refresh and try again.")}`);
+  }
+
+  // The person row (and everything that cascades with it) is now confirmed
+  // gone - these are best-effort storage cleanup, logged rather than blocking
+  // on, since the real delete already happened and can't be "undone" by
+  // reporting an error here.
   if (own.length > 0) {
     const { error: rmErr } = await supabase.storage.from("cv-documents").remove(own);
-    if (rmErr) {
-      console.error("cv-documents remove failed for person delete", id, rmErr);
-      redirect(`/people/${id}?error=${encodeURIComponent("Could not remove this person's CV files - try again. If it keeps happening, let us know.")}`);
-    }
+    if (rmErr) console.error("cv-documents remove failed for person delete", id, rmErr);
+  }
+  if (regPaths.length > 0) {
+    const { error: regRmErr } = await supabase.storage.from("company-documents").remove(regPaths);
+    if (regRmErr) console.error("company-documents remove failed for person delete", id, regRmErr);
   }
 
-  // Registration certificates this person held (0050 held_registrations,
-  // company-documents bucket): the rows cascade with the person, the files
-  // don't - remove them first, same rule as the CVs above.
-  const { data: regs } = await supabase.from("held_registrations").select("storage_path").eq("person_id", id).eq("company_id", companyId);
-  const regPaths = (regs ?? []).map((r) => r.storage_path as string | null).filter((p): p is string => !!p && p.startsWith(`${companyId}/`));
-  if (regPaths.length > 0) await supabase.storage.from("company-documents").remove(regPaths);
-
-  const { error } = await supabase.from("people").delete().eq("id", id).eq("company_id", companyId);
-  if (error) {
-    console.error("people delete failed", error);
-    redirect(`/people/${id}?error=${encodeURIComponent("Could not delete this person - try again. If it keeps happening, let us know.")}`);
-  }
   revalidatePath("/people");
   redirect("/people");
 }
@@ -232,7 +264,16 @@ export async function deleteProject(formData: FormData) {
   const personId = str(formData, "person_id");
   if (!projectId || !personId) redirect("/people");
 
-  await supabase.from("projects").delete().eq("id", projectId);
+  // This used to check NOTHING - not even `error` (worst instance of this
+  // bug class is "no check at all", same severity note as experience/
+  // actions.ts's deleteExperience() before its own fix). No destructive
+  // consequence (projects have no attached storage file), so a plain
+  // `error` check is enough here.
+  const { error } = await supabase.from("projects").delete().eq("id", projectId);
+  if (error) {
+    console.error("projects delete failed", error);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not delete this project - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);
 }

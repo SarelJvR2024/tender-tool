@@ -299,3 +299,70 @@ describe("confirmIdDocument - certified_id_on is SAST-anchored, not a naive UTC 
     expect(principalUpdate?.certified_id_on).toBe("2099-01-01");
   });
 });
+
+// discardOnboardingDocument() - a sibling of confirmVaultDocument()/
+// confirmIdDocument() above, in this SAME file, never checked before this
+// pass (found re-reading the whole file end to end for siblings of its own
+// already-fixed functions, standing review, 2026-11-06). Pre-fix it did
+// `.update({ review_status: "discarded" }).eq("id", result.id)` with NO
+// check at all - not even `error` - then unconditionally removed the
+// upload's storage file regardless. A membership-revoked-mid-request zero-
+// row match left the file destroyed while onboarding_document_results
+// stayed stuck on "pending_review" with nothing left to review.
+const pendingDiscardResult = {
+  data: {
+    id: "result-3",
+    company_id: "company-1",
+    onboarding_upload_id: "upload-3",
+    document_kind: "unknown",
+    fields: {},
+    review_status: "pending_review",
+    onboarding_uploads: { storage_path: "company-1/onboarding/raw-discard.pdf", original_filename: "discard.pdf" },
+  },
+  error: null,
+};
+
+describe("discardOnboardingDocument - membership revoked mid-request (update matches zero rows)", () => {
+  it("does not report success and does not delete the file", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingDiscardResult], // loadPendingResult
+        [{ data: null, error: null }], // discard update - membership revoked -> 0 rows
+      ],
+    });
+    supabaseState.current = client;
+
+    const { discardOnboardingDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-3" });
+    const url = await expectRedirect(discardOnboardingDocument(fd));
+
+    expect(url).not.toContain("saved=discarded");
+    expect(url).toContain("/company/document-scan?error=");
+    const removedPaths = removeCalls.flat();
+    expect(removedPaths).not.toContain("company-1/onboarding/raw-discard.pdf");
+  });
+});
+
+describe("discardOnboardingDocument - real update still succeeds", () => {
+  it("discards and removes the file when the update genuinely matches the row", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingDiscardResult],
+        [{ data: { id: "result-3" }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { discardOnboardingDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-3" });
+    const url = await expectRedirect(discardOnboardingDocument(fd));
+
+    expect(url).toContain("saved=discarded");
+    const removedPaths = removeCalls.flat();
+    expect(removedPaths).toContain("company-1/onboarding/raw-discard.pdf");
+  });
+});
