@@ -33,7 +33,8 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: membership } = await supabase.from("company_members").select("company_id, role").eq("user_id", user?.id ?? "").maybeSingle();
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id, role").eq("user_id", user?.id ?? "").maybeSingle();
+  if (membershipError) console.error("company_members select failed (bank-accounts)", membershipError);
   const isAdmin = membership?.role === "owner" || membership?.role === "admin";
 
   // RLS returns rows only to owners/admins; members get the masked summary.
@@ -44,7 +45,13 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
   ]);
   if (accountsError) console.error("bank_accounts select failed", accountsError);
   if (summariesError) console.error("bank_account_summaries rpc failed", summariesError);
-  const loadError = isAdmin ? accountsError : summariesError;
+  // A failed company_members read (membershipError) is indistinguishable
+  // from the genuine "not an owner/admin" case below (isAdmin falls back to
+  // false either way) unless flagged explicitly - it would otherwise show
+  // a real owner/admin the masked member view, falsely claim "no bank
+  // accounts on file" and tell them to go ask an owner or admin (i.e.
+  // themselves), the same established bug class fixed elsewhere in /company.
+  const loadError = membershipError ? membershipError : isAdmin ? accountsError : summariesError;
   const accounts = (accountRows ?? []) as Account[];
   const people = (principals ?? []) as { id: string; full_name: string }[];
   const nameOf = (pid: string | null) => (pid ? people.find((p) => p.id === pid)?.full_name ?? "Director" : "The company");
@@ -69,7 +76,7 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
       )}
       {!isAdmin ? (
         <Card title="On file">
-          {((summaries ?? []) as { id: string; principal_id: string | null; bank_name: string; account_holder: string; last4: string }[]).length === 0 ? (
+          {membershipError ? null : ((summaries ?? []) as { id: string; principal_id: string | null; bank_name: string; account_holder: string; last4: string }[]).length === 0 ? (
             <div className="text-sm text-muted-foreground">{loadError ? null : "No bank accounts on file."}</div>
           ) : (
             ((summaries ?? []) as { id: string; principal_id: string | null; bank_name: string; account_holder: string; last4: string }[]).map((s) => (
@@ -78,7 +85,8 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
               </div>
             ))
           )}
-          <div className="mt-2 text-xs text-muted-foreground">Ask an owner or admin of your company to add or change an account.</div>
+          {/* membershipError means we don't actually know this user isn't an owner/admin - the error banner above already covers it, so don't also tell them to go ask one (i.e. themselves). */}
+          {!membershipError && <div className="mt-2 text-xs text-muted-foreground">Ask an owner or admin of your company to add or change an account.</div>}
         </Card>
       ) : (
         <>

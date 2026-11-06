@@ -22,13 +22,40 @@ const SAVED: Record<string, string> = {
   retrying: "Queued again - this page updates itself as the result comes in.",
 };
 
+const INTRO = (
+  <>
+    Drop in every compliance document your company already has - CIDB, B-BBEE, tax clearance, ID documents, CVs, bank letter, PI
+    insurance, ISO 9001, project reference letters - at once, instead of uploading and tagging each one by hand. Each file is
+    read by AI to work out what it is and pull out its key fields, with the exact text it read them from. <strong>Nothing is
+    saved to your company profile until you confirm or correct each one below.</strong>
+  </>
+);
+
 export default async function DocumentScanPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
   const { error, saved } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
+  if (membershipError) console.error("document-scan: company_members read failed", membershipError);
+  if (!membership) {
+    // A failed read (membershipError truthy) is indistinguishable from the
+    // genuine "no company yet" case below unless flagged explicitly - an
+    // already-onboarded user hitting a transient Supabase blip here would
+    // otherwise be redirected straight to onboarding's Screen 1 ("create
+    // your company"), the same established bug class already fixed for
+    // onboarding/page.tsx and proxy.ts (PR #177).
+    if (membershipError) {
+      return (
+        <SubPage title="Bulk document scan" intro={INTRO} error={error} saved={null}>
+          <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+            Couldn&apos;t check your company - try refreshing. If it keeps happening, let us know.
+          </div>
+        </SubPage>
+      );
+    }
+    redirect("/onboarding");
+  }
   const companyId = membership.company_id as string;
 
   const [{ data: pending, error: pendingError }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }, { data: failed, error: failedError }] = await Promise.all([
@@ -83,14 +110,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   return (
     <SubPage
       title="Bulk document scan"
-      intro={
-        <>
-          Drop in every compliance document your company already has - CIDB, B-BBEE, tax clearance, ID documents, CVs, bank letter, PI
-          insurance, ISO 9001, project reference letters - at once, instead of uploading and tagging each one by hand. Each file is
-          read by AI to work out what it is and pull out its key fields, with the exact text it read them from. <strong>Nothing is
-          saved to your company profile until you confirm or correct each one below.</strong>
-        </>
-      }
+      intro={INTRO}
       error={error}
       saved={saved === "handed-off" && handoffPerson ? null : saved ? SAVED[saved] ?? saved : null}
     >
