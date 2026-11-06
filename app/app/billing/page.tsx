@@ -70,7 +70,8 @@ export default async function BillingPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user?.id ?? "").maybeSingle();
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id").eq("user_id", user?.id ?? "").maybeSingle();
+  if (membershipError) console.error("company_members select failed (billing)", membershipError);
   const companyId = membership?.company_id as string | undefined;
 
   const [{ count: memberCount }, { data: packsThisPeriod }] = await Promise.all([
@@ -133,13 +134,30 @@ export default async function BillingPage({
           {subscription && (
             <div className="mt-4 grid gap-3 border-t border-border pt-4 text-sm text-muted-foreground sm:grid-cols-2">
               <div>
-                Team: <span className="font-medium text-foreground">{memberCount ?? 0}</span> of{" "}
-                {subscription.maxUsers ?? "unlimited"}
+                {/* membershipError: companyId never resolves, so memberCount
+                    would otherwise show a false "0 of X" (the same
+                    false-zero-state shape already fixed elsewhere in this
+                    app, e.g. c871d96) rather than genuinely zero. */}
+                Team:{" "}
+                {membershipError ? (
+                  <span className="font-medium text-destructive">couldn&apos;t load</span>
+                ) : (
+                  <>
+                    <span className="font-medium text-foreground">{memberCount ?? 0}</span> of{" "}
+                    {subscription.maxUsers ?? "unlimited"}
+                  </>
+                )}
               </div>
               <div>
                 Bid packs this period:{" "}
-                <span className="font-medium text-foreground">{status === "active" ? ((packsThisPeriod as number | null) ?? 0) : "—"}</span> of{" "}
-                {status === "trialing" ? "1 (trial)" : subscription.maxPacksPerMonth ?? "unlimited"}
+                {membershipError ? (
+                  <span className="font-medium text-destructive">couldn&apos;t load</span>
+                ) : (
+                  <>
+                    <span className="font-medium text-foreground">{status === "active" ? ((packsThisPeriod as number | null) ?? 0) : "—"}</span> of{" "}
+                    {status === "trialing" ? "1 (trial)" : subscription.maxPacksPerMonth ?? "unlimited"}
+                  </>
+                )}
               </div>
             </div>
           )}

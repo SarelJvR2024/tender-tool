@@ -79,9 +79,10 @@ export default async function ExperiencePage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: membership } = user
+  const { data: membership, error: membershipError } = user
     ? await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle()
-    : { data: null };
+    : { data: null, error: null };
+  if (membershipError) console.error("company_members select failed (experience)", membershipError);
   const companyId = (membership?.company_id as string | undefined) ?? null;
 
   const { data: rows, error: loadError } = await supabase
@@ -136,7 +137,13 @@ export default async function ExperiencePage({
     const res = await findMatchingExperience(supabase, companyId, { disciplines: expandDisciplines(taxonomy, [activeDiscipline]) });
     filtered = res.items;
     filterError = res.error;
-  } else if (activeDiscipline) {
+  } else if (activeDiscipline && !membershipError) {
+    // Only a genuine "no company" case renders as a real empty filter
+    // result. On membershipError, companyId is falsy for the wrong reason
+    // (a transient read failure, not "this user has no company") - leaving
+    // `filtered` as null here falls through to `shown = filtered ?? all`
+    // below, i.e. the unfiltered list, rather than falsely claiming no
+    // items match this discipline.
     filtered = [];
   }
 
@@ -168,9 +175,13 @@ export default async function ExperiencePage({
           description="Reference letters, performance reports, completion certificates, close-out reports and award letters that prove what the company has delivered. Upload the document, then tag what it shows so tenders can be matched against it."
         />
 
-        {(errorParam || loadError || filterError) && (
+        {(errorParam || loadError || filterError || membershipError) && (
           <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {errorParam ? decodeURIComponent(errorParam) : `Could not load experience: ${loadError?.message ?? filterError}`}
+            {errorParam
+              ? decodeURIComponent(errorParam)
+              : loadError || filterError
+                ? `Could not load experience: ${loadError?.message ?? filterError}`
+                : "Couldn't verify your company - uploading and the discipline filter may be unavailable until you refresh."}
           </div>
         )}
 

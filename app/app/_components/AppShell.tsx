@@ -35,7 +35,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     // transient Supabase read) without taking down the rest of the shell -
     // every signed-in page renders through AppShell, so an unguarded
     // rejection here used to break the whole page, not just the bell.
-    const [{ data: adminData }, { data: membership }, { data: company }, notificationsResult, subscriptionRow] = await Promise.all([
+    const [{ data: adminData }, { data: membership, error: membershipError }, { data: company, error: companyError }, notificationsResult, subscriptionRow] = await Promise.all([
       supabase.rpc("is_platform_admin"),
       // 'employee' (migration 0067) only ever sees Home + My CV - see
       // nav-items.ts's own EMPLOYEE_NAV_ITEMS comment for why.
@@ -47,6 +47,15 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       }),
       fetchCompanySubscription(supabase),
     ]);
+    // Same deliberate non-surfacing as subscriptionRow.error just below: a
+    // transient failure here only affects this shared chrome's own display
+    // (isEmployee fails open to the broader, non-employee nav; companyName
+    // just stays blank) - never a false claim rendered on a page's own
+    // content, and every page mounting AppShell already has RLS as the
+    // real backstop regardless of what this nav shows. Logged so it's
+    // still visible server-side, not silently swallowed.
+    if (membershipError) console.error("company_members select failed (AppShell)", membershipError);
+    if (companyError) console.error("companies select failed (AppShell)", companyError);
     isPlatformAdmin = adminData === true;
     isEmployee = membership?.role === "employee";
     companyName = (company?.csd_trading_name || company?.legal_name) ?? null;
