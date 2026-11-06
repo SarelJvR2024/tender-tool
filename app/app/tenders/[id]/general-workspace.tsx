@@ -305,11 +305,24 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const rules = readingIsPrivate ? null : ((tender.evaluation_rules as EvaluationRules | null) ?? null);
   const evidenceRules = (rules?.experience_evidence?.rules?.length ? rules.experience_evidence.rules : manifest.experience_evidence.rules) ?? [];
   const chosen = evidenceRules.length > 0 ? { rule: evidenceRules[0], source: "tender_document" as const, otherRules: evidenceRules.length - 1 } : null;
-  const experience = chosen && company?.id
-    ? await findMatchingExperience(supabase, company.id, {
-        ...(chosen.rule.window_years ? { completedWithinYears: chosen.rule.window_years } : {}),
-        ...(closingDate ? { asOf: closingDate.slice(0, 10) } : {}),
-      })
+  // Finding, 2026-11-06: `company` comes from the batch `companies` read
+  // above with no error captured (a Supabase query error returns
+  // {data: null}, it never throws), so a transient read failure used to make
+  // this whole "Company experience this tender accepts" block render as if
+  // the tender had no evidence requirement at all - no warning, no chip,
+  // same look as "nothing to show here" - the one case the sibling
+  // `experience?.error` branch just below was never reached for. Carrying
+  // the same honest "couldn't be read" message `findMatchingExperience()`
+  // itself already returns for its own read failure, rather than `null`,
+  // makes that existing branch catch this case too instead of silently
+  // dropping it.
+  const experience = chosen
+    ? company?.id
+      ? await findMatchingExperience(supabase, company.id, {
+          ...(chosen.rule.window_years ? { completedWithinYears: chosen.rule.window_years } : {}),
+          ...(closingDate ? { asOf: closingDate.slice(0, 10) } : {}),
+        })
+      : { items: [], error: "Your company record couldn't be read for this check." }
     : null;
   const evidenceEval = chosen && experience && !experience.error ? evaluateEvidence(chosen, experience.items, false) : null;
 

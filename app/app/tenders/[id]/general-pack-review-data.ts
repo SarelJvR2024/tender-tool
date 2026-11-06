@@ -221,22 +221,61 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     const items: ReviewItem[] = [];
     const rules = (tender.evaluation_rules as EvaluationRules | null) ?? null;
     const evidenceRules = (rules?.experience_evidence?.rules?.length ? rules.experience_evidence.rules : manifest.experience_evidence.rules) ?? [];
-    if (evidenceRules.length > 0 && company?.id) {
-      const rule = evidenceRules[0];
-      const experience = await findMatchingExperience(supabase, company.id, {
-        ...(rule.window_years ? { completedWithinYears: rule.window_years } : {}),
-        ...(closingDate ? { asOf: closingDate.slice(0, 10) } : {}),
-      });
-      if (experience && !experience.error) {
-        const evidenceEval = evaluateEvidence({ rule, source: "tender_document", otherRules: evidenceRules.length - 1 }, experience.items, false);
-        const { reviewStatus } = docItemStatus(evidenceEval.status);
+    if (evidenceRules.length > 0) {
+      // Finding, 2026-11-06: `company` comes from the batch `companies` read
+      // above (outside any try/catch - a Supabase query error returns
+      // {data: null}, it never throws, so it was never caught by this
+      // section's own try/catch either). The old code only pushed an item
+      // when `company?.id` was truthy, so a transient `companies` read
+      // failure silently fell through to zero items here - indistinguishable
+      // from "this tender genuinely has no experience-evidence requirement" -
+      // exactly the "a section's own data failed to load but it quietly
+      // contributes 0 items instead of being left out of the count" shape
+      // tender-readiness.ts's own computeTenderReadiness() doc comment
+      // explicitly warns is worse than omitting the section, just not caught
+      // here because nothing actually threw. compliance-data.ts's SANRAL
+      // equivalent (tenderCompliance.ts's B6 `!experienceAvailable` branch)
+      // already pushes an honest "couldn't be read" item in this exact
+      // situation - mirrored here now, same `needs_input`/"Provide" severity
+      // (visible, not silently vanished, but not a hard pack-generation
+      // blocker either - a real company-side gap still gets evaluated
+      // normally below and can still reach `missing`/Fix).
+      if (!company?.id) {
         items.push({
           key: "experience",
           label: "Qualifying experience",
-          value: `${acceptedDocTypes(rule).size > 0 ? experience.items.filter((i) => acceptedDocTypes(rule).has(i.document_type)).length : experience.items.length} item(s)`,
-          status: reviewStatus,
-          note: evidenceEval.detail,
+          value: null,
+          status: "needs_input",
+          note: "Your company record couldn't be read for this check, so qualifying experience evidence isn't counted yet - try refreshing.",
         });
+      } else {
+        const rule = evidenceRules[0];
+        const experience = await findMatchingExperience(supabase, company.id, {
+          ...(rule.window_years ? { completedWithinYears: rule.window_years } : {}),
+          ...(closingDate ? { asOf: closingDate.slice(0, 10) } : {}),
+        });
+        if (experience.error) {
+          // Same shape, the other read that can fail without throwing
+          // (the experience_matches RPC, findMatchingExperience() in
+          // lib/experience.ts) - same fix, same reasoning as above.
+          items.push({
+            key: "experience",
+            label: "Qualifying experience",
+            value: null,
+            status: "needs_input",
+            note: "The Experience Library couldn't be read for this check, so qualifying experience evidence isn't counted yet - try refreshing.",
+          });
+        } else {
+          const evidenceEval = evaluateEvidence({ rule, source: "tender_document", otherRules: evidenceRules.length - 1 }, experience.items, false);
+          const { reviewStatus } = docItemStatus(evidenceEval.status);
+          items.push({
+            key: "experience",
+            label: "Qualifying experience",
+            value: `${acceptedDocTypes(rule).size > 0 ? experience.items.filter((i) => acceptedDocTypes(rule).has(i.document_type)).length : experience.items.length} item(s)`,
+            status: reviewStatus,
+            note: evidenceEval.detail,
+          });
+        }
       }
     }
     sections.push(section("experience", "Company experience evidence", "#general-people", "Confirm or change", items));
