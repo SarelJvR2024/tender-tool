@@ -24,7 +24,9 @@ Run: python3 engine/pack/test_process_pack_jobs.py
 """
 import datetime
 import os
+import shutil
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -57,6 +59,12 @@ class FakeClient:
         for r in matched:
             r.update(body)
         return matched
+
+    def upload(self, bucket, path, local, content_type):
+        # Not exercised for its own sake by any test here - just needs to
+        # accept the call without touching the network, same reason this
+        # fake has no real select()/update() network either.
+        pass
 
 
 def iso(dt):
@@ -175,10 +183,90 @@ def test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails
           any(a[0][0] == "pack" and a[0][2] == "error" and "job-flaky" in a[0][1] for a in alerts), alerts)
 
 
+def test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response():
+    print("SupabaseRest.rpc(): posts to /rest/v1/rpc/<fn> with the args as the body and parses "
+          "the JSON response - send_pack_ready_email() calls company_notification_recipients/"
+          "claim_notification/record_notification_sent through exactly this, and this class had "
+          "no rpc() at all before this pass (confirmed: it's the one method process_cv_jobs.py's "
+          "own send_pack_ready_email() caller needs that process_general_jobs.py's Supabase class "
+          "already had and this one, its SANRAL sibling, never did).")
+    client = ppj.SupabaseRest("https://example.test", "k")
+    calls = []
+
+    def fake_req(method, path, body=None, headers=None, raw=None):
+        calls.append((method, path, body, headers))
+        return b'[{"ok": true}]'
+    client._req = fake_req
+    result = client.rpc("some_function", {"p_a": 1})
+    check("exactly one request was made", len(calls) == 1, calls)
+    method, path, body, _headers = calls[0]
+    check("POSTs", method == "POST", method)
+    check("to the right rpc path", path == "/rest/v1/rpc/some_function", path)
+    check("the args dict is sent as the body, unmodified", body == {"p_a": 1}, body)
+    check("the JSON response is parsed back into Python", result == [{"ok": True}], result)
+
+    calls.clear()
+    client.rpc("no_args_function")
+    check("args=None sends an empty dict, not null/omitted", calls[0][2] == {}, calls[0])
+
+
+def test_process_job_sends_the_pack_ready_email_on_success():
+    print("process_job(): on a successful SANRAL pack build, send_pack_ready_email() is now "
+          "called with (client, job, page_count, APP_URL) - the Finding this pass fixed: this "
+          "bridge shares pack_generation_jobs with process_general_jobs.py (engine='sanral' vs "
+          "'general'), and the 'general' side has fired this exact email on every ready pack "
+          "since 2026-10-27 (notification-engine item B12) while this, its sibling, never did.")
+    work_root = tempfile.mkdtemp(prefix="test_pack_ready_email_work_root_")
+    job = {"id": "job-1", "status": "requested", "engine": "sanral",
+           "company_id": "co-a", "tender_id": "t-a"}
+    client = FakeClient([dict(job)])
+
+    def fake_gather(client, job, work):
+        return {}
+
+    def fake_build_submission_pack(work_dir, **kwargs):
+        os.makedirs(work_dir, exist_ok=True)
+        pdf_path = os.path.join(work_dir, "submission_pack.pdf")
+        fin_path = os.path.join(work_dir, "financial.pdf")
+        open(pdf_path, "wb").close()
+        open(fin_path, "wb").close()
+        return pdf_path, {
+            "page_count": 42, "sections": ["s1"], "omitted": [],
+            "financial": {"page_count": 5},
+            "outputs": {"pdf": pdf_path, "financial_pdf": fin_path},
+        }
+
+    sent = []
+    real_gather, real_build, real_verify, real_send = (
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email)
+    ppj.gather = fake_gather
+    ppj.build_submission_pack = fake_build_submission_pack
+    ppj.verify_pack = lambda pdf, manifest: []
+    ppj.send_pack_ready_email = lambda client, job, page_count, app_url: sent.append(
+        (job, page_count, app_url))
+    try:
+        manifest = ppj.process_job(client, job, work_root, keep=True)
+    finally:
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email = (
+            real_gather, real_build, real_verify, real_send)
+        shutil.rmtree(work_root, ignore_errors=True)
+
+    check("process_job() returns the real manifest on success", manifest is not None, manifest)
+    check("the job row was marked ready", client.rows[0]["status"] == "ready", client.rows[0])
+    check("send_pack_ready_email() was called exactly once", len(sent) == 1, sent)
+    if sent:
+        sent_job, sent_page_count, sent_app_url = sent[0]
+        check("...with the real job dict (same id)", sent_job["id"] == "job-1", sent_job)
+        check("...with the real page_count from the manifest", sent_page_count == 42, sent_page_count)
+        check("...with APP_URL", sent_app_url == ppj.APP_URL, sent_app_url)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
     test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
+    test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response()
+    test_process_job_sends_the_pack_ready_email_on_success()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -33,7 +33,19 @@ so two workers never build the same job), and then:
      entries and the bookmarks all check out in each;
   5. uploads both PDFs + filled workbooks + ACTIONS_TO_SIGN.md + manifest to
      'submission-packs' and marks the row 'ready' (or 'failed' with the
-     reason - e.g. confirm_pack.py's or fingerprint.py's own refusal text).
+     reason - e.g. confirm_pack.py's or fingerprint.py's own refusal text),
+     then fires the "Bid Pack Compilation Complete" email
+     (engine/notify/send_pack_ready_email.py, notification-engine item B12).
+     Standing review, 2026-11-06: B12 was built and wired into
+     engine/general/process_general_jobs.py's own 'ready' branch (2026-10-27)
+     and live-tested there, but never reached this, its structurally
+     identical sibling on the SAME pack_generation_jobs table (engine=
+     'sanral' vs 'general') - every company generating a SANRAL pack got no
+     "your pack is ready" email at all, while a general-family pack already
+     did. send_pack_ready_email() is called exactly the same way
+     process_general_jobs.py already does: best-effort, never raises (its
+     own docstring/try-except), so a problem sending this email can never
+     turn a successfully-built pack into a failed job.
 
 Every poll also records, per uploaded Technical workbook, SANRAL's Form B7
 category and subcontracting matrix from its SETUP sheet
@@ -84,7 +96,7 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.abspath(os.path.join(HERE, ".."))
 for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "pack_generator"), os.path.join(ENGINE_DIR, "cv"),
-          os.path.join(ENGINE_DIR, "worker"), HERE):
+          os.path.join(ENGINE_DIR, "worker"), os.path.join(ENGINE_DIR, "notify"), HERE):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -95,8 +107,13 @@ import sanral_b7  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
 from pdf_merge import verify_pack, SAST  # noqa: E402
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
+from send_pack_ready_email import send_pack_ready_email  # noqa: E402
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "pack_jobs")
+# Same literal default as engine/general/process_general_jobs.py's own
+# APP_URL - the link send_pack_ready_email()'s template points the reader
+# back to the Tender Workspace with.
+APP_URL = os.environ.get("APP_URL") or "https://tender-ready.vercel.app"
 # pack_generation_jobs is the one job queue for every engine (unified-queue
 # migration): this bridge takes only the SANRAL rows; engine = 'general' rows
 # belong to engine/general/process_general_jobs.py.
@@ -175,6 +192,14 @@ class SupabaseRest:
         q = self._filters(filters)
         out = self._req("PATCH", f"/rest/v1/{table}?{'&'.join(q)}", body,
                         {"Content-Type": "application/json", "Prefer": "return=representation"})
+        return json.loads(out or b"[]")
+
+    def rpc(self, fn, args=None):
+        # Same shape as engine/general/process_general_jobs.py's own
+        # Supabase.rpc() - send_pack_ready_email() calls company_notification_
+        # recipients/claim_notification/record_notification_sent through this.
+        out = self._req("POST", f"/rest/v1/rpc/{fn}", args or {},
+                        {"Content-Type": "application/json"})
         return json.loads(out or b"[]")
 
     def download(self, bucket, path, dest):
@@ -706,6 +731,12 @@ def process_job(client, job, work_root, keep=False):
         print(f"[ready] {job['id']}: {manifest['page_count']} pages, {len(manifest['sections'])} sections, "
               f"{len(manifest['omitted'])} not included -> {pdf_remote}; Envelope 2: "
               f"{manifest['financial']['page_count']} pages -> {uploaded.get('financial_pdf')}")
+        # Finding, standing review 2026-11-06: this SANRAL bridge never sent
+        # the "Bid Pack Compilation Complete" email (B12) its general-family
+        # sibling (process_general_jobs.py) has sent since 2026-10-27 - same
+        # pack_generation_jobs table, same 'ready' transition, same function.
+        # Best-effort: send_pack_ready_email() never raises on its own.
+        send_pack_ready_email(client, job, manifest["page_count"], APP_URL)
         return manifest
     except Exception as e:
         msg = f"{type(e).__name__}: {e}" if not isinstance(e, ValueError) else str(e)
