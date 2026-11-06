@@ -20,6 +20,11 @@ export default async function BulkCvUploadPage() {
           title="Bulk upload CVs"
           description="Select several CVs at once - choose which person each one belongs to, or create a new person from it. AI reads every file; you review and confirm each one on that person's own page."
         />
+        {error && (
+          <div role="alert" className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            Couldn&apos;t load your existing people - try refreshing. You can still create a new person from a CV, but matching one to someone already on file isn&apos;t available right now.
+          </div>
+        )}
         <BulkCvUpload people={(people ?? []).map((p) => ({ id: p.id as string, name: p.name as string }))} />
       </div>
     </AppShell>
