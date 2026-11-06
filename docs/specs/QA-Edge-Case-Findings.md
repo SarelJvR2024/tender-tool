@@ -7767,3 +7767,42 @@ Revert-and-confirm-red on the production file alone: failed exactly as predicted
 ~12 lines including comments); `engine/pack/test_pdf_merge.py` (1 new test function, wired into
 `main()`). No change to the 2026-11-04 fix's own already-sanitised writes, `guide_rows()`, or any
 other function in the file.
+
+### Finding 138 (CONFIRMED, FIXED, moderate - `years_experience_at()`'s own malformed-date guard only caught an unparsable STRING; a non-string `initial_graduated` value raised an uncaught `TypeError` from the exact same call site, the identical gap `watch_deadlines.days_until()` was fixed for)
+
+**Area:** CV (`engine/pack_generator/suggest_pack.py`'s `years_experience_at()` - called by both
+`generate_cv.py`'s CV builders and `score_candidate()`'s SANRAL key-person suggestion scoring).
+
+**Scenario:** this function's own docstring already describes being fixed once for "a malformed
+`initial_graduated`" crashing "suggestion-building for the WHOLE company, not just that one person" -
+but its `try: grad = datetime.date.fromisoformat(grad) except ValueError:` only catches an unparsable
+STRING. `watch_deadlines.days_until()` (QA pass, 2026-10-23) was fixed for the exact same underlying
+risk - a value that isn't a string at all (a number, bool, or a list/dict, the kind of thing a hand-
+edited profile JSON with no schema behind it can genuinely hold, e.g. `suggest_pack.suggest()`'s own
+`--profile` file or `daily_digest.py --mode local`'s) - and that fix's own docstring explicitly
+documents WHY a bare `except ValueError` isn't enough: a non-string value raises `TypeError` from
+`fromisoformat()`, not `ValueError`. `years_experience_at()` was never given the same guard.
+
+Confirmed live: `years_experience_at({"qualifications": {"initial_graduated": 20261231}}, closing_date)`
+(and the same for `True`, a list, and a dict) raises `TypeError: fromisoformat: argument must be str`,
+uncaught.
+
+**Fix:** added the identical `isinstance(grad, str)` check `days_until()` already uses, before the
+`fromisoformat()` call - returning `None` (the function's own existing "treat as unknown" contract,
+already handled by both real callers) with the same kind of actionable warning the existing
+`ValueError` path already prints.
+
+**Verified red-then-green.** New test
+`test_years_experience_at_survives_a_malformed_non_string_initial_graduated()` in
+`engine/pack_generator/test_suggest_pack.py` - a bare int, a stray boolean, a list, and a dict, each
+asserting `None` with no crash; plus unaffected-case checks (a falsy `False`, a genuinely malformed
+string, a real valid date). Revert-and-confirm-red on the production file alone: all four new bad-input
+checks failed exactly as predicted (`raised TypeError: fromisoformat: argument must be str`); restored:
+`0 failure(s)` across the whole file. `py_compile` clean on both touched files. Regression:
+`pack/test_process_pack_jobs.py` (the real `score_candidate()` caller's own test suite) and
+`cv/test_generate_cv.py` both re-ran clean.
+
+**Regression:** `engine/pack_generator/suggest_pack.py` (`years_experience_at()`, ~10 lines including
+comments); `engine/pack_generator/test_suggest_pack.py` (1 new test function, wired into `main()`). No
+change to `score_candidate()`'s own scoring logic, `rank_candidates()`'s tie-break, or the existing
+`ValueError` path.

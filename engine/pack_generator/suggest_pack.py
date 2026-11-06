@@ -96,9 +96,22 @@ def years_experience_at(person, closing_date):
     malformed initial_graduated straight out of datetime.date.fromisoformat()
     - called in a loop over every key person for every position
     (suggest_pack.suggest()), so ONE person's typo'd date used to crash
-    suggestion-building for the WHOLE company, not just that one person."""
+    suggestion-building for the WHOLE company, not just that one person.
+
+    "Malformed" covers more than an unparsable string, same as
+    watch_deadlines.days_until()'s own identical guard: a value that isn't a
+    string at all (a number, bool, or a list/dict - exactly what a hand-
+    edited profile JSON with no schema behind it, e.g. suggest_pack.suggest()'s
+    own --profile file or daily_digest.py --mode local's, can genuinely hold)
+    raises TypeError from fromisoformat(), not the ValueError this function
+    already catches - QA pass, 2026-11-06."""
     grad = (person.get("qualifications") or {}).get("initial_graduated")
     if not grad:
+        return None
+    if not isinstance(grad, str):
+        print(f"  WARNING: {person.get('name', '?')}'s initial_graduated ({grad!r}) is not a valid "
+              "date - years of experience treated as unknown for them. Fix it on the People page.",
+              file=sys.stderr)
         return None
     try:
         grad = datetime.date.fromisoformat(grad)

@@ -3035,6 +3035,50 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): fix - `years_experience_at()`'s own malformed-date guard only caught an unparsable STRING; a non-string `initial_graduated` raised an uncaught `TypeError`, the identical gap `watch_deadlines.days_until()` was fixed for
+
+Oriented from `f4188b3` (own prior pass: Finding 137, build_general_pack.write_guide()). `git fetch`/
+`merge --ff-only` found two new sibling commits (`13bdfc2` - an exhaustive re-audit of every control-
+character fix this session touched, finding one genuine gap in `generate_cv.py` itself; `966d799` - a
+real TS fix, `requestSubmissionPack()`'s dupe-queue race leaked a raw constraint-violation string; no
+overlap with `engine/pack_generator/`). Fast-forwarded cleanly. Open PRs re-checked via the GitHub API:
+`#164`/`#165` only, both unchanged, no collision. Re-checked again immediately before this push - still
+clean.
+
+Rotated to CV (non-SANRAL pack was last; the control-character bug class is now confirmed exhausted by
+the sibling's own exhaustive re-audit, so this cycle deliberately looked for a DIFFERENT bug class
+rather than re-treading that ground). Re-read `generate_cv.py`'s `build_sanral_keyperson()` in full and
+traced `years_experience_at()` (called at line 333, and again by `score_candidate()` in the real pack-
+suggestion scorer) - its own docstring already claims a fix for "a malformed `initial_graduated`", but
+only ever catches `ValueError`.
+
+**Found and fixed Finding 138 (CONFIRMED, moderate)**: `watch_deadlines.days_until()` (2026-10-23) was
+fixed for the exact same underlying shape - "malformed" covers more than an unparsable string; a value
+that isn't a string at all (a number, bool, list/dict, the kind of thing a hand-edited profile JSON
+with no schema behind it can hold) raises `TypeError` from `fromisoformat()`, not `ValueError`.
+`years_experience_at()` never got the same guard, despite its own docstring explicitly describing the
+string-shaped version of this exact risk. Confirmed live: a bare int, a bool, a list, and a dict all
+raised `TypeError: fromisoformat: argument must be str`, uncaught.
+
+**Fix:** added the identical `isinstance(grad, str)` check `days_until()` already uses, before the
+`fromisoformat()` call - returning `None` (the function's own existing "treat as unknown" contract) with
+an actionable warning, matching the existing `ValueError` path's own wording style.
+
+**Verified red-then-green.** New test in `engine/pack_generator/test_suggest_pack.py` covering a bare
+int/bool/list/dict, plus unaffected-case checks (falsy `False`, a malformed string, a real valid date).
+Reverted the production file alone: all four new checks failed exactly as predicted; restored:
+`0 failure(s)`. `py_compile` clean on both files. Regression: `pack/test_process_pack_jobs.py` (the real
+`score_candidate()` caller) and `cv/test_generate_cv.py` both re-ran clean.
+
+Backlog: unchanged at 18 items - a contained malformed-input guard fix, not one of Sarel's own 18
+numbered backlog items.
+
+Verify yourself: `cd engine/pack_generator && python3 test_suggest_pack.py` -> `0 failure(s)`. Diff:
+`git show <this commit> -- engine/pack_generator/suggest_pack.py` (one `isinstance` check added, ~10
+lines including comments).
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): fix - `build_general_pack.write_guide()`'s own 2026-11-04 control-character fix sanitised the tender-level fields but missed two OTHER writes in the SAME function, left un-sanitised AND un-tested
 
 Oriented from `e353baa` (own prior pass: Finding 136, company_documents.write_docx()). `git fetch`/

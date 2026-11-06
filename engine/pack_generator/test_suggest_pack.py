@@ -190,6 +190,37 @@ def test_excel_date_parses_a_text_typed_date_too_not_only_a_numeric_serial():
         sp.Workbook = real_workbook
 
 
+def test_years_experience_at_survives_a_malformed_non_string_initial_graduated():
+    print("years_experience_at(): a non-string initial_graduated (number/bool/list/dict) is treated as "
+          "unknown, not crashed on")
+    # QA pass, 2026-11-06: this function already catches a malformed STRING
+    # ('Fix it on the People page' for an unparsable "YYYY-MM-DD") via its own
+    # ValueError guard - but a value that isn't a string at all (a hand-edited
+    # profile JSON with no schema behind it, same real shape
+    # watch_deadlines.days_until() was already fixed for, 2026-10-23) raises
+    # TypeError from fromisoformat() instead, which this function's own except
+    # clause never caught - crashing suggestion-building/CV generation for the
+    # WHOLE company over one person's bad field, exactly what this function's
+    # own docstring already claims to prevent.
+    for bad, label in [(20261231, "a bare int"), (True, "a stray YAML/JSON boolean"),
+                       (["2015-03-01"], "a list instead of a string"), ({"x": 1}, "a dict instead of a string")]:
+        person = _person("Bad Date Person", bad, "engineer")
+        try:
+            years = sp.years_experience_at(person, CLOSING)
+            check(f"{label} ({bad!r}) treated as unknown, not crashed on", years is None, years)
+        except Exception as e:
+            check(f"{label} ({bad!r}) treated as unknown, not crashed on", False,
+                  f"raised {type(e).__name__}: {e}")
+
+    # Unaffected cases: still correct after the fix.
+    check("False (falsy, same as missing) still returns None, no warning",
+          sp.years_experience_at(_person("P", False, "e"), CLOSING) is None)
+    check("a genuinely malformed STRING still goes through the existing ValueError path",
+          sp.years_experience_at(_person("P", "not-a-date", "e"), CLOSING) is None)
+    check("a real, valid date is completely unaffected by the new guard",
+          sp.years_experience_at(_person("P", "2015-03-01", "e"), CLOSING) == 12)
+
+
 def main():
     test_tied_score_breaks_by_years_regardless_of_profile_order()
     test_genuine_score_difference_still_wins_over_years()
@@ -197,6 +228,7 @@ def main():
     test_a_person_with_projects_explicitly_null_does_not_crash_scoring_for_everyone_else()
     test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()
     test_excel_date_parses_a_text_typed_date_too_not_only_a_numeric_serial()
+    test_years_experience_at_survives_a_malformed_non_string_initial_graduated()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
