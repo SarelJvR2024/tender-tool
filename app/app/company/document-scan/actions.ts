@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { safeRedirectPath } from "@/lib/safeRedirect";
+import { sastToday } from "@/lib/publicHolidays";
 import {
   ONBOARDING_BUCKET,
   VAULT_DOCUMENT_COLUMN,
@@ -313,8 +314,14 @@ export async function confirmIdDocument(formData: FormData) {
   // members can update": without it, a membership-revoked-mid-request zero-
   // row match still deletes the onboarding source file below with nothing
   // left referencing it.
+  // certified_id_on is a real date column certificationStatus() (lib/principals.ts)
+  // measures "days ago" against for a compliance warning - new Date().toISOString()
+  // is always UTC, so for the 00:00-01:59 SAST window every day (SAST = UTC+2, no
+  // DST) a naive date-only stamp here silently recorded YESTERDAY's date, same
+  // established naive-UTC-"today" bug class this codebase already fixed elsewhere
+  // (lib/publicHolidays.ts's own sastToday() - standing review, 2026-11-06).
   const { data: updatedPrincipal, error } = await supabase.from("company_principals").update({
-    certified_id_path: destPath, certified_id_filename: upload!.original_filename, certified_id_on: new Date().toISOString().slice(0, 10),
+    certified_id_path: destPath, certified_id_filename: upload!.original_filename, certified_id_on: sastToday(),
   }).eq("id", principalId).select("id").maybeSingle();
   if (error || !updatedPrincipal) {
     await supabase.storage.from(VAULT_BUCKET).remove([destPath]);

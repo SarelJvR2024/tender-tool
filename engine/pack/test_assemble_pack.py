@@ -20,6 +20,7 @@ separate, independent occurrence of it in the pack-assembly path.
 
 Run: python3 engine/pack/test_assemble_pack.py
 """
+import datetime as real_datetime
 import json
 import os
 import shutil
@@ -29,6 +30,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.insert(0, os.path.join(HERE, "..", "cv"))
 import assemble_pack as ap  # noqa: E402
 
 TECH_WORKBOOK = os.path.join(HERE, "..", "..", "templates", "samples", "R.334-030-2025.1F_ran.xlsm")
@@ -146,10 +148,44 @@ def test_check_template_surfaces_fingerprint_warnings_not_just_discards_them():
         shutil.rmtree(store, ignore_errors=True)
 
 
+class _FixedDateTime(real_datetime.datetime):
+    """The system clock at UTC 2026-10-20 23:30 (= SAST 2026-10-21 01:30,
+    inside the 00:00-01:59 SAST window where a naive datetime.date.today()
+    reads one calendar day behind the real SAST date), same technique as
+    engine/pack/test_pdf_merge.py's own FixedDateTime for the identical bug
+    class in a sibling call site."""
+    @classmethod
+    def now(cls, tz=None):
+        base = real_datetime.datetime(2026, 10, 20, 23, 30, tzinfo=real_datetime.timezone.utc)
+        return base.astimezone(tz) if tz else base
+
+
+def test_generated_heading_date_is_sast_anchored_not_naive_utc():
+    print("_generated_heading_date(): SAST-anchored, not a naive UTC today()")
+    # Standing review, 2026-11-06: build_submission_pack()'s own cover-page
+    # heading built its "Generated <date>" line with a bare
+    # datetime.date.today() - same bug class as Finding 37/38
+    # (pdf_merge.py's expiry_warning(), company_documents.py's
+    # authority_facts()) - printing yesterday's date on the real submission
+    # pack cover page for the whole 00:00-01:59 SAST window every day.
+    real_dt = ap.datetime.datetime
+    ap.datetime.datetime = _FixedDateTime
+    try:
+        heading_date = ap._generated_heading_date()
+    finally:
+        ap.datetime.datetime = real_dt
+    # Real UTC instant is still 2026-10-20 23:30; real SAST is already
+    # 2026-10-21 01:30. The fix must read the SAST day (21st), not the UTC
+    # day a naive today() would have read (20th).
+    check("reads the real SAST calendar day (2026-10-21), not the UTC day behind it (2026-10-20)",
+          heading_date == "2026-10-21", heading_date)
+
+
 def main():
     test_check_template_no_baseline_match_mismatch_and_corrupted_baseline()
     test_check_template_refuses_an_unfillable_family()
     test_check_template_surfaces_fingerprint_warnings_not_just_discards_them()
+    test_generated_heading_date_is_sast_anchored_not_naive_utc()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

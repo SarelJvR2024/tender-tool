@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtraction";
 import { safeFileName } from "@/lib/safeFileName";
+import { sastToday } from "@/lib/publicHolidays";
 
 /**
  * Every write here goes through the signed-in user's own Supabase client, so
@@ -656,7 +657,12 @@ export async function applyCvExtraction(formData: FormData) {
     if ((proposal.person?.[f.key]?.value ?? null) !== v) edited.push(f.key);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  // sastToday(), not new Date().toISOString().slice(0, 10) - that's always UTC,
+  // so for the 00:00-01:59 SAST window every day (SAST = UTC+2, no DST) this
+  // audit-trail note would silently read one calendar day early; same
+  // established naive-UTC-"today" bug class fixed elsewhere in this codebase
+  // (standing review, 2026-11-06).
+  const today = sastToday();
   const sourceNote = `From CV "${upload?.original_filename ?? "upload"}" (AI-extracted, confirmed ${today})`;
   const projectRows: Record<string, string | number | null>[] = [];
   (proposal.projects ?? []).forEach((_, i) => {

@@ -44,10 +44,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 type Resp = { data: unknown; error: { message: string } | null };
 
-function makeChain(queue: Resp[]) {
+function makeChain(queue: Resp[], updateCalls?: unknown[]) {
   const chain: Record<string, unknown> = {};
-  const methods = ["select", "update", "insert", "delete", "eq", "order", "single"];
+  const methods = ["select", "insert", "delete", "eq", "order", "single"];
   for (const m of methods) chain[m] = () => chain;
+  chain.update = (payload: unknown) => {
+    updateCalls?.push(payload);
+    return chain;
+  };
   chain.maybeSingle = () => chain;
   (chain as { then: unknown }).then = (resolve: (r: Resp) => void) => {
     const next = queue.shift();
@@ -60,13 +64,14 @@ function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: s
   let fromCallIndex = 0;
   const uploadCalls: string[] = [];
   const removeCalls: string[][] = [];
+  const updateCalls: unknown[] = [];
   return {
     client: {
       auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
       from: () => {
         const queue = opts.fromQueues[fromCallIndex] ?? [];
         fromCallIndex += 1;
-        return makeChain(queue);
+        return makeChain(queue, updateCalls);
       },
       storage: {
         from: () => ({
@@ -84,6 +89,7 @@ function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: s
     },
     uploadCalls,
     removeCalls,
+    updateCalls,
   };
 }
 
@@ -109,6 +115,17 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("next/cache", () => ({
   revalidatePath: () => {},
+}));
+
+// Standing review, 2026-11-06: confirmIdDocument()'s certified_id_on stamp
+// must come from sastToday() (lib/principals.ts's certificationStatus()
+// measures "days ago" against it for a real compliance warning), not a raw
+// new Date().toISOString().slice(0, 10) - that's always UTC, so it silently
+// reads one calendar day early for the 00:00-01:59 SAST window every day.
+// Mocked to a fixed sentinel so the test below can assert the real helper
+// was actually used, not a coincidentally-matching raw UTC date.
+vi.mock("@/lib/publicHolidays", () => ({
+  sastToday: () => "2099-01-01",
 }));
 
 function formDataWith(fields: Record<string, string>): FormData {
@@ -255,5 +272,30 @@ describe("confirmIdDocument - real update still succeeds", () => {
     expect(url).toContain("saved=filed");
     const removedPaths = removeCalls.flat();
     expect(removedPaths).toContain("company-1/onboarding/raw-id.pdf");
+  });
+});
+
+describe("confirmIdDocument - certified_id_on is SAST-anchored, not a naive UTC date", () => {
+  it("stamps certified_id_on from sastToday(), not new Date().toISOString().slice(0, 10)", async () => {
+    const { client, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingIdResult],
+        [{ data: { id: "principal-1" }, error: null }],
+        [{ data: { id: "principal-1" }, error: null }], // real match
+        [{ data: null, error: null }],
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmIdDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-2", principal_id: "principal-1" });
+    await expectRedirect(confirmIdDocument(fd));
+
+    const principalUpdate = updateCalls.find(
+      (c): c is { certified_id_on: string } => typeof c === "object" && c !== null && "certified_id_on" in c,
+    );
+    expect(principalUpdate?.certified_id_on).toBe("2099-01-01");
   });
 });

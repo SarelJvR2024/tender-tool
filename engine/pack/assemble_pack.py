@@ -70,12 +70,26 @@ from provenance import ProvenanceLog  # noqa: E402
 import make_envelope_covers  # noqa: E402
 import sanral_b7  # noqa: E402
 from sanral_fill import Workbook, n2col  # noqa: E402
-from generate_cv import _convert_to_pdf  # noqa: E402
+from generate_cv import _convert_to_pdf, SAST  # noqa: E402
 from pdf_merge import merge_with_contents, expiry_warning  # noqa: E402
 
 TECHNICAL = "Envelope 1 - Technical Submission"
 FINANCIAL = "Envelope 2 - Financial Submission"
 OUTER = "Outer envelope"
+
+
+def _generated_heading_date():
+    """The submission pack cover heading's own "Generated <date>" line - same
+    naive-UTC-"today" bug class as Finding 37/38 (engine/pack/pdf_merge.py's
+    expiry_warning(), engine/company_documents.py's authority_facts(), and
+    others across this codebase): a bridge worker container has no TZ set and
+    runs in UTC by default, so a bare datetime.date.today() reads one calendar
+    day BEHIND the real SAST date for the whole 00:00-01:59 SAST window every
+    day, printing yesterday's date on the real cover page of a submitted
+    tender pack. Extracted to its own function so it's testable in isolation
+    without invoking the whole (large, fixture-heavy) build_submission_pack().
+    """
+    return datetime.datetime.now(SAST).date().isoformat()
 
 FILLERS = {
     "Conventional Consultant Tender": fill_conventional,
@@ -541,7 +555,7 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
                (description or "")[:160],
                f"Tenderer: {company}",
                f"Closing: {closing}" + (f" at {closing_time}" if closing_time else ""),
-               f"Generated {datetime.date.today().isoformat()}"]
+               f"Generated {_generated_heading_date()}"]
     manifest = merge_with_contents(sections, out_pdf, os.path.join(work_dir, "contents"),
                                    [h for h in heading if h], notes=tech_notes,
                                    front_count=1 if sections[0]["pdf"] else 0, stamp_label=contract_no)
