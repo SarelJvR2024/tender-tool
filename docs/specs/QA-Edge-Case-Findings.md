@@ -7919,3 +7919,55 @@ no behavioural change to any other section's rendering.
 restructured, ~20 lines including comments); `engine/notify/test_send_digest_emails.py` (1 new test
 function, wired into `main()`). No change to `_item_date()` itself, `send_one()`, or any other
 section's rendering logic.
+
+### Finding 141 (CONFIRMED, FIXED, low real-world severity since unreached in production - `poll_loop.poll_forever()`'s own `max_runtime` parameter always read the REAL wall clock even when `sleep` was faked, so pairing it with this module's own documented test-injection pattern busy-spins at full CPU for `max_runtime`'s own real duration instead of behaving deterministically)
+
+**Area:** Worker / job-queue (`engine/worker/poll_loop.py` - the one polling loop shared by every
+async bridge: `process_cv_jobs.py`, `process_general_jobs.py`, `extract_cv_fields.py`,
+`process_onboarding_jobs.py`, `process_narrative_jobs.py`, `process_pack_jobs.py`, and
+`run_bridges.py` itself).
+
+**Scenario:** `max_cycles`/`max_runtime` bound the loop, per this module's own docstring, "(tests, and
+any host that wants a run to end on its own)". `max_cycles` is exercised by every existing test and by
+`run_bridges.py`'s own `--max-cycles` flag. `max_runtime` had ZERO test coverage anywhere in the repo
+and ZERO real callers (confirmed by grepping every bridge and `run_bridges.py` for `max_runtime`) -
+unreached in production, but a real, documented, public parameter of a shared module, not dead code by
+accident.
+
+Writing this parameter's first-ever test, by following the module's own explicitly documented
+convention for every OTHER test in this file ("`sleep` is injectable so tests can prove the loop
+really sleeps between polls without waiting in real time") immediately produced a real bug:
+`started = time.monotonic()` and the `max_runtime` check's own `time.monotonic() - started + interval
+> max_runtime` both called the REAL wall clock directly, with no injection point - unlike `sleep`,
+which is fully injectable. Pairing a no-op/instant fake `sleep` (exactly what every other test in this
+file does to stay fast and deterministic) with `max_runtime` therefore busy-spins the loop at full CPU
+for `max_runtime`'s own REAL wall-clock duration, since the only thing that could ever make the check
+trip is actual time passing. Confirmed directly: `interval=0.05, max_runtime=0.3` with a no-op sleep
+produced **403,277 wasted cycles over ~0.25 real seconds** instead of the ~6 logical cycles a
+deterministic test expects - not a crash or a hang, but a real CPU-burning footgun for the exact
+testing pattern this module tells its own users to rely on.
+
+**Fix:** added an injectable `now` parameter (default `time.monotonic`, same shape as the existing
+`sleep` injection), and replaced both `time.monotonic()` call sites (`started = ...` and the
+`max_runtime` check itself) with it. Zero behaviour change for every real caller (none pass `now`,
+so `time.monotonic` is used exactly as before) - purely additive test-support, mirroring the module's
+own existing `sleep` pattern.
+
+**Verified red-then-green.** New test
+`test_max_runtime_uses_an_injectable_clock_not_the_real_one()` in `test_poll_loop.py`, using a fake
+`now`/`sleep` pair that advances a shared logical clock (`fake_sleep` adds to `clock["t"]`, `fake_now`
+reads it) - asserts the loop stops after exactly 4 cycles (0, 30, 60, 90 -> would be 120 > 100),
+instantly, with zero real waiting. Reverted `poll_loop.py` via `git apply -R`, re-ran - the test itself
+can no longer even call the old signature (`TypeError: poll_forever() got an unexpected keyword
+argument 'now'`), confirming red without needing to re-trigger the actual busy-spin; reapplied -
+`0 failure(s)` across the WHOLE `test_poll_loop.py` suite (including `run_bridges.py`'s own SIGTERM/
+timeout/Popen-failure tests, unaffected by this change). `py_compile` clean on both touched files.
+Regression: all 5 bridges' own test suites (`process_cv_jobs.py`, `process_general_jobs.py`,
+`extract_cv_fields.py`'s sibling, `process_onboarding_jobs.py`, `process_narrative_jobs.py`,
+`process_pack_jobs.py`) - all `0 failure(s)`, confirming the new `now` parameter's default behaviour
+is identical to the old hardcoded call for every real caller.
+
+**Regression:** `engine/worker/poll_loop.py` (`poll_forever()`, 1 new parameter, 2 call sites changed
+from `time.monotonic()` to `now()`, ~15 lines including comments); `engine/worker/test_poll_loop.py`
+(1 new test function, wired into `main()`). No change to `sleep`'s own injection, signal handling,
+`max_cycles`, or any real bridge's call site (none pass `now`).

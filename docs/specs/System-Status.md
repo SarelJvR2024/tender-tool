@@ -4393,6 +4393,61 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): fix - `poll_loop.poll_forever()`'s own `max_runtime` parameter read the REAL wall clock even when `sleep` was faked, so writing this parameter's first-ever test (following the module's own documented testing convention) busy-spun at full CPU for `max_runtime`'s real duration instead of behaving deterministically - unreached in production (no current caller sets it), fixed anyway since it's a real, documented parameter of shared worker infrastructure
+
+Oriented from `bddde02` (own prior pass: Finding 140, digest date-duplication). `git fetch origin
+main` found a large batch of new sibling commits (the anon-execute-grant RLS fix, 5 more
+membership-revoked-mid-request races swept, `daily_digest.py`'s own build-time-vs-sent-confirmed
+digested-marking fix, `pricePoints()`'s floor-at-0 fix, and several more silent-empty-state frontend
+fixes) - all unrelated to this pass's own file, `git merge --ff-only` clean, no collision (re-checked
+again immediately before pushing - still clean). Confirmed the sibling's own `daily_digest.py`/
+`send_digest_emails.py` changes didn't clobber this pass's own just-pushed Finding 140 fix - re-read
+the merged file directly and re-ran its test suite, both confirmed intact.
+
+**Rotation: worker/job-queue.** Read `engine/worker/poll_loop.py` (the one polling loop shared by
+every async bridge) end to end looking for an under-tested corner, since the file itself is small and
+has been heavily hardened by several prior passes' own sweeps (Findings 123/126/128/134, the
+claim-outside-try-block class). Found one: `max_cycles` is exercised by every existing test and by
+`run_bridges.py`'s own `--max-cycles` flag; `max_runtime` has ZERO test coverage anywhere in the repo
+and ZERO real callers (confirmed by grep across every bridge and `run_bridges.py`) - unreached in
+production, but a real, documented parameter of a shared module, not dead code by accident.
+
+**Wrote this parameter's first-ever test, by following the module's own documented convention** -
+"`sleep` is injectable so tests can prove the loop really sleeps... without waiting in real time" -
+and immediately hit a real bug: `started = time.monotonic()` and the `max_runtime` check both called
+the REAL wall clock directly, unlike `sleep`, which is fully injectable. Confirmed directly:
+`interval=0.05, max_runtime=0.3` with a no-op sleep produced **403,277 wasted cycles over ~0.25 real
+seconds**, not the handful of logical cycles a deterministic test expects - a real CPU-burning
+footgun for the exact testing pattern this module tells its own users to rely on, found the moment
+anyone actually tries to use it.
+
+**Fixed** by adding an injectable `now` parameter (default `time.monotonic`, same shape as the
+existing `sleep` injection) and routing both real call sites through it. Zero behaviour change for
+every actual caller (none pass `now`, so `time.monotonic` runs exactly as before) - purely additive
+test-support.
+
+**Verified red-then-green.** New test using a fake `now`/`sleep` pair sharing one logical clock -
+asserts the loop stops after exactly 4 cycles, instantly, with zero real waiting. Reverted via `git
+apply -R` - the test can no longer even call the old signature (`TypeError`), confirming red without
+re-triggering the real busy-spin; reapplied - `0 failure(s)` across the whole `test_poll_loop.py`
+suite. `py_compile` clean. Regression: all 5 bridges' own test suites (`process_cv_jobs.py`,
+`process_general_jobs.py`, `extract_cv_fields.py`, `process_onboarding_jobs.py`,
+`process_narrative_jobs.py`, `process_pack_jobs.py`) - all `0 failure(s)`, confirming the new
+parameter's default is identical to the old hardcoded call for every real caller.
+
+**Backlog: unchanged** - a latent-but-unreached infrastructure gap found by writing real coverage for
+an existing, documented parameter, not a new or existing numbered judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean, no
+schema/migration involved, no production caller affected):
+- `engine/worker/poll_loop.py`
+- `engine/worker/test_poll_loop.py`
+
+To verify independently: `cd engine/worker && python3 test_poll_loop.py` - expect "All bridge-loop
+smoke tests passed", including the new `max_runtime stops after exactly 4 logical cycles` line.
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): fix - a "lapses before closing" digest line silently showed the tender's closing date twice and never showed the document/credential's own real expiry date, found while adversarially testing Finding 139's new item shape against the real email renderer
 
 Oriented from `0a17f78` (own prior pass: Finding 139, person-credential lapses-before-closing).

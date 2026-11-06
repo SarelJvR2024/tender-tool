@@ -50,7 +50,8 @@ def _ts():
 
 def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
                  max_runtime=None, sleep=None, log=print, stop_event=None,
-                 install_signal_handlers=True, name="bridge", unit="job(s)", alert_source=None):
+                 install_signal_handlers=True, name="bridge", unit="job(s)", alert_source=None,
+                 now=None):
     """Call poll_once() every `interval` seconds until stopped.
 
     alert_source: when set, a failed poll is also recorded in system_alerts
@@ -69,6 +70,21 @@ def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
         # Event.wait returns early the moment a stop signal arrives, so a
         # SIGTERM during a 60s sleep doesn't hold a redeploy up for 60s.
         sleep = stop_event.wait
+    # Injectable like `sleep` itself, for the same reason: max_runtime's own
+    # accounting used to always read the REAL time.monotonic() even when
+    # `sleep` was faked to not actually wait - so a test following this
+    # module's own documented pattern ("sleep is injectable so tests can
+    # prove the loop really sleeps... without waiting in real time") and
+    # also setting max_runtime busy-spun at full CPU for max_runtime's own
+    # REAL wall-clock duration before the unfaked clock finally caught up -
+    # confirmed directly: interval=0.05/max_runtime=0.3 with a no-op sleep
+    # produced 403,277 wasted cycles over ~0.25 real seconds, not the tiny
+    # handful of logical cycles a deterministic test expects. No current
+    # caller passes max_runtime (confirmed by grep across every bridge and
+    # run_bridges.py), so this was unreached in production - found while
+    # writing this parameter's first-ever test, by following the module's
+    # own stated contract. QA pass, 2026-11-06.
+    now = now or time.monotonic
 
     if install_signal_handlers and threading.current_thread() is threading.main_thread():
         def _stop(signum, _frame):
@@ -77,7 +93,7 @@ def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
         signal.signal(signal.SIGTERM, _stop)
         signal.signal(signal.SIGINT, _stop)
 
-    started = time.monotonic()
+    started = now()
     stats = {"cycles": 0, "jobs": 0, "errors": 0, "stopped_by": None}
     log(f"[{_ts()}] {name}: polling every {interval}s"
         + (f", at most {max_cycles} cycles" if max_cycles else "")
@@ -104,7 +120,7 @@ def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
         if max_cycles is not None and stats["cycles"] >= max_cycles:
             stats["stopped_by"] = "max_cycles"
             break
-        if max_runtime is not None and time.monotonic() - started + interval > max_runtime:
+        if max_runtime is not None and now() - started + interval > max_runtime:
             stats["stopped_by"] = "max_runtime"
             break
 

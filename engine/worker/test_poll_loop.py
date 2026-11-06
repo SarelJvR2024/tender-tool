@@ -120,6 +120,40 @@ def test_poll_forever_unit():
           "cycle 3 error survived, job-C cycle 4")
 
 
+def test_max_runtime_uses_an_injectable_clock_not_the_real_one():
+    # Finding 141 (2026-11-06): max_runtime's own elapsed-time check used to
+    # always call the REAL time.monotonic(), even when `sleep` was faked to
+    # not actually wait - exactly this module's own documented pattern for
+    # every other test in this file. Confirmed directly before this fix: a
+    # no-op sleep paired with max_runtime busy-spun at full CPU for
+    # max_runtime's own real wall-clock duration (interval=0.05/
+    # max_runtime=0.3 produced 403,277 wasted cycles over ~0.25 real
+    # seconds) instead of the tiny, deterministic handful of logical cycles
+    # a test expects. No current bridge passes max_runtime (confirmed by
+    # grep), so this was unreached in production - found while writing this
+    # parameter's first-ever test.
+    calls = {"n": 0}
+
+    def poll_once():
+        calls["n"] += 1
+        return 0
+
+    clock = {"t": 0.0}
+
+    def fake_now():
+        return clock["t"]
+
+    def fake_sleep(seconds):
+        clock["t"] += seconds  # a real sleep would do exactly this to the real clock
+
+    stats = poll_forever(poll_once, interval=30, max_runtime=100, sleep=fake_sleep, now=fake_now,
+                         log=lambda *a: None, install_signal_handlers=False)
+    assert stats == {"cycles": 4, "jobs": 0, "errors": 0, "stopped_by": "max_runtime"}, stats
+    assert calls["n"] == 4, calls
+    print("PASS poll_forever: max_runtime stops after exactly 4 logical cycles (0, 30, 60, 90 -> would be "
+          "120 > 100) using the injected clock, with zero real waiting and zero wasted cycles")
+
+
 def test_cv_bridge_loop_end_to_end():
     fake = FakeSupabase().start()
     try:
@@ -357,6 +391,7 @@ def test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost():
 
 if __name__ == "__main__":
     test_poll_forever_unit()
+    test_max_runtime_uses_an_injectable_clock_not_the_real_one()
     test_claim_is_atomic()
     test_cv_bridge_loop_end_to_end()
     test_runner_drives_bridges_and_stops_on_sigterm()
