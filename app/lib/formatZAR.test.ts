@@ -60,3 +60,13 @@ test("formatZAR: compact and vat combine (compact magnitude, vat suffix still ap
 test("formatZAR: zero is a real value, not treated as missing", () => {
   assert.equal(formatZAR(0), "R 0.00");
 });
+
+test("formatZAR: compact rounds up into the next magnitude instead of printing '1000.0k'", () => {
+  // 999,950 is the smallest value whose thousands figure (999.95) rounds to
+  // 1000.0 at 1 decimal place - it must render as the next unit up ("1.0M"),
+  // never as "1000.0k".
+  assert.equal(formatZAR(999_950, { compact: true }), "R 1.0M");
+  assert.equal(formatZAR(999_999, { compact: true }), "R 1.0M");
+  // One rand below that boundary still correctly stays in "k".
+  assert.equal(formatZAR(999_949, { compact: true }), "R 999.9k");
+});

@@ -35,7 +35,12 @@ function toNumber(v: number | string | null | undefined): number | null {
 }
 
 function compactMagnitude(abs: number): string {
-  if (abs >= 1_000_000) {
+  // A value just under 1,000,000 whose thousands figure rounds UP to 1000.0
+  // at the 1-decimal precision below (e.g. 999,950 -> "999.95k" -> rounds to
+  // "1000.0k") must be promoted to the next magnitude instead - otherwise it
+  // prints the nonsensical "R 1000.0k". Checking the rounded result here,
+  // not just the raw threshold, is what catches that.
+  if (abs >= 1_000_000 || Math.round((abs / 1_000) * 10) / 10 >= 1_000) {
     const m = abs / 1_000_000;
     return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
   }
