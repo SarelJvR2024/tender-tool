@@ -3063,6 +3063,51 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): clean sweep / coverage closure - `is_combined_bulletin()` (Finding 42) and `find_person_registrations()` had zero dedicated tests anywhere in the repo; re-checked both against the real sample corpus (no bug found) and added the missing coverage
+
+Oriented from `080334c` (own prior pass: Finding 138, `years_experience_at()`). `git fetch`/
+`merge --ff-only` found one new sibling commit (`f7e0509` - a real fix, `sanralScoring.ts`'s management-
+range estimate only sampled 2 of the true range past 6 ambiguous positions; no overlap with
+`engine/general/`). Fast-forwarded cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only,
+both unchanged, no collision. Re-checked again immediately before this push - still clean.
+
+Rotated to intake (CV was last). `engine/intake/`'s own two files (`classify_tender.py`,
+`scenario_driver.py`) were already exhaustively re-confirmed clean in an earlier intake rotation; moved
+to `engine/general/requirements.py` (the document-reading pipeline `classify_tender.py`'s own docstring
+names as feeding it), looking specifically for functions with NO existing test coverage rather than
+re-reading already-tested ground. Found two: `is_combined_bulletin()`/`BULLETIN_ROW_RE` (Finding 42's
+own fix - detects several different tenders' rows bundled into one PDF, so the engine declines to
+extract tender-specific facts from it rather than attribute the wrong tender's facts) and
+`find_person_registrations()` - confirmed by grep, zero references to either anywhere under any
+`test_*.py` file in the repo.
+
+**Constructed an adversarial hypothesis first, then checked it against real data**: a normal single
+tender's own numbered scope-of-work section (items like "1. ME 01 ... by March 2026") could plausibly
+match `BULLETIN_ROW_RE`'s own buyer-agnostic pattern (a numbered item + an uppercase reference-like
+token + a nearby month) by coincidence, false-flagging a real document as a combined bulletin and
+silently excluding its whole content from extraction. Ran `is_combined_bulletin()` against every real
+document in `templates/general_samples/` directly (not assumed): only the one genuine real bulletin
+(`tshwane_gpm08_bulletin/Notice 6 of 2026-27.pdf`) matched at all (12 rows); every other real sample
+scored zero. The hypothesis didn't hold against any real document available - per this session's own
+standing discipline (confirm against real evidence before fixing, as the intake rotation's own combined-
+SANRAL-forms hypothesis was correctly ruled out for the same reason), this is NOT a finding.
+`find_person_registrations()` was also run against the same real corpus and correctly found the real
+PSIRA (TN051.pdf) and SACAP (SCMU5-26-27-0007SB.pdf) requirements, with no obvious false
+negative/positive.
+
+**No bug found - added the missing test coverage instead**, using verbatim real text from the corpus
+(the real bulletin's own first 3 rows; TN051's real PSIRA clause) rather than synthetic strings: 7 new
+checks in `engine/general/test_requirements.py` covering a real bulletin's own detection, the
+`BULLETIN_MIN_ROWS` boundary (2 rows must NOT trigger it), a real single-tender document correctly NOT
+flagged, a real registration requirement correctly detected, a glossary-only mention correctly
+excluded, and a real ask surfacing despite nearby glossary noise in the same document. Full suite:
+`0 failure(s)`. `py_compile` clean; `test_requirements_manifest_v2.py` re-ran clean too.
+
+Backlog: unchanged at 18 items - pure coverage closure, no bug, not one of Sarel's own 18 numbered
+backlog items.
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): fix - `years_experience_at()`'s own malformed-date guard only caught an unparsable STRING; a non-string `initial_graduated` raised an uncaught `TypeError`, the identical gap `watch_deadlines.days_until()` was fixed for
 
 Oriented from `f4188b3` (own prior pass: Finding 137, build_general_pack.write_guide()). `git fetch`/

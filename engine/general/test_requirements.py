@@ -328,6 +328,68 @@ def check_unrecognized_format_is_flagged_not_silently_blank():
               manifest["documents"][0].get("unreadable"))
 
 
+# Finding 42's own is_combined_bulletin()/BULLETIN_ROW_RE/find_person_registrations()
+# never had a single dedicated test anywhere in the repo (confirmed by grep before
+# writing this) despite both being real, confirmed-important fixes with real-world
+# evidence cited in their own code comments. QA pass, 2026-11-06: re-checked both
+# against every real sample document in templates/general_samples/ directly - zero
+# false positives/negatives found there, so these are coverage additions using real,
+# verbatim-quoted text from that same corpus, not new bug fixes.
+
+# Verbatim (row 1-3, trimmed) from the real combined bulletin this detection exists
+# for - templates/general_samples/tshwane_gpm08_bulletin/Notice 6 of 2026-27.pdf.
+REAL_BULLETIN_EXCERPT = """
+1.    HD 03 -          Tender for the supply of      30 November     Not applicable      Not applicable           80/20
+
+
+2.    HD 06 -          Tender for the supply,        30 November     Not applicable      Not applicable           80/
+
+
+3.   GFS 04 -         Tender for the                27 November                         Compulsory briefing           8
+"""
+
+
+def check_combined_bulletin_detection():
+    print("Finding 42: is_combined_bulletin() - a real multi-tender bulletin is detected, a single tender's own text is not")
+    check("the real bulletin excerpt (3 rows) is detected as a combined bulletin",
+          req.is_combined_bulletin(REAL_BULLETIN_EXCERPT))
+    # Boundary: BULLETIN_MIN_ROWS is 3 - exactly 2 of the same real rows must NOT trigger it.
+    two_rows = "\n".join(REAL_BULLETIN_EXCERPT.strip().split("\n\n\n")[:1]) + "\n2.    HD 06 -  Tender for the supply, 30 November"
+    check("only 2 bulletin-shaped rows (below the threshold of 3) is not flagged",
+          not req.is_combined_bulletin(two_rows), req.BULLETIN_ROW_RE.findall(two_rows))
+    check("an empty/None text is not flagged (no crash either)", not req.is_combined_bulletin(None))
+    check("a real single tender's own ordinary text (TN051's PSIRA clause) is not flagged",
+          not req.is_combined_bulletin(PSIRA_REAL_TEXT))
+
+
+# Verbatim from the real tender this registration check exists for - a Dawid
+# Kruiper Municipality security-services tender (templates/general_samples/
+# dawid_kruiper_tn051/TN051.pdf).
+PSIRA_REAL_TEXT = (
+    "5.1 The Security Company who render the Security Services must be registered with "
+    "PSIRA (Private Security Industry Regulation). Proof of registration must be "
+    "submitted with the tender (Copy of PSIRA Certificate). If no proof"
+)
+# GLOSSARY_LINE_RE's own documented example shape (Treasury RT83's abbreviations list) -
+# a body named only in a glossary, nobody is actually asked to hold it.
+GLOSSARY_ONLY_TEXT = "Pr.CPM   Professional Construction Project Manager\nPSIRA    Private Security Industry Regulatory Authority"
+
+
+def check_person_registration_detection():
+    print("find_person_registrations(): a real registration requirement is detected; a glossary-only mention is not")
+    out = req.find_person_registrations([{"name": "TN051.pdf", "text": PSIRA_REAL_TEXT}])
+    bodies = [o["body"] for o in out]
+    check("the real PSIRA requirement is detected", "PSIRA" in bodies, bodies)
+    out2 = req.find_person_registrations([{"name": "glossary.pdf", "text": GLOSSARY_ONLY_TEXT}])
+    check("a body named only in a glossary/abbreviations list is not reported as a real requirement",
+          out2 == [], out2)
+    # Both in the same document: the real ask must still surface despite the glossary noise.
+    combined = GLOSSARY_ONLY_TEXT + "\n\n" + PSIRA_REAL_TEXT
+    out3 = req.find_person_registrations([{"name": "both.pdf", "text": combined}])
+    check("a real ask elsewhere in the same document still surfaces despite nearby glossary noise",
+          "PSIRA" in [o["body"] for o in out3], out3)
+
+
 def check_zip_decompression_bomb_is_capped():
     print("Standing review (2026-11-03): a zip whose own header lies about how much it "
           "decompresses to must not be trusted - collect_documents() must cap extraction, "
@@ -403,6 +465,8 @@ def main():
     check_key_personnel_false_positive()
     check_buyers_own_manager_excluded()
     check_unrecognized_format_is_flagged_not_silently_blank()
+    check_combined_bulletin_detection()
+    check_person_registration_detection()
     check_zip_decompression_bomb_is_capped()
 
     print(f"\n{len(FAILS)} failure(s)")
