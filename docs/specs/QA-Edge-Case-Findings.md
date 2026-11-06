@@ -7870,3 +7870,52 @@ docstring/comments, inserted between `find_documents_lapsing_before_closing()` a
 explanatory comment); `engine/compliance/test_watch_deadlines_urgency.py` (1 new test function, wired
 into `main()`). No change to `find_documents_lapsing_before_closing()`, `find_due_person_credentials()`,
 or any other existing reminder path.
+
+### Finding 140 (CONFIRMED, FIXED, moderate - a "lapses before closing" digest line silently duplicated the tender's closing date and never showed the document/credential's own actual expiry date, the one fact a reader needs to know when to renew by)
+
+**Area:** Notify (`engine/notify/send_digest_emails.py`'s `render_text()` - the actual customer-facing
+email body, not `daily_digest.py`'s assembly step).
+
+**Scenario:** found while adversarially testing Finding 139's new `person_credential_before_closing`
+item shape against the real email renderer, not just the JSON `daily_digest.py` builds. A
+`lapses_before_closing` item (both `find_documents_lapsing_before_closing()`'s own
+`document_before_closing` items, and Finding 139's new `person_credential_before_closing` items)
+carries BOTH `expiry_date` (the document/credential's own real lapse date - the one thing the reader
+actually needs, to know when to renew by) AND `closing_date` (the tender's) on the SAME item -
+confirmed by reading both functions' own `due.append({...})` dict literals directly. `_item_date()`'s
+own documented priority order checks `"closing_date"` BEFORE `"expiry_date"` - correct for
+`new_tenders`/`submission_due` items, which never set `expiry_date` at all, but this is the one
+`document_expiry` shape where both keys coexist on the same item. The trailing `(date)` `render_text()`
+always appended after its own custom "will have lapsed before X closes (closing_date)" sentence
+therefore silently resolved to `closing_date` again - duplicating the exact date already shown - while
+the document/credential's own real `expiry_date` never appeared in the sent email anywhere at all.
+
+Confirmed live by calling `render_text()` directly with a real item shape (not assumed from reading the
+code): `SARS Tax Compliance Status PIN - will have lapsed before R.396-010-2025/1F closes (2027-01-05)
+(2027-01-05)` - the same date twice, and the item's real `expiry_date` (`2027-01-15`) nowhere in the
+email. Identical for the new person-credential shape. This predates Finding 139 entirely (Finding 132,
+2026-11-05, introduced the first instance of this item shape) - Finding 139 only inherited the same
+bug by correctly mirroring that shape, and widened its real-world reach (both document AND person
+items now hit it on every send that includes one).
+
+**Fix:** when `status == "lapses_before_closing"`, the sentence now names both dates explicitly -
+`"{label} (expires {expiry_date}) - will have lapsed before {tender_label} closes ({closing_date})"`
+- and the generic trailing `_item_date(item)` call is skipped for this branch entirely (both dates are
+already shown inline, so appending a third copy would either re-duplicate `closing_date` or, if
+`_item_date()`'s order were naively flipped instead, misapply `expiry_date`'s meaning to every OTHER
+section that relies on the existing priority order for its own, non-overlapping date key).
+
+**Verified red-then-green.** New test
+`test_render_text_does_not_duplicate_the_closing_date_or_drop_the_real_expiry_date()` in
+`test_send_digest_emails.py`, covering both the original `document_before_closing` shape and Finding
+139's `person_credential_before_closing` shape (plus confirming the person-name prefix and the
+tender's own closing date each still appear exactly once). Reverted `send_digest_emails.py` via `git
+apply -R`, re-ran - both new checks failed exactly as predicted, printing the real duplicated-date
+body; reapplied, re-ran - `0 failure(s)`. `py_compile` clean on both touched files. Regression:
+`test_digest_live.py`, `test_send_pack_ready_email.py`, `test_digest_opt_in.py` - all `0 failure(s)`,
+no behavioural change to any other section's rendering.
+
+**Regression:** `engine/notify/send_digest_emails.py` (`render_text()`, one `if`/`else` branch
+restructured, ~20 lines including comments); `engine/notify/test_send_digest_emails.py` (1 new test
+function, wired into `main()`). No change to `_item_date()` itself, `send_one()`, or any other
+section's rendering logic.

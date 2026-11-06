@@ -250,6 +250,46 @@ def test_render_text_shows_which_tender_a_document_will_have_lapsed_before():
           "will have lapsed before" not in ordinary_body)
 
 
+def test_render_text_does_not_duplicate_the_closing_date_or_drop_the_real_expiry_date():
+    print("render_text(): a lapses_before_closing item shows its OWN expiry date once, "
+          "not the tender's closing date twice (Finding 140)")
+    # Finding 140 (2026-11-06): a lapses_before_closing item carries BOTH
+    # "expiry_date" (the document/credential's own real lapse date) AND
+    # "closing_date" (the tender's) - the one document_expiry shape where
+    # both coexist. _item_date()'s own priority order checks "closing_date"
+    # before "expiry_date" (correct for every OTHER section, which never set
+    # both on the same item), so the trailing "(date)" this function used to
+    # always append silently resolved to closing_date again here, duplicating
+    # the exact date already named by the sentence above it, while the
+    # document's own real expiry date never reached the sent email at all.
+    items = [{"type": "document_before_closing", "label": "SARS Tax Compliance Status PIN",
+              "expiry_date": "2027-01-15", "status": "lapses_before_closing",
+              "tender_label": "R.396-010-2025/1F", "closing_date": "2027-01-05"}]
+    body = sde.render_text(_digest(document_expiry=items))
+    check("the closing date is not duplicated as a trailing '(date) (date)'",
+          "(2027-01-05) (2027-01-05)" not in body, body)
+    check("the document's own real expiry date now actually appears in the sent email",
+          "2027-01-15" in body, body)
+
+    # Finding 139 (2026-11-06)'s own new item shape - a person_credential_before_closing
+    # item - carries "expiry_date"/"closing_date" AND "person_name" all at once. Must get
+    # the identical fix (the "person_name - " prefix happens earlier in the chain, before
+    # this branch, so it isn't itself at risk - checked directly here anyway).
+    person_items = [{"type": "person_credential_before_closing", "label": "ECSA professional registration",
+                      "person_name": "Assigned Engineer", "expiry_date": "2027-02-04",
+                      "status": "lapses_before_closing", "tender_label": "Z.001-2026",
+                      "closing_date": "2027-02-14"}]
+    person_body = sde.render_text(_digest(document_expiry=person_items))
+    check("the person's own name still prefixes the line",
+          "Assigned Engineer - ECSA professional registration" in person_body, person_body)
+    check("no duplicated closing date for the person-credential shape either",
+          "(2027-02-14) (2027-02-14)" not in person_body, person_body)
+    check("the credential's own real expiry date actually appears",
+          "2027-02-04" in person_body, person_body)
+    check("the tender's own closing date still appears exactly once",
+          person_body.count("2027-02-14") == 1, person_body)
+
+
 # --- send_one(): every status path, no real network -------------------------
 
 def test_send_one_skips_cleanly_without_email_or_content():
@@ -418,6 +458,7 @@ def main():
     test_render_text_shows_what_actually_changed_on_a_listing_change()
     test_render_text_shows_why_a_tender_was_reassessed()
     test_render_text_shows_which_tender_a_document_will_have_lapsed_before()
+    test_render_text_does_not_duplicate_the_closing_date_or_drop_the_real_expiry_date()
     test_send_one_skips_cleanly_without_email_or_content()
     test_send_one_dry_run_never_touches_the_network()
     test_send_one_reports_sent_on_a_real_looking_success()

@@ -222,11 +222,32 @@ def render_text(digest):
                 # specific tender's own closing day. No other section sets
                 # "tender_label" (confirmed by grep), so this only changes
                 # document_before_closing's own rendering.
+                #
+                # Finding 140 (2026-11-06): this branch's own item is the
+                # ONE document_expiry shape that carries BOTH "expiry_date"
+                # (the document's own real lapse date - the one thing the
+                # reader actually needs to act on) AND "closing_date" (the
+                # tender's) at once - find_person_credentials_lapsing_before_
+                # closing() (Finding 139) inherits the identical shape, so
+                # this isn't limited to the original document case either.
+                # _item_date()'s own priority order checks "closing_date"
+                # BEFORE "expiry_date" (correct for new_tenders/submission_due,
+                # which never set "expiry_date" at all) - so the trailing
+                # "(date)" below used to silently resolve to "closing_date"
+                # for this branch too, duplicating the exact date already
+                # named in the sentence above it, while the document/
+                # credential's own real expiry date never appeared in the
+                # sent email anywhere. Confirmed directly: rendering a real
+                # lapses_before_closing item printed "...closes (2027-01-05)
+                # (2027-01-05)" - the same date twice - with the item's real
+                # expiry_date (2027-01-15) never shown at all.
                 if item.get("status") == "lapses_before_closing" and item.get("tender_label"):
-                    bit = (f"{bit} - will have lapsed before {item['tender_label']} closes "
-                           f"({item.get('closing_date') or 'closing date on file'})")
-                date = _item_date(item)
-                lines.append(f"  - {bit}" + (f" ({date})" if date else ""))
+                    bit = (f"{bit} (expires {item.get('expiry_date') or 'date unknown'}) - will have lapsed "
+                           f"before {item['tender_label']} closes ({item.get('closing_date') or 'closing date on file'})")
+                    lines.append(f"  - {bit}")
+                else:
+                    date = _item_date(item)
+                    lines.append(f"  - {bit}" + (f" ({date})" if date else ""))
             if len(items) > 10:
                 lines.append(f"  ... and {len(items) - 10} more")
         lines.append("")

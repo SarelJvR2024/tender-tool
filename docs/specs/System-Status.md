@@ -3879,6 +3879,60 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): fix - a "lapses before closing" digest line silently showed the tender's closing date twice and never showed the document/credential's own real expiry date, found while adversarially testing Finding 139's new item shape against the real email renderer
+
+Oriented from `0a17f78` (own prior pass: Finding 139, person-credential lapses-before-closing).
+`git fetch origin main` found a large batch of new sibling commits (the "claim a one-time-ever
+notification token too early" sweep, three membership-revoked-mid-request race fixes, `HEALTH_SOURCE_
+GROUPS`/`formatZAR`/`pipeline` fixes, `tenderTemplates.ts` dual-list derivation, `generate_narrative.py`
+similarity re-check) - all unrelated to this pass's own file, `git merge --ff-only` clean, no collision
+(re-checked again immediately before pushing - still clean).
+
+**Found by testing Finding 139's own new item shape against the REAL renderer, not just
+`daily_digest.py`'s JSON assembly.** Called `send_digest_emails.render_text()` directly with a real
+`person_credential_before_closing` item and read the actual rendered line, rather than assuming Finding
+139's own passing regression suite (which only exercises `daily_digest.py`, never the email body
+itself) meant the full pipeline was correct end to end.
+
+**The bug, confirmed live, predates Finding 139 entirely**: a `lapses_before_closing` item (both the
+original `document_before_closing` shape, Finding 132, 2026-11-05, AND Finding 139's new
+`person_credential_before_closing` shape) carries BOTH `expiry_date` (the document/credential's own
+real lapse date - the one fact a reader needs, to know when to renew by) and `closing_date` (the
+tender's) on the same item. `render_text()`'s `_item_date()` helper checks `closing_date` before
+`expiry_date` in its priority order - correct for every OTHER section, which never sets both on one
+item - so the generic trailing `(date)` this function always appended after its own custom "will have
+lapsed before X closes (closing_date)" sentence silently resolved to `closing_date` again. Confirmed
+directly: `SARS Tax Compliance Status PIN - will have lapsed before R.396-010-2025/1F closes
+(2027-01-05) (2027-01-05)` - the same date twice, and the item's real `expiry_date` (`2027-01-15`)
+never appearing in the sent email at all. Identical for the person-credential shape. Finding 139 didn't
+introduce this - it only inherited the existing, already-live bug by correctly mirroring
+`find_documents_lapsing_before_closing()`'s own item shape - but it does widen how often a real send
+hits it (both the document and person-credential sections can now trigger it).
+
+**Fix:** the sentence now names both dates explicitly (`"{label} (expires {expiry_date}) - will have
+lapsed before {tender_label} closes ({closing_date})"`) and skips the generic trailing-date call for
+this one branch, since both dates are already shown inline.
+
+**Verified red-then-green.** New test covering both the document and person-credential shapes in
+`test_send_digest_emails.py`, reverted the fix via `git apply -R` - failed exactly as predicted,
+printing the real duplicated-date body; reapplied - `0 failure(s)`. `py_compile` clean. Regression:
+`test_digest_live.py`, `test_send_pack_ready_email.py`, `test_digest_opt_in.py` - all `0 failure(s)`,
+no change to any other section's rendering.
+
+**Backlog: unchanged** - a mechanical rendering bug found while verifying Finding 139's own new item
+shape against the real send path, not a new or existing numbered judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean, no
+schema/migration involved):
+- `engine/notify/send_digest_emails.py`
+- `engine/notify/test_send_digest_emails.py`
+
+To verify independently: `cd engine/notify && python3 test_send_digest_emails.py` - expect
+`0 failure(s)`, including the new
+`render_text(): a lapses_before_closing item shows its OWN expiry date once` section.
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): fix - Finding 132's own flagged-not-fixed gap closed: no proactive "lapses before closing" check existed for a key PERSON's own professional registration, only for company-wide documents
 
 Oriented from `f6d49d1` (own prior pass: Finding 138/intake coverage-closure). `git fetch origin main`
