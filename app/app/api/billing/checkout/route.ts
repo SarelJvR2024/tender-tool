@@ -13,6 +13,7 @@ import {
   type PayfastFields,
 } from "@/lib/payfast";
 import { PLAN_LABEL, priceForPayfastAmount, type BillingInterval, type PlanTier } from "@/lib/billing";
+import { sastToday } from "@/lib/publicHolidays";
 
 
 /**
@@ -87,7 +88,12 @@ export async function GET(request: NextRequest) {
     custom_str1: company.id as string,
     custom_str2: encodePlanInterval({ planTier: plan, billingInterval: interval }),
     subscription_type: "1",
-    billing_date: new Date().toISOString().slice(0, 10),
+    // SAST, not raw UTC - during the 22:00-00:00 UTC window (00:00-02:00
+    // SAST) a raw toISOString() slice reports yesterday's date, handing
+    // PayFast a billing_date already in the past for the real SA calendar
+    // day. Same UTC-vs-SAST bug class as the deadline calculator's own
+    // sastToday() fix.
+    billing_date: sastToday(),
     recurring_amount: amount,
     frequency: String(PAYFAST_FREQUENCY[interval]),
     cycles: String(PAYFAST_CYCLES_INDEFINITE),

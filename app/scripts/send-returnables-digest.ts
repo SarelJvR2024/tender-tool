@@ -39,7 +39,7 @@
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
 import { createClient } from "@supabase/supabase-js";
 import { formatDate } from "../lib/dates.ts";
-import { businessDaysBetween } from "../lib/publicHolidays.ts";
+import { businessDaysBetween, sastToday } from "../lib/publicHolidays.ts";
 import { returnablesWindowCandidates, returnablesMissingMandatoryItems, type ReturnablesWindowTenderRow } from "../lib/returnablesDigestCandidates.ts";
 import { returnablesDigestEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
@@ -66,7 +66,13 @@ async function main() {
   }
 
   const supabase = createClient(url, serviceKey);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // SAST, not raw UTC - the scheduled 04:40 UTC run never crosses this, but
+  // a manual workflow_dispatch run (or a future schedule change) in the
+  // 22:00-00:00 UTC window would otherwise compute yesterday's SAST date as
+  // "today", shifting businessDaysBetween() by a day against the real 3-5
+  // business day window - the same UTC-vs-SAST bug class fixed in the
+  // deadline calculator (lib/publicHolidays.ts's sastToday()).
+  const todayStr = sastToday();
 
   const { data: tenderRows, error: tenderError } = await supabase
     .from("tenders")
