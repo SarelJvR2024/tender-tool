@@ -62,6 +62,7 @@ import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { printSignDeadline } from "../lib/dispatchTriage.ts";
 import { operationalRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
 import { parseSenderCliArgs, printDryRunTable, type DryRunRow } from "../lib/senderCliArgs.ts";
+import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 type SupabaseService = SupabaseClient;
 
@@ -119,12 +120,24 @@ async function claim(supabase: SupabaseService, alertType: string, tenderId: str
 }
 
 async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
-  let query = supabase
-    .from("tender_packs")
-    .select("id, tender_id, company_id, pipeline_stage, submission_type, estimated_print_hours, estimated_transit_hours, dispatch_status, tenders(id, contract_no, description, closing_date)")
-    .eq("submission_type", "physical_box");
-  if (opts.scopeCompanyId) query = query.eq("company_id", opts.scopeCompanyId);
-  const { data: packRows, error } = await query;
+  // Paginated via fetchAllRows(), not a plain `.select()` - same reasoning
+  // as scripts/send-deadline-reminders.ts's own read: this runs under the
+  // SERVICE ROLE key against `tender_packs` summed across EVERY company at
+  // once (unless --company-id scopes a single run), and a tender_pack is
+  // never deleted, so the physical_box subset only grows. Past PostgREST's
+  // 1000-row db-max-rows cap this would silently stop sending the 48-hour
+  // print/transit cutoff alert for whichever packs sort past row 1000.
+  const { rows: packRows, error } = await fetchAllRows<Record<string, unknown>>(
+    (from, to) => {
+      let query = supabase
+        .from("tender_packs")
+        .select("id, tender_id, company_id, pipeline_stage, submission_type, estimated_print_hours, estimated_transit_hours, dispatch_status, tenders(id, contract_no, description, closing_date)")
+        .eq("submission_type", "physical_box");
+      if (opts.scopeCompanyId) query = query.eq("company_id", opts.scopeCompanyId);
+      return query.range(from, to);
+    },
+    20_000,
+  );
   if (error) {
     console.error("print-cutoff: could not read tender_packs", error);
     return { sent: 0, candidates: 0 };
@@ -172,15 +185,28 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: R
 }
 
 async function runBriefingReminders(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
-  const { data: tenderRows, error } = await supabase
-    .from("tenders")
-    .select("id, contract_no, description, briefing_date, briefing_time, tender_packs!inner(company_id)")
-    .not("briefing_date", "is", null);
+  // Paginated via fetchAllRows(), not a plain `.select()` - same reasoning
+  // as runPrintCutoff() above and scripts/send-deadline-reminders.ts's own
+  // identical `tenders` x `tender_packs!inner` read: shared/public table
+  // (0001: "not tenant-scoped"), joined has-many to EVERY company's own
+  // tender_packs at once under the SERVICE ROLE key. Past PostgREST's
+  // 1000-row db-max-rows cap this would silently stop sending the 5-day/
+  // 24-hour briefing reminder for whichever tender/company pairs sort past
+  // row 1000.
+  const { rows: tenderRows, error } = await fetchAllRows<BriefingReminderTenderRow>(
+    (from, to) =>
+      supabase
+        .from("tenders")
+        .select("id, contract_no, description, briefing_date, briefing_time, tender_packs!inner(company_id)")
+        .not("briefing_date", "is", null)
+        .range(from, to),
+    20_000,
+  );
   if (error) {
     console.error("briefing: could not read tenders", error);
     return { sent: 0, candidates: 0 };
   }
-  let candidates = briefingReminderCandidates((tenderRows ?? []) as unknown as BriefingReminderTenderRow[], daysUntil);
+  let candidates = briefingReminderCandidates(tenderRows, daysUntil);
   // --company-id post-filters here (no direct FK-friendly way to push this
   // into the query above without an extra join) - still safe: nothing is
   // claimed or sent for a filtered-out candidate, it's just discarded from

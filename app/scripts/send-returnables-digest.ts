@@ -44,6 +44,7 @@ import { returnablesWindowCandidates, returnablesMissingMandatoryItems, type Ret
 import { returnablesDigestEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
+import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 const NOTIFICATION_TYPE = "returnables_digest";
 
@@ -74,16 +75,30 @@ async function main() {
   // deadline calculator (lib/publicHolidays.ts's sastToday()).
   const todayStr = sastToday();
 
-  const { data: tenderRows, error: tenderError } = await supabase
-    .from("tenders")
-    .select("id, contract_no, description, title, closing_date, family, document_requirements, tender_packs!inner(company_id, pipeline_stage)")
-    .not("closing_date", "is", null);
+  // Paginated via fetchAllRows(), not a plain `.select()` - same reasoning
+  // as scripts/send-deadline-reminders.ts's own identical read: this runs
+  // under the SERVICE ROLE key against `tenders` (shared/public, "not
+  // tenant-scoped" per 0001) joined has-many to EVERY company's own
+  // tender_packs at once, the exact shape that silently hits PostgREST's
+  // 1000-row db-max-rows cap (lib/supabasePaging.ts) before any single
+  // company's data would. Past that cap this script would silently stop
+  // sending the returnables-missing nudge for whichever tender/company pairs
+  // sort past row 1000.
+  const { rows: tenderRows, error: tenderError } = await fetchAllRows<ReturnablesWindowTenderRow>(
+    (from, to) =>
+      supabase
+        .from("tenders")
+        .select("id, contract_no, description, title, closing_date, family, document_requirements, tender_packs!inner(company_id, pipeline_stage)")
+        .not("closing_date", "is", null)
+        .range(from, to),
+    20_000,
+  );
   if (tenderError) {
     console.error("Could not read tenders", tenderError);
     process.exit(1);
   }
 
-  const candidates = returnablesWindowCandidates((tenderRows ?? []) as unknown as ReturnablesWindowTenderRow[], todayStr, businessDaysBetween);
+  const candidates = returnablesWindowCandidates(tenderRows, todayStr, businessDaysBetween);
 
   if (candidates.length === 0) {
     console.log("No tenders at the 3-5 business day returnables-digest window today.");

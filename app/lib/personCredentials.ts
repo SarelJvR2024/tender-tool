@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { expiryStatus, type StatusChip } from "./dates.ts";
+import { fetchAllRows } from "./supabasePaging.ts";
 
 // Per-person professional registrations that carry an expiry / renewal date
 // (migrations 0035, 0040). Mirrors engine/compliance/watch_deadlines.py
@@ -206,19 +207,45 @@ export type AskedFor = Record<RequiredBody, string[]>;
  *    require registration with one of these bodies.
  * Only tenders still open (or with no closing date) count. RLS decides which
  * tenders the user can see.
+ *
+ * Both reads are paginated via fetchAllRows(), not a plain `.select()` -
+ * `tenders`/`tender_requirements` are the shared/public tables (0001: "daily
+ * discovery pipeline's one feed serves every tenant", readable by every
+ * authenticated user regardless of company - confirmed in 0001's own RLS
+ * policies, "readable by authenticated users") fed daily by a dozen+
+ * discovery scrapers that already return 268-292 rows EACH from a single
+ * buyer in this session's own live-tests (System-Status.md). A plain
+ * `.eq("status", "open")` here is not scoped to one company at all - it's
+ * every open tender system-wide - which is exactly the shape that silently
+ * hits PostgREST's 1000-row db-max-rows cap (lib/supabasePaging.ts,
+ * confirmed live 2026-10-23; same bug class as lib/marketPricing.ts PR #111,
+ * lib/discoveryPagination.ts, lib/companyReadinessData.ts). Past that cap,
+ * registrationsAskedFor() would silently stop surfacing "this tender asks
+ * for SACNASP/SAGC/..." badges for whichever open tenders sort past row
+ * 1000, understating real demand for a registration on the People page.
  */
 export async function registrationsAskedFor(supabase: SupabaseClient): Promise<AskedFor> {
   const out: AskedFor = { SACNASP: [], SAGC: [], SACAP: [], SACPLAN: [], SACQSP: [], SACPVP: [], PSIRA: [] };
-  const [{ data: reqRows }, { data: generalRows }] = await Promise.all([
-    supabase
-      .from("tender_requirements")
-      .select("position_code, position_description, tenders!inner(id, contract_no, title, status, closing_date)")
-      .eq("tenders.status", "open"),
-    supabase
-      .from("tenders")
-      .select("id, contract_no, title, closing_date, document_requirements")
-      .eq("status", "open")
-      .not("document_requirements->person_registrations", "is", null),
+  const [{ rows: reqRows }, { rows: generalRows }] = await Promise.all([
+    fetchAllRows<{ position_code: string; position_description: string | null; tenders: { id: string; contract_no: string | null; title: string | null; status: string; closing_date: string | null }[] }>(
+      (from, to) =>
+        supabase
+          .from("tender_requirements")
+          .select("position_code, position_description, tenders!inner(id, contract_no, title, status, closing_date)")
+          .eq("tenders.status", "open")
+          .range(from, to),
+      20_000,
+    ),
+    fetchAllRows<{ id: string; contract_no: string | null; title: string | null; closing_date: string | null; document_requirements: { person_registrations?: { body: string }[] } | null }>(
+      (from, to) =>
+        supabase
+          .from("tenders")
+          .select("id, contract_no, title, closing_date, document_requirements")
+          .eq("status", "open")
+          .not("document_requirements->person_registrations", "is", null)
+          .range(from, to),
+      20_000,
+    ),
   ]);
   // "now" only after the (request-time) reads above - Cache Components
   // refuses a current-time value before any dynamic data access.

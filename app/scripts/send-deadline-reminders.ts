@@ -50,6 +50,7 @@ import { deadlineReminderCandidates, type DeadlineReminderTenderRow } from "../l
 import { deadlineReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
+import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -75,10 +76,29 @@ async function main() {
 
   const supabase = createClient(url, serviceKey);
 
-  const { data: tenderRows, error: tenderError } = await supabase
-    .from("tenders")
-    .select("id, contract_no, description, closing_date, tender_packs!inner(company_id, pipeline_stage)")
-    .not("closing_date", "is", null);
+  // Paginated via fetchAllRows(), not a plain `.select()` - this runs under
+  // the SERVICE ROLE key (RLS bypassed entirely) against `tenders`, the
+  // shared/public table fed daily by every discovery scraper (0001: "not
+  // tenant-scoped"), joined has-many to EVERY company's own tender_packs at
+  // once (not one company's worth - deadlineReminderCandidates()'s own doc
+  // comment is explicit that a tender tracked by several companies yields
+  // several rows here). That is exactly the shape that silently hits
+  // PostgREST's 1000-row db-max-rows cap (lib/supabasePaging.ts, confirmed
+  // live 2026-10-23; same bug class as lib/marketPricing.ts PR #111,
+  // lib/discoveryPagination.ts, lib/companyReadinessData.ts) well before any
+  // single company's own data would - it sums EVERY company's tracked
+  // tenders together. Past that cap this script would silently stop sending
+  // "closing in 3 days / 24 hours" reminders for whichever tender/company
+  // pairs sort past row 1000 - a missed bid deadline, not a cosmetic gap.
+  const { rows: tenderRows, error: tenderError } = await fetchAllRows<DeadlineReminderTenderRow>(
+    (from, to) =>
+      supabase
+        .from("tenders")
+        .select("id, contract_no, description, closing_date, tender_packs!inner(company_id, pipeline_stage)")
+        .not("closing_date", "is", null)
+        .range(from, to),
+    20_000,
+  );
   if (tenderError) {
     console.error("Could not read tenders", tenderError);
     process.exit(1);
@@ -89,7 +109,7 @@ async function main() {
   // several entries here, each handled (and dedupe-claimed) independently.
   // See deadlineReminderCandidates()'s own doc comment for why this can't
   // just be tender.tender_packs[0] (QA Finding, 2026-10-22).
-  const candidates = deadlineReminderCandidates((tenderRows ?? []) as unknown as DeadlineReminderTenderRow[], daysUntil);
+  const candidates = deadlineReminderCandidates(tenderRows, daysUntil);
 
   if (candidates.length === 0) {
     console.log("No tenders at a 3-day or 24-hour reminder threshold today.");
