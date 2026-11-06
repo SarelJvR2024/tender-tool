@@ -27,7 +27,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   let companyName: string | null = null;
   let notifications: Awaited<ReturnType<typeof getNotifications>> = [];
   let notificationsError = false;
-  let subscription: Awaited<ReturnType<typeof fetchCompanySubscription>> = null;
+  let subscription: Awaited<ReturnType<typeof fetchCompanySubscription>>["subscription"] = null;
   let isDemo = false;
 
   if (user) {
@@ -52,7 +52,14 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     companyName = (company?.csd_trading_name || company?.legal_name) ?? null;
     notifications = notificationsResult ?? [];
     notificationsError = notificationsResult === null;
-    subscription = subscriptionRow;
+    // subscriptionRow.error is deliberately not surfaced here: SubscriptionBanner
+    // already renders nothing when subscription is null (see its own comment),
+    // which is the safe direction to fail in on every signed-in page - it never
+    // shows a false "trial ended"/"lapsed" warning on a transient read failure.
+    // billing/page.tsx (fetchCompanySubscription's other caller) is where that
+    // same failure needs a visible, honest banner instead of "no subscription
+    // found", since that page actively asserts there's no subscription at all.
+    subscription = subscriptionRow.subscription;
     // "Demo company" (app/AGENTS.md): the one seeded demo/trial company gets
     // a small banner so sample data is never mistaken for a real vault - see
     // lib/demoCompany.ts for why this is a static allowlist, not a new column.

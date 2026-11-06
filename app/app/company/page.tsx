@@ -65,11 +65,16 @@ export default async function CompanyPage({
   // has set up. A type with no row is "not set up".
   const templates: Record<string, CompanyDocumentTemplateRow> = {};
   const templateUrls: Record<string, string> = {};
+  let templatesError = false;
   if (row && !editing) {
-    const { data: tplRows } = await supabase
+    const { data: tplRows, error: tplError } = await supabase
       .from("company_document_templates")
       .select("id, document_type, mode, storage_path, original_filename, guideline, updated_at")
       .eq("company_id", row.id);
+    if (tplError) {
+      console.error("company_document_templates select failed", tplError);
+      templatesError = true;
+    }
     for (const t of (tplRows ?? []) as CompanyDocumentTemplateRow[]) templates[t.document_type] = t;
     const withFiles = Object.values(templates).filter((t) => t.storage_path);
     const signed = await Promise.all(
@@ -84,12 +89,17 @@ export default async function CompanyPage({
   // on its own page; only counts here. RLS scopes every count to this company
   // (bank accounts: owners/admins only, so members see 0 here).
   const registerCounts = { principals: 0, registrations: 0, properties: 0 };
+  let registerCountsError = false;
   if (row && !editing) {
     const [a, b, c] = await Promise.all([
       supabase.from("company_principals").select("id", { count: "exact", head: true }),
       supabase.from("held_registrations").select("id", { count: "exact", head: true }),
       supabase.from("company_properties").select("id", { count: "exact", head: true }),
     ]);
+    if (a.error) console.error("company_principals count failed", a.error);
+    if (b.error) console.error("held_registrations count failed", b.error);
+    if (c.error) console.error("company_properties count failed", c.error);
+    registerCountsError = Boolean(a.error || b.error || c.error);
     registerCounts.principals = a.count ?? 0;
     registerCounts.registrations = b.count ?? 0;
     registerCounts.properties = c.count ?? 0;
@@ -110,12 +120,21 @@ export default async function CompanyPage({
   let readiness: ReadinessResult | null = null;
   let peopleRows: { id: string; name: string }[] = [];
   let peopleWithCvIds = new Set<string>();
+  let readinessInputsError = false;
   if (row && !editing) {
-    const [{ data: cvRows }, { count: experienceCount }, { data: peopleData }] = await Promise.all([
+    const [
+      { data: cvRows, error: cvError },
+      { count: experienceCount, error: experienceError },
+      { data: peopleData, error: peopleError },
+    ] = await Promise.all([
       supabase.from("cv_uploads").select("person_id"),
       supabase.from("experience_items").select("id", { count: "exact", head: true }),
       supabase.from("people").select("id, name").order("name", { ascending: true }),
     ]);
+    if (cvError) console.error("cv_uploads select failed (company)", cvError);
+    if (experienceError) console.error("experience_items count failed (company)", experienceError);
+    if (peopleError) console.error("people select failed (company)", peopleError);
+    readinessInputsError = Boolean(cvError || experienceError || peopleError);
     peopleRows = (peopleData ?? []) as { id: string; name: string }[];
     peopleWithCvIds = new Set((cvRows ?? []).map((r) => r.person_id as string));
     readiness = computeBidReadiness({
@@ -212,6 +231,12 @@ export default async function CompanyPage({
           {(loadError || !row) && (
             <Banner tone="destructive">
               {loadError ? "Couldn't load your company profile - try refreshing. If it keeps happening, let us know." : "Could not load your company profile."}
+            </Banner>
+          )}
+
+          {row && !editing && (templatesError || registerCountsError || readinessInputsError) && (
+            <Banner tone="destructive">
+              Some of your company details (people, registers or letters) couldn&apos;t be loaded - the counts and checklist above may be incomplete. Try refreshing.
             </Banner>
           )}
 

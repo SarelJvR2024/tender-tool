@@ -61,7 +61,7 @@ export default async function BillingPage({
   // views of one source, not two independent checks that could drift apart.
   const isSandbox = isBillingSandboxed();
   const supabase = await createClient();
-  const subscription = await fetchCompanySubscription(supabase);
+  const { subscription, error: subscriptionError } = await fetchCompanySubscription(supabase);
 
   const status = subscription ? effectiveSubscriptionStatus(subscription) : null;
   const lapsed = subscription ? isSubscriptionLapsed(subscription) : false;
@@ -125,6 +125,8 @@ export default async function BillingPage({
                 {lapsed ? "Action needed" : status === "trialing" ? "Trialing" : "Active"}
               </span>
             </div>
+          ) : subscriptionError ? (
+            <p className="text-sm text-destructive">Couldn&apos;t load your subscription - try refreshing. If it keeps happening, let us know.</p>
           ) : (
             <p className="text-sm text-muted-foreground">No subscription found for your company yet.</p>
           )}
