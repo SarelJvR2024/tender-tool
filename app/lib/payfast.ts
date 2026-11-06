@@ -14,6 +14,7 @@
 // Node-only (uses the "node:crypto" module) - never imported into a "use
 // client" component.
 import { createHash } from "node:crypto";
+import { addMonths } from "date-fns";
 
 export type PayfastMode = "sandbox" | "live";
 
@@ -206,3 +207,22 @@ export function decodePlanInterval(value: string | null | undefined): PlanAndInt
 // "Subscriptions" - Monthly=3, Annual=6). cycles=0 means "until cancelled".
 export const PAYFAST_FREQUENCY: Record<"monthly" | "yearly", number> = { monthly: 3, yearly: 6 };
 export const PAYFAST_CYCLES_INDEFINITE = 0;
+
+/**
+ * The new `current_period_end` an ITN-triggered activation sets, counted from now.
+ * Moved here (standing review, 2026-11-06) from a private helper inside the ITN route
+ * handler itself specifically so it has real test coverage (payfast.spec.ts) - a route.ts
+ * file in the App Router may only export HTTP method handlers, so the function couldn't be
+ * tested in place.
+ *
+ * Uses date-fns's addMonths() rather than a bare `date.setMonth(date.getMonth() + 1)` /
+ * `setFullYear(getFullYear() + 1)`, reproduced live: a customer who pays on Jan/Mar/May/
+ * Aug/Oct 31 would otherwise get a "paid through" date silently pushed 1-2 days past the
+ * real next-month anniversary, because the bare JS Date math "overflows" into the
+ * following month whenever the target month is shorter than 31 days (e.g. Jan 31 + 1
+ * "month" -> Mar 3, not Feb 28). date-fns's addMonths() clamps to the last day of the
+ * target month instead, which is the correct billing-anniversary behaviour.
+ */
+export function nextPeriodEnd(interval: "monthly" | "yearly"): string {
+  return addMonths(new Date(), interval === "yearly" ? 12 : 1).toISOString();
+}

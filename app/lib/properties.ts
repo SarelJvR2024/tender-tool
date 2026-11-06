@@ -1,3 +1,5 @@
+import { addMonths } from "date-fns";
+
 // Landlord / property tenders (migration 0050 company_properties +
 // property_documents; Sarel, Q-MD3: support them). A lease tender asks about
 // a BUILDING, so these are per-building records, not company facts.
@@ -90,11 +92,21 @@ export function isPropertyDocumentType(v: unknown): v is string {
   return typeof v === "string" && PROPERTY_DOCUMENT_TYPES.some((t) => t.key === v);
 }
 
-/** Older than the tender rule allows, counted from the issue date. */
+/**
+ * Older than the tender rule allows, counted from the issue date.
+ *
+ * Uses date-fns's addMonths() rather than a bare `date.setMonth(date.getMonth() + n)`
+ * (standing review, 2026-11-06): a certificate issued on a leap day (Feb 29) with a
+ * 12-month validity window would otherwise silently roll over to March 1 of the
+ * following year instead of landing on Feb 28 - the bare JS Date math "overflows"
+ * whenever the target month is shorter than the issue day, the same underlying bug
+ * found in app/api/billing/payfast/itn/route.ts's nextPeriodEnd() in this same pass.
+ * date-fns's addMonths() clamps to the last day of the target month instead, which
+ * is the correct calendar-anniversary behaviour here.
+ */
 export function tooOld(doc: Pick<PropertyDocumentRow, "document_type" | "issued_on">, today = new Date()): string | null {
   const t = PROPERTY_DOCUMENT_TYPES.find((x) => x.key === doc.document_type);
   if (!t?.maxAgeMonths || !doc.issued_on) return null;
-  const limit = new Date(doc.issued_on);
-  limit.setMonth(limit.getMonth() + t.maxAgeMonths);
+  const limit = addMonths(new Date(doc.issued_on), t.maxAgeMonths);
   return limit < today ? `Older than ${t.maxAgeMonths} months - ${t.askedBy.split(" (")[0]} won't accept it; get a new one.` : null;
 }

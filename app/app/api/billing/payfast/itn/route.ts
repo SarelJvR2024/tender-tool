@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { PAYFAST_ITN_HOSTNAMES, decodePlanInterval, payfastValidateUrl, verifyItnSignature } from "@/lib/payfast";
+import {
+  PAYFAST_ITN_HOSTNAMES,
+  decodePlanInterval,
+  nextPeriodEnd,
+  payfastValidateUrl,
+  verifyItnSignature,
+} from "@/lib/payfast";
 
 
 /**
@@ -96,13 +102,6 @@ export async function POST(request: NextRequest) {
   }
 
   return new NextResponse("OK", { status: 200 });
-}
-
-function nextPeriodEnd(interval: "monthly" | "yearly"): string {
-  const d = new Date();
-  if (interval === "yearly") d.setFullYear(d.getFullYear() + 1);
-  else d.setMonth(d.getMonth() + 1);
-  return d.toISOString();
 }
 
 async function sourceIpLooksLikePayfast(request: NextRequest): Promise<boolean> {

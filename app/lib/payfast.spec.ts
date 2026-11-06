@@ -5,6 +5,7 @@ import {
   decodePlanInterval,
   encodePlanInterval,
   isBillingSandboxed,
+  nextPeriodEnd,
   signCheckoutFields,
   verifyItnSignature,
 } from "./payfast";
@@ -189,5 +190,50 @@ describe("encodePlanInterval / decodePlanInterval", () => {
     expect(decodePlanInterval("enterprise:monthly")).toBeNull(); // enterprise is priced on request, never a self-serve PayFast checkout
     expect(decodePlanInterval("starter:weekly")).toBeNull();
     expect(decodePlanInterval(null)).toBeNull();
+  });
+});
+
+// Standing review, 2026-11-06: a bare `date.setMonth(date.getMonth() + 1)`/
+// `setFullYear(getFullYear() + 1)` "overflows" into the following month whenever the
+// current day-of-month doesn't exist in the target month (e.g. Jan 31 + 1 month has no
+// Feb 31, so plain JS Date math silently lands on Mar 3 instead). Reproduced live against
+// the function's old implementation before this fix (moved here from a private helper in
+// the ITN route handler specifically so this is testable): a customer paying on the 31st
+// of Jan/Mar/May/Aug/Oct got their "paid through" date pushed 1-2 real days further out
+// than a real calendar month, every time their renewal happened to land on one of those
+// dates - not a rare edge case for a recurring monthly charge.
+describe("nextPeriodEnd", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("monthly: paid on the 31st of a long month lands on the real end of next month, not 1-2 days past it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-31T10:00:00.000Z"));
+    expect(nextPeriodEnd("monthly")).toBe("2026-02-28T10:00:00.000Z"); // was 2026-03-03 before the fix
+  });
+
+  it("monthly: paid on the 31st of March lands on the real end of April (30th), not May 1st", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-31T10:00:00.000Z"));
+    expect(nextPeriodEnd("monthly")).toBe("2026-04-30T10:00:00.000Z"); // was 2026-05-01 before the fix
+  });
+
+  it("monthly: an ordinary day (no day-of-month overflow) is unaffected", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T10:00:00.000Z"));
+    expect(nextPeriodEnd("monthly")).toBe("2026-07-15T10:00:00.000Z");
+  });
+
+  it("yearly: a leap-day payment (Feb 29) lands on Feb 28 the following (non-leap) year, not Mar 1", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2028-02-29T10:00:00.000Z"));
+    expect(nextPeriodEnd("yearly")).toBe("2029-02-28T10:00:00.000Z");
+  });
+
+  it("yearly: an ordinary date is unaffected", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-15T10:00:00.000Z"));
+    expect(nextPeriodEnd("yearly")).toBe("2027-06-15T10:00:00.000Z");
   });
 });
