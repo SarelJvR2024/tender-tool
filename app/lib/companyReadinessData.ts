@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeBidReadiness, type ReadinessResult } from "./readiness";
+import { fetchAllRows } from "./supabasePaging";
 
 /**
  * Fetches the real data computeBidReadiness() needs and scores it - the one
@@ -10,19 +11,34 @@ import { computeBidReadiness, type ReadinessResult } from "./readiness";
  * database. No company_id filter on any query below - RLS already scopes
  * every one of these tables to the signed-in user's own company, same as
  * every other query in this app.
+ *
+ * `cv_uploads` is read via fetchAllRows(), not a plain `.select()` - the same
+ * class of bug lib/marketPricing.ts (PR #111) and lib/discoveryPagination.ts
+ * were each fixed for: PostgREST silently caps a single response at 1000
+ * rows (db-max-rows) regardless of any client-side `.limit()`. cv_uploads is
+ * exactly the shape that bites (migration 0008: "Re-uploading a newer CV is
+ * a new row (history kept), not an overwrite" - one company's own upload
+ * history grows forever, no retention), so a long-lived company could pass
+ * 1000 rows and silently undercount distinct people-with-a-CV. The other two
+ * counts below stay plain `count: "exact", head: true` queries - PostgREST's
+ * exact row count isn't capped by db-max-rows, only the actual row data is,
+ * so those were never at risk.
  */
 export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<ReadinessResult> {
-  const [{ data: company }, { count: principalCount }, { data: cvRows }, { count: experienceCount }] = await Promise.all([
+  const [{ data: company }, { count: principalCount }, cvUploads, { count: experienceCount }] = await Promise.all([
     supabase
       .from("companies")
       .select("legal_name, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, bee_level, bee_proof_expiry, cidb_grading, cidb_expiry, bank_confirmation_letter_valid_until")
       .maybeSingle(),
     supabase.from("company_principals").select("id", { count: "exact", head: true }),
-    supabase.from("cv_uploads").select("person_id"),
+    fetchAllRows<{ person_id: string }>(
+      (from, to) => supabase.from("cv_uploads").select("person_id").range(from, to),
+      20_000,
+    ),
     supabase.from("experience_items").select("id", { count: "exact", head: true }),
   ]);
 
-  const peopleWithCvCount = new Set((cvRows ?? []).map((r: { person_id: string }) => r.person_id)).size;
+  const peopleWithCvCount = new Set(cvUploads.rows.map((r) => r.person_id)).size;
 
   return computeBidReadiness({
     legalName: company?.legal_name ?? null,
