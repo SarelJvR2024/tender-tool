@@ -51,7 +51,7 @@ type TenderRow = {
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
-  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks }, savingsSummary] = await Promise.all([
+  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks, error: briefingTasksError }, savingsSummary] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -64,6 +64,7 @@ export default async function AnalyticsPage() {
     supabase.from("tender_tasks").select("status").eq("kind", "briefing"),
     fetchSavingsCounterSummary(supabase),
   ]);
+  if (briefingTasksError) console.error("tender_tasks (briefing) select failed (analytics)", briefingTasksError);
 
   if (error) {
     return (
@@ -250,7 +251,14 @@ export default async function AnalyticsPage() {
               <HelpCircle className="size-4 text-muted-foreground" aria-hidden />
               <h2 className="text-sm font-semibold text-foreground">Briefing attendance</h2>
             </div>
-            {briefingRows.length === 0 ? (
+            {briefingTasksError ? (
+              <ErrorState
+                icon={HelpCircle}
+                title="Couldn't load briefing attendance"
+                description="Try refreshing - if it keeps happening, let us know."
+                className="py-6"
+              />
+            ) : briefingRows.length === 0 ? (
               <EmptyState icon={HelpCircle} title="No compulsory briefings tracked yet" description="A tender with a compulsory briefing session adds a task for it - attendance shows up here once one exists." className="py-6" />
             ) : (
               <>
