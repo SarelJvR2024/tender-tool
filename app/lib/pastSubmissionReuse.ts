@@ -221,10 +221,26 @@ export async function buildReusePlan(supabase: SupabaseClient, targetTenderId: s
 
   const [{ data: people }, { data: packs }] = await Promise.all([
     supabase.from("people").select("id"),
-    supabase.from("tender_packs").select("id, tender_id").in("tender_id", [targetTenderId, sourceTenderId]),
+    supabase.from("tender_packs").select("id, tender_id, pipeline_stage").in("tender_id", [targetTenderId, sourceTenderId]),
   ]);
+  const packRows = (packs ?? []) as { id: string; tender_id: string; pipeline_stage: string }[];
+  // Found 2026-11-06: the ONLY thing stopping this from reusing answers onto an
+  // already-submitted tender was reuse-past-submission.tsx's own widget-hiding
+  // check (stage in submitted/briefing_shortlisted/won/lost -> `return null`,
+  // never rendering the form at all) - that's a display-only gate, not a check
+  // this function or applyPastSubmission() ever repeated server-side, and this
+  // is the one function both the preview AND the apply action rebuild their
+  // plan from "from the database, not taken from the preview the browser saw"
+  // per this function's own header comment. A stale tab left open from before
+  // the tender was submitted (or a direct POST to applyPastSubmission with a
+  // still-valid source id) could silently overwrite tender_answers / reconfirm
+  // key positions on a tender that has already gone in. Re-checked here, not
+  // just in the widget, using the same DONE_STAGES list that already decides
+  // whether a tender is a valid *source*.
+  const targetStage = packRows.find((p) => p.tender_id === targetTenderId)?.pipeline_stage;
+  if (targetStage && DONE_STAGES.includes(targetStage)) return null;
   const personIds = new Set(((people ?? []) as { id: string }[]).map((p) => p.id));
-  const packOf = new Map(((packs ?? []) as { id: string; tender_id: string }[]).map((p) => [p.tender_id, p.id]));
+  const packOf = new Map(packRows.map((p) => [p.tender_id, p.id]));
   const targetPackId = packOf.get(targetTenderId) ?? null;
   const sourcePackId = packOf.get(sourceTenderId) ?? null;
   const notes: string[] = [];
