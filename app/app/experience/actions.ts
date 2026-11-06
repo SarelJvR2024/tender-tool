@@ -174,10 +174,21 @@ export async function saveExperienceTags(formData: FormData) {
     update.original_filename = file.name;
   }
 
-  const { error } = await supabase.from("experience_items").update(update).eq("id", id);
-  if (error) {
+  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own "experience_items:
+  // tenant isolation" (0012, using (is_company_member(company_id)),
+  // re-evaluated against the OLD row) no longer matches - e.g. another
+  // admin's removeMember() (0114) revoking this user's own company_members
+  // row between the `existing` read above (when a replacement file is
+  // attached) and this write. Without this check, a zero-row match left the
+  // just-uploaded replacement orphaned AND still deleted the still-
+  // referenced replaced file below regardless. Same shape, same fix, as
+  // app/company/actions.ts uploadVaultDocument().
+  const { data: updated, error } = await supabase.from("experience_items").update(update).eq("id", id).select("id").maybeSingle();
+  if (error || !updated) {
     console.error("experience_items update failed", error);
-    redirect(err(back, "Could not save these tags - try again. If it keeps happening, let us know."));
+    if (typeof update.storage_path === "string") await supabase.storage.from("experience-documents").remove([update.storage_path]);
+    redirect(err(back, error ? "Could not save these tags - try again. If it keeps happening, let us know." : "That experience item is no longer there - it may have been removed. Refresh and try again."));
   }
   if (replacedPath) {
     await supabase.storage.from("experience-documents").remove([replacedPath]);

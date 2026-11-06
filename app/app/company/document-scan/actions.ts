@@ -194,8 +194,20 @@ export async function confirmVaultDocument(formData: FormData) {
   if (copyErr) fail(copyErr);
   update[docColumn] = destPath;
 
-  const { error } = await supabase.from("companies").update(update).eq("id", companyId);
-  if (error) {
+  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own "companies: members
+  // can update" (0001, using (is_company_member(id)), re-evaluated against
+  // the OLD row) no longer matches - e.g. another admin's removeMember()
+  // (0114) revoking this user's own company_members row during the real
+  // network round trip copyBetweenBuckets() just made. Without this check,
+  // that race deleted the ONLY remaining copy of the document below (the
+  // onboarding source file) while leaving the onboarding_document_results
+  // row stuck on review_status "pending_review" (markApplied() below hits
+  // the same race) - worse than orphaning a file, it destroys the document
+  // outright. Same shape, same fix, as app/company/actions.ts
+  // uploadVaultDocument().
+  const { data: updatedCompany, error } = await supabase.from("companies").update(update).eq("id", companyId).select("id").maybeSingle();
+  if (error || !updatedCompany) {
     console.error("companies update failed for onboarding document", error);
     await supabase.storage.from(VAULT_BUCKET).remove([destPath]);
     fail("Could not file this document - try again. If it keeps happening, let us know.");
@@ -295,12 +307,18 @@ export async function confirmIdDocument(formData: FormData) {
   const copyErr = await copyBetweenBuckets(supabase, ONBOARDING_BUCKET, upload!.storage_path, VAULT_BUCKET, destPath, "application/octet-stream");
   if (copyErr) fail(copyErr);
 
-  const { error } = await supabase.from("company_principals").update({
+  // .select("id").maybeSingle() here matters - same race as
+  // confirmVaultDocument() above, on "company_principals: tenant isolation"
+  // (0050, using (is_company_member(company_id))) instead of "companies:
+  // members can update": without it, a membership-revoked-mid-request zero-
+  // row match still deletes the onboarding source file below with nothing
+  // left referencing it.
+  const { data: updatedPrincipal, error } = await supabase.from("company_principals").update({
     certified_id_path: destPath, certified_id_filename: upload!.original_filename, certified_id_on: new Date().toISOString().slice(0, 10),
-  }).eq("id", principalId);
-  if (error) {
+  }).eq("id", principalId).select("id").maybeSingle();
+  if (error || !updatedPrincipal) {
     await supabase.storage.from(VAULT_BUCKET).remove([destPath]);
-    fail(error.message);
+    fail(error ? error.message : "That person is no longer on your directors/shareholders register - it may have been removed. Refresh and try again.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, null, { table: "company_principals", id: principalId, column: "certified_id_path" });

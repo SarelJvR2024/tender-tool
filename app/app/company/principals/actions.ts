@@ -171,10 +171,20 @@ export async function uploadPrincipalDocument(formData: FormData) {
 
   const update: Record<string, string | null> = { [spec.pathColumn]: path, [spec.nameColumn]: file.name };
   if (kind === "certified_id") update.certified_id_on = str(formData, "certified_id_on");
-  const { error } = await supabase.from("company_principals").update(update).eq("id", id);
-  if (error) {
+  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own "company_principals:
+  // tenant isolation" (0050, using (is_company_member(company_id)),
+  // re-evaluated against the OLD row) no longer matches - e.g. another
+  // admin's removeMember() (0114) revoking this user's own company_members
+  // row between the `existing` read above and this write - indistinguishable
+  // from a real update by `error` alone. Without this check, that race left
+  // the just-uploaded file orphaned AND deleted the still-referenced
+  // previous file below regardless. Same shape, same fix, as
+  // app/company/actions.ts uploadVaultDocument().
+  const { data: updated, error } = await supabase.from("company_principals").update(update).eq("id", id).select("id").maybeSingle();
+  if (error || !updated) {
     await supabase.storage.from(VAULT_BUCKET).remove([path]);
-    fail(friendly(error.message), anchor);
+    fail(error ? friendly(error.message) : "That person is no longer in your register - it may have been removed. Refresh and try again.", anchor);
   }
   if (previous) await supabase.storage.from(VAULT_BUCKET).remove([previous]);
   revalidatePath(BACK);
