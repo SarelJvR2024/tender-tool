@@ -43,6 +43,7 @@ export function CommandPalette({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TenderSearchResult[]>([]);
+  const [searchFailed, setSearchFailed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const requestId = useRef(0);
 
@@ -53,6 +54,7 @@ export function CommandPalette({
     if (!next) {
       setQuery("");
       setResults([]);
+      setSearchFailed(false);
     }
     onOpenChange(next);
   }
@@ -64,8 +66,11 @@ export function CommandPalette({
     const id = ++requestId.current;
     const handle = setTimeout(() => {
       startTransition(async () => {
-        const rows = await searchTenders(q);
-        if (requestId.current === id) setResults(rows);
+        const { results: rows, error } = await searchTenders(q);
+        if (requestId.current === id) {
+          setResults(rows);
+          setSearchFailed(error);
+        }
       });
     }, 200);
     return () => clearTimeout(handle);
@@ -78,6 +83,9 @@ export function CommandPalette({
   // Derived, not stored: avoids a synchronous setResults([]) in the effect
   // above just to hide stale rows once the query drops below 2 characters.
   const displayedResults = isEmployee || needle.length < 2 ? [] : results;
+  // Same reasoning: don't show a stale "search failed" from a previous,
+  // longer query once the user has deleted back down below 2 characters.
+  const showSearchFailed = !isEmployee && needle.length >= 2 && searchFailed && !isPending;
 
   function go(href: string) {
     handleOpenChange(false);
@@ -89,7 +97,7 @@ export function CommandPalette({
       <Command shouldFilter={false}>
         <CommandInput placeholder="Jump to a page, or search a tender by contract no..." value={query} onValueChange={setQuery} />
         <CommandList>
-          <CommandEmpty>{isPending ? "Searching..." : "Nothing found."}</CommandEmpty>
+          <CommandEmpty>{isPending ? "Searching..." : showSearchFailed ? "Tender search failed - try again." : "Nothing found."}</CommandEmpty>
           {pageMatches.length > 0 && (
             <CommandGroup heading="Pages">
               {pageMatches.map((item) => (
