@@ -66,8 +66,23 @@ export async function saveMyDetails(formData: FormData) {
     highest_graduated: str(formData, "highest_graduated"),
   };
 
-  const { error } = await supabase.from("people").update(row).eq("id", personId);
-  if (error) fail(error.message);
+  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own "people: employee
+  // restricted to own record" RESTRICTIVE policy (0077, using (... or id =
+  // own_linked_person_id(company_id)), re-evaluated against the OLD row) no
+  // longer matches - e.g. an owner/admin unlinking this person
+  // (people.linked_user_id) or removing this user's own company_members row
+  // between the My CV page loading and this submit. No destructive
+  // consequence here (no file precedes this write), but still a real
+  // silent-false-success ("saved" shown when nothing was written) - the same
+  // "plain update twin" shape already fixed in company/actions.ts
+  // updateCompanyProfile() and people/actions.ts savePerson(), never swept
+  // into this self-service file until now (standing review, 2026-11-06).
+  const { data: updated, error } = await supabase.from("people").update(row).eq("id", personId).select("id").maybeSingle();
+  if (error || !updated) {
+    console.error("people update failed (my-cv saveMyDetails)", error);
+    fail("Your roster record is no longer linked to your account - refresh and try again.");
+  }
   redirect(`${BACK}?saved=details`);
 }
 
@@ -129,14 +144,39 @@ export async function applyMyCvExtraction(formData: FormData) {
   }
   if (Object.keys(personUpdate).length === 0) fail("Nothing was ticked. Tick the fields to save, or discard the extraction.");
 
-  const { error } = await supabase.from("people").update({ ...personUpdate, updated_at: new Date().toISOString() }).eq("id", personId);
-  if (error) fail(`Could not save: ${error.message}`);
+  // Same zero-rows-matched race as saveMyDetails() above, chained twice here
+  // (the person update, then marking the extraction applied) - both gated by
+  // the identical "own linked person" RESTRICTIVE policy, so the same
+  // membership/link revocation mid-request can silently no-op either or
+  // both. Pre-fix this checked only `error` on both writes: a silent
+  // false-success would also leave cv_extraction_results stuck on
+  // 'pending_review' with nothing actually applied - not destructive (the
+  // row isn't lost, just never re-checked since the UI believes it's done),
+  // but the identical "plain update twin" silent-false-success shape, never
+  // swept into this file before now (standing review, 2026-11-06).
+  const { data: updatedPerson, error } = await supabase
+    .from("people")
+    .update({ ...personUpdate, updated_at: new Date().toISOString() })
+    .eq("id", personId)
+    .select("id")
+    .maybeSingle();
+  if (error || !updatedPerson) {
+    console.error("people update failed (my-cv applyMyCvExtraction)", error);
+    fail("Your roster record is no longer linked to your account - refresh and try again.");
+  }
 
-  const { error: markError } = await supabase
+  const { data: marked, error: markError } = await supabase
     .from("cv_extraction_results")
     .update({ review_status: "applied", reviewed_by: userId, reviewed_at: new Date().toISOString(), applied: { person_fields: Object.keys(personUpdate) } })
-    .eq("id", extractionId);
-  if (markError) fail(`Saved, but couldn't mark the extraction reviewed: ${markError.message}`);
+    .eq("id", extractionId)
+    .select("id")
+    .maybeSingle();
+  if (markError || !marked) {
+    console.error("cv_extraction_results mark-applied failed (my-cv applyMyCvExtraction)", markError);
+    fail(markError
+      ? `Saved, but couldn't mark the extraction reviewed: ${markError.message}`
+      : "Saved your details, but the extraction result is no longer there to mark reviewed - refresh and try again.");
+  }
 
   redirect(`${BACK}?saved=extracted`);
 }
@@ -146,12 +186,21 @@ export async function discardMyCvExtraction(formData: FormData) {
   const extractionId = str(formData, "extraction_id");
   if (!extractionId) redirect(BACK);
 
-  const { error } = await supabase
+  // Same shape as applyMyCvExtraction()'s mark-applied write above - checked
+  // only `error` before, so a membership/link revocation mid-request (or
+  // the row having moved on from 'pending_review' already) would silently
+  // match zero rows while still redirecting as if the discard happened.
+  const { data: discarded, error } = await supabase
     .from("cv_extraction_results")
     .update({ review_status: "discarded", reviewed_by: userId, reviewed_at: new Date().toISOString() })
     .eq("id", extractionId)
     .eq("person_id", personId)
-    .eq("review_status", "pending_review");
-  if (error) fail(error.message);
+    .eq("review_status", "pending_review")
+    .select("id")
+    .maybeSingle();
+  if (error || !discarded) {
+    console.error("cv_extraction_results discard failed (my-cv discardMyCvExtraction)", error);
+    fail(error ? error.message : "That extraction result is no longer there to discard - refresh and try again.");
+  }
   redirect(BACK);
 }
