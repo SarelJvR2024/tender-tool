@@ -413,6 +413,68 @@ test_fetch_releases_stops_early_on_an_empty_later_page()
 test_fetch_releases_raises_when_page_1_itself_has_zero_cards()
 test_fetch_releases_raises_past_the_safety_cap_without_fetching_further()
 
+# --- reused Ref No (original + re-advertisement) must not collide on ocid --
+
+# Live re-test, 2026-11-06: Kouga reuses the same Ref No for an original
+# listing and a later, genuinely separate re-advertisement (e.g. real Ref
+# "235/2026" was both a 20 Oct original and a still-open 6 Nov
+# re-advertisement, confirmed live - 5 of 292 open listings on that run were
+# reused this way). Before the fix, both normalize()'d to the identical
+# ocid ("kouga:<ref>"), and seed_supabase_opportunities.py's own
+# `(company_id, ocid)` upsert key would let whichever is written second
+# silently overwrite the other. Reproduced here with a synthetic duplicate
+# (same Ref No "225/2026", different URL/title/closing date) rather than
+# depending on the live site still having a reused ref whenever this runs.
+
+
+REUSED_REF_CARD = """
+                            <a href="https://www.kouga.gov.za/tender/re-advertisement-resealing-of-roads-phase-4" title="View tender RE-ADVERTISEMENT: RESEALING OF ROADS - PHASE 4 " class="box">
+                                <div class="text">
+                                    <h3>RE-ADVERTISEMENT: RESEALING OF ROADS - PHASE 4 </h3>
+                                    <div class="infobox">
+
+                                        <div class="rel__info">
+                                            <strong>Ref No:</strong>225/2026                                        </div>
+                                        <div class="startdate">
+                                            <strong>Start Date:</strong>03 Nov 2026                                        </div>
+                                        <div class="closingdate">
+                                        <strong>Closing Date:</strong>12 Nov 2026                                        </div>
+                                    </div>
+                                    <p></p>
+                                </div>
+                                <div class="button">
+                                    <div class="btn__main">Find Out More</div>
+                                </div>
+                            </a>
+"""
+
+
+def test_reused_ref_gets_distinct_ocids_not_a_collision():
+    # Insert a SECOND card reusing the same real Ref No ("225/2026") right
+    # next to the original - a genuine re-advertisement with its own URL,
+    # title and (later) closing date, exactly the real shape found live.
+    html = FIXTURE_PAGE_1.replace('<div class="paging">', REUSED_REF_CARD + '\n                <div class="paging">', 1)
+    sh.http_get = _serve({"/tenders/status/open": html})
+    try:
+        rels = kouga.fetch_releases(max_pages=0)
+    finally:
+        sh.http_get = _real_http_get
+    same_ref = [r for r in rels if r["contract_number"] == "225/2026"]
+    check("both the original and its re-advertisement are present (same Ref No, 2 cards)",
+          len(same_ref) == 2, len(same_ref))
+    check("...but they do NOT share an ocid (the collision this fix closes)",
+          len({r["ocid"] for r in same_ref}) == 2, [r["ocid"] for r in same_ref])
+    check("...and each disambiguated ocid still starts with the shared ref, for traceability",
+          all(r["ocid"].startswith("kouga:225/2026:") for r in same_ref), [r["ocid"] for r in same_ref])
+    other = [r for r in rels if r["contract_number"] != "225/2026"]
+    check("every OTHER (non-colliding) ref keeps its plain, unsuffixed ocid - "
+          "confirms the fix doesn't touch refs that were never ambiguous, "
+          "which would otherwise re-trigger a 'new tender' alert for all of them",
+          all(r["ocid"] == f"kouga:{r['contract_number']}" for r in other), [r["ocid"] for r in other])
+
+
+test_reused_ref_gets_distinct_ocids_not_a_collision()
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)

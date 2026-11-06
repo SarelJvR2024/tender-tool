@@ -68,6 +68,37 @@ def max_page(html):
     return max(nums) if nums else 1
 
 
+def _disambiguate_reused_refs(rels):
+    """Kouga reuses the same Ref No for an original listing and a later,
+    genuinely separate re-advertisement - confirmed live, 2026-11-06: Ref
+    "235/2026" is both a 20 Oct original (already past its own closing
+    date) and a 6 Nov re-advertisement that is still open - two different
+    cards, two different URLs, two different closing dates, same Ref No.
+    Checked the real site, not assumed from one example: 5 of 292 open
+    listings on this run were reused this way, every one of them an
+    "RE-ADVERTISEMENT ..." title paired with its own original.
+
+    Left alone, both rows get the identical ocid ("kouga:<ref>"), and
+    seed_supabase_opportunities.py's own `(company_id, ocid)` upsert key
+    would let whichever one happens to be written second silently
+    overwrite the other - e.g. hiding a still-open re-advertisement behind
+    its own already-closed original, or vice versa, depending on write
+    order. Only the colliding rows are touched here, suffixed with their
+    own URL slug (stable across runs, otherwise never part of the ocid):
+    every non-colliding ref keeps exactly the ocid it always had, so this
+    doesn't re-trigger a "new tender" alert for the other tenders that
+    were never ambiguous."""
+    by_ref = {}
+    for r in rels:
+        by_ref.setdefault(r["contract_number"], []).append(r)
+    for ref, group in by_ref.items():
+        if len(group) < 2:
+            continue
+        for r in group:
+            slug = (r["source_url"] or "").rstrip("/").rsplit("/", 1)[-1]
+            r["ocid"] = f"kouga:{ref}:{slug}"
+
+
 def normalize(url, title, ref, start, closing):
     return sh.release(
         ocid=f"kouga:{ref}",
@@ -108,6 +139,7 @@ def fetch_releases(max_pages=None, log=print):
             log(f"  WARNING: kouga page {p} of {last} had 0 cards - stopping early rather than guessing further")
             break
         rels.extend(normalize(*c) for c in page_cards)
+    _disambiguate_reused_refs(rels)
     log(f"  Kouga Local Municipality: {len(rels)} open tenders from {last} page(s)")
     return rels
 
