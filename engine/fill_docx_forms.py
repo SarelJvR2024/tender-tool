@@ -32,12 +32,27 @@ Usage:
 fetched from the real tender's Drive folder (not reconstructed from memory - these
 forms vary per contract, e.g. different NRA reference numbers in the headers).
 """
+import os
 import re
 import sys
 import json
 import docx
 import yaml
 from provenance import ProvenanceLog
+
+# Standing review, 2026-11-06: company/signatory/director text (legal_name,
+# registered_address, signatory name, director/principal names) written
+# straight into python-docx runs/cells with no sanitisation - the identical
+# "python-docx raises a raw ValueError on a stray control character" shape
+# already found and fixed six times this session (generate_cv.py,
+# make_envelope_covers.py, pdf_merge.py, build_general_pack.py,
+# sanral_fill.py, company_documents.py). Worse here: assemble_pack.py's own
+# call to run_forms_pipeline.main() (line 354) has no try/except around it -
+# unlike the print_financial.export() call directly above it, which is
+# guarded - so one bad character in ANY of these fields crashes the whole
+# SANRAL pack build, not just these two forms.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "cv"))
+from generate_cv import _safe_text  # noqa: E402
 
 
 # Book 1's key-person titles (R.396-010-2025/1F T-24 abbreviation list, plus
@@ -118,7 +133,7 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
             # (not even an empty string write) rather than crashing python-docx's
             # run-text setter on None, which is what happened before this fix.
             if comp.get("postal_address"):
-                p.runs[0].text = comp["postal_address"]
+                p.runs[0].text = _safe_text(comp["postal_address"])
                 for r in p.runs[1:]:
                     r.text = ""
                 log.confirmed("c123.postal_address", comp["postal_address"])
@@ -128,19 +143,19 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
         if p.text == "Telephone: \t":
             telephone_seen += 1
             if telephone_seen == 2 and signatory.get("phone"):
-                p.add_run(signatory["phone"])
+                p.add_run(_safe_text(signatory["phone"]))
                 log.confirmed("c123.representative_telephone", signatory["phone"])
             elif telephone_seen == 2:
                 log.missing("c123.representative_telephone", f"{signatory['name']}'s telephone number is not on file.")
             elif comp.get("telephone"):
-                p.add_run(comp["telephone"])
+                p.add_run(_safe_text(comp["telephone"]))
                 log.confirmed("c123.company_telephone", comp["telephone"])
             else:
                 log.missing("c123.company_telephone", "The company's telephone number is not on file.")
             continue
         if p.text == "E-mail Address: \t":
             if signatory.get("email"):
-                p.add_run(signatory["email"])
+                p.add_run(_safe_text(signatory["email"]))
                 log.confirmed("c123.representative_email", signatory["email"])
             else:
                 log.missing("c123.representative_email", f"{signatory['name']}'s email address is not on file.")
@@ -149,7 +164,7 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
             label = p.text
             value = fills[label]
             if value:
-                p.add_run(value)
+                p.add_run(_safe_text(value))
                 log.confirmed(f"c123.{_slug(label)}", value)
             else:
                 log.missing(f"c123.{_slug(label)}", f"No value on file for '{label.strip()}'.")
@@ -190,7 +205,7 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
                         f"No confirmed key-person assignment (pack.yaml) was given - fill '{label}' by hand.")
             continue
         person, pos = rows[row_idx]
-        row.cells[1].text = person["name"]
+        row.cells[1].text = _safe_text(person["name"])
         status = person.get("employment_status")
         if status == "not_full_time_employee":
             row.cells[2].text = "Not permanent"
@@ -221,10 +236,10 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
         rows = dir_table.rows[1:]
         for row, pr in zip(rows, principals):
             designation = pr.get("designation") or ("Member" if is_cc else "Director")
-            row.cells[0].text = pr["name"]
+            row.cells[0].text = _safe_text(pr["name"])
             row.cells[1].text = str(pr.get("appointed_on") or "")
-            row.cells[2].text = designation
-            row.cells[3].text = pr.get("registration_number") or ""
+            row.cells[2].text = _safe_text(designation)
+            row.cells[3].text = _safe_text(pr.get("registration_number")) if pr.get("registration_number") else ""
         log.confirmed("c123.directors_table", "; ".join(p["name"] for p in principals[:len(rows)]))
         undated = [p["name"] for p in principals[:len(rows)] if not p.get("appointed_on")]
         if undated:
@@ -235,7 +250,7 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
                         f"{len(principals)} directors/members on the register, the form has {len(rows)} rows - list "
                         f"{', '.join(p['name'] for p in principals[len(rows):])} on an attached page.")
     elif director:
-        dir_table.rows[1].cells[0].text = director
+        dir_table.rows[1].cells[0].text = _safe_text(director)
         dir_table.rows[1].cells[2].text = "Member" if is_cc else "Director"
         log.confirmed("c123.director_name", director)
         log.computed("c123.director_designation", "Member" if is_cc else "Director",
@@ -268,23 +283,23 @@ def fill_form_of_offer(src_dir, out_dir, comp, signatory, log):
                 continue
             for r in p.runs:
                 if ".........." in r.text:
-                    r.text = r.text.replace("..........", f" {comp['bee_level']} ", 1)
+                    r.text = r.text.replace("..........", f" {_safe_text(str(comp['bee_level']))} ", 1)
                     log.confirmed("c111.bee_level", comp["bee_level"])
         if p.text.startswith("NAME AND ADDRESS OF ORGANISATION:"):
             value = ", ".join(x for x in (comp["legal_name"], comp.get("registered_address")) if x)
-            p.add_run(f"  {value}")
+            p.add_run(f"  {_safe_text(value)}")
             log.confirmed("c111.organisation_name_address", value)
             if not comp.get("registered_address"):
                 log.missing("c111.organisation_address", "No registered address on file - add it after the name by hand.")
         if p.text.startswith("NAME (IN CAPITALS): "):
             name_in_caps_count += 1
             if name_in_caps_count == 1:
-                p.add_run(f"  {signatory['name'].upper()}")
+                p.add_run(f"  {_safe_text(signatory['name'].upper())}")
                 log.confirmed("c111.signatory_name", signatory["name"].upper())
             # witness field (2nd+ occurrence) stays blank - a witness must be a real,
             # different person; see module docstring.
         if p.text.startswith("CAPACITY: "):
-            p.add_run(f"  {signatory['signatory_capacity']}")
+            p.add_run(f"  {_safe_text(signatory['signatory_capacity'])}")
             log.confirmed("c111.signatory_capacity", signatory["signatory_capacity"])
     d.save(f"{out_dir}/C.1.1.1_Form_of_Offer_FILLED.docx")
     log.missing("c111.witness_name_signature",

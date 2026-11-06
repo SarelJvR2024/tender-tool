@@ -1,5 +1,25 @@
 # System Status
 
+## This pass (2026-11-06, standing solution-architect review): fixed - `fill_docx_forms.py` was the 7th docx/xlsx writer missing the control-character guard, and the worst one yet (no try/except around its call at all)
+
+Oriented from `e353baa` (own prior pass: `company_documents.py`'s `write_docx()` was the 6th such writer found missing this guard). `git fetch`/`merge --ff-only` confirmed clean, no new commits, no collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
+
+Continued the control-character-guard sweep `e353baa` itself continued: checked every remaining docx/xlsx writer in `engine/` for the same "python-docx/lxml raises a raw `ValueError` on a stray control character" shape already fixed 6 times (`generate_cv.py`, `make_envelope_covers.py`, `pdf_merge.py`, `build_general_pack.py`, `sanral_fill.py`, `company_documents.py`). Found a genuine 7th instance: `fill_docx_forms.py`'s `fill_contract_data()` and `fill_form_of_offer()` - fills SANRAL's C.1.2.3 Contract Data and C.1.1.1 Form of Offer forms - write real company/signatory/director/principal text (`legal_name`, `registered_address`, postal/telephone/email, signatory name/capacity, key-person names, director/principal names, designations, registration numbers, BEE level) straight into `python-docx` runs/cells with zero sanitisation.
+
+Checked the blast radius before fixing, not assumed: `assemble_pack.py:354`'s own call to `run_forms_pipeline.main()` (this module's entry point) has **no try/except at all** - unlike the `print_financial.export()` call directly above it, which is wrapped (`except Exception as e:  # a print failure must not lose the technical pack`). This is worse than any of the prior 6 instances: one stray control character anywhere in this data crashes the entire SANRAL pack build, not just one document.
+
+Fixed the same way as the prior 6: imported `generate_cv.py`'s shared `_safe_text()` (same `sys.path.insert(...)` pattern `company_documents.py`'s fix used) and routed every real free-text write site through it - postal address, phone, email, the generic `fills` dict lookup, key-person names, principal names/designations/registration numbers, the one-director name, BEE level, organisation name+address, signatory name/capacity. Caught one real gap in my own first pass before it reached main: `row.cells[2].text = designation` (a principal's designation, e.g. "Managing Director") was initially left unwrapped even though `pr.get("designation")` is real free text - found by re-grepping every `.text =`/`add_run(` call site in the file after the first round of edits, not assumed complete.
+
+Added 3 new tests to `test_fill_docx_forms.py` (previously covered only the unrecognized-key-position-title finding) - one each for the director-name path, the principal-designation path (the gap my own first pass missed), and `fill_form_of_offer()`'s organisation-name path. Confirmed genuinely red-then-green: temporarily reverted the 3 corresponding `_safe_text()` call sites and re-ran - all 3 new tests failed with the exact crash (`ValueError`) this fix prevents; restored the fix and re-ran clean. Full suite (original + 3 new) `0 failure(s)`. `ast.parse` clean. `ruff check` - the only 2 new findings (`I001`/`RUF100` on the new `from generate_cv import _safe_text` import block) are the identical pair `company_documents.py`'s own fix already carries from the same import pattern, confirmed by running `ruff check` on that file too; nothing else newly introduced.
+
+**Backlog: 19, unchanged** - standalone bug, fixed; not a new judgment-call item. `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation session-refresh gap all untouched, as directed.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access):
+- `engine/fill_docx_forms.py`
+- `engine/test_fill_docx_forms.py`
+
+---
+
 ## This pass (2026-11-06, standing solution-architect review): fixed - `sars_procurement.py` has never extracted a closing date at all, since the source's own first commit
 
 Oriented from `e7ce44a` (own prior pass: `transnet_etenders.py` re-tested live, genuinely clean). `git fetch`/`merge --ff-only` confirmed clean, no new commits, no collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
