@@ -50,6 +50,10 @@ import hashlib
 import os
 import re
 import shutil
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "cv"))
+from generate_cv import _safe_text  # noqa: E402
 
 # Same constant/pattern as engine/fill_a_forms.py's own SAST (that file's own
 # comment has the full reasoning): a bridge worker container has no TZ set
@@ -222,6 +226,19 @@ def write_docx(text, out_path, logo_path=None):
     import docx
     from docx.shared import Inches, Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    # `text` carries fact values straight from fill_fields() - including
+    # tender_description, a buyer-published/OCR'd field already confirmed
+    # elsewhere in this engine to sometimes hold a stray control character
+    # (generate_cv.py, make_envelope_covers.py, pdf_merge.py's contents
+    # builder, build_general_pack.py's guide, sanral_fill.py's set_value()
+    # all needed the identical guard). python-docx/lxml raises a raw
+    # ValueError on one, and assemble_pack.py's own call to
+    # fill_authority_letter.produce_letter() has no try/except around it -
+    # an authority letter is the ONE document in the whole SANRAL pack that
+    # reaches this function with no sanitisation at all, so a single stray
+    # control character here crashed the WHOLE pack build, not just this
+    # one letter. QA pass, 2026-11-06.
+    text = _safe_text(text)
     d = docx.Document()
     if logo_path and os.path.exists(logo_path):
         p = d.add_paragraph()

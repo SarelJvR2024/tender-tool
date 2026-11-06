@@ -201,6 +201,36 @@ def run(out):
           f"authority_facts()'s date reads the real SAST date (21 October 2026), not the naive "
           f"UTC one (20 October 2026) - got {facts['date']!r}")
 
+    print("6c. A control character in the tender's own buyer-published/OCR'd description does not crash write_docx()")
+    # Finding (2026-11-06): write_docx() wrote `text` straight into python-docx
+    # runs with no sanitisation at all - the one docx writer in this engine
+    # that never got the control-character guard every sibling writer needed
+    # (generate_cv.py, make_envelope_covers.py, pdf_merge.py's contents
+    # builder, build_general_pack.py's guide, sanral_fill.py's set_value()).
+    # tender_description (a fact a company's own guideline can mark with
+    # {{tender_description}}) is buyer-published/OCR'd text, already confirmed
+    # elsewhere in this engine to sometimes carry a stray control character -
+    # and assemble_pack.py's own call to produce_letter() has no try/except
+    # around it, so this crashed the WHOLE SANRAL pack build, not just the
+    # authority letter.
+    p = profile("Control Character Engineers (Pty) Ltd")
+    p["document_templates"] = {"authority_to_sign": {
+        "mode": "ai_guideline", "guideline": "{{signatory_name}} signs for tender {{tender_description}}."}}
+    dirty_tender = dict(TENDER, description="Routine ad-hoc maintenance\x0bof R396 Section 1")
+    log = ProvenanceLog("test")
+    try:
+        r = fill_authority_letter.produce_letter(p, os.path.join(out, "control_char"), p["key_people"][0],
+                                                  dirty_tender, RFP, log)
+        crashed = False
+    except ValueError:
+        crashed = True
+    check(not crashed, "a control character in the tender's own description must not crash docx generation")
+    if not crashed:
+        check(r["status"] == "generated", f"the letter is still generated ({r.get('status')})")
+        got = text_of(r["path"])
+        check("Routine ad-hoc maintenance" in got and "R396 Section 1" in got,
+              f"the real text either side of the control character survives, just the control char removed ({got!r})")
+
 
 def run_db(psql, out):
     sys.path.insert(0, os.path.join(HERE, "intake"))

@@ -7685,3 +7685,50 @@ exactly as predicted (`refers to E2116DXFSOUR`, `refers to E2292GXMPKRI`, `refer
 lines including comments); `engine/discovery/test_gov_sources.py` (4 new fixture rows in
 `ESKOM_NOTICES`). No change to `classify()`'s own pattern matching, `normalize()`, or any other
 notice-word list's ordering.
+
+### Finding 136 (CONFIRMED, FIXED, severe - `company_documents.write_docx()` was the ONE docx writer in this engine that never got the control-character guard every sibling writer needed; a stray control character in a tender's own buyer-published/OCR'd description crashed the WHOLE SANRAL pack build, not just the authority letter)
+
+**Area:** SANRAL pack (`engine/company_documents.py` - the per-company letter-of-authority-to-sign
+mechanism, called from `assemble_pack.py`'s SANRAL pack build).
+
+**Scenario:** this exact bug class - a stray control character (`\x00-\x08`, `\x0B`, `\x0C`, `\x0E-\x1F`)
+in a tender's own buyer-published/OCR'd text crashing python-docx/lxml with a raw `ValueError: All
+strings must be XML compatible...` - has now been found and fixed FIVE times this session across every
+other docx-writing function in this engine: `generate_cv.py` (original), `make_envelope_covers.py`
+(Finding 125), `pdf_merge.py`'s contents-page builder and `build_general_pack.py`'s completion guide
+(commit `b099ce5`), and `sanral_fill.py`'s `Workbook.set_value()` (commit `59c20a7`). `company_documents.
+write_docx()` - the authority-to-sign letter's own docx writer - was the one writer this sweep never
+reached: it writes `text` straight into python-docx paragraph runs (`p.add_run(line)`,
+`p.add_run(block[2:].strip())`) with zero sanitisation.
+
+`text` can genuinely carry a control character: `authority_facts()` sets `"tender_description":
+tender.get("description")` - a buyer-published, sometimes OCR'd field - and a company whose own
+guideline marks `{{tender_description}}` has that raw text substituted straight in via `fill_fields()`.
+`assemble_pack.py`'s own call to `fill_authority_letter.produce_letter()` (line ~364) has NO try/except
+around it - unlike several of the OTHER steps in the same pipeline, which already learned this lesson
+(Finding 125's own fix was specifically about `make_envelope_covers.py` having no try/except either) -
+so a crash here takes down the entire SANRAL pack build, not just the one letter.
+
+Confirmed live: `company_documents.write_docx("...\x0b...", out)` raised
+`ValueError: All strings must be XML compatible...` exactly as every prior instance of this bug class did.
+
+**Fix:** imported `generate_cv._safe_text()` (the same `_XML_INVALID_RE` sanitiser every sibling fix
+this session already reuses rather than re-implementing) and applied it to `text` at the top of
+`write_docx()`, before any paragraph is built from it - one line, matching the minimal-footprint pattern
+every prior fix in this class used.
+
+**Verified red-then-green.** New case "6c" in `engine/test_company_documents.py`'s own `run()` - a
+company whose guideline marks `{{tender_description}}`, fed a tender description with an embedded
+control character (matching the real `assemble_pack.py` call shape exactly, through
+`fill_authority_letter.produce_letter()`, not a direct call to `write_docx()`) - asserts no crash, the
+letter still generates, and the real text on either side of the control character survives with just
+the control character itself removed. Reverted the production file alone: failed exactly as predicted
+(the control-character crash); restored: `0 failure(s)` across the whole file. `py_compile` clean on
+both touched files. Regression: `pack/test_assemble_pack.py`, `cv/test_extract_cv_fields.py` (confirms
+the new `cv/` sys.path insert doesn't collide with CV's own module resolution) and `test_fill_financial.py`
+all re-ran clean.
+
+**Regression:** `engine/company_documents.py` (one `sys.path`/import line, one `_safe_text()` call in
+`write_docx()`, ~15 lines including comment); `engine/test_company_documents.py` (1 new case, "6c").
+No change to `fill_fields()`, `guard_only_company_wording()`, `render_guideline()`'s own AI-placement
+logic, or any other document type's handling.

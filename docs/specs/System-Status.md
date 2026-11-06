@@ -2968,6 +2968,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): fix - `company_documents.write_docx()` was the ONE docx writer in this engine that never got the control-character guard every sibling writer needed; a stray control character crashed the WHOLE SANRAL pack build, not just the authority letter
+
+Oriented from `13f3f4d` (own prior pass: Finding 135, eskom_bulletin.py). `git fetch`/`merge --ff-only`
+found two new sibling commits (`e7ce44a` - transnet_etenders.py re-tested live, clean; `2e7954b` - a
+real fix, sars_procurement.py never extracted a closing date at all since its first commit, found by
+live-testing against the real site, the same methodology my own Finding 135 used - both docs-only/
+discovery-only, no overlap). Fast-forwarded cleanly. Open PRs re-checked via the GitHub API:
+`#164`/`#165` only, both unchanged, no collision. Re-checked again immediately before this push - still
+clean.
+
+Rotated to SANRAL pack (discovery was last). `pack/bridge_selftest.py` (zero mentions) checked first -
+confirmed harness-only (no CI wiring, requires a scratch Postgres via `PACK_SELFTEST_PSQL` that doesn't
+exist in this environment), same category as `scenario_driver.py` ruled out during the intake rotation.
+Moved to `fill_authority_letter.py`/`company_documents.py` (the per-company authority-letter
+mechanism) and read both in full.
+
+**Found and fixed Finding 136 (CONFIRMED, severe)**: the "control character in a tender's own buyer-
+published/OCR'd text crashes python-docx" bug class has now been found and fixed FIVE times this
+session across every OTHER docx writer in this engine (`generate_cv.py`, `make_envelope_covers.py`,
+`pdf_merge.py`'s contents builder, `build_general_pack.py`'s guide, `sanral_fill.py`'s `set_value()`) -
+`company_documents.write_docx()` was the one writer that sweep never reached. It writes `text` straight
+into python-docx runs with zero sanitisation, and `text` can genuinely carry a control character: a
+company's own guideline marking `{{tender_description}}` gets that buyer-published field substituted in
+raw. `assemble_pack.py`'s own call to `produce_letter()` has no try/except around it, so this crashed
+the ENTIRE SANRAL pack build, not just the one letter. Confirmed live: a control character in the
+description raised the exact same `ValueError` every prior instance of this bug class did.
+
+**Fix:** imported `generate_cv._safe_text()` (the same sanitiser every sibling fix already reuses) and
+applied it to `text` at the top of `write_docx()`, before any paragraph is built - matching the
+minimal-footprint pattern every prior fix in this class used.
+
+**Verified red-then-green.** New case "6c" in `engine/test_company_documents.py`, going through the
+real `fill_authority_letter.produce_letter()` call shape (not a direct `write_docx()` call) with a
+tender description carrying a control character. Reverted the production file alone: failed exactly as
+predicted; restored: `0 failure(s)`. `py_compile` clean on both files. Regression:
+`pack/test_assemble_pack.py`, `cv/test_extract_cv_fields.py` (confirms the new `cv/` sys.path insert
+doesn't collide with CV's own module resolution), and `test_fill_financial.py` all re-ran clean.
+
+Backlog: unchanged at 18 items - a contained bug-class recurrence fix, not one of Sarel's own 18
+numbered backlog items.
+
+Verify yourself: `cd engine && python3 test_company_documents.py` -> `0 failure(s)`. Diff: `git show
+<this commit> -- engine/company_documents.py` (one import, one `_safe_text()` call, ~15 lines
+including comment).
+
+---
+
 ## This pass (2026-11-05, standing QA/robustness review): fix - Eskom's own REFERENCE field truncates at 20 characters, cutting a glued notice word mid-word on real live bulletin entries; over a quarter of all real notices checked had a `refers_to_reference` that could never match any real tender
 
 Oriented from `d44f7d1` (own prior pass: Finding 134, process_cv_jobs.py). `git fetch`/`merge --ff-only`
