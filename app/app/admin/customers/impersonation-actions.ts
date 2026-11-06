@@ -37,8 +37,11 @@ export async function startImpersonation(formData: FormData) {
     // The audit row was already opened before we knew session minting would
     // fail - close it now rather than leave an open row for a session that
     // never actually started, which would misrepresent "an impersonation
-    // happened" when nothing was ever viewed.
-    await supabase.rpc("platform_admin_end_impersonation", { p_audit_log_id: audit_log_id });
+    // happened" when nothing was ever viewed. Logged, not surfaced: the
+    // admin is about to see minted.error regardless, and this is best-effort
+    // audit-log cleanup, not something to layer a second error message onto.
+    const { error: closeOnFailError } = await supabase.rpc("platform_admin_end_impersonation", { p_audit_log_id: audit_log_id });
+    if (closeOnFailError) console.error("platform_admin_end_impersonation failed while cleaning up a failed mint", closeOnFailError);
     redirect(`/admin/customers?error=${encodeURIComponent(minted.error)}`);
   }
 
@@ -61,12 +64,20 @@ export async function endImpersonation() {
 
   if (cookiePayload) {
     const supabase = await createClient({ bypassImpersonation: true });
-    const { data } = await supabase
+    // Neither read below is re-checked by anything downstream of this
+    // function (the session itself already ended above, by clearing the one
+    // cookie that carried it - this is audit-trail bookkeeping only), so a
+    // transient failure on either is logged, not surfaced: the admin still
+    // gets a correct "you're out" redirect either way, just without the
+    // row's own ended_at necessarily set or the ?company= row highlighted.
+    const { data, error: readError } = await supabase
       .from("impersonation_audit_logs")
       .select("target_company_id")
       .eq("id", cookiePayload.auditLogId)
       .maybeSingle();
-    await supabase.rpc("platform_admin_end_impersonation", { p_audit_log_id: cookiePayload.auditLogId });
+    if (readError) console.error("impersonation_audit_logs read failed while ending impersonation", readError);
+    const { error: endError } = await supabase.rpc("platform_admin_end_impersonation", { p_audit_log_id: cookiePayload.auditLogId });
+    if (endError) console.error("platform_admin_end_impersonation failed while ending impersonation", endError);
     if (data?.target_company_id) {
       redirect(`/admin/customers?company=${data.target_company_id}`);
     }

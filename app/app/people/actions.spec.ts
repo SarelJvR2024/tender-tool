@@ -268,6 +268,36 @@ describe("applyCvExtraction - person update + mark-applied both genuinely match"
   });
 });
 
+// queueStandardCvs()'s own "already queued?" check (called from
+// applyCvExtraction()) had no error capture - standing review, 2026-11-06.
+// Unlike requestTenderCv()'s equivalent dedupe check, this one has NO
+// database-level unique-index backstop (migration 0075 deliberately scoped
+// its index to tender-specific requests only), so a transient read failure
+// here used to fall through to "nothing pending" and queue a second,
+// duplicate set of 4 standard-CV jobs. Now fails closed instead.
+describe("applyCvExtraction - queueStandardCvs' own pending-check read fails", () => {
+  it("does not queue a duplicate set of standard CVs, and reports the failure rather than silently proceeding", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [pendingExtraction], // cv_extraction_results select
+      [{ data: { id: "person-1" }, error: null }], // people update - real match
+      [{ data: { id: "extraction-1" }, error: null }], // cv_extraction_results update (mark applied) - real match
+      [{ data: null, error: { message: "read failed" } }], // queueStandardCvs' own pending check - errors
+    ]);
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+
+    const url = await expectRedirect(applyCvExtraction(formDataWith(extractionTickedPersonField)));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).not.toContain("cv_applied=");
+    // No generated_cvs insert should have happened - the pending-check's own
+    // read failure must not be treated as "nothing pending, go ahead".
+    expect(insertCalls).toHaveLength(0);
+  });
+});
+
 describe("discardCvExtraction - matches zero rows (revoked mid-request, or already moved on)", () => {
   it("does not redirect as if the discard happened", async () => {
     const { client } = makeSupabase([
