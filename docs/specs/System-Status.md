@@ -1,5 +1,25 @@
 # System Status
 
+## This pass (2026-11-06, standing solution-architect review): fixed - `sars_procurement.py` has never extracted a closing date at all, since the source's own first commit
+
+Oriented from `e7ce44a` (own prior pass: `transnet_etenders.py` re-tested live, genuinely clean). `git fetch`/`merge --ff-only` confirmed clean, no new commits, no collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.
+
+Continued the discovery-scraper live-test rotation `13f3f4d` (Eskom) and `e7ce44a` (Transnet) both used: `sars_procurement.py`, `lephalale.py`, `vaal_central_water.py`, `capetown_procurement.py`, `kouga.py` were all still last live-tested 2026-11-01. Picked `sars_procurement.py`.
+
+Ran it live: 2 real open tenders. Both had `closing_date: None` - traced why rather than assuming it was a transient scrape miss. `normalize()` has never set `closing_date` at all (confirmed via `git log` on the file: the original "Add 3 new discovery sources" commit never included it, and nothing since has either) - only `published_date` is extracted. Checked the real live page's raw HTML directly rather than assuming the source genuinely has no closing date to give: it does - a separate "Published Tenders" detail section (distinct from the dated `<ul>` "What's New" summary list `parse_listing()` already reads) states `Closing Date: DD/MM/YYYY HH:MM` for each tender, right next to its title (confirmed live: `RFP14/2026` -> `17/11/2026 11:00`, `RFP18/2026` -> `10/11/2026 11:00`). Every SARS tender this source has ever discovered has been missing its real closing date entirely - no deadline countdown, no "closing soon" flag, nothing.
+
+Fixed by adding `_closing_dates_by_ref()`, keying each detail block's stated closing date by its parsed RFP reference, and attaching it in `parse_listing()`/`normalize()`. Deliberately NOT routed through `source_http.parse_sast()`'s own ambiguous US-style (month-first) slash-date branch - SARS's format is day-first, and a day/month both <=12 (a real, common case) would silently transpose under that reading; the day/month/year are parsed explicitly and handed to `sh.iso_sast()` only as an unambiguous ISO string instead.
+
+Caught and fixed a real bug in my own first version of the fix before it reached main: the first regex used an unbounded `.*?` between `<strong>title</strong>` and `Closing Date:`, which crossed over unrelated `<strong>` tags earlier on the page (the "What's New" summary list's own date headings) and attached the wrong date - caught by my own new test (deliberately ordered the fixture's summary section before its detail section, the opposite of the real page's own order, specifically to catch this), not by luck matching the live page's current ordering. Fixed with a `(?:(?!<strong>).)*?` bound that refuses to cross into another `<strong>` block.
+
+Verified for real: re-ran against the real live site after the fix - `RFP14/2026` -> `2026-11-17T11:00:00+02:00`, `RFP18/2026` -> `2026-11-10T11:00:00+02:00`, matching the page exactly. Added 2 new assertions to `test_gov_sources.py` (closing-date extraction with the day/month-both-<=12 safety case spelled out explicitly; a tender with no stated closing date still parses to `None`, not a crash) - full suite `ALL PASSED`. `ast.parse` clean; `ruff check` - all findings pre-existing or matching the file's own existing `re.S` convention (`DATE_BLOCK` above already uses the identical style), none newly introduced.
+
+**Backlog: 19, unchanged** - standalone bug, fixed; not a new judgment-call item. `held_registrations`-vs-CV, `start_payfast_checkout()`'s revenue gap, and the impersonation session-refresh gap all untouched, as directed.
+
+Committed and pushed directly to `main` (no PR - small, fully verified against the real live site, no live-DB access):
+- `engine/discovery/sars_procurement.py`
+- `engine/discovery/test_gov_sources.py`
+
 ## This pass (2026-11-05, standing solution-architect review): clean sweep - `transnet_etenders.py` re-tested against its real live site, genuinely clean (last dedicated live check was 2026-11-01)
 
 Oriented from `13f3f4d` (sibling pass: `eskom_bulletin.py`'s `base_reference()` missed truncated notice words at Eskom's own 20-character REFERENCE field limit, orphaning over a quarter of real notices from their tender - a genuinely significant discovery-scraper bug found by live-testing against the real site rather than only the committed fixture). `git fetch`/`merge --ff-only` confirmed clean, no collision. Open PRs re-checked: only `#164`/`#165` remain (both untouched since 2026-10-26). Backlog cross-checked against the recent chain: 19 total, 3 genuinely open (`start_payfast_checkout()`'s revenue gap, the impersonation session-refresh gap, `held_registrations`-vs-CV) - self-consistent, none touched this pass.

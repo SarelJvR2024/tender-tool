@@ -109,9 +109,57 @@ def fetch_documents(url):
     return docs
 
 
+# Standing review, 2026-11-06: the page's separate "Published Tenders"
+# detail section (its own <p><strong>title</strong><br>Closing Date:
+# DD/MM/YYYY HH:MM (<a>...) ... </p> blocks - distinct from the dated <ul>
+# summary list DATE_BLOCK/TENDER_LINK above read) states each tender's real
+# closing date/time, never previously extracted since this source's own
+# first commit (cace3f7) - confirmed live: both of SARS's 2 currently open
+# tenders state one ("Closing Date: 17/11/2026 11:00", "10/11/2026 11:00"),
+# so every SARS tender ever discovered has had no closing date at all.
+# Day-first (DD/MM/YYYY), NOT source_http.parse_sast()'s own US-style
+# month-first reading - deliberately NOT routed through parse_sast()'s
+# ambiguous slash-date branch (a day and month both <=12, an entirely real
+# case here, would silently transpose) - the day/month/year are parsed
+# explicitly below and handed to sh.iso_sast() only as an unambiguous ISO
+# string.
+#
+# The `(?:(?!<strong>).)*?` middle section is deliberate, not just a lazy
+# `.*?`: caught by the fixture's own "What's New" <strong> headings sitting
+# earlier on the same page than this detail section - an unbounded `.*?`
+# jumped straight from THAT first unrelated <strong> all the way to the
+# FIRST "Closing Date:" anywhere later in the page, attaching the wrong
+# (or no, once its captured title fails REF.search()) date to the wrong
+# entry and consuming the real match findall() needed. Refusing to cross
+# into another <strong> keeps each match scoped to its own title block,
+# regardless of what else appears earlier on the page.
+_CLOSING_IN_BLOCK = re.compile(
+    r"<strong>([^<]*?)</strong>(?:(?!<strong>).)*?Closing Date:\s*(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{1,2}):(\d{2})",
+    re.S,
+)
+
+
+def _closing_dates_by_ref(page):
+    out = {}
+    for title, d, mo, y, hh, mm in _CLOSING_IN_BLOCK.findall(page):
+        m = REF.search(html.unescape(title))
+        if not m:
+            continue
+        ref = re.sub(r"\s+", "", m.group(1)).upper()
+        try:
+            out[ref] = sh.iso_sast(f"{y}-{int(mo):02d}-{int(d):02d}T{int(hh):02d}:{int(mm):02d}:00")
+        except ValueError:
+            continue  # an out-of-range day/month (typo on the live page) - unreadable, not a crash
+    return out
+
+
 def parse_listing(page):
     """One release per <a href=".../tender/..."> link found under a dated
-    block (a date can carry more than one tender)."""
+    block (a date can carry more than one tender). Each entry's closing date
+    (if the page states one for that ref, see _closing_dates_by_ref()) is
+    attached here, not guessed from the dated-block heading itself (that's
+    the publish date, a different field)."""
+    closing_by_ref = _closing_dates_by_ref(page)
     out = []
     for date_str, block in DATE_BLOCK.findall(page):
         published = _parse_text_date(date_str)
@@ -120,7 +168,8 @@ def parse_listing(page):
             m = REF.search(text)
             ref = re.sub(r"\s+", "", m.group(1)).upper() if m else None
             title = sh.clean(text.split("|")[0]) if "|" in text else sh.clean(text)
-            out.append({"url": html.unescape(url), "title": title, "ref": ref, "published": published})
+            out.append({"url": html.unescape(url), "title": title, "ref": ref, "published": published,
+                        "closing": closing_by_ref.get(ref) if ref else None})
     return out
 
 
@@ -135,6 +184,7 @@ def normalize(entry, docs=None):
         source=SOURCE, source_id=entry["ref"] or entry["url"], source_url=entry["url"],
         status="advertised",
         published_date=entry["published"],
+        closing_date=entry.get("closing"),
     )
 
 

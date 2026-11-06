@@ -84,11 +84,26 @@ CAPETOWN_RFQ_HTML = """<table><tr><th>Reference Number</th><th>Title</th><th>Cat
 CAPETOWN_AWARD_DETAIL = "<div><h3>Award Status</h3><dl><dt>Status</dt><dd>Awarded</dd><dt>Reference Number</dt><dd>GH12700188</dd><dt>Title</dt><dd>THERMOSTAT;HWC;35-70 Celc;VKF-11</dd><dt>Date</dt><dd>2026/10/16</dd><dt>To</dt><dd>ALWAYS SUPERLATIVE</dd></dl><a>Back</a></div>"
 
 # --- real rows, 18 Oct 2026 (sars_procurement / cidb_tenders / dbsa_procurement) ---
+# The <p> "Published Tenders" detail blocks below (real live shape, found
+# 2026-11-06) are a SEPARATE section from the dated <ul> summary list above -
+# RFP14/2026 states a closing date there; RFP13/2026 deliberately doesn't
+# (confirms a tender with no stated closing date still parses, closing=None,
+# not a crash). 10/11/2026 is chosen deliberately: day and month both <=12,
+# the exact shape that would silently come out as 11 October instead of the
+# correct 10 November if this were ever routed through source_http.parse_sast()'s
+# US-style (month-first) branch instead of being parsed as the day-first
+# format SARS's own page actually uses.
 SARS_PAGE_HTML = """<h2>What&#8217;s New</h2><ul><li><strong>16 October 2026 &#8211; New Tender</strong><ul>
 <li><a href="https://www.sars.gov.za/tender/rfp14-2026-appointment-of-armed-security/">RFP14/2026: Appointment of armed security service provider | South African Revenue Service</a></li>
 </ul></li><li><strong>15 October 2026 &#8211;</strong><ul>
 <li><a href="https://www.sars.gov.za/tender/rfp13-2026-specialist-resources/">RFP13/2026: Appointment of specialist resources | South African Revenue Service</a></li>
-</ul></li></ul>"""
+</ul></li></ul>
+<h2>Published Tenders</h2>
+<p><strong>RFP14/2026: Appointment of armed security service provider</strong><br>
+Closing Date: 10/11/2026 11:00 (<a href="https://www.sars.gov.za/tender/rfp14-2026-appointment-of-armed-security/">Click here for tender documents</a>)<br>
+Briefing Session Date: (Non-Compulsory) 2026/10/26 at 11:00</p>
+<p><strong>RFP13/2026: Appointment of specialist resources</strong><br>
+(<a href="https://www.sars.gov.za/tender/rfp13-2026-specialist-resources/">Click here for tender documents</a>)</p>"""
 
 CIDB_FEED_OPEN = {"tender_ID": "34", "description": "Appointment of a service provider to review the cidb standard",
                    "bid_number": "cidb 010 2526", "tender_advert_file": "https://www.cidb.org.za/wp-content/x.pdf",
@@ -178,6 +193,12 @@ def test_new_sources():
     check("SARS title excludes the ' | South African Revenue Service' suffix",
           r["title"] is not None and "South African Revenue Service" not in r["title"], r["title"])
     check("SARS published date", r["published_date"] == "2026-10-16T00:00:00+02:00")
+    check("SARS closing date from the separate 'Published Tenders' detail section, day-first not US-style "
+          "(10/11/2026 11:00 -> 10 November, not 11 October)",
+          r["closing_date"] == "2026-11-10T11:00:00+02:00", r["closing_date"])
+    r13 = sars_procurement.normalize(entries[1])
+    check("SARS: a tender with no stated closing date still parses, closing=None not a crash",
+          r13["contract_number"] == "RFP13/2026" and r13["closing_date"] is None, r13["closing_date"])
 
     # Found 2026-11-01, tested against the real live site: TENDER_LINK used to
     # require href as the literal first attribute right after "<a " - the
