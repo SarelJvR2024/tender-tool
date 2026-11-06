@@ -267,6 +267,16 @@ export default async function PersonDetailPage({
   let rolesError: string | null = null;
   let pendingExtractions: CvExtractionResult[] = [];
   let signatoryScopes: SignatoryScope[] = [];
+  // Projects/CV uploads/pending extractions/generated CVs/signatory scopes
+  // below were all read as `{ data }` only - a failed read on any of them
+  // silently became an empty list, indistinguishable from "this person
+  // genuinely has none yet" (e.g. "No project history on file yet" is a
+  // real, explicit empty-state sentence this page would show on a transient
+  // failure, not just a blank section). Same bug class this doc's sweep has
+  // already fixed repeatedly elsewhere; combined into one flag since all 5
+  // are secondary reads on the same page, same as app/company/page.tsx's
+  // own secondary-reads fix.
+  let secondaryLoadError = false;
   // 0061: optional region/industry/discipline tags shown on the "Signatory
   // capacity" field - reuses discipline_categories (0040), same taxonomy
   // the Experience Library and pricing form already read.
@@ -302,46 +312,53 @@ export default async function PersonDetailPage({
     if (roleErr) console.error("Failed to load tender_roles catalog:", roleErr.message);
     rolesError = roleErr?.message ?? null;
 
-    const { data: projectRows } = await supabase
+    const { data: projectRows, error: projectsErr } = await supabase
       .from("projects")
       .select("*")
       .eq("person_id", id)
       .order("start_date", { ascending: false });
     projects = (projectRows ?? []) as Project[];
+    if (projectsErr) console.error("projects select failed for person detail", projectsErr);
 
-    const { data: uploadRows } = await supabase
+    const { data: uploadRows, error: uploadsErr } = await supabase
       .from("cv_uploads")
       .select("id, storage_path, original_filename, mode, status, created_at, extraction_error")
       .eq("person_id", id)
       .order("created_at", { ascending: false });
     cvUploads = (uploadRows ?? []) as CvUpload[];
+    if (uploadsErr) console.error("cv_uploads select failed for person detail", uploadsErr);
 
     // AI-extracted fields waiting for a person to confirm/correct (0023).
-    const { data: extractionRows } = await supabase
+    const { data: extractionRows, error: extractionsErr } = await supabase
       .from("cv_extraction_results")
       .select("id, cv_upload_id, proposed, warnings, text_method, source_pages, model, created_at")
       .eq("person_id", id)
       .eq("review_status", "pending_review")
       .order("created_at", { ascending: false });
     pendingExtractions = (extractionRows ?? []) as CvExtractionResult[];
+    if (extractionsErr) console.error("cv_extraction_results select failed for person detail", extractionsErr);
 
     // Standard (non-tender-specific) CVs only here - tender_id is null.
     // Tender-customized CVs are requested and shown on that tender's own
     // Workspace page (app/app/tenders/[id]/page.tsx), not duplicated here.
-    const { data: genRows } = await supabase
+    const { data: genRows, error: genErr } = await supabase
       .from("generated_cvs")
       .select("id, format, detail, status, storage_path_docx, storage_path_pdf, error_message, tender_id, requested_at")
       .eq("person_id", id)
       .is("tender_id", null)
       .order("requested_at", { ascending: false });
     generatedCvs = (genRows ?? []) as GeneratedCv[];
+    if (genErr) console.error("generated_cvs select failed for person detail", genErr);
 
-    const { data: scopeRows } = await supabase
+    const { data: scopeRows, error: scopesErr } = await supabase
       .from("signatory_scopes")
       .select("id, region, industry_tag, discipline_tag")
       .eq("person_id", id)
       .order("created_at");
     signatoryScopes = (scopeRows ?? []) as SignatoryScope[];
+    if (scopesErr) console.error("signatory_scopes select failed for person detail", scopesErr);
+
+    secondaryLoadError = !!projectsErr || !!uploadsErr || !!extractionsErr || !!genErr || !!scopesErr;
 
     // Signed URLs for anything actually downloadable (private bucket) -
     // generated once at render time, short-lived, never stored.
@@ -412,6 +429,13 @@ export default async function PersonDetailPage({
         {errorParam && (
           <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {decodeURIComponent(errorParam)}
+          </div>
+        )}
+
+        {secondaryLoadError && (
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            Some of this person&apos;s details (projects, CVs or registrations) couldn&apos;t be loaded - the
+            sections below may be incomplete. Try refreshing.
           </div>
         )}
 

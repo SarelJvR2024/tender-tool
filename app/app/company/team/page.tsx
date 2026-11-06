@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createInvite, revokeInvite, setMemberRole, removeMember } from "./actions";
 import { Card, DangerButton, Select, SubPage, Submit, Text, fmtDate } from "../_components/ui";
+import { Banner } from "../_components/shared";
 
 export const instant = false;
 
@@ -27,18 +28,37 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const { error, saved } = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: membership } = await supabase.from("company_members").select("company_id, role").eq("user_id", user?.id ?? "").maybeSingle();
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id, role").eq("user_id", user?.id ?? "").maybeSingle();
+  if (membershipError) console.error("company_members select failed (team, own membership)", membershipError);
   const isAdmin = membership?.role === "owner" || membership?.role === "admin";
   const companyId = membership?.company_id as string | undefined;
 
-  const [{ data: memberRows }, { data: inviteRows }, { data: personRows }, { data: labels }] = await Promise.all([
-    companyId ? supabase.from("company_members").select("id, user_id, role").eq("company_id", companyId).order("created_at") : Promise.resolve({ data: [] }),
+  const [
+    { data: memberRows, error: memberError },
+    { data: inviteRows, error: inviteError },
+    { data: personRows, error: personError },
+    { data: labels, error: labelsError },
+  ] = await Promise.all([
+    companyId ? supabase.from("company_members").select("id, user_id, role").eq("company_id", companyId).order("created_at") : Promise.resolve({ data: [], error: null }),
     isAdmin && companyId
       ? supabase.from("company_invites").select("id, email, role, token, created_at, expires_at, linked_person_id").eq("company_id", companyId).is("accepted_at", null).order("created_at", { ascending: false })
-      : Promise.resolve({ data: [] }),
-    isAdmin && companyId ? supabase.from("people").select("id, name").eq("company_id", companyId).order("name") : Promise.resolve({ data: [] }),
-    isAdmin ? supabase.rpc("company_member_labels") : Promise.resolve({ data: [] }),
+      : Promise.resolve({ data: [], error: null }),
+    isAdmin && companyId ? supabase.from("people").select("id, name").eq("company_id", companyId).order("name") : Promise.resolve({ data: [], error: null }),
+    isAdmin ? supabase.rpc("company_member_labels") : Promise.resolve({ data: [], error: null }),
   ]);
+  if (memberError) console.error("company_members select failed (team, roster)", memberError);
+  if (inviteError) console.error("company_invites select failed (team)", inviteError);
+  if (personError) console.error("people select failed (team, invite-link picker)", personError);
+  if (labelsError) console.error("company_member_labels rpc failed (team)", labelsError);
+
+  // Any of the 5 reads above failing silently degrades this page to "No
+  // members yet"/"No pending invites" (and, for the membership read itself,
+  // to isAdmin===false, hiding the invite/remove actions from a real admin)
+  // - indistinguishable from the genuine empty/non-admin state. Same bug
+  // class this doc's sweep has already fixed repeatedly elsewhere; one
+  // combined banner here rather than a per-section one, since a failure on
+  // the membership read alone cascades into every section on this page.
+  const loadError = !!membershipError || !!memberError || !!inviteError || !!personError || !!labelsError;
 
   const members = (memberRows ?? []) as Member[];
   const invites = (inviteRows ?? []) as Invite[];
@@ -66,6 +86,13 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
       error={error}
       saved={saved ? SAVED[saved] ?? null : null}
     >
+      {loadError && (
+        <div className="mb-3.5">
+          <Banner tone="destructive">
+            Couldn&apos;t load your team - try refreshing. If it keeps happening, let us know.
+          </Banner>
+        </div>
+      )}
       <Card title="Current team">
         {members.length === 0 ? (
           <div className="text-[13px] text-muted-foreground">No members yet.</div>
