@@ -4804,6 +4804,48 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): clean sweep - discovery rotation (`cidb_tenders.py` live-refetched; `source_http.py`'s shared `parse_rand()`/`parse_sanral_date()`/`norm_ref()`/`iso_sast_closing()` helpers and `assess_tender.py`'s `assess_fit()`/`categorize()` boundary re-read adversarially; `discovery_downgrades.py`'s flag/recovery logic traced end to end), no new reachable bug found
+
+Oriented from `00ce7ec` (own prior pass: Finding 141, `poll_loop.py` injectable clock). `git fetch
+origin main` found two more rounds of sibling commits (the TS-sweep's own 3rd grep blind spot -
+bare unchecked Supabase writes with no "const { data" shape - 12 more instances fixed, and the
+`watch_deadlines.py`/`process_pack_jobs.py` fixes from the prior fetch) - all unrelated to this
+pass's own files, `git merge --ff-only` clean both times, no collision. Confirmed the sibling's own
+`a5fe813` (`watch_deadlines.py`'s `--out` report gaining the person-credential before-closing check)
+correctly builds on my own Finding 139 function rather than duplicating or reverting it - read the
+diff directly rather than trusting the commit message.
+
+**Rotation: discovery.** Every buyer-direct scraper in `engine/discovery/` already has at least one
+dedicated live-site pass on record (confirmed by cross-referencing this doc's own history by name,
+same check a recent sibling pass already did and reached the same conclusion) - no "never tested"
+candidate exists. Picked a fresh angle instead: live-refetched `cidb_tenders.py` against the real
+feed (1 open of 25 listed, 34 reported by the feed's own `tender_count` - a real discrepancy, but in
+the feed's AWARDED/CLOSED history, not its open tenders, and already transparently logged by the
+existing code; not a code bug, CIDB's own feed being internally inconsistent) and read
+`source_http.py` (the shared date/money/reference-normalisation helpers every discovery source
+calls) and `assess_tender.py`'s `assess_fit()`/`categorize()` boundary end to end, specifically
+checking `assess_fit()`'s `categories[0]` access (only reached inside the `uncategorized` branch) for
+an empty-list crash. Traced both real call sites (`assess_tender.read_release()` and
+`classify_tender.assess_fit_from_text()`) - both always pass `categorize()`'s own return value
+directly, which structurally can never be empty (`matches`, or a single-element
+`uncategorized_<category>`/`uncategorized` fallback) - so this is unreached, not evidenced, per this
+doc's own "theoretically constructible but not evidenced" standard; not fixed. Also traced
+`discovery_downgrades.flag_update()`'s "best of was/current" and recovery-threshold logic against
+several hand-constructed sequences (fresh downgrade, a second downgrade while one is already open,
+recovery to at or above the original "was" verdict) - matches its own documented contract exactly,
+no bug found.
+
+**Genuinely clean - no fix needed, no code changed.** `git status`: clean working tree (every check
+was a read-only live fetch via the scraper's own functions, plus code reading - no file edits).
+
+**Backlog: unchanged at 18 items** - no new finding, no judgment-call item touched.
+
+To verify independently: `cd engine/discovery && python3 -c "import cidb_tenders as cb; rows =
+cb.fetch_releases(); print(len(rows))"` against the live feed (expect 1, adjust for whatever is open
+at read time).
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): fix - `poll_loop.poll_forever()`'s own `max_runtime` parameter read the REAL wall clock even when `sleep` was faked, so writing this parameter's first-ever test (following the module's own documented testing convention) busy-spun at full CPU for `max_runtime`'s real duration instead of behaving deterministically - unreached in production (no current caller sets it), fixed anyway since it's a real, documented parameter of shared worker infrastructure
 
 Oriented from `bddde02` (own prior pass: Finding 140, digest date-duplication). `git fetch origin
