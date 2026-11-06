@@ -83,10 +83,32 @@ export async function saveHeldRegistration(formData: FormData) {
       console.error("held registration certificate upload failed", file.name, upErr);
       fail(`Saved, but ${file.name} could not be uploaded - try again. If it keeps happening, let us know.`, `#r-${heldId}`);
     }
-    const { error } = await supabase.from("held_registrations").update({ storage_path: path, original_filename: file.name }).eq("id", heldId);
-    if (error) {
+    // .select("id").maybeSingle() here matters exactly as it does on the row
+    // update above: this attach write has its own, later timing window (the
+    // row write above having already matched doesn't protect this one) - if
+    // another admin's removeMember() (0114) revokes this user's own
+    // company_members row between the row write succeeding and this attach
+    // write, RLS's own "held_registrations: tenant isolation" `using`
+    // (re-evaluated against the OLD row) matches zero rows here too, with
+    // the same `error: null` PostgREST response. Pre-fix, `error` alone
+    // couldn't tell that apart from a real attach, so the code went on to
+    // delete `existing.storage_path` - the OLD file the row still actually
+    // references, since this write never took effect - while the just-
+    // uploaded new file sat permanently unreferenced: the row ends up
+    // pointing at a file that no longer exists, worse than a plain orphan.
+    const { data: attached, error } = await supabase
+      .from("held_registrations")
+      .update({ storage_path: path, original_filename: file.name })
+      .eq("id", heldId)
+      .select("id")
+      .maybeSingle();
+    if (error || !attached) {
+      console.error("held_registrations update failed for certificate attach", error);
       await supabase.storage.from(VAULT_BUCKET).remove([path]);
-      fail(error.message, `#r-${heldId}`);
+      fail(
+        error ? error.message : "That registration is no longer there - it may have been removed. Refresh and try again.",
+        `#r-${heldId}`,
+      );
     }
     if (existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
   }

@@ -178,6 +178,51 @@ describe("saveHeldRegistration - stale/foreign id no-op update", () => {
   });
 });
 
+// The row update above (23b43b4) and the attach-write below (this pass) are
+// two SEPARATE writes with two separate timing windows - fixing the first
+// does not protect the second. If membership is revoked between the row
+// write succeeding and the certificate-attach write, the attach write itself
+// matches zero rows (same `error: null` PostgREST behaviour), and pre-fix
+// code only checked `error` on it - so it went on to delete the OLD file the
+// row still actually references (the attach never took effect), while the
+// newly-uploaded file was left permanently unreferenced.
+describe("saveHeldRegistration - membership revoked between the row write and the certificate attach write", () => {
+  it("does not delete the still-referenced previous file, and cleans up the newly-uploaded orphan instead", async () => {
+    const heldId = "11111111-1111-1111-1111-111111111111";
+    const oldPath = `company-1/registrations/${heldId}/old-certificate.pdf`;
+    const { client, uploadCalls, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        [{ data: { id: heldId }, error: null }], // update(row).eq("id", id) - real match
+        [{ data: { storage_path: oldPath }, error: null }], // existing select, before upload
+        [{ data: null, error: null }], // attach update(storage_path, original_filename) - 0 rows matched
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveHeldRegistration } = await import("./actions");
+
+    const fd = formDataWith({
+      held_id: heldId,
+      registration_type_id: "22222222-2222-2222-2222-222222222222",
+      holder: "company",
+    });
+    fd.set("file", new File(["pdf-bytes"], "new-certificate.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(saveHeldRegistration(fd));
+
+    expect(url).not.toContain("saved=1");
+    expect(url).toContain("/company/registrations?error=");
+    expect(uploadCalls).toHaveLength(1); // the new file genuinely was uploaded before the race was detected
+    const newPath = uploadCalls[0];
+    // The real bug: the OLD file must survive (the row still points at it),
+    // and the NEW, now-unreferenced file must be cleaned up - never the
+    // other way round.
+    expect(removeCalls.flat()).not.toContain(oldPath);
+    expect(removeCalls.flat()).toContain(newPath);
+  });
+});
+
 describe("saveHeldRegistration - real update still succeeds", () => {
   it("still saves normally when the update genuinely matches the row", async () => {
     const heldId = "11111111-1111-1111-1111-111111111111";
@@ -202,6 +247,35 @@ describe("saveHeldRegistration - real update still succeeds", () => {
     expect(url).toContain("saved=1");
     expect(url).toContain(`#r-${heldId}`);
     expect(uploadCalls).toHaveLength(0); // no file attached in this case
+  });
+
+  it("still attaches a new certificate and removes the old one when the attach write genuinely matches", async () => {
+    const heldId = "11111111-1111-1111-1111-111111111111";
+    const oldPath = `company-1/registrations/${heldId}/old-certificate.pdf`;
+    const { client, uploadCalls, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        [{ data: { id: heldId }, error: null }], // update(row).eq("id", id) - real match
+        [{ data: { storage_path: oldPath }, error: null }], // existing select, before upload
+        [{ data: { id: heldId }, error: null }], // attach update - real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveHeldRegistration } = await import("./actions");
+
+    const fd = formDataWith({
+      held_id: heldId,
+      registration_type_id: "22222222-2222-2222-2222-222222222222",
+      holder: "company",
+    });
+    fd.set("file", new File(["pdf-bytes"], "new-certificate.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(saveHeldRegistration(fd));
+
+    expect(url).toContain("saved=1");
+    expect(uploadCalls).toHaveLength(1);
+    expect(removeCalls.flat()).toContain(oldPath);
   });
 });
 
