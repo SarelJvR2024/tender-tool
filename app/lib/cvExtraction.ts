@@ -115,11 +115,24 @@ export type CvExtractionResult = {
 
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+// A bare 4-digit token that is also a plausible calendar year (1900-2099) is
+// too weak to use as a project/contract-number match on its own: two
+// genuinely different projects completed in the same year (common - a
+// company often finishes several projects a year) would otherwise match on
+// nothing but that shared year. A real contract/project number embeds extra
+// characters around a year (e.g. "2024/15", "GG2024-01") and squashes to
+// something longer than 4 characters, so it's unaffected by this exclusion -
+// only an isolated, year-shaped token is dropped.
+const BARE_YEAR = /^(?:19|20)\d{2}$/;
+
 /**
  * Is a proposed project probably one already on file? Compares the contract /
- * project numbers (tokens with a digit, 4+ characters) and the whole client
- * line, letters and digits only. Used to leave a likely duplicate unticked on
- * a re-upload, never to hide it.
+ * project numbers (tokens with a digit, 4+ characters, excluding a bare
+ * calendar year - see BARE_YEAR) and the whole client line, letters and
+ * digits only. Used to leave a likely duplicate unticked on a re-upload,
+ * never to hide it - so a weak/ambiguous signal (a shared year alone) must
+ * never be treated as a match: that would risk silently leaving a genuinely
+ * new project unticked, not just a real duplicate.
  */
 export function looksLikeExistingProject(clientAndNumber: string, existing: string[]): boolean {
   const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -127,7 +140,8 @@ export function looksLikeExistingProject(clientAndNumber: string, existing: stri
   const numbers = clientAndNumber
     .split(/[\s,;:()]+/)
     .filter((t) => /\d/.test(t) && t.replace(/[^a-z0-9]/gi, "").length >= 4)
-    .map(squash);
+    .map(squash)
+    .filter((n) => !BARE_YEAR.test(n));
   return existing.some((e) => {
     const ex = squash(e);
     return ex === whole || numbers.some((n) => ex.includes(n));
