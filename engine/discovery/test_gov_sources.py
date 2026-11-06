@@ -304,24 +304,22 @@ def test_merge():
     print("gov_sources.merge")
     portal = [etenders_portal.normalize(x) for x in (PORTAL_SANRAL_0756C, PORTAL_SANRAL_N011, PORTAL_OTHER_BUYER_SAME_REF)]
     closed = [etenders_portal.normalize(PORTAL_SANRAL_0754A_CLOSED)]
-    site = [
-        # SANRAL lists by contract number; the portal by NRA bid number. The
-        # SCM reference on SANRAL's page is the bridge.
-        sanral_site("CONTRACT SANRAL: X.002-211-2024/1F", "2026-11-10T12:00:00+02:00", scm="NRA 2026/0756 (C)", slug="x002"),
-        sanral_site("N.011-010-2027/1F", "2026-11-13T12:00:00+02:00", slug="n011"),  # portal says 19 Nov
-        sanral_site("NRA2026/0754 (A)", "2026-11-06T12:00:00+02:00", scm="NRA2026/0754 (A)", slug="nra2026-0754-a"),
-        sanral_site("NRA 2026/0021", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021"),
-        sanral_site("NRA 2026/0021 (B)", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021-b"),
-    ]
-    # gov_sources.merge() always recomputes is_closed from sh.is_past() against
-    # the REAL current time (sh.release() strips any given is_closed and
-    # computes its own - confirmed by reading the code, not assumed), and the
-    # "open on SANRAL, Closed on portal" check below hardcodes 2026-11-06 as
-    # still-open. Same bug class as the randwater fixture that already
-    # flipped (System-Status.md, Finding 62, 2026-10-23) - this one is a
-    # ticking time bomb for 2026-11-06, not yet flipped. Freezing the clock
-    # (same FixedDateTime pattern as test_kouga.py's own fix, same pass)
-    # makes it correct forever, not just until that date. QA pass, 2026-10-23.
+    # is_closed is baked into each release at construction time (sh.release(),
+    # called by sanral_site() below, sets it via sh.is_past() against the REAL
+    # clock right then - gov_sources.merge() itself never recomputes it; it
+    # only reads the field it's handed). The 2026-10-23 QA pass froze the
+    # clock around the merge() call below, on the mistaken belief ("confirmed
+    # by reading the code") that merge() does the recomputing - it doesn't, so
+    # that freeze never actually took effect for `site`, which is built
+    # before the patch is applied. Result: the "open on SANRAL, Closed on
+    # portal" case (hardcoded 2026-11-06 as still-open, same bug class as the
+    # randwater fixture, System-Status.md Finding 62) flipped for real today
+    # regardless of the earlier fix. Root-caused by reproducing the exact
+    # failure and tracing is_closed back to sh.release()'s own construction
+    # time, not assumed. Fix: freeze the clock BEFORE building `site` (every
+    # sanral_site() call) as well as around merge(), so every is_closed value
+    # this test depends on is computed under the same frozen "now" - correct
+    # regardless of what the real wall clock says on any future day.
     import datetime as _real_datetime
 
     class _FixedBeforeClosing(_real_datetime.datetime):
@@ -333,6 +331,15 @@ def test_merge():
     _real_dt = sh.datetime.datetime
     sh.datetime.datetime = _FixedBeforeClosing
     try:
+        site = [
+            # SANRAL lists by contract number; the portal by NRA bid number. The
+            # SCM reference on SANRAL's page is the bridge.
+            sanral_site("CONTRACT SANRAL: X.002-211-2024/1F", "2026-11-10T12:00:00+02:00", scm="NRA 2026/0756 (C)", slug="x002"),
+            sanral_site("N.011-010-2027/1F", "2026-11-13T12:00:00+02:00", slug="n011"),  # portal says 19 Nov
+            sanral_site("NRA2026/0754 (A)", "2026-11-06T12:00:00+02:00", scm="NRA2026/0754 (A)", slug="nra2026-0754-a"),
+            sanral_site("NRA 2026/0021", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021"),
+            sanral_site("NRA 2026/0021 (B)", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021-b"),
+        ]
         m = gov_sources.merge({"etenders_portal": portal, "sanral": site}, closed)
     finally:
         sh.datetime.datetime = _real_dt
