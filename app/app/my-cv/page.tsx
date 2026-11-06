@@ -67,36 +67,62 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
     return null; // proxy.ts guards this route; this is just a type-safety fallback.
   }
 
-  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
+  if (membershipError) console.error("my-cv: company_members read failed", membershipError);
   const companyId = membership?.company_id as string | undefined;
 
-  const { data: person } = companyId
+  const { data: person, error: personError } = companyId
     ? await supabase.from("people").select(
         "id, name, phone, email, ecsa_level, ecsa_number, ecsa_expiry, sacpcmp_number, sacpcmp_expiry, highest_level, highest_description, highest_institution, highest_graduated",
       ).eq("company_id", companyId).eq("linked_user_id", user.id).maybeSingle()
-    : { data: null };
+    : { data: null, error: null };
+  if (personError) console.error("my-cv: people read failed", personError);
 
   if (!person) {
+    // A failed read (membershipError/personError) is indistinguishable from
+    // the genuine "no roster record linked" case below unless flagged
+    // explicitly - telling an already-linked person to go ask an admin to
+    // re-link them, when nothing is actually wrong with their link, is a
+    // false and actively misleading claim, the same established bug class
+    // this doc has already fixed repeatedly elsewhere, just worse here
+    // since it points the reader at the wrong fix entirely.
+    const loadFailed = Boolean(membershipError || personError);
     return (
       <AppShell>
         <div className="mx-auto box-border w-full max-w-[760px] flex-1 px-4 pt-5 pb-10">
           <h1 className="text-xl font-bold text-foreground">My CV</h1>
-          <p className="text-[13px] leading-relaxed text-muted-foreground">
-            No roster record is linked to your account yet. Ask an owner or admin of your company to link your account to your
-            CV record (Company &rarr; Team), or to send you an invite tied to your name.
-          </p>
+          {loadFailed ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
+              Couldn&apos;t load your CV record - try refreshing. If it keeps happening, let us know.
+            </div>
+          ) : (
+            <p className="text-[13px] leading-relaxed text-muted-foreground">
+              No roster record is linked to your account yet. Ask an owner or admin of your company to link your account to your
+              CV record (Company &rarr; Team), or to send you an invite tied to your name.
+            </p>
+          )}
         </div>
       </AppShell>
     );
   }
 
   const personId = person.id as string;
-  const [{ data: uploads }, { data: extractions }, { data: generated }, { data: projects }] = await Promise.all([
+  const [
+    { data: uploads, error: uploadsError },
+    { data: extractions, error: extractionsError },
+    { data: generated, error: generatedError },
+    { data: projects, error: projectsError },
+  ] = await Promise.all([
     supabase.from("cv_uploads").select("id, storage_path, original_filename, mode, status, created_at").eq("person_id", personId).order("created_at", { ascending: false }),
     supabase.from("cv_extraction_results").select("id, proposed, review_status, created_at").eq("person_id", personId).eq("review_status", "pending_review").order("created_at", { ascending: false }),
     supabase.from("generated_cvs").select("id, format, detail, status, storage_path_pdf, requested_at").eq("person_id", personId).order("requested_at", { ascending: false }),
     supabase.from("projects").select("id, client_and_number, position_held, start_date, end_date").eq("person_id", personId).order("start_date", { ascending: false }),
   ]);
+  if (uploadsError) console.error("my-cv: cv_uploads read failed", uploadsError);
+  if (extractionsError) console.error("my-cv: cv_extraction_results read failed", extractionsError);
+  if (generatedError) console.error("my-cv: generated_cvs read failed", generatedError);
+  if (projectsError) console.error("my-cv: projects read failed", projectsError);
+  const secondaryLoadError = Boolean(uploadsError || extractionsError || generatedError || projectsError);
 
   return (
     <AppShell>
@@ -114,6 +140,12 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
         {error && (
           <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             Could not save: {error}
+          </div>
+        )}
+        {secondaryLoadError && (
+          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
+            Some of your CV details (uploads, generated CVs or project history) couldn&apos;t be loaded - the sections below may
+            be incomplete. Try refreshing.
           </div>
         )}
 

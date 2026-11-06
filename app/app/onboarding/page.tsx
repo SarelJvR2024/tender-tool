@@ -38,12 +38,29 @@ export default async function OnboardingPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
+  if (membershipError) console.error("onboarding: company_members read failed", membershipError);
 
   if (!membership) {
+    // A failed read (membershipError truthy) is indistinguishable from the
+    // genuine "no company yet" case below unless flagged explicitly - an
+    // already-onboarded member who lands here (a stale bookmark/link, or
+    // proxy.ts's own equivalent redirect on a transient blip) would
+    // otherwise see Screen 1 ("create your company") with no hint anything
+    // is wrong. migration 0116's unique constraint means submitting it
+    // would fail safely rather than create a duplicate company, but still
+    // warn first rather than let them submit into a confusing error with no
+    // context.
     return (
       <AuthShell>
-        <Step1 error={error} />
+        <Step1
+          error={
+            error ??
+            (membershipError
+              ? "Couldn't check whether your company is already set up - refresh before continuing. If you already have one, creating a new one now would fail safely, but please refresh first."
+              : undefined)
+          }
+        />
       </AuthShell>
     );
   }
