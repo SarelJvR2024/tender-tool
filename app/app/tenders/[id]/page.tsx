@@ -283,10 +283,12 @@ export default async function TenderWorkspacePage({
   // (app/app/people/page.tsx), reused as-is rather than inventing a second
   // team-members concept. RLS (people: tenant isolation) already scopes this
   // to the signed-in user's own company.
-  const { data: assignablePeopleRows } = await supabase
+  const { data: assignablePeopleRows, error: peopleLoadErrorRaw } = await supabase
     .from("people")
     .select("id, name")
     .order("name", { ascending: true });
+  if (peopleLoadErrorRaw) console.error("people select failed for tender workspace assignee list", id, peopleLoadErrorRaw);
+  const peopleLoadError = !!peopleLoadErrorRaw;
   const assignablePeople = (assignablePeopleRows ?? []) as AssignablePerson[];
 
   // RLS scopes this to the signed-in user's own company - there's at most
@@ -331,8 +333,23 @@ export default async function TenderWorkspacePage({
   let requirementRows: { position_code: string; position_description: string | null }[] = [];
   let roleTags: RoleTag[] = [];
   const roleTitles = new Map<string, string>();
+  // keyPositionsError feeds both the "No positions listed yet" copy below
+  // (a real Supabase failure here used to be indistinguishable from this
+  // tender genuinely having none, same as every other instance of this bug
+  // class elsewhere in the app) AND, more consequentially on this one page,
+  // openPositionsCount/`ready` further down - a silently-empty
+  // tender_requirements/tender_pack_assignments read would make
+  // openPositionsCount fall to 0 and could falsely enable "Generate
+  // submission pack" with real key positions still unconfirmed. Never let
+  // that happen on a failed read: `ready` below is gated on
+  // `!keyPositionsError` too, not just on the (possibly wrong) count.
+  let keyPositionsError = false;
   if (tenderPack) {
-    const [{ data: reqRows }, { data: tagRows }, { data: roleRows }] = await Promise.all([
+    const [
+      { data: reqRows, error: reqError },
+      { data: tagRows, error: tagError },
+      { data: roleRows, error: roleError },
+    ] = await Promise.all([
       supabase.from("tender_requirements").select("position_code, position_description").eq("tender_id", id).eq("is_alternate", false),
       supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
       supabase.from("tender_roles").select("code, title"),
@@ -340,20 +357,25 @@ export default async function TenderWorkspacePage({
     requirementRows = (reqRows ?? []) as typeof requirementRows;
     roleTags = (tagRows ?? []) as RoleTag[];
     for (const r of (roleRows ?? []) as { code: string; title: string }[]) roleTitles.set(r.code, r.title);
+    if (reqError) { console.error("tender_requirements select failed for tender", id, reqError); keyPositionsError = true; }
+    if (tagError) { console.error("person_role_eligibility select failed for tender", id, tagError); keyPositionsError = true; }
+    if (roleError) { console.error("tender_roles select failed for tender", id, roleError); keyPositionsError = true; }
 
-    const { data: assignmentRows } = await supabase
+    const { data: assignmentRows, error: assignmentsError } = await supabase
       .from("tender_pack_assignments")
       .select("id, position_code, confirmed_person_id, suggested_person_id, candidate_scores, people:confirmed_person_id(name)")
       .eq("tender_pack_id", tenderPack.id)
       .order("position_code", { ascending: true });
     assignments = (assignmentRows ?? []) as unknown as Assignment[];
+    if (assignmentsError) { console.error("tender_pack_assignments select failed for tender_pack", tenderPack.id, assignmentsError); keyPositionsError = true; }
 
-    const { data: genRows } = await supabase
+    const { data: genRows, error: genError } = await supabase
       .from("generated_cvs")
       .select("id, position_code, person_id, format, detail, status, storage_path_docx, storage_path_pdf, error_message")
       .eq("tender_id", id)
       .order("requested_at", { ascending: false });
     generatedCvs = (genRows ?? []) as GeneratedCv[];
+    if (genError) { console.error("generated_cvs select failed for tender", id, genError); keyPositionsError = true; }
   }
 
   const cvSignedUrls: Record<string, string> = {};
@@ -777,15 +799,17 @@ export default async function TenderWorkspacePage({
                 <div className="mt-3.5 border-t border-border pt-3.5">
                   <PrimaryPackActionLink
                     href={showSubmissionPack ? "#submission-pack" : "#general-pack"}
-                    ready={!!tenderPack && (!tenderReadiness || tenderReadiness.thingsLeft === 0) && openPositionsCount === 0}
+                    ready={!!tenderPack && !keyPositionsError && (!tenderReadiness || tenderReadiness.thingsLeft === 0) && openPositionsCount === 0}
                     disabledReason={
                       !tenderPack
                         ? "Start a tender pack first (below) before a submission pack can be generated."
-                        : openPositionsCount > 0
-                          ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming before the pack can be generated.`
-                          : tenderReadiness && tenderReadiness.thingsLeft > 0
-                            ? `${tenderReadiness.thingsLeft} readiness item${tenderReadiness.thingsLeft === 1 ? "" : "s"} still need confirming first.`
-                            : null
+                        : keyPositionsError
+                          ? "Couldn't load this tender's key positions - try refreshing before the pack can be generated."
+                          : openPositionsCount > 0
+                            ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming before the pack can be generated.`
+                            : tenderReadiness && tenderReadiness.thingsLeft > 0
+                              ? `${tenderReadiness.thingsLeft} readiness item${tenderReadiness.thingsLeft === 1 ? "" : "s"} still need confirming first.`
+                              : null
                     }
                   />
                 </div>
@@ -978,7 +1002,7 @@ export default async function TenderWorkspacePage({
                 </>
               ) : null;
 
-              const keyPositionsSection = tenderPack && (positions.length > 0 || isSanralPackFamily) ? (() => {
+              const keyPositionsSection = tenderPack && (positions.length > 0 || isSanralPackFamily || keyPositionsError) ? (() => {
                 // Spec v3 Batch 5 (§16.E/§29): "Completed groups can compact;
                 // blockers remain discoverable." An unconfirmed position is
                 // literally rendered as a red "Fix: no key person confirmed"
@@ -1011,16 +1035,27 @@ export default async function TenderWorkspacePage({
                 );
                 const body = (
                   <>
-                  {positions.length === 0 && (
+                  {keyPositionsError && (
+                    <div role="alert" className="bg-destructive/10 text-destructive" style={{ fontSize: 12, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                      Couldn&apos;t load key positions - try refreshing. The positions, confirmations and generated CVs
+                      below may be incomplete or out of date.
+                    </div>
+                  )}
+                  {positions.length === 0 && !keyPositionsError && (
                     <div style={{ fontSize: 12, color: "var(--muted-foreground)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
                       No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
                       SETUP sheet) - upload it under Blank tender templates (Compliance & Guard tab) below, and they appear
                       here once the pack builder has read it.
                     </div>
                   )}
-                  {assignablePeople.length === 0 && positions.length > 0 && (
+                  {assignablePeople.length === 0 && positions.length > 0 && !peopleLoadError && (
                     <div style={{ fontSize: 12, color: "var(--warning)", marginBottom: 8 }}>
                       No one is captured on the People page yet - add your key people there first.
+                    </div>
+                  )}
+                  {peopleLoadError && positions.length > 0 && (
+                    <div role="alert" className="bg-destructive/10 text-destructive" style={{ fontSize: 12, borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                      Couldn&apos;t load your people roster - try refreshing before confirming key positions.
                     </div>
                   )}
                   {positions.map((code) => {
