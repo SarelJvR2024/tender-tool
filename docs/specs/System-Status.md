@@ -3349,6 +3349,65 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): fix - Finding 132's own flagged-not-fixed gap closed: no proactive "lapses before closing" check existed for a key PERSON's own professional registration, only for company-wide documents
+
+Oriented from `f6d49d1` (own prior pass: Finding 138/intake coverage-closure). `git fetch origin main`
+found new sibling commits (`0160955`/`52ecff2` - `fetchCompanyReadiness()`'s own `cv_uploads`
+pagination fix, unrelated to this pass's files) - `git merge --ff-only` clean, no collision; re-checked
+again immediately before pushing, still clean.
+
+**Implemented, not just flagged, Finding 132's own explicitly-left-open gap**: that finding fixed the
+live digest to call `find_documents_lapsing_before_closing()` (company-wide VAULT documents - COID,
+B-BBEE, SARS TCS PIN, etc.) but explicitly noted no equivalent existed for a key PERSON's own
+professional registration (ECSA/SACPCMP/SACNASP/SAGC) - so a person whose registration is fine today,
+outside the normal 60-day reminder window, but will have lapsed by the closing date of the SPECIFIC
+tender they are actually confirmed onto, was never proactively flagged by the digest; only reactively,
+if someone happened to open that tender's own compliance report page (`app/lib/tenderCompliance.ts`).
+
+**New function** `find_person_credentials_lapsing_before_closing()` in
+`engine/compliance/watch_deadlines.py`, mirroring `find_documents_lapsing_before_closing()`'s exact
+SAST closing-day math and "already inside normal window / already expired" guards, but scoped per
+PERSON and per ASSIGNMENT rather than company-wide. Deliberately joins through
+`tender_pack_assignments.confirmed_person_id` - the human-set, hard-gated assignment field - and
+NEVER `suggested_person_id`, so a person is never flagged against a tender they aren't actually
+confirmed onto, even if the AI suggested them for it. Wired into `daily_digest.py`'s
+`document_expiry_signals()` as an 8th OR-term.
+
+**Verified with a real adversarial scenario, not just the happy path**: new test
+`find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment()` in
+`engine/compliance/test_watch_deadlines_urgency.py` constructs two people sharing an IDENTICAL
+expiring ECSA credential - one referenced by a real `tender_pack_assignments` row, one referenced by
+none at all - and confirms only the confirmed person is reported, naming the real tender they're
+confirmed onto, with seen-store de-dup on a second same-day run. Caught and fixed my own bug in this
+new test before it ever reached production code: the test's own `check(cond, msg)` helper requires a
+string `msg` (unconditional `+ msg`), and my first draft passed the raw `item` dict, crashing with
+`TypeError: can only concatenate str (not "dict") to str` - fixed by formatting it as `f"{item}"`,
+matching every other `check()` call in the file.
+
+**Verified red-then-green.** Reverted the two production files (`watch_deadlines.py`,
+`daily_digest.py`) via `git apply -R`, re-ran `test_watch_deadlines_urgency.py` - failed exactly as
+predicted (`AttributeError: module 'watch_deadlines' has no attribute
+'find_person_credentials_lapsing_before_closing'`); reapplied, re-ran - `0 failure(s)`, full file
+including its own pre-existing multi-pass scenario. `py_compile` clean on all three touched files.
+Regression: `engine/notify/test_digest_live.py` and `engine/notify/test_send_digest_emails.py` (both
+touch `document_expiry_signals()`'s own call site) - both `0 failure(s)`, no change in behaviour for
+any existing scenario.
+
+**Backlog: unchanged** - this closes an already-flagged, already-numbered gap from Finding 132, not a
+new backlog item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean, no
+schema/migration involved, mirrors an already-accepted pattern):
+- `engine/compliance/watch_deadlines.py`
+- `engine/notify/daily_digest.py`
+- `engine/compliance/test_watch_deadlines_urgency.py`
+
+To verify independently: `cd engine/compliance && python3 test_watch_deadlines_urgency.py` - expect
+`0 failure(s)`, including the new
+`find_person_credentials_lapsing_before_closing(): scoped to the real confirmed assignment` section.
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): clean sweep / coverage closure - `is_combined_bulletin()` (Finding 42) and `find_person_registrations()` had zero dedicated tests anywhere in the repo; re-checked both against the real sample corpus (no bug found) and added the missing coverage
 
 Oriented from `080334c` (own prior pass: Finding 138, `years_experience_at()`). `git fetch`/

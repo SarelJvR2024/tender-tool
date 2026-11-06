@@ -7806,3 +7806,67 @@ checks failed exactly as predicted (`raised TypeError: fromisoformat: argument m
 comments); `engine/pack_generator/test_suggest_pack.py` (1 new test function, wired into `main()`). No
 change to `score_candidate()`'s own scoring logic, `rank_candidates()`'s tie-break, or the existing
 `ValueError` path.
+
+### Finding 139 (CONFIRMED, FIXED, moderate - the proactive "lapses before closing" check Finding 132 added for company-wide VAULT DOCUMENTS never existed for a key PERSON's own professional registration, a gap Finding 132 itself explicitly flagged but deliberately did not fix)
+
+**Area:** Compliance / reminders (`engine/compliance/watch_deadlines.py`, wired into
+`engine/notify/daily_digest.py`'s live digest).
+
+**Scenario:** Finding 132 fixed the live digest to call
+`find_documents_lapsing_before_closing()` - a document that is fine TODAY, outside the normal
+60-day reminder window, but will genuinely have lapsed by the closing date of a tender the company
+has a pack for. That finding's own writeup explicitly noted the identical gap existed for a key
+PERSON's own professional registration (`ecsa_expiry`/`sacpcmp_expiry`/`sacnasp_expiry`/
+`sagc_expiry`, `TRACKED_PERSON_EXPIRY_FIELDS`) - a person whose ECSA registration, say, is valid for
+another 90 days (well outside the 60-day window `find_due_person_credentials()` already covers) but
+will have lapsed before the SPECIFIC tender they are confirmed onto closes in 100 days, was never
+proactively flagged anywhere; only reactively, if someone happened to open that tender's own
+compliance report page (`app/lib/tenderCompliance.ts`). Finding 132 left this gap open for Sarel's
+own call on priority rather than fixing it inline.
+
+**Fix:** new function `find_person_credentials_lapsing_before_closing(url, key, seen, today,
+lead_days)` in `watch_deadlines.py`, mirroring `find_documents_lapsing_before_closing()`'s exact SAST
+closing-day math and "already inside the normal window" / "already expired" guards (so this never
+duplicates what `find_due_person_credentials()` already reports), scoped per PERSON and per
+ASSIGNMENT rather than company-wide. Joins `tender_pack_assignments` on `confirmed_person_id` -
+deliberately the human-set, hard-gated assignment field, never the merely AI-`suggested_person_id` -
+through `tender_packs` to the real `tenders` row (for `closing_date`/`status`/`contract_no`) and
+`people` (for the tracked expiry columns). Wired into `daily_digest.py`'s
+`document_expiry_signals()` as an 8th OR-term.
+
+**Verified with a real adversarial scenario**: new test
+`find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment()` in
+`test_watch_deadlines_urgency.py` constructs two people sharing an IDENTICAL expiring ECSA
+credential - one (`p-assigned`) referenced by a real `tender_pack_assignments` row confirming them
+onto a specific open tender, one (`p-unassigned`) referenced by no assignment at all - and confirms
+only the confirmed person is reported, naming the real tender they're confirmed onto (not any other
+open tender the company happens to have a pack for), with seen-store de-dup proven across a second
+same-day run.
+
+**Caught and fixed my own bug in the new test before it reached production code**: my first draft's
+final assertion passed the raw result dict as the `check(cond, msg)` helper's `msg` argument -
+`check(item["field"] == "ecsa_expiry" and ..., item)` - but that helper unconditionally does
+`"  PASS " + msg`/`"  FAIL " + msg`, so a non-string `msg` crashes with `TypeError: can only
+concatenate str (not "dict") to str` regardless of `cond`'s truth value, independent of whether the
+production code itself was correct. Confirmed via an actual run: the first three checks of the new
+test printed PASS correctly (proving the production function itself was already working: exactly 1
+item returned, for the right person, naming the right tender) before this line crashed the whole
+script before the file's own pre-existing multi-pass scenario ever ran. Fixed by formatting it as
+`f"{item}"`, matching every other `check()` call in this file.
+
+**Verified red-then-green, precisely.** `git diff` of the two production files
+(`watch_deadlines.py`, `daily_digest.py`) saved to a patch, reverted with `git apply -R`, re-ran
+`test_watch_deadlines_urgency.py` - failed exactly as predicted, `AttributeError: module
+'watch_deadlines' has no attribute 'find_person_credentials_lapsing_before_closing'`; reapplied the
+patch, re-ran - `0 failure(s)`, including the file's own pre-existing multi-pass `main()` scenario
+(document/task reminders, escalation-on-expiry, SAST closing-day math) running clean end to end.
+`py_compile` clean on all three touched files. Regression: `engine/notify/test_digest_live.py` and
+`engine/notify/test_send_digest_emails.py` (both exercise `document_expiry_signals()`'s own call
+site directly) - both `0 failure(s)`, no change in behaviour for any existing scenario.
+
+**Regression:** `engine/compliance/watch_deadlines.py` (1 new function, ~100 lines including
+docstring/comments, inserted between `find_documents_lapsing_before_closing()` and
+`find_due_tasks()`); `engine/notify/daily_digest.py` (`document_expiry_signals()`, 1 new OR-term plus
+explanatory comment); `engine/compliance/test_watch_deadlines_urgency.py` (1 new test function, wired
+into `main()`). No change to `find_documents_lapsing_before_closing()`, `find_due_person_credentials()`,
+or any other existing reminder path.

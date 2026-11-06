@@ -495,6 +495,105 @@ def find_documents_lapsing_before_closing(url, key, seen, today, lead_days=DEFAU
     return due
 
 
+def find_person_credentials_lapsing_before_closing(url, key, seen, today, lead_days=DEFAULT_DOC_LEAD_DAYS):
+    """A key person's own professional registration (TRACKED_PERSON_EXPIRY_FIELDS)
+    that is fine today - outside the normal reminder window - but will have
+    lapsed by the closing date of a tender they are actually CONFIRMED onto
+    (tender_pack_assignments.confirmed_person_id - a human-set, hard-gated
+    field; never the merely-suggested_person_id). Same "fine today, not fine
+    by closing day" gap find_documents_lapsing_before_closing() already
+    closes for company-wide documents, just scoped per PERSON and per
+    ASSIGNMENT rather than company-wide, so a person is never flagged
+    against a tender they aren't even on. app/lib/tenderCompliance.ts's own
+    compliance report already gets this right reactively (when someone opens
+    that tender's page); this is the identical check's proactive, digest-
+    email side - flagged as a real, not-yet-closed gap in Finding 132
+    (2026-11-05), implemented here (QA pass, 2026-11-06)."""
+    assignments = supabase_request(
+        url, key, "tender_pack_assignments?select=tender_pack_id,confirmed_person_id&confirmed_person_id=not.is.null")
+    if not assignments:
+        return []
+    pack_ids = sorted({a["tender_pack_id"] for a in assignments})
+    packs = {p["id"]: p for p in supabase_request(
+        url, key, f"tender_packs?select=id,company_id,tender_id&id=in.({','.join(pack_ids)})")}
+    tender_ids = sorted({p["tender_id"] for p in packs.values()})
+    tenders = {}
+    if tender_ids:
+        rows = supabase_request(url, key, f"tenders?select=id,contract_no,title,closing_date,status&id=in.({','.join(tender_ids)})")
+        tenders = {t["id"]: t for t in rows}
+    company_ids = sorted({p["company_id"] for p in packs.values()})
+    companies = {}
+    if company_ids:
+        rows = supabase_request(url, key, f"companies?select=id,legal_name&id=in.({','.join(company_ids)})")
+        companies = {c["id"]: c.get("legal_name") for c in rows}
+    person_ids = sorted({a["confirmed_person_id"] for a in assignments})
+    select_cols = "id,company_id,name," + ",".join(
+        f"{col},{num}" for col, _, _, num in TRACKED_PERSON_EXPIRY_FIELDS)
+    people = {}
+    if person_ids:
+        rows = supabase_request(url, key, f"people?select={select_cols}&id=in.({','.join(person_ids)})")
+        people = {p["id"]: p for p in rows}
+
+    due = []
+    for a in assignments:
+        pack = packs.get(a["tender_pack_id"])
+        person = people.get(a["confirmed_person_id"])
+        tender = tenders.get(pack["tender_id"]) if pack else None
+        if not pack or not person or not tender or tender.get("status") != "open" or not tender.get("closing_date"):
+            continue
+        # Same SAST closing-day normalisation as find_documents_lapsing_before_closing() -
+        # see that function's own comment for why a naive +2h shift on an already-
+        # SAST-tagged offset double-counts the offset (Finding 71, 2026-10-24).
+        try:
+            closing_ts = datetime.datetime.fromisoformat(str(tender["closing_date"]).replace("Z", "+00:00"))
+        except ValueError:
+            system_alerts.record("deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') "
+                                 "is not a valid date - its person-credential lapsing-before-closing check was "
+                                 "skipped.", "warning", context={"tender_id": tender["id"],
+                                                                  "closing_date": tender["closing_date"]})
+            continue
+        closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
+                       if closing_ts.tzinfo else closing_ts.date())
+        to_closing = (closing_day - today).days
+        if to_closing < 0:
+            continue
+        for col, label, lead_override, num_col in TRACKED_PERSON_EXPIRY_FIELDS:
+            expiry = person.get(col)
+            if not expiry:
+                continue
+            left = days_until(expiry, today)
+            if left is None:
+                continue
+            exp_day = today + datetime.timedelta(days=left)
+            if exp_day >= closing_day or exp_day < today:
+                continue  # covers the closing date / already expired (reported by find_due_person_credentials)
+            if left <= (lead_override if lead_override is not None else lead_days):
+                continue  # already inside the normal window - find_due_person_credentials reports this one
+            seen_key = f"person_before_closing::{person['id']}::{col}::{expiry}::{tender['id']}"
+            if seen_key in seen:
+                continue
+            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "person_credential_before_closing",
+                              "company_id": pack["company_id"]}
+            due.append({
+                "type": "person_credential_before_closing",
+                "company_id": pack["company_id"],
+                "company_name": companies.get(pack["company_id"]),
+                "person_id": person["id"],
+                "person_name": person.get("name"),
+                "field": col,
+                "label": label,
+                "registration_number": person.get(num_col),
+                "expiry_date": expiry,
+                "days_left": (exp_day - today).days,
+                "tender_id": tender["id"],
+                "tender_label": tender.get("contract_no") or tender.get("title") or tender["id"],
+                "closing_date": closing_day.isoformat(),
+                "days_to_closing": to_closing,
+                "status": "lapses_before_closing",
+            })
+    return due
+
+
 def find_due_tasks(url, key, seen, today, lead_days):
     tasks = supabase_request(
         url, key,

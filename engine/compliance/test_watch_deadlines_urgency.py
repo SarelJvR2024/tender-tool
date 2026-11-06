@@ -249,11 +249,77 @@ def closing_day_handles_a_sast_tagged_offset_correctly():
               f"got {before[0]['closing_date']!r}")
 
 
+def find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment():
+    """Finding 132's own flagged-not-fixed gap (2026-11-05), implemented
+    2026-11-06: a key person's own professional registration that is fine
+    today but will have lapsed by the closing date of a tender they are
+    actually CONFIRMED onto (tender_pack_assignments.confirmed_person_id -
+    a human-set, hard-gated field, never the merely-suggested one). Proves
+    the scoping is real, not "any open tender the company has a pack for"
+    (which would false-flag a person against a tender they aren't even on):
+    a second person with an identical expiring credential but NO assignment
+    at all must not be reported."""
+    print("find_person_credentials_lapsing_before_closing(): scoped to the real confirmed assignment, "
+          "not any open tender the company happens to have a pack for")
+    today = datetime.date(2026, 11, 6)
+    expiry = (today + datetime.timedelta(days=90)).isoformat()  # outside the 60-day window...
+    closing = (today + datetime.timedelta(days=100)).isoformat() + "T10:00:00+00:00"  # ...but before this closes
+    rows = {
+        # Only "p-assigned" has a real tender_pack_assignments row at all -
+        # "p-unassigned" below shares the identical expiring credential but is
+        # never referenced by any assignment, confirmed or otherwise.
+        "tender_pack_assignments": [{"tender_pack_id": "pk1", "confirmed_person_id": "p-assigned"}],
+        "tender_packs": [{"id": "pk1", "company_id": "co3", "tender_id": "t4"}],
+        "tenders": [{"id": "t4", "contract_no": "Z.001-2026", "title": "closes in 100 days",
+                    "closing_date": closing, "status": "open"}],
+        "companies": [{"id": "co3", "legal_name": "Assignment Scoped Co"}],
+        "people": [
+            {"id": "p-assigned", "company_id": "co3", "name": "Assigned Engineer", "ecsa_expiry": expiry},
+            {"id": "p-unassigned", "company_id": "co3", "name": "Unassigned Engineer", "ecsa_expiry": expiry},
+        ],
+    }
+
+    def fake(url, key, path):
+        table, _, query = path.partition("?")
+        out = [dict(r) for r in rows.get(table, [])]
+        for part in query.split("&"):
+            if not part or part.startswith(("select=", "order=")):
+                continue
+            col, _, cond = part.partition("=")
+            if cond.startswith("eq."):
+                out = [r for r in out if str(r.get(col)) == cond[3:]]
+            elif cond.startswith("in.("):
+                vals = set(re.findall(r"[^,()]+", cond[3:]))
+                out = [r for r in out if str(r.get(col)) in vals]
+            elif cond == "not.is.null":
+                out = [r for r in out if r.get(col) is not None]
+        return out
+
+    real_request = wd.supabase_request
+    wd.supabase_request = fake
+    try:
+        seen = {}
+        due = wd.find_person_credentials_lapsing_before_closing("u", "k", seen, today, wd.DEFAULT_DOC_LEAD_DAYS)
+        due_again = wd.find_person_credentials_lapsing_before_closing("u", "k", seen, today, wd.DEFAULT_DOC_LEAD_DAYS)
+    finally:
+        wd.supabase_request = real_request
+    check(len(due) == 1, f"only the CONFIRMED assignment's own person should be reported, got {due}")
+    if due:
+        item = due[0]
+        check(item["person_id"] == "p-assigned" and item["person_name"] == "Assigned Engineer",
+              f"the confirmed person, not the unassigned one with the same expiring credential, got {item}")
+        check(item["tender_id"] == "t4" and item["tender_label"] == "Z.001-2026",
+              f"names the real tender they're actually confirmed onto, got {item}")
+        check(item["field"] == "ecsa_expiry" and item["status"] == "lapses_before_closing", f"{item}")
+    check(due_again == [], f"a second run the same day reports nothing new (seen-store de-dup), got {due_again}")
+
+
 def main():
     supabase_request_pages_past_the_1000_row_server_cap()  # before supabase_request itself is replaced below
     wd.supabase_request = fake_request
     days_until_malformed_inputs()
     closing_day_handles_a_sast_tagged_offset_correctly()
+    find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment()
     seen = {}
     print(f"run 1 - {TODAY}")
     docs, tasks, before = run(seen, TODAY)

@@ -420,7 +420,16 @@ def document_expiry_signals(url, key, seen, today, lead_days):
             # 60-day "fine for now" window that will genuinely have expired by a
             # tender's own closing date, and the one automated channel meant to
             # warn them of exactly that never did.
-            + watch_deadlines.find_documents_lapsing_before_closing(url, key, seen, today, lead_days))
+            + watch_deadlines.find_documents_lapsing_before_closing(url, key, seen, today, lead_days)
+            # Finding 132's own flagged-not-fixed gap, closed (QA pass, 2026-11-06):
+            # the identical "fine today, not fine by closing day" check, scoped to a
+            # key person's own professional registration and the SPECIFIC tender
+            # they are confirmed onto (tender_pack_assignments.confirmed_person_id) -
+            # never existed anywhere before, so a key person's ECSA/SACPCMP/SACNASP/
+            # SAGC registration lapsing before their own tender's closing date was
+            # only ever caught reactively, when someone happened to open that
+            # tender's compliance report page.
+            + watch_deadlines.find_person_credentials_lapsing_before_closing(url, key, seen, today, lead_days))
 
 
 def find_readiness_changes(url, key, seen, today, owners=None):
