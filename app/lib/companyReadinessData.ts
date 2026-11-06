@@ -25,7 +25,12 @@ import { fetchAllRows } from "./supabasePaging";
  * so those were never at risk.
  */
 export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<ReadinessResult> {
-  const [{ data: company }, { count: principalCount }, cvUploads, { count: experienceCount }] = await Promise.all([
+  const [
+    { data: company, error: companyErr },
+    { count: principalCount, error: principalCountErr },
+    cvUploads,
+    { count: experienceCount, error: experienceCountErr },
+  ] = await Promise.all([
     supabase
       .from("companies")
       .select("legal_name, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, bee_level, bee_proof_expiry, cidb_grading, cidb_expiry, bank_confirmation_letter_valid_until")
@@ -37,6 +42,14 @@ export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<R
     ),
     supabase.from("experience_items").select("id", { count: "exact", head: true }),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). All 3 default
+  // safe-direction already: null company fields / null counts all read as
+  // "not done yet" to computeBidReadiness() below, never a false pass on
+  // the bid-readiness score shown on dashboard/vault/onboarding. Logged.
+  if (companyErr) console.error("companies select failed (company readiness)", companyErr);
+  if (principalCountErr) console.error("company_principals count failed (company readiness)", principalCountErr);
+  if (experienceCountErr) console.error("experience_items count failed (company readiness)", experienceCountErr);
 
   const peopleWithCvCount = new Set(cvUploads.rows.map((r) => r.person_id)).size;
 

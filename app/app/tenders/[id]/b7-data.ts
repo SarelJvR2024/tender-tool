@@ -31,12 +31,27 @@ export type B7State = {
 
 export const loadB7State = cache(async (tenderId: string): Promise<B7State> => {
   const supabase = await createClient();
-  const [{ data: tender }, { data: company }, { data: planRow }] = await Promise.all([
+  const [
+    { data: tender, error: tenderErr },
+    { data: company, error: companyErr },
+    { data: planRow, error: planRowErr },
+  ] = await Promise.all([
     supabase.from("tenders").select("sanral_b7_setup").eq("id", tenderId).maybeSingle(),
     // RLS scopes companies to the signed-in user's own company (same read compliance-data.ts makes).
     supabase.from("companies").select("status").maybeSingle(),
     supabase.from("tender_subcontracting_plans").select(PLAN_COLUMNS).eq("tender_id", tenderId).maybeSingle(),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). This feeds the
+  // real blocker requestSubmissionPack() enforces (actions.ts:154) - but
+  // engine/pack/process_pack_jobs.py re-derives the same applicability
+  // straight from the uploaded Technical workbook's own SETUP sheet,
+  // independent of this TS read (same defense-in-depth as compliance-data.ts's
+  // own requirementRows finding, this entry). A bypass here just queues a
+  // job the engine then fails loudly - self-correcting on retry. Logged.
+  if (tenderErr) console.error("tenders select failed (B7 state)", tenderErr);
+  if (companyErr) console.error("companies select failed (B7 state)", companyErr);
+  if (planRowErr) console.error("tender_subcontracting_plans select failed (B7 state)", planRowErr);
   const setup = ((tender?.sanral_b7_setup as B7Setup) ?? null) as B7Setup;
   const companyStatus = (company?.status as string | null) ?? null;
   const plan = planRow ? parsePlan(planRow) : null;

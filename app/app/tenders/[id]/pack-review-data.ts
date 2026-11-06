@@ -254,7 +254,12 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
 
   // --- 4. Signature ----------------------------------------------------------
   try {
-    const [{ data: signerAnswer }, { data: signers }, { data: scopeRows }, { data: tenderRow }] = await Promise.all([
+    const [
+      { data: signerAnswer, error: signerAnswerErr },
+      { data: signers, error: signersErr },
+      { data: scopeRows, error: scopeRowsErr },
+      { data: tenderRow, error: tenderRowErr },
+    ] = await Promise.all([
       supabase.from("tender_answers").select("value").eq("tender_id", tenderId).eq("field_key", "signatory_person_id").maybeSingle(),
       supabase.from("people").select("id, name, signatory_capacity").not("signatory_capacity", "is", null).order("created_at"),
       // signatory_scopes (0061): optional region/industry/discipline tags per
@@ -263,6 +268,16 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
       supabase.from("signatory_scopes").select("person_id, region, industry_tag, discipline_tag"),
       supabase.from("tenders").select("region, industry_tags, discipline_tags").eq("id", tenderId).maybeSingle(),
     ]);
+    // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+    // Promise.all destructures never match the sweep's own "const { data"
+    // grep). Safe direction already: a failed read here just falls through
+    // to pickDefaultSignatory()'s own empty-signers/no-scope path, which
+    // reads as "needs a signatory chosen" (amber), never a false "signed"
+    // green - logged, not gated.
+    if (signerAnswerErr) console.error("tender_answers select failed (pack-review signature)", signerAnswerErr);
+    if (signersErr) console.error("people select failed (pack-review signature)", signersErr);
+    if (scopeRowsErr) console.error("signatory_scopes select failed (pack-review signature)", scopeRowsErr);
+    if (tenderRowErr) console.error("tenders select failed (pack-review signature)", tenderRowErr);
     const signerList = (signers ?? []) as Signatory[];
     const scopes = (scopeRows ?? []) as SignatoryScope[];
     const chosenId = (signerAnswer?.value as string | null | undefined) ?? null;

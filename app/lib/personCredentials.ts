@@ -226,7 +226,7 @@ export type AskedFor = Record<RequiredBody, string[]>;
  */
 export async function registrationsAskedFor(supabase: SupabaseClient): Promise<AskedFor> {
   const out: AskedFor = { SACNASP: [], SAGC: [], SACAP: [], SACPLAN: [], SACQSP: [], SACPVP: [], PSIRA: [] };
-  const [{ rows: reqRows }, { rows: generalRows }] = await Promise.all([
+  const [{ rows: reqRows, error: reqRowsErr }, { rows: generalRows, error: generalRowsErr }] = await Promise.all([
     fetchAllRows<{ position_code: string; position_description: string | null; tenders: { id: string; contract_no: string | null; title: string | null; status: string; closing_date: string | null }[] }>(
       (from, to) =>
         supabase
@@ -247,6 +247,16 @@ export async function registrationsAskedFor(supabase: SupabaseClient): Promise<A
       20_000,
     ),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot, one layer removed -
+  // fetchAllRows() already returns its own `error` alongside `rows`
+  // (supabasePaging.ts), but this array-destructure (invisible to the
+  // sweep's "const { data" grep either way, same root cause as every
+  // other find this pass) threw that signal away without capturing it.
+  // Safe direction: a failed read just under-promotes a registration's
+  // real demand (fewer "this tender asks for X" badges on the People
+  // page), never a false claim that nothing needs it. Logged.
+  if (reqRowsErr) console.error("tender_requirements paginated read failed (registrationsAskedFor)", reqRowsErr);
+  if (generalRowsErr) console.error("tenders paginated read failed (registrationsAskedFor)", generalRowsErr);
   // "now" only after the (request-time) reads above - Cache Components
   // refuses a current-time value before any dynamic data access.
   const nowIso = new Date().toISOString();

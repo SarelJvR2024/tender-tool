@@ -42,10 +42,18 @@ export async function saveGeneralAnswers(formData: FormData) {
   if (!tenderId) redirect("/dashboard");
 
   // This company's own reading (0032: private documents on a shared tender) wins over the shared one.
-  const [{ data: tender }, { data: ownPack }] = await Promise.all([
+  const [{ data: tender, error: tenderErr }, { data: ownPack, error: ownPackErr }] = await Promise.all([
     supabase.from("tenders").select("document_requirements").eq("id", tenderId).maybeSingle(),
     supabase.from("tender_packs").select("document_requirements").eq("tender_id", tenderId).eq("company_id", companyId).maybeSingle(),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). Already
+  // fail-closed either way - a failed read makes `manifest` null, which
+  // already redirects with a clear error below rather than proceeding.
+  // Logged so a transient failure here is now visible, not just inferred
+  // from the generic "documents haven't been read yet" message.
+  if (tenderErr) console.error("tenders select failed (saveGeneralAnswers)", tenderErr);
+  if (ownPackErr) console.error("tender_packs select failed (saveGeneralAnswers)", ownPackErr);
   const manifest = ((ownPack?.document_requirements ?? tender?.document_requirements) as RequirementManifest | null) ?? null;
   if (!manifest) redirect(back(tenderId, `?error=${encodeURIComponent("This tender's documents haven't been read yet.")}`));
 

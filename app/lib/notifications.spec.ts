@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getNotifications } from "./notifications";
 
 function daysFromNow(days: number): string {
@@ -17,6 +17,8 @@ function stubSupabase(opts: {
   types?: Record<string, unknown>[];
   people?: Record<string, unknown>[];
   tenders?: Record<string, unknown>[];
+  /** Table name whose read should come back with a real Supabase error, e.g. "held_registrations". */
+  erroringTable?: string;
 }) {
   const rowsByTable: Record<string, unknown[]> = {
     held_registrations: opts.held ?? [],
@@ -24,6 +26,7 @@ function stubSupabase(opts: {
     people: opts.people ?? [],
     tenders: opts.tenders ?? [],
   };
+  const errFor = (table: string) => (table === opts.erroringTable ? { message: `${table} read failed` } : null);
   return {
     from(table: string) {
       const self: Record<string, unknown> = {
@@ -31,8 +34,9 @@ function stubSupabase(opts: {
         eq: () => self,
         not: () => self,
         order: () => self,
-        maybeSingle: async () => ({ data: table === "companies" ? opts.company : null }),
-        then: (resolve: (v: { data: unknown }) => void) => resolve({ data: rowsByTable[table] ?? [] }),
+        maybeSingle: async () => ({ data: table === "companies" ? opts.company : null, error: errFor(table) }),
+        then: (resolve: (v: { data: unknown; error: unknown }) => void) =>
+          resolve({ data: rowsByTable[table] ?? [], error: errFor(table) }),
       };
       return self;
     },
@@ -49,6 +53,40 @@ const blankCompany = {
   bank_confirmation_letter_valid_until: null,
   bee_proof_expiry: null,
 };
+
+// Standing solution-architect review, 2026-11-06: getNotifications() used to
+// destructure all 5 of its parallel reads as just `{ data }`, with no error
+// captured at all - a 4th blind spot in the standing TS-sweep's own grep
+// (array/tuple Promise.all destructures never match its literal
+// "const { data" pattern). A real failure on any read fell through to the
+// same `?? []`/null defaults as a genuine "nothing expiring/closing soon"
+// case, so the topbar bell (AppShell.tsx) and the dashboard's own
+// "Documents expiring" stat card could both show a false all-clear. Fixed
+// by throwing instead - both call sites already have error-isolation built
+// specifically to catch an exception from this function (AppShell.tsx's own
+// `.catch()`, dashboard/page.tsx's own top-level try/catch); it just never
+// fired for this bug class, since nothing here used to throw on a soft
+// `{ error }` failure.
+describe("getNotifications - a read failure throws, instead of a false all-clear", () => {
+  it("throws when the companies read fails", async () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const supabase = stubSupabase({ company: blankCompany, erroringTable: "companies" });
+    await expect(getNotifications(supabase)).rejects.toThrow(/companies read failed/);
+    expect(logSpy).toHaveBeenCalled();
+  });
+
+  it("throws when the held_registrations read fails, even though every other read succeeded", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const supabase = stubSupabase({ company: blankCompany, erroringTable: "held_registrations" });
+    await expect(getNotifications(supabase)).rejects.toThrow(/held_registrations read failed/);
+  });
+
+  it("does not throw and returns real notifications on the ordinary success path", async () => {
+    const supabase = stubSupabase({ company: { ...blankCompany, sars_tcs_pin_expiry: daysFromNow(45) } });
+    const notifications = await getNotifications(supabase);
+    expect(notifications.map((n) => n.id)).toContain("company:sars_tcs_pin_expiry");
+  });
+});
 
 describe("getNotifications - company field windows", () => {
   it("flags a 60-day field (e.g. SARS TCS PIN) at 45 days out - within the default window", async () => {

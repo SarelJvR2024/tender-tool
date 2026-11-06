@@ -1,7 +1,89 @@
-import { describe, expect, it } from "vitest";
-import { byUrgency, detailFor, statusFor, type DocumentExpiryRow } from "./documentExpiry";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { byUrgency, detailFor, statusFor, loadDocumentExpiryOverview, type DocumentExpiryRow } from "./documentExpiry";
 import { COMPANY_EXPIRY_FIELDS } from "./companyExpiryFields";
 import { VAULT_DOCUMENTS } from "./vaultDocuments";
+
+// Standing solution-architect review, 2026-11-06: loadDocumentExpiryOverview()
+// used to destructure all 4 of its parallel reads as just `{ data }`, with no
+// error captured at all - a 4th blind spot in the standing TS-sweep's own
+// grep (array/tuple Promise.all destructures never match its literal
+// "const { data" pattern, same root cause as this pass's other finds). A
+// real failure on any of the 4 reads was indistinguishable from "nothing
+// tracked yet", and both callers (dashboard/page.tsx's "Vault & compliance
+// health" card, DocumentExpiryOverview.tsx) treated a genuinely empty
+// result as 100% compliant / "every tracked document is valid" - the
+// dangerous direction this sweep looks for, not just a logging gap, on the
+// one widget whose whole job is catching real compliance gaps before a bid.
+// These tests exercise the fix directly against the real, unmodified
+// function, using the same sequential-response-queue mocking convention as
+// savingsCounterData.spec.ts.
+
+type Resp = { data: unknown; error: { message: string } | null };
+
+function makeChain(resp: Resp) {
+  const chain: Record<string, unknown> = {};
+  const methods = ["select", "order", "eq", "in", "maybeSingle"];
+  for (const m of methods) chain[m] = () => chain;
+  (chain as { then: unknown }).then = (resolve: (r: Resp) => void) => resolve(resp);
+  return chain;
+}
+
+// Call order inside loadDocumentExpiryOverview(): companies, held_registrations, registration_types, people.
+function makeSupabase(companyResp: Resp, heldResp: Resp, typeResp: Resp, peopleResp: Resp) {
+  const queue = [companyResp, heldResp, typeResp, peopleResp];
+  let i = 0;
+  return {
+    from: () => makeChain(queue[i++] ?? { data: null, error: null }),
+  } as unknown as Parameters<typeof loadDocumentExpiryOverview>[0];
+}
+
+const EMPTY_OK: Resp = { data: [], error: null };
+
+describe("loadDocumentExpiryOverview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns error: false and an empty row set on the genuine 'nothing tracked yet' case", async () => {
+    const supabase = makeSupabase({ data: null, error: null }, EMPTY_OK, EMPTY_OK, EMPTY_OK);
+    const { rows, error } = await loadDocumentExpiryOverview(supabase);
+    expect(rows).toEqual([]);
+    expect(error).toBe(false);
+  });
+
+  it("returns error: true (not a plain empty/all-valid result) when the companies read fails", async () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const supabase = makeSupabase({ data: null, error: { message: "connection reset" } }, EMPTY_OK, EMPTY_OK, EMPTY_OK);
+    const { rows, error } = await loadDocumentExpiryOverview(supabase);
+    // Pre-fix this looked identical to the genuine empty-vault case above -
+    // the whole point of this test is that it no longer does, so a caller
+    // can no longer read it as "100% compliant".
+    expect(rows).toEqual([]);
+    expect(error).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith("companies select failed (document expiry overview)", { message: "connection reset" });
+  });
+
+  it("returns error: true when the held_registrations read fails, even though every other read succeeded", async () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const supabase = makeSupabase({ data: null, error: null }, { data: null, error: { message: "timeout" } }, EMPTY_OK, EMPTY_OK);
+    const { error } = await loadDocumentExpiryOverview(supabase);
+    expect(error).toBe(true);
+    expect(logSpy).toHaveBeenCalledWith("held_registrations select failed (document expiry overview)", { message: "timeout" });
+  });
+
+  it("returns error: false and the real rows on the ordinary success path", async () => {
+    const supabase = makeSupabase(
+      { data: null, error: null },
+      { data: [{ id: "h1", expiry_date: "2020-01-01", registration_type_id: "t1" }], error: null },
+      { data: [{ id: "t1", label: "Fire certificate" }], error: null },
+      EMPTY_OK,
+    );
+    const { rows, error } = await loadDocumentExpiryOverview(supabase);
+    expect(error).toBe(false);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: "held:h1", label: "Fire certificate", status: "expired" });
+  });
+});
 
 function row(overrides: Partial<DocumentExpiryRow>): DocumentExpiryRow {
   return { id: "x", label: "X", status: "valid", daysLeft: 100, detail: "", href: "/company", ...overrides };

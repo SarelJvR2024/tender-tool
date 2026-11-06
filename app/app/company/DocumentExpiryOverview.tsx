@@ -47,13 +47,22 @@ const TONE_CLASS = {
 
 export async function DocumentExpiryOverview({ companyId }: { companyId: string }) {
   const supabase = await createClient();
-  const rows = await loadDocumentExpiryOverview(supabase);
+  const { rows, error: loadError } = await loadDocumentExpiryOverview(supabase);
   const needsAttention = rows.filter((r) => r.status === "expired" || r.status === "expiring_soon" || r.status === "missing").length;
 
   return (
     <div id="document-expiry" className="scroll-mt-20">
       <SectionCard title="Document expiry">
-        {needsAttention > 0 ? (
+        {loadError ? (
+          // Standing review, 2026-11-06: never the false "every document is
+          // valid" message on a read failure - that was this widget's whole
+          // reason to exist (Sarel: "2 documents need attention before your
+          // next bid"), so a silent pass here would be the one place a false
+          // reassurance actually matters.
+          <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive">
+            Couldn&apos;t check document expiry right now - try refreshing.
+          </div>
+        ) : needsAttention > 0 ? (
           <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
             {needsAttention} document{needsAttention === 1 ? "" : "s"} need{needsAttention === 1 ? "s" : ""} attention before your next bid.
           </div>

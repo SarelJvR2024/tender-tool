@@ -219,10 +219,18 @@ export async function buildReusePlan(supabase: SupabaseClient, targetTenderId: s
   const source = (await listPastSubmissions(supabase, target)).find((p) => p.tender_id === sourceTenderId);
   if (!source) return null;
 
-  const [{ data: people }, { data: packs }] = await Promise.all([
+  const [{ data: people, error: peopleErr }, { data: packs, error: packsErr }] = await Promise.all([
     supabase.from("people").select("id"),
     supabase.from("tender_packs").select("id, tender_id").in("tender_id", [targetTenderId, sourceTenderId]),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). Safe direction
+  // throughout this function: every failure below just shrinks what gets
+  // offered to copy (personIds/packOf empty), never widens it - the apply
+  // step can only under-copy, never duplicate or overwrite silently.
+  // Logged.
+  if (peopleErr) console.error("people select failed (reuse plan)", peopleErr);
+  if (packsErr) console.error("tender_packs select failed (reuse plan)", packsErr);
   const personIds = new Set(((people ?? []) as { id: string }[]).map((p) => p.id));
   const packOf = new Map(((packs ?? []) as { id: string; tender_id: string }[]).map((p) => [p.tender_id, p.id]));
   const targetPackId = packOf.get(targetTenderId) ?? null;
@@ -232,10 +240,12 @@ export async function buildReusePlan(supabase: SupabaseClient, targetTenderId: s
   let answers: ReusePlan["answers"] = { copy: [], skip: [] };
   if (flow === "general") {
     const manifest = target.document_requirements ?? null;
-    const [{ data: src }, { data: mine }] = await Promise.all([
+    const [{ data: src, error: srcErr }, { data: mine, error: mineErr }] = await Promise.all([
       supabase.from("tender_answers").select("field_key, value, storage_path").eq("tender_id", sourceTenderId),
       supabase.from("tender_answers").select("field_key, value").eq("tender_id", targetTenderId),
     ]);
+    if (srcErr) console.error("tender_answers (source) select failed (reuse plan answers)", srcErr);
+    if (mineErr) console.error("tender_answers (target) select failed (reuse plan answers)", mineErr);
     if (!manifest) {
       notes.push("This tender's documents haven't been read yet, so it isn't known which questions its forms ask. Come back once the needs list is shown.");
     } else {
@@ -251,14 +261,23 @@ export async function buildReusePlan(supabase: SupabaseClient, targetTenderId: s
 
   let positions: ReusePlan["positions"] = { copy: [], skip: [] };
   if (flow === "sanral" && sourcePackId) {
-    const [{ data: srcReq }, { data: tgtReq }, { data: srcAsg }, { data: tgtAsg }] = await Promise.all([
+    const [
+      { data: srcReq, error: srcReqErr },
+      { data: tgtReq, error: tgtReqErr },
+      { data: srcAsg, error: srcAsgErr },
+      { data: tgtAsg, error: tgtAsgErr },
+    ] = await Promise.all([
       supabase.from("tender_requirements").select("position_code, position_description").eq("tender_id", sourceTenderId).eq("is_alternate", false),
       supabase.from("tender_requirements").select("position_code, position_description").eq("tender_id", targetTenderId).eq("is_alternate", false),
       supabase.from("tender_pack_assignments").select("position_code, confirmed_person_id").eq("tender_pack_id", sourcePackId),
       targetPackId
         ? supabase.from("tender_pack_assignments").select("position_code, confirmed_person_id").eq("tender_pack_id", targetPackId)
-        : Promise.resolve({ data: [] }),
+        : Promise.resolve({ data: [], error: null }),
     ]);
+    if (srcReqErr) console.error("tender_requirements (source) select failed (reuse plan positions)", srcReqErr);
+    if (tgtReqErr) console.error("tender_requirements (target) select failed (reuse plan positions)", tgtReqErr);
+    if (srcAsgErr) console.error("tender_pack_assignments (source) select failed (reuse plan positions)", srcAsgErr);
+    if (tgtAsgErr) console.error("tender_pack_assignments (target) select failed (reuse plan positions)", tgtAsgErr);
     const targetPositions = (tgtReq ?? []) as { position_code: string; position_description: string | null }[];
     if (!targetPackId) notes.push("Start a pack for this tender first - key positions hang off it.");
     else if (targetPositions.length === 0) notes.push("This tender's key positions aren't known yet: they're read from its Technical workbook once it's uploaded under Blank tender templates.");

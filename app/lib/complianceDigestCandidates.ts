@@ -54,12 +54,28 @@ function thresholdFor(daysLeft: number): ComplianceDigestThreshold | null {
 /** Every compliance-digest candidate for ONE company, explicitly filtered - never relies on RLS. */
 export async function complianceDigestCandidatesForCompany(supabase: SupabaseClient, companyId: string): Promise<ComplianceDigestCandidate[]> {
   const companyFields = COMPANY_EXPIRY_FIELDS.map((f) => f.field).join(", ");
-  const [{ data: companyRow }, { data: heldRows }, { data: typeRows }, { data: peopleRows }] = await Promise.all([
+  const [
+    { data: companyRow, error: companyErr },
+    { data: heldRows, error: heldRowsErr },
+    { data: typeRows, error: typeRowsErr },
+    { data: peopleRows, error: peopleRowsErr },
+  ] = await Promise.all([
     supabase.from("companies").select(`id, legal_name, ${companyFields}`).eq("id", companyId).maybeSingle(),
     supabase.from("held_registrations").select("id, expiry_date, registration_type_id").eq("company_id", companyId).not("expiry_date", "is", null),
     supabase.from("registration_types").select("id, label"),
     supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry").eq("company_id", companyId),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). A failed read
+  // here means this ONE company gets no digest candidate THIS run (not a
+  // false "all clear" sent to them - nothing is sent either way) - bounded
+  // to one missed day of a 30/14/7-day escalating cadence, not a lost
+  // warning outright. Logged so a transient miss is now visible to the
+  // operator instead of indistinguishable from "genuinely nothing due".
+  if (companyErr) console.error(`companies select failed (compliance digest, company ${companyId})`, companyErr);
+  if (heldRowsErr) console.error(`held_registrations select failed (compliance digest, company ${companyId})`, heldRowsErr);
+  if (typeRowsErr) console.error(`registration_types select failed (compliance digest, company ${companyId})`, typeRowsErr);
+  if (peopleRowsErr) console.error(`people select failed (compliance digest, company ${companyId})`, peopleRowsErr);
 
   const typeLabelById = new Map(((typeRows ?? []) as RegistrationTypeRow[]).map((t) => [t.id, t.label]));
   const out: ComplianceDigestCandidate[] = [];

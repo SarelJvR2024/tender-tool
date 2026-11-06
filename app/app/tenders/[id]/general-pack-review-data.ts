@@ -99,10 +99,18 @@ function failedSection(key: string, title: string, changeHref: string, changeLab
 export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Promise<GeneralPackReviewSnapshot> => {
   const supabase = await createClient();
 
-  const [{ data: tender }, { data: ownPack }] = await Promise.all([
+  const [{ data: tender, error: tenderErr }, { data: ownPack, error: ownPackErr }] = await Promise.all([
     supabase.from("tenders").select("document_requirements, closing_date, evaluation_rules").eq("id", tenderId).maybeSingle(),
     supabase.from("tender_packs").select("id, company_id, document_requirements").eq("tender_id", tenderId).maybeSingle(),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match the sweep's own "const { data"
+  // grep). This whole module is display-only (the Pack Review page's own
+  // checklist) - general-actions.ts's own request gate never reads this
+  // snapshot, so a failed read here just shows "mapped: false"/missing
+  // items (safe direction), never a false pass. Logged, not gated.
+  if (tenderErr) console.error("tenders select failed (general pack review)", tenderErr);
+  if (ownPackErr) console.error("tender_packs select failed (general pack review)", ownPackErr);
   const manifest = ((ownPack?.document_requirements ?? tender?.document_requirements) as RequirementManifest | null) ?? null;
   if (!manifest || !tender) {
     return { mapped: false, sections: [], gapsCount: 0, reviewed: null };
@@ -129,7 +137,14 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     reviewed = null;
   }
 
-  const [{ data: companyRow }, { data: answerRows }, { data: peopleRows }, { data: roleRows }, { data: tagRows }, { data: officeRows }] = await Promise.all([
+  const [
+    { data: companyRow, error: companyRowErr },
+    { data: answerRows, error: answerRowsErr },
+    { data: peopleRows, error: peopleRowsErr },
+    { data: roleRows, error: roleRowsErr },
+    { data: tagRows, error: tagRowsErr },
+    { data: officeRows, error: officeRowsErr },
+  ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
     supabase.from("people").select("id, name, signatory_capacity").order("name"),
@@ -137,6 +152,12 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     supabase.from("person_role_eligibility").select("person_id, role_code"),
     supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
   ]);
+  if (companyRowErr) console.error("companies select failed (general pack review)", companyRowErr);
+  if (answerRowsErr) console.error("tender_answers select failed (general pack review)", answerRowsErr);
+  if (peopleRowsErr) console.error("people select failed (general pack review)", peopleRowsErr);
+  if (roleRowsErr) console.error("tender_roles select failed (general pack review)", roleRowsErr);
+  if (tagRowsErr) console.error("person_role_eligibility select failed (general pack review)", tagRowsErr);
+  if (officeRowsErr) console.error("company_offices select failed (general pack review)", officeRowsErr);
   const company = (companyRow as unknown as GeneralCompany | null) ?? null;
   const answers = (answerRows ?? []) as TenderAnswer[];
   const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null }[];
@@ -193,10 +214,12 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
       const taggedPeople = taggedIds.map((id) => people.find((p) => p.id === id)).filter((p): p is { id: string; name: string; signatory_capacity: string | null } => !!p);
       let withCv = 0;
       if (taggedIds.length > 0) {
-        const [{ data: gen }, { data: up }] = await Promise.all([
+        const [{ data: gen, error: genErr }, { data: up, error: upErr }] = await Promise.all([
           supabase.from("generated_cvs").select("person_id").in("person_id", taggedIds).eq("status", "ready"),
           supabase.from("cv_uploads").select("person_id").in("person_id", taggedIds),
         ]);
+        if (genErr) console.error("generated_cvs select failed (general pack review roles)", genErr);
+        if (upErr) console.error("cv_uploads select failed (general pack review roles)", upErr);
         const haveCv = new Set([...(gen ?? []).map((g) => g.person_id as string), ...(up ?? []).map((u) => u.person_id as string)]);
         withCv = taggedPeople.filter((p) => haveCv.has(p.id)).length;
       }

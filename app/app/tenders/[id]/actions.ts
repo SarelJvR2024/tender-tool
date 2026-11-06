@@ -558,11 +558,32 @@ export async function syncWonProjectToTeam(formData: FormData) {
     fail("Could not save the completed-project details - try again. If it keeps happening, let us know.");
   }
 
-  const [{ data: assignmentRows }, { data: tenderRow }, { data: reqRows }] = await Promise.all([
+  const [
+    { data: assignmentRows, error: asgErr },
+    { data: tenderRow, error: tenderErr },
+    { data: reqRows, error: reqErr },
+  ] = await Promise.all([
     supabase.from("tender_pack_assignments").select("position_code, confirmed_person_id").eq("tender_pack_id", tenderPackId!),
     supabase.from("tenders").select("contract_no, title").eq("id", tenderId!).maybeSingle(),
     supabase.from("tender_requirements").select("position_code, position_description").eq("tender_id", tenderId!),
   ]);
+  // Standing review, 2026-11-06: a 4th grep blind spot in the standing
+  // sweep - array/tuple-destructured Promise.all() results never match the
+  // sweep's own literal "const { data" grep (there's a "[" between "const"
+  // and "{"), so this whole shape went unchecked. assignmentRows is the one
+  // that actually gates the sync below (`confirmed = assignmentRows ?? []`
+  // filter) - a silently failed read here used to fall through to an empty
+  // list, skip the whole upsert block, and still redirect to `#won-project`
+  // with no error shown, reporting success while nothing was actually
+  // synced into the person's project history. tenderRow/reqRows only feed
+  // display text (client_and_number/descByCode), already defaulted safely
+  // (`?? []`, `|| "Tender"`) - logged, not gated.
+  if (asgErr) {
+    console.error("tender_pack_assignments select failed for won-project sync", asgErr);
+    fail("Could not load confirmed positions - try again. If it keeps happening, let us know.");
+  }
+  if (tenderErr) console.error("tenders select failed for won-project sync", tenderErr);
+  if (reqErr) console.error("tender_requirements select failed for won-project sync", reqErr);
 
   const clientAndNumber = tenderRow?.contract_no || tenderRow?.title || "Tender";
   const descByCode = new Map(
@@ -577,11 +598,19 @@ export async function syncWonProjectToTeam(formData: FormData) {
   // header for why this is needed. Scoped to rows THIS sync created
   // (source_tender_pack_id = this pack) - never another tenant's or
   // another pack's project history.
-  const { data: existingSynced } = await supabase
+  const { data: existingSynced, error: existingSyncedErr } = await supabase
     .from("projects")
     .select("id, person_id, position_code")
     .eq("company_id", companyId)
     .eq("source_tender_pack_id", tenderPackId!);
+  if (existingSyncedErr) {
+    // Safe direction only: a failed read just means no stale row is found
+    // to delete this round (staleSyncedProjectRows sees an empty existing
+    // set) - never a wrong deletion. The upsert below still runs off the
+    // already-checked `confirmed` list, so a real re-assignment still
+    // takes; self-correcting on the next sync. Logged, not gated.
+    console.error("projects select failed for won-project sync stale check", existingSyncedErr);
+  }
   const stale = staleSyncedProjectRows(confirmed, existingSynced ?? []);
   if (stale.length > 0) {
     const { error: staleErr } = await supabase.from("projects").delete().in("id", stale.map((row) => row.id));

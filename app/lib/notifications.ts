@@ -71,7 +71,13 @@ type DeadlineRow = { id: string; contract_no: string | null; description: string
 export async function getNotifications(supabase: SupabaseClient): Promise<AppNotification[]> {
   const companyFields = COMPANY_EXPIRY_FIELDS.map((f) => f.field).join(", ");
 
-  const [{ data: companyRow }, { data: heldRows }, { data: typeRows }, { data: peopleRows }, { data: tenderRows }] = await Promise.all([
+  const [
+    { data: companyRow, error: companyErr },
+    { data: heldRows, error: heldRowsErr },
+    { data: typeRows, error: typeRowsErr },
+    { data: peopleRows, error: peopleRowsErr },
+    { data: tenderRows, error: tenderRowsErr },
+  ] = await Promise.all([
     supabase.from("companies").select(companyFields).maybeSingle(),
     supabase
       .from("held_registrations")
@@ -86,6 +92,24 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
       .not("closing_date", "is", null)
       .order("closing_date", { ascending: true }),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). Real finding,
+  // fixed with a behavior change: these 5 reads used to fall through to
+  // `?? []`/null defaults on a failure, which this function's own callers
+  // cannot tell apart from a genuine "nothing expiring/closing soon" case
+  // - AppShell.tsx's own `getNotifications(supabase).catch(...)` and
+  // dashboard/page.tsx's own top-level try/catch both already exist
+  // specifically to turn an exception from this function into a visible
+  // "couldn't load"/retry state instead of a false empty bell - they were
+  // just never triggered by this bug class, because nothing here ever
+  // threw on a soft { error } failure. Throwing now (after logging) routes
+  // straight into that already-built handling on both callers, rather than
+  // changing this function's return shape and touching both call sites.
+  const err = companyErr ?? heldRowsErr ?? typeRowsErr ?? peopleRowsErr ?? tenderRowsErr;
+  if (err) {
+    console.error("a notifications read failed", { companyErr, heldRowsErr, typeRowsErr, peopleRowsErr, tenderRowsErr });
+    throw new Error(`getNotifications: a read failed (${err.message})`);
+  }
 
   const typeLabelById = new Map(((typeRows ?? []) as { id: string; label: string }[]).map((t) => [t.id, t.label]));
 

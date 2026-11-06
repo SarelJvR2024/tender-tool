@@ -67,15 +67,42 @@ export function byUrgency(a: DocumentExpiryRow, b: DocumentExpiryRow): number {
 type HeldRegistrationRow = { id: string; expiry_date: string | null; registration_type_id: string };
 type PersonExpiryRow = { id: string; name: string | null; ecsa_expiry: string | null; sacpcmp_expiry: string | null };
 
-export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Promise<DocumentExpiryRow[]> {
+/**
+ * Standing review, 2026-11-06: 4th sweep blind spot - array/tuple
+ * Promise.all destructures never match the sweep's own "const { data"
+ * grep (a "[" sits between "const" and "{"), so these 4 reads went
+ * unchecked by every prior pass. Real finding, fixed with a behavior
+ * change (not just logging): every caller of this function used
+ * `rows.length === 0` to mean "nothing tracked yet, so treat it as 100%
+ * compliant" - `vaultCompliancePct` on the dashboard and the vault page's
+ * own "Every tracked document is valid" message both took a FAILED read
+ * (which also makes rows empty) for that exact same genuine-empty case,
+ * so a transient Supabase failure here used to silently render a false
+ * "all clear"/"100% compliant" on the one widget whose whole job is
+ * catching real compliance gaps before a bid - the dangerous direction
+ * this sweep has been looking for, not just a logging gap. Now returns
+ * `error` alongside `rows` so each caller can tell "no documents yet"
+ * from "couldn't check" and show that honestly instead of a false pass.
+ */
+export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Promise<{ rows: DocumentExpiryRow[]; error: boolean }> {
   const companyFields = [...COMPANY_EXPIRY_FIELDS.map((f) => f.field), ...COMPANY_EXPIRY_FIELDS.map((f) => f.pathField)].join(", ");
 
-  const [{ data: companyRow }, { data: heldRows }, { data: typeRows }, { data: peopleRows }] = await Promise.all([
+  const [
+    { data: companyRow, error: companyErr },
+    { data: heldRows, error: heldRowsErr },
+    { data: typeRows, error: typeRowsErr },
+    { data: peopleRows, error: peopleRowsErr },
+  ] = await Promise.all([
     supabase.from("companies").select(companyFields).maybeSingle(),
     supabase.from("held_registrations").select("id, expiry_date, registration_type_id"),
     supabase.from("registration_types").select("id, label"),
     supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry"),
   ]);
+  if (companyErr) console.error("companies select failed (document expiry overview)", companyErr);
+  if (heldRowsErr) console.error("held_registrations select failed (document expiry overview)", heldRowsErr);
+  if (typeRowsErr) console.error("registration_types select failed (document expiry overview)", typeRowsErr);
+  if (peopleRowsErr) console.error("people select failed (document expiry overview)", peopleRowsErr);
+  const hadError = Boolean(companyErr) || Boolean(heldRowsErr) || Boolean(typeRowsErr) || Boolean(peopleRowsErr);
   const typeLabelById = new Map(((typeRows ?? []) as { id: string; label: string }[]).map((t) => [t.id, t.label]));
 
   const rows: DocumentExpiryRow[] = [];
@@ -123,5 +150,5 @@ export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Prom
     }
   }
 
-  return rows.sort(byUrgency);
+  return { rows: rows.sort(byUrgency), error: hadError };
 }

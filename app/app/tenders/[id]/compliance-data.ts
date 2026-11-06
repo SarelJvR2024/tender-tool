@@ -49,15 +49,15 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   if (family !== SANRAL_CONVENTIONAL_FAMILY) return { mapped: false as const, family };
 
   const [
-    { data: company },
-    { data: pack },
-    { data: requirementRows },
-    { data: financial },
-    { data: briefing },
-    { data: roleRows },
-    { data: tagRows },
-    { data: officeRows },
-    { data: letterRows },
+    { data: company, error: companyErr },
+    { data: pack, error: packErr },
+    { data: requirementRows, error: requirementRowsErr },
+    { data: financial, error: financialErr },
+    { data: briefing, error: briefingErr },
+    { data: roleRows, error: roleRowsErr },
+    { data: tagRows, error: tagRowsErr },
+    { data: officeRows, error: officeRowsErr },
+    { data: letterRows, error: letterRowsErr },
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -75,6 +75,38 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     // 0037: the company's own letter of authority (what the pack binds in as A2).
     supabase.from("company_document_templates").select("mode").eq("document_type", "authority_to_sign"),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot - array/tuple
+  // Promise.all destructures never match the sweep's own literal
+  // "const { data" grep (a "[" sits between "const" and "{"), so this whole
+  // 9-way read went unchecked by every prior pass. Traced each against the
+  // real gate this feeds (requestSubmissionPack()'s own packReadiness()
+  // check, actions.ts:139-142): a failed requirementRows read here used to
+  // make positionCodes fall back to assignments-only, which could leave an
+  // unconfirmed required position entirely out of positionRows -
+  // unfilledPositions silently empty for it, the TS-side gate wrongly
+  // passing. NOT actually exploitable: engine/pack/process_pack_jobs.py's
+  // own gate (~line 505) re-derives `required` straight from the uploaded
+  // Technical workbook's SETUP sheet and `unassigned` from a fresh
+  // tender_pack_assignments read, independent of this TS gate entirely
+  // (same defense-in-depth already documented for confirmPositionPerson()
+  // in the immediately-preceding pass) - any bypass here just means the
+  // job gets queued and then fails loudly at the engine with "No confirmed
+  // key person for position(s) ..." instead of being caught earlier,
+  // self-correcting on retry. The rest default safe-direction too: a
+  // failed `company` read zeroes the vault, which sanralConventionalDocumentChecks()
+  // reads as non-compliant (Fix, not a false Verify); `financial`/`briefing`/
+  // `letterRows` failures default to "not complete"/missing (same
+  // direction). Logged, not gated - this file's real enforcement already
+  // lives one layer down, at the engine.
+  if (companyErr) console.error("companies select failed (tender compliance)", companyErr);
+  if (packErr) console.error("tender_packs select failed (tender compliance)", packErr);
+  if (requirementRowsErr) console.error("tender_requirements select failed (tender compliance)", requirementRowsErr);
+  if (financialErr) console.error("financial_captures select failed (tender compliance)", financialErr);
+  if (briefingErr) console.error("tender_tasks select failed (tender compliance)", briefingErr);
+  if (roleRowsErr) console.error("tender_roles select failed (tender compliance)", roleRowsErr);
+  if (tagRowsErr) console.error("person_role_eligibility select failed (tender compliance)", tagRowsErr);
+  if (officeRowsErr) console.error("company_offices select failed (tender compliance)", officeRowsErr);
+  if (letterRowsErr) console.error("company_document_templates select failed (tender compliance)", letterRowsErr);
   const roles = (roleRows ?? []) as TenderRole[];
   const roleTags = (tagRows ?? []) as RoleTag[];
   const offices = (officeRows ?? []) as CompanyOffice[];
@@ -83,7 +115,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   let provenance: { field_key: string; status: string }[] = [];
   let assignments: Assignment[] = [];
   if (packId) {
-    const [{ data: prov }, { data: asg }] = await Promise.all([
+    const [{ data: prov, error: provErr }, { data: asg, error: asgErr }] = await Promise.all([
       supabase.from("field_provenance").select("field_key, status").eq("tender_pack_id", packId),
       supabase
         .from("tender_pack_assignments")
@@ -91,6 +123,8 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
         .eq("tender_pack_id", packId)
         .order("position_code", { ascending: true }),
     ]);
+    if (provErr) console.error("field_provenance select failed (tender compliance)", provErr);
+    if (asgErr) console.error("tender_pack_assignments select failed (tender compliance)", asgErr);
     provenance = (prov ?? []) as typeof provenance;
     assignments = (asg ?? []) as Assignment[];
   }
@@ -112,13 +146,22 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   let cvUploads: CvUpload[] = [];
   let generatedCvs: GeneratedCvRow[] = [];
   if (personIds.length > 0) {
-    const [{ data: ppl }, { data: prj }, { data: cvs }, { data: gen }] = await Promise.all([
+    const [
+      { data: ppl, error: pplErr },
+      { data: prj, error: prjErr },
+      { data: cvs, error: cvsErr },
+      { data: gen, error: genErr },
+    ] = await Promise.all([
       // conditional registrations (0040 columns, 0050 catalog) are read only for a position whose requirement names the body
       supabase.from("people").select(`id, name, ecsa_level, ecsa_number, initial_graduated, sacpcmp_number, sacpcmp_expiry, ${CONDITIONAL_REGISTRATION_COLUMNS}` as const).in("id", personIds),
       supabase.from("projects").select("person_id, client_type, project_type, position_code, start_date, end_date").in("person_id", personIds),
       supabase.from("cv_uploads").select("person_id, mode, original_filename, created_at").in("person_id", personIds).order("created_at", { ascending: false }),
       supabase.from("generated_cvs").select("position_code, status").eq("tender_id", tenderId),
     ]);
+    if (pplErr) console.error("people select failed (tender compliance)", pplErr);
+    if (prjErr) console.error("projects select failed (tender compliance)", prjErr);
+    if (cvsErr) console.error("cv_uploads select failed (tender compliance)", cvsErr);
+    if (genErr) console.error("generated_cvs select failed (tender compliance)", genErr);
     // 0050 catalog registrations (SACQSP, SACAP, ...) of the same people
     const held = await loadHeldCatalogRegistrations(supabase, personIds);
     people = ((ppl ?? []) as PersonRow[]).map((p) => ({ ...p, held: held.filter((h) => h.person_id === p.id) }));

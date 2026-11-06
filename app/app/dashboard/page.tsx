@@ -165,7 +165,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow, error: companyError }, { summary: savingsSummary, error: savingsSummaryError }, documentExpiryRows, { data: peopleRows }] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities, error: opportunitiesError }, { data: companyRow, error: companyError }, { summary: savingsSummary, error: savingsSummaryError }, { rows: documentExpiryRows, error: documentExpiryError }, { data: peopleRows, error: peopleRowsError }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -203,6 +203,19 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
 
   if (error) console.error("tenders select failed for dashboard", error);
   if (companyError) console.error("companies select failed for dashboard", companyError);
+  // Standing review, 2026-11-06: 4th sweep blind spot - a single long
+  // array-destructure line like this one hides each individual `{ data: x }`
+  // member from the sweep's own "const { data" grep too, not only the
+  // array-bracket case already fixed elsewhere this pass: "const" appears
+  // once, at the very start of the line, never immediately before most of
+  // these object patterns. opportunities defaults to an empty Discovery
+  // widget list (cosmetic); peopleRows feeds peopleCount/hasSignatoryCapacity
+  // below, which already default to 0/false - "not done yet" on the setup
+  // checklist, the safe direction, same as the dashboard's own companies-
+  // read precedent (3db3c87). Logged, not gated.
+  if (opportunitiesError) console.error("discovered_opportunities select failed for dashboard", opportunitiesError);
+  if (peopleRowsError) console.error("people select failed for dashboard", peopleRowsError);
+  if (documentExpiryError) console.error("document expiry overview load failed for dashboard", documentExpiryError);
 
   const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
@@ -342,7 +355,14 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   const personExpiryRows = documentExpiryRows.filter((r) => r.id.startsWith("person:"));
   const vaultValidCount = vaultRows.filter((r) => r.status === "valid").length;
   const vaultNeedsAttention = vaultRows.length - vaultValidCount;
-  const vaultCompliancePct = vaultRows.length === 0 ? 100 : Math.round((vaultValidCount / vaultRows.length) * 100);
+  // Standing review, 2026-11-06: real finding, fixed with a behavior
+  // change. `vaultRows.length === 0` used to mean "100% compliant" with no
+  // way to tell a genuine empty vault from loadDocumentExpiryOverview()'s
+  // own read having just failed (documentExpiryError) - the exact same
+  // zero-rows-means-either-thing shape silently masking a real problem,
+  // just one call further out. A failed load now shows as "?" rather than
+  // a false "100% compliant".
+  const vaultCompliancePct = documentExpiryError ? null : vaultRows.length === 0 ? 100 : Math.round((vaultValidCount / vaultRows.length) * 100);
 
   return (
     <AppShell>
@@ -391,14 +411,20 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
               <h2 className="font-display text-sm font-medium text-foreground">Vault &amp; compliance health</h2>
               <span
                 className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                  vaultNeedsAttention === 0 ? "border-success/20 bg-success/10 text-success" : "border-warning/20 bg-warning/10 text-warning"
+                  documentExpiryError
+                    ? "border-destructive/20 bg-destructive/10 text-destructive"
+                    : vaultNeedsAttention === 0
+                      ? "border-success/20 bg-success/10 text-success"
+                      : "border-warning/20 bg-warning/10 text-warning"
                 }`}
               >
-                {vaultCompliancePct}% compliant{vaultNeedsAttention > 0 ? ` · ${vaultNeedsAttention} need${vaultNeedsAttention === 1 ? "s" : ""} attention` : ""}
+                {documentExpiryError
+                  ? "Couldn't check right now"
+                  : `${vaultCompliancePct}% compliant${vaultNeedsAttention > 0 ? ` · ${vaultNeedsAttention} need${vaultNeedsAttention === 1 ? "s" : ""} attention` : ""}`}
               </span>
             </div>
             {vaultRows.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No compliance documents tracked yet.</div>
+              <div className="text-xs text-muted-foreground">{documentExpiryError ? "Couldn't load compliance documents - try refreshing." : "No compliance documents tracked yet."}</div>
             ) : (
               <div className="flex flex-col">
                 {vaultRows.map((r) => (

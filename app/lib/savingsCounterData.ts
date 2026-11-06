@@ -119,10 +119,19 @@ export async function fetchTenderSavingsBreakdown(
   supabase: SupabaseClient,
   tenderId: string,
 ): Promise<{ hoursSaved: number; randSaved: number; steps: CountedStepBreakdown; usingDefaultBaseline: boolean }> {
-  const [{ data: company }, { data: rows }] = await Promise.all([
+  const [{ data: company, error: companyErr }, { data: rows, error: rowsErr }] = await Promise.all([
     supabase.from("companies").select("savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
     supabase.from("savings_counted_steps").select("step_key, hours").eq("tender_id", tenderId),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data") - this function
+  // (fetchTenderSavingsBreakdown, a sibling of fetchSavingsCounterSummary
+  // above, already fixed for the same bug earlier today) was missed by
+  // that same-file fix because it's a separate function. A failed `rows`
+  // read understates this tender's own "how we worked this out" panel
+  // (fewer counted steps shown, never more) - logged, not gated.
+  if (companyErr) console.error("companies select failed (tender savings breakdown)", companyErr);
+  if (rowsErr) console.error("savings_counted_steps select failed (tender savings breakdown)", rowsErr);
 
   // Spec v3 §18: same resolveBaseline() the Home/Analytics summary above
   // uses, so a company with no confirmed baseline sees the same "default,

@@ -145,11 +145,24 @@ export async function deletePerson(formData: FormData) {
   // happens below), but don't destroy anything yet. Registration
   // certificates this person held (0050 held_registrations, company-
   // documents bucket): the rows cascade with the person, the files don't.
-  const [{ data: uploads }, { data: generated }, { data: regs }] = await Promise.all([
+  const [
+    { data: uploads, error: uploadsErr },
+    { data: generated, error: generatedErr },
+    { data: regs, error: regsErr },
+  ] = await Promise.all([
     supabase.from("cv_uploads").select("storage_path").eq("person_id", id).eq("company_id", companyId),
     supabase.from("generated_cvs").select("storage_path_docx, storage_path_pdf").eq("person_id", id).eq("company_id", companyId),
     supabase.from("held_registrations").select("storage_path").eq("person_id", id).eq("company_id", companyId),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). Same safe-
+  // direction shape already established elsewhere in this sweep for a
+  // storage_path-before-delete read: a failed read here just means fewer
+  // files get cleaned up below (a storage leak), never destroys a still-
+  // referenced file. Logged, not gated.
+  if (uploadsErr) console.error("cv_uploads select failed (deletePerson storage cleanup)", uploadsErr);
+  if (generatedErr) console.error("generated_cvs select failed (deletePerson storage cleanup)", generatedErr);
+  if (regsErr) console.error("held_registrations select failed (deletePerson storage cleanup)", regsErr);
   const paths = new Set<string>();
   for (const u of uploads ?? []) if (u.storage_path) paths.add(u.storage_path as string);
   for (const g of generated ?? []) {

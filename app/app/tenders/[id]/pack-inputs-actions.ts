@@ -105,12 +105,26 @@ export async function confirmPositionPerson(
   // so pack_selections.yaml (process_pack_jobs.py) says "suggested X,
   // confirmed Y" honestly. Recomputed here from the stored ranking - the same
   // suggestForPosition() the card uses - never taken from the browser.
-  const [{ data: current }, { data: req }, { data: tags }, { data: ppl }] = await Promise.all([
+  const [
+    { data: current, error: currentErr },
+    { data: req, error: reqErr },
+    { data: tags, error: tagsErr },
+    { data: ppl, error: pplErr },
+  ] = await Promise.all([
     supabase.from("tender_pack_assignments").select("candidate_scores").eq("tender_pack_id", tenderPackId).eq("position_code", positionCode).maybeSingle(),
     supabase.from("tender_requirements").select("position_description").eq("tender_id", tenderId).eq("position_code", positionCode).eq("is_alternate", false).maybeSingle(),
     supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
     supabase.from("people").select("id").eq("company_id", companyId),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot - array/tuple
+  // Promise.all destructures never match "const { data" either (a "["
+  // sits between "const" and "{"). Only feeds `sugg` (a convenience
+  // suggestion, never the confirmed write) - same self-correcting shape
+  // already traced for this function's own upsert below. Logged.
+  if (currentErr) console.error("tender_pack_assignments select failed for confirmPositionPerson suggestion", currentErr);
+  if (reqErr) console.error("tender_requirements select failed for confirmPositionPerson suggestion", reqErr);
+  if (tagsErr) console.error("person_role_eligibility select failed for confirmPositionPerson suggestion", tagsErr);
+  if (pplErr) console.error("people select failed for confirmPositionPerson suggestion", pplErr);
   const sugg = suggestForPosition({
     positionCode,
     description: (req?.position_description as string | null | undefined) ?? null,
@@ -144,10 +158,14 @@ export async function confirmPositionPerson(
     );
   if (assignError) console.error("tender_pack_assignments upsert failed for confirmPositionPerson", assignError);
 
-  const [{ data: reqRows }, { data: asgRows }] = await Promise.all([
+  const [{ data: reqRows, error: reqRowsErr }, { data: asgRows, error: asgRowsErr }] = await Promise.all([
     supabase.from("tender_requirements").select("position_code").eq("tender_id", tenderId).eq("is_alternate", false),
     supabase.from("tender_pack_assignments").select("position_code, confirmed_person_id").eq("tender_pack_id", tenderPackId),
   ]);
+  // Same 4th blind spot, same self-correcting shape as above - only feeds
+  // allConfirmed/tender_packs.status, display-only (comment below). Logged.
+  if (reqRowsErr) console.error("tender_requirements select failed for confirmPositionPerson allConfirmed", reqRowsErr);
+  if (asgRowsErr) console.error("tender_pack_assignments select failed for confirmPositionPerson allConfirmed", asgRowsErr);
   const required = new Set([
     ...(reqRows ?? []).map((r) => r.position_code as string),
     ...(asgRows ?? []).map((a) => a.position_code as string),

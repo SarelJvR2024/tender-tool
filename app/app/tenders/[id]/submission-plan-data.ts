@@ -55,10 +55,16 @@ function summarize(steps: PlanStep[]): SubmissionPlanSnapshot["summary"] {
 export const loadSubmissionPlan = cache(async (tenderId: string): Promise<SubmissionPlanSnapshot> => {
   const supabase = await createClient();
 
-  const [{ data: tender }, { data: ownPack }] = await Promise.all([
+  const [{ data: tender, error: tenderErr }, { data: ownPack, error: ownPackErr }] = await Promise.all([
     supabase.from("tenders").select("document_requirements, closing_date, briefing_date").eq("id", tenderId).maybeSingle(),
     supabase.from("tender_packs").select("id, company_id, document_requirements").eq("tender_id", tenderId).maybeSingle(),
   ]);
+  // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+  // Promise.all destructures never match "const { data"). Display-only
+  // (Disqualification guard/submission-plan-view read this for a UI
+  // banner, never a server-side submit block) - safe direction, logged.
+  if (tenderErr) console.error("tenders select failed (submission plan)", tenderErr);
+  if (ownPackErr) console.error("tender_packs select failed (submission plan)", ownPackErr);
   const manifest = ((ownPack?.document_requirements ?? tender?.document_requirements) as RequirementManifest | null) ?? null;
   if (!manifest || !tender) {
     return { mapped: false, steps: [], summary: EMPTY_SUMMARY, timeline: [] };
@@ -78,13 +84,24 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
   for (const f of manifest.forms) steps.push(formStep(f, manifest.form_suite));
   for (const b of manifest.buyer_forms ?? []) steps.push(buyerFormStep(b));
 
-  const [{ data: companyRow }, { data: answerRows }, { data: peopleRows }, { data: roleCatalogRows }, { data: tagRows }] = await Promise.all([
+  const [
+    { data: companyRow, error: companyRowErr },
+    { data: answerRows, error: answerRowsErr },
+    { data: peopleRows, error: peopleRowsErr },
+    { data: roleCatalogRows, error: roleCatalogRowsErr },
+    { data: tagRows, error: tagRowsErr },
+  ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
     supabase.from("people").select("id, name, signatory_capacity").order("name"),
     supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
     supabase.from("person_role_eligibility").select("person_id, role_code"),
   ]);
+  if (companyRowErr) console.error("companies select failed (submission plan)", companyRowErr);
+  if (answerRowsErr) console.error("tender_answers select failed (submission plan)", answerRowsErr);
+  if (peopleRowsErr) console.error("people select failed (submission plan)", peopleRowsErr);
+  if (roleCatalogRowsErr) console.error("tender_roles select failed (submission plan)", roleCatalogRowsErr);
+  if (tagRowsErr) console.error("person_role_eligibility select failed (submission plan)", tagRowsErr);
   const company = (companyRow as unknown as GeneralCompany | null) ?? null;
   const answers = (answerRows ?? []) as TenderAnswer[];
   const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null }[];
@@ -160,10 +177,12 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
         .filter((p): p is { id: string; name: string; signatory_capacity: string | null } => !!p);
       let withCv = 0;
       if (taggedIds.length > 0) {
-        const [{ data: gen }, { data: up }] = await Promise.all([
+        const [{ data: gen, error: genErr }, { data: up, error: upErr }] = await Promise.all([
           supabase.from("generated_cvs").select("person_id").in("person_id", taggedIds).eq("status", "ready"),
           supabase.from("cv_uploads").select("person_id").in("person_id", taggedIds),
         ]);
+        if (genErr) console.error("generated_cvs select failed (submission plan roles)", genErr);
+        if (upErr) console.error("cv_uploads select failed (submission plan roles)", upErr);
         const haveCv = new Set([...(gen ?? []).map((g) => g.person_id as string), ...(up ?? []).map((u) => u.person_id as string)]);
         withCv = taggedPeople.filter((p) => haveCv.has(p.id)).length;
       }

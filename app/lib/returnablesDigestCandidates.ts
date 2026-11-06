@@ -135,10 +135,17 @@ export async function returnablesMissingMandatoryItems(
   companyId: string,
 ): Promise<ReturnablesMissingResult> {
   if (tender.family === SANRAL_CONVENTIONAL_FAMILY) {
-    const [{ data: company }, { data: pack }] = await Promise.all([
+    const [{ data: company, error: companyErr }, { data: pack, error: packErr }] = await Promise.all([
       supabase.from("companies").select(COMPANY_VAULT_COLUMNS).eq("id", companyId).maybeSingle(),
       supabase.from("tender_packs").select("id").eq("tender_id", tender.id).eq("company_id", companyId).maybeSingle(),
     ]);
+    // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
+    // Promise.all destructures never match "const { data"). Safe direction
+    // already: a failed company read computes sanralConventionalDocumentChecks()
+    // off a null vault, which flags MORE items missing, never fewer - the
+    // digest over-reports rather than silently clearing a real gap. Logged.
+    if (companyErr) console.error(`companies select failed (returnables digest, company ${companyId})`, companyErr);
+    if (packErr) console.error(`tender_packs select failed (returnables digest, tender ${tender.id})`, packErr);
     const packId = (pack?.id as string | undefined) ?? null;
     const provenance = packId
       ? (((await supabase.from("field_provenance").select("field_key, status").eq("tender_pack_id", packId)).data ?? []) as { field_key: string; status: string }[])
@@ -158,11 +165,23 @@ export async function returnablesMissingMandatoryItems(
     return { mapped: false, missingLabels: [], workspaceAnchor: "general-documents" };
   }
 
-  const [{ data: company }, { data: pack }, { data: answerRows }] = await Promise.all([
+  const [
+    { data: company, error: companyErr },
+    { data: pack, error: packErr },
+    { data: answerRows, error: answerRowsErr },
+  ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).eq("id", companyId).maybeSingle(),
     supabase.from("tender_packs").select("document_requirements").eq("tender_id", tender.id).eq("company_id", companyId).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tender.id).eq("company_id", companyId),
   ]);
+  // Same 4th blind spot as above. A failed `pack` read falls back to the
+  // shared `tender.document_requirements` manifest (still a real manifest,
+  // not none); a failed `company`/`answerRows` read makes checkReturnable()
+  // see fewer answers/no vault - same over-report-not-under-report
+  // direction. Logged.
+  if (companyErr) console.error(`companies select failed (returnables digest general, company ${companyId})`, companyErr);
+  if (packErr) console.error(`tender_packs select failed (returnables digest general, tender ${tender.id})`, packErr);
+  if (answerRowsErr) console.error(`tender_answers select failed (returnables digest general, tender ${tender.id})`, answerRowsErr);
   // Own private-document reading takes priority over the shared manifest,
   // same resolution rule general-workspace.tsx itself uses.
   const manifest = ((pack?.document_requirements ?? tender.document_requirements) as RequirementManifest | null) ?? null;
