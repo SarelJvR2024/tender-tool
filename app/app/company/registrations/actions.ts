@@ -57,8 +57,14 @@ export async function saveHeldRegistration(formData: FormData) {
 
   let heldId = id;
   if (id) {
-    const { error } = await supabase.from("held_registrations").update(row).eq("id", id);
+    // .select().maybeSingle() so a zero-row match (RLS-blocked - deleted
+    // elsewhere, or a foreign id) is distinguishable from a real update:
+    // PostgREST returns {error: null} for both, so `error` alone can't
+    // tell them apart, and without this check the code below would go on
+    // to upload a certificate file with nothing left to attach it to.
+    const { data, error } = await supabase.from("held_registrations").update(row).eq("id", id).select("id").maybeSingle();
     if (error) fail(error.message, anchor);
+    if (!data) fail("That registration is no longer there - it may have been removed. Refresh and try again.", "#add");
   } else {
     const { data, error } = await supabase.from("held_registrations").insert(row).select("id").single();
     if (error) fail(error.message, anchor);
