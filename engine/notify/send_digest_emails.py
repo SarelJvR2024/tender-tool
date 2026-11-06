@@ -61,6 +61,10 @@ import urllib.error
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import system_alerts  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "discovery"))
+import company_profiles  # noqa: E402
+import discovery_downgrades  # noqa: E402
+import watch_tender_updates  # noqa: E402
 
 RESEND_ENDPOINT = "https://api.resend.com/emails"
 
@@ -308,6 +312,67 @@ def send_one(api_key, from_addr, digest, dry_run=False):
             return "failed", f"Could not send to {email!r}: {type(e).__name__}: {e}"
 
 
+def mark_delivered_items(sent_digests):
+    """Marks every re-assessed-tender downgrade and tender update that rode
+    along (daily_digest.py's own `_delivered_downgrades`/
+    `_delivered_tender_updates` keys) in a digest THIS RUN CONFIRMED SENT -
+    never a digest that was skipped, failed, or merely built. This is the
+    real fix for Finding, 2026-11-06: daily_digest.py used to mark both as
+    digested unconditionally at build time, before this script had even
+    tried to send anything - the same "claimed a one-time token before the
+    send was confirmed" shape already fixed for every other notification
+    type in this codebase. Moving the write here, gated on an actual `sent`
+    status, closes it for these two as well.
+
+    Never raises: a missing/unreachable Supabase credential here means the
+    marks are skipped, not that sending fails - the safe direction is "carry
+    it again tomorrow" (a harmless duplicate line in an already-opted-in
+    person's digest), never the silent, permanent loss the old call site
+    risked. One summary alert on failure, not one per item (same "don't
+    flood Sarel" rule the rest of this module already follows)."""
+    downgrade_ids = {oid for d in sent_digests for oid in d.get("_delivered_downgrades") or []}
+    update_keys = {(u["company_id"], u["watched_document_id"])
+                   for d in sent_digests for u in d.get("_delivered_tender_updates") or []}
+    if not downgrade_ids and not update_keys:
+        return
+
+    client = company_profiles.RestClient.from_env()
+    if client is None:
+        print(f"NOTE: {len(downgrade_ids)} re-assessed tender(s) and {len(update_keys)} tender update(s) were "
+              "sent today but could not be marked as digested - NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY "
+              "aren't set in this step. They'll be carried again in tomorrow's digest (a harmless duplicate), "
+              "never silently lost.")
+        system_alerts.record(
+            "digest_send",
+            f"Sent {len(sent_digests)} digest(s) but could not mark {len(downgrade_ids)} re-assessed tender(s)/"
+            f"{len(update_keys)} tender update(s) as digested - Supabase credentials are not set for this step. "
+            "They will be carried again tomorrow (safe), but this should be fixed so marking actually happens.",
+            "warning",
+        )
+        return
+
+    if downgrade_ids:
+        try:
+            discovery_downgrades.mark_digested(client, [{"opportunity_id": oid} for oid in downgrade_ids])
+            print(f"  marked {len(downgrade_ids)} re-assessed tender(s) as digested (confirmed sent today)")
+        except Exception as e:
+            print(f"WARNING: could not mark {len(downgrade_ids)} re-assessed tender(s) as digested ({e}) - "
+                  "they will be carried again tomorrow.")
+            system_alerts.record("digest_send", f"Could not mark {len(downgrade_ids)} re-assessed tender(s) "
+                                 f"as digested after a confirmed send: {type(e).__name__}: {e}", "warning")
+
+    if update_keys:
+        try:
+            watch_tender_updates.mark_digested(
+                client, [{"company_id": cid, "watched_document_id": wid} for cid, wid in update_keys])
+            print(f"  marked {len(update_keys)} tender update(s) as digested (confirmed sent today)")
+        except Exception as e:
+            print(f"WARNING: could not mark {len(update_keys)} tender update(s) as digested ({e}) - "
+                  "they will be carried again tomorrow.")
+            system_alerts.record("digest_send", f"Could not mark {len(update_keys)} tender update(s) "
+                                 f"as digested after a confirmed send: {type(e).__name__}: {e}", "warning")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("digest_json", help="the --out file daily_digest.py wrote")
@@ -339,6 +404,7 @@ def main():
 
     results = {"sent": 0, "skipped_empty": 0, "skipped_no_email": 0, "failed": 0, "dry_run": 0}
     failures = []
+    sent_digests = []  # only digests this run actually confirmed sent - see mark_delivered_items() below
     for d in digests:
         # send_one()'s own try/except only guards the actual Resend call -
         # a malformed entry (e.g. no "person" key at all, from a partial/
@@ -352,6 +418,8 @@ def main():
             print(f"  {status:<16} {label:<28} {detail}")
             if status == "failed":
                 failures.append(detail)
+            elif status == "sent":
+                sent_digests.append(d)
         except Exception as e:
             results["failed"] += 1
             print(f"  failed           (unreadable digest entry)      {type(e).__name__}: {e}")
@@ -369,6 +437,9 @@ def main():
             f"{len(failures)} of {len(digests)} daily digest email(s) failed to send:\n" + "\n".join(failures[:20]),
             "error",
         )
+
+    if not args.dry_run:
+        mark_delivered_items(sent_digests)
 
 
 if __name__ == "__main__":

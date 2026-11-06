@@ -449,6 +449,117 @@ def test_main_isolates_a_malformed_digest_entry():
             system_alerts.set_sink(None)
 
 
+# --- mark_delivered_items(): the Finding 2026-11-06 fix - a re-assessed-
+# tender downgrade / tender update is only marked digested once THIS run
+# actually confirms the email carrying it was sent, never at build time. ---
+
+class _FakeRestClient:
+    pass
+
+
+def test_mark_delivered_items_marks_nothing_for_a_run_with_no_sent_digests():
+    print("mark_delivered_items(): no 'sent' digests at all -> no Supabase call attempted, no crash")
+    real_from_env = sde.company_profiles.RestClient.from_env
+    calls = []
+    sde.company_profiles.RestClient.from_env = staticmethod(lambda: calls.append(1) or _FakeRestClient())
+    try:
+        sde.mark_delivered_items([])
+        check("from_env() is never even called when there's nothing to mark", calls == [], calls)
+    finally:
+        sde.company_profiles.RestClient.from_env = real_from_env
+
+
+def test_mark_delivered_items_only_marks_ids_from_confirmed_sent_digests():
+    print("mark_delivered_items(): marks exactly the ids carried by the digests it's given (the caller's job "
+          "in main() is to only pass digests with status=='sent' - this checks the marking itself is correct "
+          "and doesn't, say, re-read or guess from anywhere else)")
+    sent_only = _digest(_delivered_downgrades=["OPP-1", "OPP-2"],
+                        _delivered_tender_updates=[{"company_id": "C1", "watched_document_id": "W1"}])
+
+    real_from_env = sde.company_profiles.RestClient.from_env
+    real_dd_mark = sde.discovery_downgrades.mark_digested
+    real_wtu_mark = sde.watch_tender_updates.mark_digested
+    dd_calls, wtu_calls = [], []
+    sde.company_profiles.RestClient.from_env = staticmethod(lambda: _FakeRestClient())
+    sde.discovery_downgrades.mark_digested = lambda client, items: dd_calls.append(items)
+    sde.watch_tender_updates.mark_digested = lambda client, items: wtu_calls.append(items)
+    try:
+        sde.mark_delivered_items([sent_only])
+        check("exactly 1 call to discovery_downgrades.mark_digested", len(dd_calls) == 1, dd_calls)
+        check("both downgrade ids from the sent digest are in it, nothing extra",
+              {i["opportunity_id"] for i in dd_calls[0]} == {"OPP-1", "OPP-2"}, dd_calls)
+        check("exactly 1 call to watch_tender_updates.mark_digested", len(wtu_calls) == 1, wtu_calls)
+        check("the tender-update key from the sent digest is in it",
+              wtu_calls[0] == [{"company_id": "C1", "watched_document_id": "W1"}], wtu_calls)
+    finally:
+        sde.company_profiles.RestClient.from_env = real_from_env
+        sde.discovery_downgrades.mark_digested = real_dd_mark
+        sde.watch_tender_updates.mark_digested = real_wtu_mark
+
+
+def test_mark_delivered_items_degrades_safely_with_no_supabase_credentials():
+    print("mark_delivered_items(): no NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY available this step "
+          "-> never crashes, never marks anything, warns once via system_alerts (safe direction: carried again "
+          "tomorrow, not silently lost)")
+    sent_only = _digest(_delivered_downgrades=["OPP-1"], _delivered_tender_updates=[])
+    real_from_env = sde.company_profiles.RestClient.from_env
+    real_dd_mark = sde.discovery_downgrades.mark_digested
+    sde.company_profiles.RestClient.from_env = staticmethod(lambda: None)
+    dd_calls = []
+    sde.discovery_downgrades.mark_digested = lambda client, items: dd_calls.append(items)
+    alerts = []
+    system_alerts.set_sink(alerts.append)
+    try:
+        sde.mark_delivered_items([sent_only])
+        check("mark_digested is never reached without real credentials", dd_calls == [], dd_calls)
+        check("a warning alert explains why, for a human to act on", any(
+            a.get("p_severity") == "warning" and "credentials" in a.get("p_message", "") for a in alerts), alerts)
+    finally:
+        sde.company_profiles.RestClient.from_env = real_from_env
+        sde.discovery_downgrades.mark_digested = real_dd_mark
+        system_alerts.set_sink(None)
+
+
+def test_main_only_marks_the_digest_that_actually_sent_not_a_skipped_one():
+    print("main(): end to end - a digest with no e-mail on file (skipped_no_email) must NOT have its own "
+          "re-assessed-tender/tender-update ids marked digested, only the one that actually sent")
+    sent_entry = _digest(email="jane@example.test", new_tenders=[{"title": "x"}],
+                         _delivered_downgrades=["OPP-SENT"])
+    skipped_entry = _digest(email=None, new_tenders=[{"title": "y"}],
+                            _delivered_downgrades=["OPP-SKIPPED"])
+
+    real_urlopen = sde.urllib.request.urlopen
+    real_from_env = sde.company_profiles.RestClient.from_env
+    real_dd_mark = sde.discovery_downgrades.mark_digested
+    sde.urllib.request.urlopen = lambda req, timeout=20: _FakeResp()
+    sde.company_profiles.RestClient.from_env = staticmethod(lambda: _FakeRestClient())
+    dd_calls = []
+    sde.discovery_downgrades.mark_digested = lambda client, items: dd_calls.append(items)
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "digest.json")
+        json.dump([sent_entry, skipped_entry], open(path, "w"))
+        real_argv, real_environ = sys.argv, dict(os.environ)
+        sys.argv = ["send_digest_emails.py", path]
+        os.environ["RESEND_API_KEY"] = "test-key"
+        try:
+            sde.main()
+            check("mark_digested was called exactly once (for the batch of sent digests)", len(dd_calls) == 1, dd_calls)
+            ids = {i["opportunity_id"] for i in dd_calls[0]} if dd_calls else set()
+            check("only the SENT digest's downgrade id was marked", ids == {"OPP-SENT"}, ids)
+            check("the skipped digest's own downgrade id was NOT marked (carried again tomorrow instead)",
+                  "OPP-SKIPPED" not in ids, ids)
+        except SystemExit:
+            check("main() did not exit early", False)
+        finally:
+            sys.argv = real_argv
+            os.environ.clear()
+            os.environ.update(real_environ)
+            sde.urllib.request.urlopen = real_urlopen
+            sde.company_profiles.RestClient.from_env = real_from_env
+            sde.discovery_downgrades.mark_digested = real_dd_mark
+
+
 def main():
     test_section_count_and_has_content()
     test_item_date_picks_first_present_key()
@@ -467,6 +578,10 @@ def main():
     test_send_one_handles_a_retry_after_http_date_not_just_seconds()
     test_send_one_reports_failed_on_a_permanent_http_error()
     test_main_isolates_a_malformed_digest_entry()
+    test_mark_delivered_items_marks_nothing_for_a_run_with_no_sent_digests()
+    test_mark_delivered_items_only_marks_ids_from_confirmed_sent_digests()
+    test_mark_delivered_items_degrades_safely_with_no_supabase_credentials()
+    test_main_only_marks_the_digest_that_actually_sent_not_a_skipped_one()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

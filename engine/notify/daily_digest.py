@@ -636,6 +636,16 @@ def build_digest_for_person(person, signals):
                                         "most_urgent": items[0].get("urgency") if items else None}
         else:
             digest["tender_updates"] = items
+        # Tracked regardless of role (even the viewer summary above, which
+        # drops the raw ids) so main() can defer marking these as digested
+        # until send_digest_emails.py confirms this exact digest was
+        # actually sent - see that function's own call site for why this
+        # moved out of this file entirely (Finding, 2026-11-06: this used to
+        # be marked unconditionally here, at BUILD time, before any email
+        # had even been attempted).
+        if items:
+            digest.setdefault("_delivered_tender_updates", []).extend(
+                {"company_id": i["company_id"], "watched_document_id": i["watched_document_id"]} for i in items)
 
     if "listing_changes" in visible:
         items = signals.get("listing_changes") or []
@@ -654,6 +664,10 @@ def build_digest_for_person(person, signals):
                                                 "pursuing_count": sum(1 for i in items if i.get("pursuing"))}
             else:
                 digest["reassessed_tenders"] = items
+            # Tracked so main() can leave it in the exported JSON for
+            # send_digest_emails.py to mark as digested only AFTER this
+            # specific digest is confirmed sent - see that key's own
+            # fuller comment on the tender_updates section above.
             digest.setdefault("_delivered_downgrades", []).extend(i["opportunity_id"] for i in items)
 
     return digest
@@ -818,7 +832,7 @@ def main():
              + save_readiness_seen_db(client, readiness_seen, readiness_loaded, owners))
         print(f"  Seen stores: deadline_reminders_seen ({DIGEST_CONSUMER}) + {READINESS_TABLE} - {n} row(s) written")
 
-    digests, totals, delivered_downgrades = [], {}, set()
+    digests, totals = [], {}
     for p in roster:
         # One bad roster entry (a malformed/corrupted row - missing a key
         # signals() or build_digest_for_person() assumes) must not cost
@@ -835,7 +849,18 @@ def main():
             for k, v in signals.items():
                 totals.setdefault(k, {})[ckey] = len(v)
             d = build_digest_for_person(p, signals)
-            delivered_downgrades.update(d.pop("_delivered_downgrades", []))
+            # _delivered_downgrades/_delivered_tender_updates (if present)
+            # are deliberately NOT popped here and NOT acted on in this
+            # script at all - see the finding below for why marking these
+            # as digested at build time, before any email is even
+            # attempted, is exactly the "claimed a one-time token before
+            # confirming the batched send" bug class this codebase has
+            # already fixed for every OTHER notification type (pack_ready,
+            # deadline reminders, operational alerts, returnables/
+            # compliance/discovered-tenders/scout-alert digests). They ride
+            # along in the --out JSON purely as data for
+            # send_digest_emails.py to act on once it knows which digests
+            # actually sent.
             digests.append(d)
         except Exception as e:
             label = p.get("email") or p.get("user_id") or "(unidentified roster entry)"
@@ -857,26 +882,28 @@ def main():
           f"{total('listing_changes')} listing change(s) (cancellations, date moves) on tenders in the feed, "
           f"{total('reassessed_tenders')} re-assessed tender(s) no longer as good a fit.")
 
-    # Each update is carried by one digest only: mark the ones that went to a
-    # roster company as digested (the watch already alerted on them).
-    if updates_client is not None:
-        roster_companies = {p["company_id"] for p in roster}
-        delivered = [u for u in tender_updates if u["company_id"] in roster_companies]
-        try:
-            watch_tender_updates.mark_digested(updates_client, delivered)
-        except Exception as e:
-            print(f"WARNING: could not mark {len(delivered)} tender update(s) as digested ({e}) - "
-                  "they will be carried again tomorrow.")
-
-    # Each downgrade is carried once: only the ones that reached at least one
-    # person (a plain-feed downgrade in a company with no full_cycle/viewer
-    # member stays pending - it is still flagged on the Discovery card).
-    if mode == "live" and delivered_downgrades:
-        try:
-            discovery_downgrades.mark_digested(client, [i for i in reassessed if i["opportunity_id"] in delivered_downgrades])
-        except Exception as e:
-            print(f"WARNING: could not mark {len(delivered_downgrades)} re-assessed tender(s) as digested ({e}) - "
-                  "they will be carried again tomorrow.")
+    # Finding, 2026-11-06 (standing solution-architect review): tender
+    # updates and re-assessed-tender downgrades used to be marked digested
+    # RIGHT HERE - the moment a digest was merely BUILT, not once it was
+    # actually sent. This script only assembles the report (see its own
+    # docstring); the real send is a SEPARATE process, send_digest_emails.py,
+    # reading the JSON this run writes, in its own later GitHub Actions step
+    # with its own separate credentials. Marking here meant: a Resend outage,
+    # a bad API key, a cancelled/timed-out "Send via Resend" step, or even
+    # just one person's e-mail transiently failing (send_one()'s own "failed"
+    # status) permanently and silently lost that item - it would never be
+    # carried again, even though it was never actually delivered. Every
+    # OTHER notification type in this codebase (pack_ready, deadline
+    # reminders, operational alerts, returnables/compliance/discovered-
+    # tenders/scout-alert digests) has already been fixed for exactly this
+    # "claim the one-time token before confirming the send" shape - this
+    # pass found these were the two remaining instances, in the one script
+    # where "claim" and "send" aren't even two lines in the same function
+    # but two different scripts in two different Actions steps. Marking has
+    # moved to send_digest_emails.py, keyed off which digests it actually
+    # confirms sent (status == "sent") - see that module for the real write.
+    # The safe default on either side of that boundary is now "carry it
+    # again tomorrow" (a harmless duplicate) rather than "lose it for good".
 
     print(f"\n{len(digests)} per-person digest(s) built ({mode} mode):")
     for d in digests:

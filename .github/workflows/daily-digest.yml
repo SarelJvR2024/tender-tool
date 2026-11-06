@@ -17,10 +17,22 @@
 # these are separate from Vercel's and Supabase's own env vars, nothing here
 # is shared automatically:
 #   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  - same real project
-#     credentials the app/bridge worker use. daily_digest.py's own --mode
-#     live is read-only against Supabase (confirmed by reading
-#     watch_deadlines.supabase_request: GET only) - this workflow cannot
-#     write or delete anything in the real database.
+#     credentials the app/bridge worker use, needed by BOTH Python steps
+#     below. Correction, 2026-11-06 (this file previously claimed
+#     daily_digest.py's --mode live is "read-only against Supabase... this
+#     workflow cannot write or delete anything in the real database" - that
+#     was never quite true, confirmed false by reading the actual code: it
+#     writes deadline_reminders_seen/digest_readiness_seen seen-store rows
+#     every run): the build step writes those seen-store rows; the SEND step
+#     ALSO now needs these same two secrets (added this pass) so
+#     send_digest_emails.py can mark a re-assessed tender/tender update as
+#     digested right after confirming it actually sent - moved here from the
+#     build step, which used to mark both unconditionally before any send
+#     was even attempted (see send_digest_emails.py's own
+#     mark_delivered_items() for the fix and why). Without these two
+#     secrets on the send step specifically, emails still send fine, but
+#     those two items go un-marked and are safely carried again tomorrow
+#     rather than lost - see that function's own docstring.
 #   RESEND_API_KEY, DIGEST_FROM_ADDRESS - see send_digest_emails.py's own
 #     docstring ("REQUIRED SETUP") for how to get these. Until both are set,
 #     this workflow still runs safely and still goes green: send_digest_emails.py
@@ -147,6 +159,13 @@ jobs:
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           DIGEST_FROM_ADDRESS: ${{ secrets.DIGEST_FROM_ADDRESS }}
+          # Added this pass (see header comment above): needed so this step
+          # can mark a re-assessed tender/tender update as digested right
+          # after confirming the email carrying it actually sent, instead of
+          # that happening unconditionally in the build step above before
+          # any send was attempted.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python3 engine/notify/send_digest_emails.py digest_report.json
 
       # Two steps, not one if: always() - GitHub Actions has no single
