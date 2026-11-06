@@ -165,7 +165,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, { summary: savingsSummary, error: savingsSummaryError }, documentExpiryRows, { data: peopleRows }] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow, error: companyError }, { summary: savingsSummary, error: savingsSummaryError }, documentExpiryRows, { data: peopleRows }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -202,6 +202,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
+  if (companyError) console.error("companies select failed for dashboard", companyError);
 
   const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
@@ -317,8 +318,14 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
         // non-null with real defaults (0085) - so this reads as "done" once
         // either default (20 hours, R450) has been changed to the
         // company's own real number, same spirit as the other items here
-        // ("on file" rather than merely "has a value").
-        done: companyRow?.savings_baseline_hours_per_tender !== 20 || companyRow?.savings_baseline_hourly_cost_zar !== 450,
+        // ("on file" rather than merely "has a value"). A failed companies
+        // read (companyError) makes companyRow null the same way the
+        // genuine "no row yet" case would, but `undefined !== 20` is true -
+        // so without the companyError guard, a transient read failure would
+        // falsely mark this item "done" (the opposite direction from this
+        // bug class's usual "false empty state", but the same unprotected-
+        // read root cause).
+        done: !companyError && (companyRow?.savings_baseline_hours_per_tender !== 20 || companyRow?.savings_baseline_hourly_cost_zar !== 450),
         href: "/company#savings-baseline",
       },
     ];
