@@ -224,6 +224,19 @@ export async function requestSubmissionPack(formData: FormData) {
     p_reviewed_by: reviewRow?.reviewed_by ?? null,
   });
   if (error) {
+    if (error.code === "23505") {
+      // pack_generation_jobs_one_open_key (0026): the plain SELECT above
+      // (line ~161) only catches an already-queued pack outside the race
+      // window - a second request for the SAME tender that slips past it
+      // (a double-click, or two tabs) reaches this same unique index this
+      // function's insert hits, same shape as requestTenderCv()'s own
+      // 23505 catch above - without this, the raw constraint-violation
+      // string (confirmed live: 'duplicate key value violates unique
+      // constraint "pack_generation_jobs_one_open_key"') would reach the
+      // user instead of the friendly message the non-race path already
+      // shows.
+      fail("A submission pack is already queued for this tender.");
+    }
     console.error("request_submission_pack_checked failed", error);
     fail(error.message || "Could not request this submission pack - try again. If it keeps happening, let us know.");
   }
