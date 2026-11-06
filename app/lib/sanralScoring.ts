@@ -36,7 +36,7 @@ import {
   equivalentTypes,
   normPositionCode,
   normType,
-} from "./sanralMatrices";
+} from "./sanralMatrices.ts";
 
 export type Range = { min: number; max: number };
 
@@ -252,23 +252,50 @@ export function estimateSanralConventional(opts: {
   if (unknownIdx.length > 0) {
     notes.push("Whether SANRAL treats some positions as managerial isn't on file (the tender's SETUP sheet says; the schema doesn't store it) - management shown across both readings.");
   }
-  const scenarios = unknownIdx.length <= 6 ? 1 << unknownIdx.length : 2;
-  let manLo = Infinity;
-  let manHi = -Infinity;
-  for (let mask = 0; mask < scenarios; mask++) {
-    const scenario = opts.positions.map((p, i) => {
-      if (p.managerial !== null) return p;
-      if (!canBeManagerial(p)) return { ...p, managerial: false };
-      const bit = unknownIdx.length <= 6 ? (mask >> unknownIdx.indexOf(i)) & 1 : mask;
-      return { ...p, managerial: bit === 1 };
-    });
-    const est = scenario.map((p) => estimatePosition(p, closing));
-    const sum = est.reduce((acc, p) => add(acc, p.management), r(0, 0));
-    const max = est.reduce((acc, p) => acc + p.managementMax.max, 0);
-    manLo = Math.min(manLo, max ? (sum.min / max) * 15 : 0);
-    manHi = Math.max(manHi, max ? (sum.max / max) * 15 : 0);
+  // Positions with a KNOWN managerial reading (or that can't be managerial at
+  // all) contribute a fixed amount, computed once. Every AMBIGUOUS position's
+  // own managementMax moves by exactly the same fixed amount either way (15
+  // non-managerial, 30 managerial - a constant +15 delta, never anything
+  // else, by construction above), so for any fixed count k of the ambiguous
+  // positions read as managerial, the extreme numerator for that k is always
+  // the k positions whose own managerial-vs-non swing is largest (for the
+  // max) or smallest (for the min) - trying every k from 0..n and keeping the
+  // best is an exact solve, not a sample of a few combinations. This replaced
+  // a brute-force 2^n search that was only run in full up to n=6 ambiguous
+  // positions and silently fell back, above 6, to trying just "all managerial"
+  // and "all non-managerial" - which is not guaranteed to contain the true
+  // extreme (a mixed combination can beat both uniform ones; confirmed with a
+  // worked counter-example in sanralScoring.test.ts) and could under-state how
+  // low the true minimum - and therefore the "clears even at the bottom of
+  // every range" outlook - really goes, on any tender with more than 6 key
+  // positions whose managerial flag isn't on file (today, every position:
+  // SETUP row 9 isn't stored yet - compliance-data.ts).
+  const fixedEst = opts.positions
+    .map((p, i) => (unknownIdx.includes(i) ? null : estimatePosition({ ...p, managerial: p.managerial ?? false }, closing)))
+    .filter((p): p is PositionEstimate => p !== null);
+  const fixedMax = fixedEst.reduce((acc, p) => acc + p.managementMax.max, 0);
+  const ambiguousPair = unknownIdx.map((i) => ({
+    asFalse: estimatePosition({ ...opts.positions[i], managerial: false }, closing).management,
+    asTrue: estimatePosition({ ...opts.positions[i], managerial: true }, closing).management,
+  }));
+
+  function extremeManagement(direction: "min" | "max"): number {
+    const fixedSum = fixedEst.reduce((s, p) => s + p.management[direction], 0);
+    const deltas = ambiguousPair.map((a) => a.asTrue[direction] - a.asFalse[direction]); // always >= 0: managerial only ever adds points, never removes them
+    const allFalseSum = fixedSum + ambiguousPair.reduce((s, a) => s + a.asFalse[direction], 0);
+    const allFalseDenom = fixedMax + ambiguousPair.length * 15;
+    const sorted = [...deltas].sort((a, b) => (direction === "max" ? b - a : a - b));
+    let runningNumerator = allFalseSum;
+    let best = direction === "max" ? -Infinity : Infinity;
+    for (let k = 0; k <= sorted.length; k++) {
+      const denom = allFalseDenom + k * 15;
+      const ratio = denom ? (runningNumerator / denom) * 15 : 0;
+      best = direction === "max" ? Math.max(best, ratio) : Math.min(best, ratio);
+      if (k < sorted.length) runningNumerator += sorted[k];
+    }
+    return best;
   }
-  const management = roundR(r(manLo, manHi));
+  const management = roundR(r(extremeManagement("min"), extremeManagement("max")));
 
   const QS: Record<string, number> = { iso: 10, registered: 7, in_house: 5, none: 0 };
   const qualitySystem = opts.qualitySystem ? r(QS[opts.qualitySystem], QS[opts.qualitySystem]) : r(0, 10);
