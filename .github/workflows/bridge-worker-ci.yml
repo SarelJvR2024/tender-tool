@@ -43,6 +43,20 @@
 # runs the real script - so Part 2 now genuinely executes, and fails the job
 # if it reports any failure, on every push that touches the engine or a
 # migration.
+#
+# Standing-review-pass finding (2026-11-06): Finding 92's own repo-wide sweep
+# (2026-10-28) was itself incomplete - a fresh `find . -name "test_*.py"` vs.
+# every file path referenced in this workflow turned up 9 more test files
+# that ran clean standalone (confirmed individually, exit 0, no live
+# Supabase/Postgres/API key) but had never once run here: discovery/
+# test_assess_tender.py, discovery/test_list_tenders.py, general/
+# test_build_general_pack.py, pack/test_pack_suggestions.py, and 5
+# top-level files (test_fill_a_forms.py, test_fill_financial.py,
+# test_fill_key_persons_malformed.py, test_make_envelope_covers.py,
+# test_sanral_fill.py) - every one of them a real regression test added for
+# a real, already-fixed bug. Added below, same `if: ${{ !cancelled() }}`
+# convention. Re-diffed `find . -name "test_*.py"` against this file after
+# adding them: zero gaps remain.
 name: bridge-worker-ci
 
 on:
@@ -222,6 +236,26 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_fill_financial_hours.py
 
+      - name: A/B forms - a name with a literal backslash doesn't corrupt or crash a pack build (never wired into CI, same 2026-11-06 sweep as above)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_a_forms.py
+
+      - name: fill_financial.py - a malformed pack.yaml (bad key_persons reference, missing name) is refused cleanly, not a raw KeyError (never wired into CI)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_financial.py
+
+      - name: fill_tender.py/fill_conventional.py - the same malformed-key_persons shape raises a clean ValueError, not a raw KeyError (never wired into CI)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_key_persons_malformed.py
+
+      - name: Envelope covers - a control character in OCR'd tender text is stripped, not a crash (never wired into CI, same 2026-11-06 sweep as above)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_make_envelope_covers.py
+
+      - name: SANRAL Excel filler - the control-character crash recurred a 4th time (never wired into CI, same 2026-11-06 sweep as above)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_sanral_fill.py
+
       - name: Pack bridge sync functions - tender_requirements/B7-setup/position-suggestion writes (fake Supabase, real sample workbook)
         if: ${{ !cancelled() }}
         run: python3 engine/pack/test_sync_functions.py
@@ -233,6 +267,15 @@ jobs:
       - name: SANRAL pack assembly - check_template() survives a corrupted fingerprint baseline (Finding 100)
         if: ${{ !cancelled() }}
         run: python3 engine/pack/test_assemble_pack.py
+
+      - name: Pack bridge - pack_suggestions_positions() drops a stale assignment the current workbook no longer asks for (2026-10-28 incident)
+        # Standing-review-pass finding, 2026-11-06: a repo-wide sweep found 9
+        # engine/test_*.py files that pass clean standalone but had never once
+        # run in CI - the same gap shape as Findings 87/88/89/92, just missed
+        # by that earlier sweep. Each confirmed individually (exit 0, no live
+        # Supabase/Postgres/API key) before being added here.
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_pack_suggestions.py
 
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         if: ${{ !cancelled() }}
@@ -313,6 +356,10 @@ jobs:
       - name: General engine - submission_plan.compile_plan() assessment engine
         if: ${{ !cancelled() }}
         run: python3 engine/general/test_submission_plan.py
+
+      - name: General engine - a company's own uploaded CIDB certificate reaches a general pack (never wired into CI, same 2026-11-06 sweep as above)
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_build_general_pack.py
 
       - name: Onboarding - classify_documents.py / process_onboarding_jobs.py (no live Supabase/API key needed)
         if: ${{ !cancelled() }}
@@ -413,6 +460,14 @@ jobs:
       - name: Discovery direct buyer reader - Vaal Central Water
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_vaal_central_water.py
+
+      - name: Discovery - assess_tender.load_company_profile()'s own disciplines type-safety (never wired into CI, same 2026-11-06 sweep as above)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_assess_tender.py
+
+      - name: Discovery - list_tenders.py survives one malformed SANRAL list row without losing every other real tender (Finding 124, never wired into CI)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_list_tenders.py
 
   tenant-isolation-db:
     # Part 2 of engine/security/test_tenant_isolation.py: real RLS + the
