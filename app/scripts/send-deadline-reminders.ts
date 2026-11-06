@@ -44,13 +44,95 @@
 // (missing RESEND_API_KEY: this run exits early and claims NOTHING via
 // record_deadline_reminder_sent - that claim is one-time-only, so claiming
 // it without actually sending would permanently waste it; see main()).
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
-import { deadlineReminderCandidates, type DeadlineReminderTenderRow } from "../lib/deadlineReminders.ts";
+import { deadlineReminderCandidates, type DeadlineReminderCandidate, type DeadlineReminderTenderRow } from "../lib/deadlineReminders.ts";
 import { deadlineReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 import { fetchAllRows } from "../lib/supabasePaging.ts";
+
+type SupabaseService = SupabaseClient;
+
+/**
+ * Sends (or skips) every candidate, each independently claimed/dedupe-gated.
+ * Split out from main() so the ordering below is independently testable with
+ * a mocked Supabase client - this exact ordering is the fix for a real bug
+ * found 2026-11-06 (see this function's own recipients-before-claim comment).
+ */
+export async function processDeadlineReminderCandidates(
+  supabase: SupabaseService,
+  candidates: DeadlineReminderCandidate[],
+  appUrl: string,
+): Promise<{ sent: number; skippedAlreadySent: number; skippedNoMembers: number }> {
+  let sent = 0;
+  let skippedAlreadySent = 0;
+  let skippedNoMembers = 0;
+
+  for (const { tender, companyId, daysLeft, threshold } of candidates) {
+    // Recipients looked up and checked BEFORE the one-time claim, not after
+    // (standing review, 2026-11-06 - the same "claim before something that
+    // can genuinely fail/be empty" bug class scripts/send-returnables-digest.ts
+    // was already fixed for, 2026-10-30, just under a different RPC name
+    // - record_deadline_reminder_sent, not claim_notification - so the prior
+    // pass's grep for claim_notification callers never found this one).
+    // record_deadline_reminder_sent's own claim is a one-time-ever token
+    // (this file's own header comment); claiming it for a company with zero
+    // registered members, then never sending because of that, would
+    // permanently waste this exact tender/company/threshold reminder - even
+    // after that company later adds a member, days before the same tender's
+    // closing date.
+    const recipients = await criticalBidRecipients(supabase, companyId);
+    if (recipients.length === 0) {
+      skippedNoMembers++;
+      continue;
+    }
+
+    const { data: claimed, error: claimError } = await supabase.rpc("record_deadline_reminder_sent", {
+      p_tender_id: tender.id,
+      p_company_id: companyId,
+      p_threshold_days: threshold,
+    });
+    if (claimError) {
+      console.error(`record_deadline_reminder_sent failed for tender ${tender.id}, company ${companyId}`, claimError);
+      continue;
+    }
+    if (!claimed) {
+      skippedAlreadySent++;
+      continue;
+    }
+
+    const contractLabel = tender.contract_no || tender.description || "Tender";
+    const { subject, html, text } = deadlineReminderEmail({
+      contractLabel,
+      closingDate: tender.closing_date!,
+      daysLeft,
+      appUrl,
+      tenderId: tender.id,
+    });
+
+    for (const email of recipients) {
+      const result = await sendTransactionalEmail({ to: email, subject, html, text });
+      if (result.status === "sent") sent++;
+      else console.log(`  ${result.status} -> ${email} (${contractLabel})`);
+      const { error: logError } = await supabase.rpc("record_notification_sent", {
+        p_idempotency_key: `deadline-reminder-${tender.id}-${companyId}-${threshold}-${email}`,
+        p_notification_type: "deadline_reminder",
+        p_recipient_email: email,
+        p_company_id: companyId,
+        p_tender_id: tender.id,
+        p_subject: subject,
+        p_status: result.status,
+        p_resend_id: result.status === "sent" ? result.resendId : null,
+        p_error: result.status === "failed" ? result.error : null,
+      });
+      if (logError) console.error("record_notification_sent failed for deadline_reminder", logError);
+    }
+  }
+
+  return { sent, skippedAlreadySent, skippedNoMembers };
+}
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -116,65 +198,21 @@ async function main() {
     return;
   }
 
-  let sent = 0;
-  let skippedAlreadySent = 0;
-  let skippedNoMembers = 0;
-
-  for (const { tender, companyId, daysLeft, threshold } of candidates) {
-    const { data: claimed, error: claimError } = await supabase.rpc("record_deadline_reminder_sent", {
-      p_tender_id: tender.id,
-      p_company_id: companyId,
-      p_threshold_days: threshold,
-    });
-    if (claimError) {
-      console.error(`record_deadline_reminder_sent failed for tender ${tender.id}, company ${companyId}`, claimError);
-      continue;
-    }
-    if (!claimed) {
-      skippedAlreadySent++;
-      continue;
-    }
-
-    const recipients = await criticalBidRecipients(supabase, companyId);
-    if (recipients.length === 0) {
-      skippedNoMembers++;
-      continue;
-    }
-
-    const contractLabel = tender.contract_no || tender.description || "Tender";
-    const { subject, html, text } = deadlineReminderEmail({
-      contractLabel,
-      closingDate: tender.closing_date!,
-      daysLeft,
-      appUrl,
-      tenderId: tender.id,
-    });
-
-    for (const email of recipients) {
-      const result = await sendTransactionalEmail({ to: email, subject, html, text });
-      if (result.status === "sent") sent++;
-      else console.log(`  ${result.status} -> ${email} (${contractLabel})`);
-      const { error: logError } = await supabase.rpc("record_notification_sent", {
-        p_idempotency_key: `deadline-reminder-${tender.id}-${companyId}-${threshold}-${email}`,
-        p_notification_type: "deadline_reminder",
-        p_recipient_email: email,
-        p_company_id: companyId,
-        p_tender_id: tender.id,
-        p_subject: subject,
-        p_status: result.status,
-        p_resend_id: result.status === "sent" ? result.resendId : null,
-        p_error: result.status === "failed" ? result.error : null,
-      });
-      if (logError) console.error("record_notification_sent failed for deadline_reminder", logError);
-    }
-  }
+  const { sent, skippedAlreadySent, skippedNoMembers } = await processDeadlineReminderCandidates(supabase, candidates, appUrl);
 
   console.log(
     `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoMembers} with no registered company member, out of ${candidates.length} candidate tender/company/threshold pair(s).`
   );
 }
 
-main().catch((e) => {
-  console.error("send-deadline-reminders failed", e);
-  process.exit(1);
-});
+// Only runs main() when this file is executed directly (`node
+// --experimental-strip-types scripts/send-deadline-reminders.ts`), not when
+// a test file imports processDeadlineReminderCandidates() above - otherwise
+// every test run would also fire off a real (doomed, since test env vars
+// aren't real Supabase credentials) network call and `process.exit(1)`.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error("send-deadline-reminders failed", e);
+    process.exit(1);
+  });
+}

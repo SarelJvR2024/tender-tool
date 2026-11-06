@@ -1,0 +1,144 @@
+// Regression test for a real bug found 2026-11-06 (standing solution-
+// architect review): all 3 stages here (print cutoff, briefing countdown,
+// clarification window) used to call the one-time-ever
+// record_operational_alert_sent() claim BEFORE looking up
+// operationalRecipients(), so a company with zero opted-in recipients at the
+// moment this script ran would have its claim permanently burned with
+// nothing ever sent - even after that company later opted a member in,
+// hours/days before the same tender's own deadline. Same bug class, same
+// shape as scripts/send-deadline-reminders.ts's own identical fix this same
+// pass - just under this file's own claim RPC name
+// (record_operational_alert_sent, not record_deadline_reminder_sent), which
+// is why the 2026-10-30 pass's grep for claim_notification callers never
+// found any of these 4 call sites.
+import { describe, expect, it, vi } from "vitest";
+import { runPrintCutoff, runBriefingReminders, runClarificationWindow, type RunOpts } from "./send-operational-alerts.ts";
+
+type Call = { table?: string; name?: string; kind: "rpc" | "from" };
+
+function daysFromToday(n: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return d.toISOString();
+}
+
+/** Thenable, chainable query-builder stub good enough for every .from() shape these 3 functions use (range-paginated reads, a direct awaited chain, and a .maybeSingle() lookup). */
+function makeBuilder(data: unknown, error: unknown = null) {
+  const builder: Record<string, unknown> = {
+    select: () => builder, eq: () => builder, not: () => builder, order: () => builder, in: () => builder, gte: () => builder, is: () => builder,
+    range: () => Promise.resolve({ data, error }),
+    maybeSingle: () => Promise.resolve({ data: Array.isArray(data) ? data[0] ?? null : data, error }),
+    then: (resolve: (v: { data: unknown; error: unknown }) => unknown, reject?: (e: unknown) => unknown) => Promise.resolve({ data, error }).then(resolve, reject),
+  };
+  return builder;
+}
+
+function mockSupabase(opts: { fromResponses: Record<string, unknown>; rpcResponses: Record<string, { data: unknown; error: unknown }> }) {
+  const calls: Call[] = [];
+  const rpc = vi.fn(async (name: string) => {
+    calls.push({ name, kind: "rpc" });
+    return opts.rpcResponses[name] ?? { data: null, error: null };
+  });
+  const from = vi.fn((table: string) => {
+    calls.push({ table, kind: "from" });
+    return makeBuilder(opts.fromResponses[table] ?? []);
+  });
+  return { rpc, from, calls } as unknown as { rpc: typeof rpc; from: typeof from; calls: Call[] };
+}
+
+const baseOpts: RunOpts = { dryRun: false, scopeCompanyId: null, testRecipient: null };
+
+describe("runPrintCutoff", () => {
+  const pack = {
+    id: "pack-1", tender_id: "tender-1", company_id: "company-1", pipeline_stage: "building",
+    submission_type: "physical_box", estimated_print_hours: 0, estimated_transit_hours: 0, dispatch_status: "not_started",
+    tenders: { id: "tender-1", contract_no: "N.007-030-2026/1F", description: "Upgrade", closing_date: new Date(Date.now() + 40 * 60 * 60 * 1000).toISOString() },
+  };
+
+  it("never claims record_operational_alert_sent for a company with zero opted-in recipients", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tender_packs: [pack] },
+      rpcResponses: { company_notification_recipients: { data: [], error: null } },
+    });
+    const result = await runPrintCutoff(supabase as never, "https://app.example", baseOpts, []);
+    expect(result.sent).toBe(0);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(false);
+  });
+
+  it("claims and attempts to send when a recipient exists", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tender_packs: [pack] },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    await runPrintCutoff(supabase as never, "https://app.example", baseOpts, []);
+    const recipientsIdx = supabase.calls.findIndex((c) => c.name === "company_notification_recipients");
+    const claimIdx = supabase.calls.findIndex((c) => c.name === "record_operational_alert_sent");
+    expect(recipientsIdx).toBeGreaterThanOrEqual(0);
+    expect(recipientsIdx).toBeLessThan(claimIdx);
+  });
+});
+
+describe("runBriefingReminders", () => {
+  const tender = { id: "tender-2", contract_no: "N.007-040-2026/1F", description: "Rehab", briefing_date: daysFromToday(5), briefing_time: "10:00", tender_packs: [{ company_id: "company-1" }] };
+
+  it("never claims record_operational_alert_sent for a company with zero opted-in recipients", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tenders: [tender] },
+      rpcResponses: { company_notification_recipients: { data: [], error: null } },
+    });
+    const result = await runBriefingReminders(supabase as never, "https://app.example", baseOpts, []);
+    expect(result.sent).toBe(0);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(false);
+  });
+
+  it("claims and attempts to send when a recipient exists", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tenders: [tender] },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    await runBriefingReminders(supabase as never, "https://app.example", baseOpts, []);
+    const recipientsIdx = supabase.calls.findIndex((c) => c.name === "company_notification_recipients");
+    const claimIdx = supabase.calls.findIndex((c) => c.name === "record_operational_alert_sent");
+    expect(recipientsIdx).toBeGreaterThanOrEqual(0);
+    expect(recipientsIdx).toBeLessThan(claimIdx);
+  });
+});
+
+describe("runClarificationWindow", () => {
+  const task = {
+    id: "task-1", company_id: "company-1", tender_id: "tender-3", description: "Submit clarification questions", due_date: daysFromToday(10), status: "open", kind: "clarification",
+    tenders: { id: "tender-3", contract_no: "N.007-050-2026/1F", description: "Signage", buyer: "SANRAL" },
+  };
+
+  it("never claims record_operational_alert_sent for a company with zero opted-in recipients", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tender_tasks: [task], tender_packs: null },
+      rpcResponses: { company_notification_recipients: { data: [], error: null } },
+    });
+    const result = await runClarificationWindow(supabase as never, "https://app.example", baseOpts, []);
+    expect(result.sent).toBe(0);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(false);
+  });
+
+  it("claims and attempts to send when a recipient exists", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tender_tasks: [task], tender_packs: null },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    await runClarificationWindow(supabase as never, "https://app.example", baseOpts, []);
+    const recipientsIdx = supabase.calls.findIndex((c) => c.name === "company_notification_recipients");
+    const claimIdx = supabase.calls.findIndex((c) => c.name === "record_operational_alert_sent");
+    expect(recipientsIdx).toBeGreaterThanOrEqual(0);
+    expect(recipientsIdx).toBeLessThan(claimIdx);
+  });
+});

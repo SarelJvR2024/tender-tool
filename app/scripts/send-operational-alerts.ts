@@ -66,7 +66,7 @@ import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 type SupabaseService = SupabaseClient;
 
-type RunOpts = { dryRun: boolean; scopeCompanyId: string | null; testRecipient: string | null };
+export type RunOpts = { dryRun: boolean; scopeCompanyId: string | null; testRecipient: string | null };
 
 /** Audit-log write for /admin/notifications (the unified Tier 0-3 dispatch log) - record_notification_sent() (migration 0093) is a plain, no-constraint audit insert, deliberately decoupled from this script's own record_operational_alert_sent()/notification_claims dedupe, so this can be added without touching that dedupe flow at all. */
 async function logSend(
@@ -119,7 +119,7 @@ async function claim(supabase: SupabaseService, alertType: string, tenderId: str
   return !!claimed;
 }
 
-async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
+export async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
   // Paginated via fetchAllRows(), not a plain `.select()` - same reasoning
   // as scripts/send-deadline-reminders.ts's own read: this runs under the
   // SERVICE ROLE key against `tender_packs` summed across EVERY company at
@@ -153,9 +153,21 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: R
   const candidates = printCutoffCandidates(packs, tendersById);
   let sent = 0;
   for (const { pack, tender, hoursLeft } of candidates) {
+    // Recipients resolved and checked BEFORE the one-time
+    // record_operational_alert_sent claim, not after (standing review,
+    // 2026-11-06 - same "claim before something that can genuinely be
+    // empty" bug class scripts/send-returnables-digest.ts/
+    // send-deadline-reminders.ts were fixed for; this file's own claim()
+    // uses a DIFFERENT RPC name, record_operational_alert_sent, which is
+    // why the 2026-10-30 pass's grep for claim_notification callers never
+    // caught these 3 stages). A zero-recipients company would otherwise
+    // permanently burn this tender/company's one-shot 48h print-cutoff
+    // alert, even after that company later adds an opted-in recipient,
+    // hours before the same tender's own print/transit deadline.
+    const recipients = await companyRecipients(supabase, pack.company_id);
+    if (!opts.dryRun && recipients.length === 0) continue;
     const firstClaim = await claim(supabase, "print_cutoff", tender.id, pack.company_id, "48h", opts);
     if (!firstClaim) continue;
-    const recipients = await companyRecipients(supabase, pack.company_id);
     const deadline = printSignDeadline({
       closingDate: tender.closing_date,
       submissionType: pack.submission_type,
@@ -173,7 +185,6 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: R
       });
       continue;
     }
-    if (recipients.length === 0) continue;
     const sendTo = opts.testRecipient ? [opts.testRecipient] : recipients;
     for (const to of sendTo) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
@@ -184,7 +195,7 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: R
   return { sent, candidates: candidates.length };
 }
 
-async function runBriefingReminders(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
+export async function runBriefingReminders(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
   // Paginated via fetchAllRows(), not a plain `.select()` - same reasoning
   // as runPrintCutoff() above and scripts/send-deadline-reminders.ts's own
   // identical `tenders` x `tender_packs!inner` read: shared/public table
@@ -214,9 +225,12 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string, o
   if (opts.scopeCompanyId) candidates = candidates.filter((c) => c.companyId === opts.scopeCompanyId);
   let sent = 0;
   for (const { tender, companyId, daysLeft, threshold } of candidates) {
+    // Same recipients-before-claim fix as runPrintCutoff() above, for the
+    // identical reason - see that function's own comment.
+    const recipients = await companyRecipients(supabase, companyId);
+    if (!opts.dryRun && recipients.length === 0) continue;
     const firstClaim = await claim(supabase, "briefing", tender.id, companyId, String(threshold), opts);
     if (!firstClaim) continue;
-    const recipients = await companyRecipients(supabase, companyId);
     const contractLabel = tender.contract_no || tender.description || "Tender";
     const { subject, html, text } = briefingReminderEmail({
       contractLabel,
@@ -233,7 +247,6 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string, o
       });
       continue;
     }
-    if (recipients.length === 0) continue;
     const sendTo = opts.testRecipient ? [opts.testRecipient] : recipients;
     for (const to of sendTo) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
@@ -244,7 +257,7 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string, o
   return { sent, candidates: candidates.length };
 }
 
-async function runClarificationWindow(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
+export async function runClarificationWindow(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
   let query = supabase
     .from("tender_tasks")
     .select("id, company_id, tender_id, description, due_date, status, kind, tenders(id, contract_no, description, buyer)")
@@ -277,9 +290,12 @@ async function runClarificationWindow(supabase: SupabaseService, appUrl: string,
   for (const { task, daysLeft, threshold } of candidates) {
     const tender = (task as unknown as { tenders: { id: string; contract_no: string | null; description: string | null; buyer: string | null } | null }).tenders;
     if (!tender) continue;
+    // Same recipients-before-claim fix as runPrintCutoff() above, for the
+    // identical reason - see that function's own comment.
+    const recipients = await companyRecipients(supabase, task.company_id);
+    if (!opts.dryRun && recipients.length === 0) continue;
     const firstClaim = await claim(supabase, "clarification_window", tender.id, task.company_id, String(threshold), opts);
     if (!firstClaim) continue;
-    const recipients = await companyRecipients(supabase, task.company_id);
     const { subject, html, text } = clarificationWindowReminderEmail({
       reference: tender.contract_no || tender.id,
       tenderTitle: tender.description,
@@ -298,7 +314,6 @@ async function runClarificationWindow(supabase: SupabaseService, appUrl: string,
       });
       continue;
     }
-    if (recipients.length === 0) continue;
     const sendTo = opts.testRecipient ? [opts.testRecipient] : recipients;
     for (const to of sendTo) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
@@ -347,7 +362,12 @@ async function main() {
   else console.log(`Clarification window: ${clarification.sent} sent, out of ${clarification.candidates} candidate(s).`);
 }
 
-main().catch((e) => {
-  console.error("send-operational-alerts failed", e);
-  process.exit(1);
-});
+// Only runs main() when this file is executed directly, not when a test
+// file imports runPrintCutoff()/runBriefingReminders()/runClarificationWindow()
+// above - see scripts/send-deadline-reminders.ts's identical guard for why.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error("send-operational-alerts failed", e);
+    process.exit(1);
+  });
+}
