@@ -27,7 +27,8 @@ async function requireCompanyAdmin() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: membership } = await supabase.from("company_members").select("company_id, role, user_id").eq("user_id", user.id).maybeSingle();
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id, role, user_id").eq("user_id", user.id).maybeSingle();
+  if (membershipError) throw new Error("Couldn't verify your company - try again.");
   if (!membership) redirect("/onboarding");
   if (membership.role !== "owner" && membership.role !== "admin") fail("Only an owner or admin of the company can manage the team.");
   return { companyId: membership.company_id as string, userId: user.id };

@@ -17,11 +17,12 @@ async function requireMember() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: membership } = await supabase
+  const { data: membership, error: membershipError } = await supabase
     .from("company_members")
     .select("company_id")
     .eq("user_id", user.id)
     .maybeSingle();
+  if (membershipError) throw new Error("Couldn't verify your company - try again.");
   if (!membership) redirect("/onboarding");
   return { supabase, userId: user.id, companyId: membership.company_id as string };
 }
