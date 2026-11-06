@@ -56,9 +56,26 @@ export async function saveBankAccount(formData: FormData) {
   // Empty on an edit = keep the number on file (the form never echoes it).
   if (number) row.account_number = number;
 
-  const { error } = id
-    ? await supabase.from("bank_accounts").update(row).eq("id", id)
-    : await supabase.from("bank_accounts").insert(row);
+  // .select("id").maybeSingle() on the update branch matters: PostgREST
+  // returns a 2xx with `error: null` and zero rows affected when RLS's own
+  // `using (tt_is_company_admin(company_id))` (re-evaluated against the OLD
+  // row) no longer matches - e.g. another admin's removeMember() revoking
+  // this user's own owner/admin company_members row, or demoting them to a
+  // lesser role, between page load and this write - indistinguishable from
+  // a real update by `error` alone. Same shape, same fix, as
+  // app/company/actions.ts uploadVaultDocument().
+  let saveError: { message: string } | null = null;
+  let noLongerThere = false;
+  if (id) {
+    const { data, error } = await supabase.from("bank_accounts").update(row).eq("id", id).select("id").maybeSingle();
+    saveError = error;
+    noLongerThere = !error && !data;
+  } else {
+    const { error } = await supabase.from("bank_accounts").insert(row);
+    saveError = error;
+  }
+  if (noLongerThere) fail("That bank account is no longer there - it may have been removed. Refresh and try again.");
+  const error = saveError;
   if (error) {
     const known = error.message.includes("bank_accounts_one_") || error.message.includes("account_number");
     // Not logging error.message itself for the unknown case - this file's
@@ -83,10 +100,17 @@ export async function deleteBankAccount(formData: FormData) {
   const supabase = await createClient();
   const id = str(formData, "account_id");
   if (!id) redirect(BACK);
-  const { error } = await supabase.from("bank_accounts").delete().eq("id", id);
+  // .select("id").maybeSingle() matters here too: a zero-row-match delete
+  // (the same RLS race as saveBankAccount() above) returns `error: null`,
+  // indistinguishable from a real delete - without this check the account
+  // stays on file while the page reports it removed.
+  const { data: deleted, error } = await supabase.from("bank_accounts").delete().eq("id", id).select("id").maybeSingle();
   if (error) {
     console.error("bank_accounts delete failed");
     fail("Could not delete this bank account - try again. If it keeps happening, let us know.");
+  }
+  if (!deleted) {
+    fail("That bank account is no longer there - it may have been removed. Refresh and try again.");
   }
   revalidatePath(BACK);
   redirect(`${BACK}?saved=removed`);

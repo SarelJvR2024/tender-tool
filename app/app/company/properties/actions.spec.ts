@@ -174,3 +174,81 @@ describe("savePropertyDocument - real update still succeeds", () => {
     expect(removedPaths).toContain("company-1/properties/prop-1/title_deed/old-old.pdf");
   });
 });
+
+// Same bug class, found this pass in two sibling functions of this same file:
+// saveProperty()'s edit branch (`.update(row).eq("id", id)`, no `.select()`)
+// and, worse, deleteProperty() - which reads the building's OWN documents'
+// storage paths BEFORE deleting the building row, then unconditionally
+// removes those files from storage regardless of whether the delete actually
+// matched a row. On the same membership-revoked-mid-request race, the
+// building row survives untouched while its real, still-referenced document
+// files are destroyed - and the page reports "removed".
+describe("saveProperty - membership revoked mid-request (edit matches zero rows)", () => {
+  it("does not report success when the update matches zero rows", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        [{ data: null, error: null }], // update(row).eq("id", id) - 0 rows matched
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveProperty } = await import("./actions");
+
+    const fd = formDataWith({ property_id: "prop-1", label: "Main Road offices" });
+
+    const url = await expectRedirect(saveProperty(fd));
+
+    expect(url).not.toContain("saved=1");
+    expect(url).toContain("/company/properties?error=");
+  });
+});
+
+describe("deleteProperty - membership revoked mid-request (delete matches zero rows)", () => {
+  it("does not report success and does not destroy the building's still-referenced documents", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        // property_documents select for storage paths - still readable (its
+        // own RLS is keyed off property_id/company_id, not this user's
+        // membership row directly)
+        [{ data: [{ storage_path: "company-1/properties/prop-1/title_deed/deed.pdf" }], error: null }],
+        // delete(...).eq("id", id) - membership revoked in between -> 0 rows
+        [{ data: null, error: null }],
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deleteProperty } = await import("./actions");
+
+    const fd = formDataWith({ property_id: "prop-1" });
+
+    const url = await expectRedirect(deleteProperty(fd));
+
+    expect(url).not.toContain("saved=removed");
+    expect(url).toContain("/company/properties?error=");
+    expect(removeCalls).toHaveLength(0); // the real document file must survive
+  });
+});
+
+describe("deleteProperty - real delete still succeeds", () => {
+  it("still removes the building's documents from storage when the delete genuinely matches the row", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: [{ storage_path: "company-1/properties/prop-1/title_deed/deed.pdf" }], error: null }],
+        [{ data: { id: "prop-1" }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deleteProperty } = await import("./actions");
+
+    const fd = formDataWith({ property_id: "prop-1" });
+
+    const url = await expectRedirect(deleteProperty(fd));
+
+    expect(url).toContain("saved=removed");
+    expect(removeCalls.flat()).toContain("company-1/properties/prop-1/title_deed/deed.pdf");
+  });
+});

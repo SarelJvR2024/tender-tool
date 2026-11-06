@@ -188,3 +188,82 @@ describe("uploadPrincipalDocument - real update still succeeds", () => {
     expect(removedPaths).toContain("company-1/principals/p-1/certified_id/old-old.pdf");
   });
 });
+
+// Same bug class, found this pass in two sibling functions of this same
+// file: savePrincipal()'s edit branch (`.update(update).eq("id", id)`, no
+// `.select()`) and, worse, deletePrincipal() - which reads the person's OWN
+// certified-ID/disability-proof storage paths BEFORE deleting the principal
+// row, then unconditionally removes those files from storage regardless of
+// whether the delete actually matched a row. On the same
+// membership-revoked-mid-request race, the principal's row survives
+// untouched while their real, still-referenced POPIA documents are
+// destroyed from storage - and the page reports "removed".
+describe("savePrincipal - membership revoked mid-request (edit matches zero rows)", () => {
+  it("does not report success when the update matches zero rows", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        [{ data: null, error: null }], // update(update).eq("id", id) - 0 rows matched
+      ],
+    });
+    supabaseState.current = client;
+
+    const { savePrincipal } = await import("./actions");
+
+    const fd = formDataWith({ principal_id: "p-1", role: "director", full_name: "Jane Director" });
+
+    const url = await expectRedirect(savePrincipal(fd));
+
+    expect(url).not.toContain("saved=1");
+    expect(url).toContain("/company/principals?error=");
+  });
+});
+
+describe("deletePrincipal - membership revoked mid-request (delete matches zero rows)", () => {
+  it("does not report success and does not destroy the person's still-referenced POPIA documents", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        // company_principals select for certified_id_path/disability_proof_path -
+        // still readable (its own select is a point read keyed by id, same race
+        // window as the update case above, just not yet hit here)
+        [{ data: { certified_id_path: "company-1/principals/p-1/certified_id/id.pdf", disability_proof_path: null }, error: null }],
+        // delete(...).eq("id", id) - membership revoked in between -> 0 rows
+        [{ data: null, error: null }],
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deletePrincipal } = await import("./actions");
+
+    const fd = formDataWith({ principal_id: "p-1" });
+
+    const url = await expectRedirect(deletePrincipal(fd));
+
+    expect(url).not.toContain("saved=removed");
+    expect(url).toContain("/company/principals?error=");
+    expect(removeCalls).toHaveLength(0); // the real POPIA document must survive
+  });
+});
+
+describe("deletePrincipal - real delete still succeeds", () => {
+  it("still removes the person's documents from storage when the delete genuinely matches the row", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: { certified_id_path: "company-1/principals/p-1/certified_id/id.pdf", disability_proof_path: null }, error: null }],
+        [{ data: { id: "p-1" }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deletePrincipal } = await import("./actions");
+
+    const fd = formDataWith({ principal_id: "p-1" });
+
+    const url = await expectRedirect(deletePrincipal(fd));
+
+    expect(url).toContain("saved=removed");
+    expect(removeCalls.flat()).toContain("company-1/principals/p-1/certified_id/id.pdf");
+  });
+});

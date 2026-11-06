@@ -79,8 +79,15 @@ export async function saveProperty(formData: FormData) {
   };
   let propertyId = id;
   if (id) {
-    const { error } = await supabase.from("company_properties").update(row).eq("id", id);
+    // .select("id").maybeSingle() matters: PostgREST returns a 2xx with
+    // `error: null` and zero rows affected when RLS's own `using
+    // (is_company_member(company_id))` no longer matches - e.g. this user's
+    // own company_members row being removed between page load and this
+    // write - indistinguishable from a real update by `error` alone. Same
+    // shape, same fix, as app/company/actions.ts uploadVaultDocument().
+    const { data, error } = await supabase.from("company_properties").update(row).eq("id", id).select("id").maybeSingle();
     if (error) fail(error.message, anchor);
+    if (!data) fail("That building is no longer there - it may have been removed. Refresh and try again.", "#add");
   } else {
     const { data, error } = await supabase.from("company_properties").insert(row).select("id").single();
     if (error) fail(error.message, anchor);
@@ -96,10 +103,19 @@ export async function deleteProperty(formData: FormData) {
   const id = str(formData, "property_id");
   if (!id) redirect(BACK);
   const { data: docs } = await supabase.from("property_documents").select("storage_path").eq("property_id", id);
-  const { error } = await supabase.from("company_properties").delete().eq("id", id);
+  // .select("id").maybeSingle() matters here even more than on an update:
+  // without it, a zero-row-match delete (the same RLS race as above - this
+  // user's own company_members row removed between the `docs` read and this
+  // delete) is indistinguishable from a real one by `error` alone, and the
+  // code below would go on to destroy the building's still-referenced
+  // documents from storage while the building row itself survives untouched.
+  const { data: deleted, error } = await supabase.from("company_properties").delete().eq("id", id).select("id").maybeSingle();
   if (error) {
     console.error("company_properties delete failed", error);
     fail("Could not delete this building - try again. If it keeps happening, let us know.");
+  }
+  if (!deleted) {
+    fail("That building is no longer there - it may have been removed. Refresh and try again.");
   }
   const paths = (docs ?? []).map((d) => d.storage_path).filter(Boolean) as string[];
   if (paths.length) await supabase.storage.from(VAULT_BUCKET).remove(paths);

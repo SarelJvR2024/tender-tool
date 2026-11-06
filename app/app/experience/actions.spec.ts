@@ -185,3 +185,56 @@ describe("saveExperienceTags - real update still succeeds", () => {
     expect(removedPaths).toContain("company-1/experience/old-old.pdf");
   });
 });
+
+// Same bug class, found this pass in deleteExperience() in this same file -
+// worse than saveExperienceTags() above, since the pre-fix code didn't even
+// check `error` on the delete call. It reads the item's own storage_path
+// BEFORE deleting the row, then unconditionally removes that file from
+// storage with no gate on the delete having actually matched a row. On the
+// same membership-revoked-mid-request race, the item survives untouched
+// while its real, still-referenced evidence document is destroyed from
+// storage - and the page is left showing nothing wrong at all (no error
+// query param either, pre-fix).
+describe("deleteExperience - membership revoked mid-request (delete matches zero rows)", () => {
+  it("does not destroy the still-referenced evidence file and surfaces an error", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        [{ data: { storage_path: "company-1/experience/evidence.pdf" }, error: null }], // existing select
+        [{ data: null, error: null }], // delete(...).eq("id", id) - 0 rows matched
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deleteExperience } = await import("./actions");
+
+    const fd = formDataWith({ id: "exp-1" });
+
+    const url = await expectRedirect(deleteExperience(fd));
+
+    expect(url).toContain("/experience?error=");
+    expect(removeCalls).toHaveLength(0); // the real evidence file must survive
+  });
+});
+
+describe("deleteExperience - real delete still succeeds", () => {
+  it("still removes the evidence file from storage when the delete genuinely matches the row", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: { storage_path: "company-1/experience/evidence.pdf" }, error: null }],
+        [{ data: { id: "exp-1" }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deleteExperience } = await import("./actions");
+
+    const fd = formDataWith({ id: "exp-1" });
+
+    const url = await expectRedirect(deleteExperience(fd));
+
+    expect(url).toBe("/experience");
+    expect(removeCalls.flat()).toContain("company-1/experience/evidence.pdf");
+  });
+});

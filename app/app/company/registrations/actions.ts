@@ -101,10 +101,19 @@ export async function deleteHeldRegistration(formData: FormData) {
   const id = str(formData, "held_id");
   if (!id) redirect(BACK);
   const { data: existing } = await supabase.from("held_registrations").select("storage_path").eq("id", id).maybeSingle();
-  const { error } = await supabase.from("held_registrations").delete().eq("id", id);
+  // .select("id").maybeSingle() matters here even more than on the update
+  // above: without it, a zero-row-match delete (the same RLS race - this
+  // user's own company_members row removed between the `existing` read and
+  // this delete) is indistinguishable from a real one by `error` alone, and
+  // the code below would go on to destroy the still-referenced certificate
+  // from storage while the registration's own row survives untouched.
+  const { data: deleted, error } = await supabase.from("held_registrations").delete().eq("id", id).select("id").maybeSingle();
   if (error) {
     console.error("held_registrations delete failed", error);
     fail("Could not delete this registration - try again. If it keeps happening, let us know.");
+  }
+  if (!deleted) {
+    fail("That registration is no longer there - it may have been removed. Refresh and try again.");
   }
   if (existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
   revalidatePath(BACK);

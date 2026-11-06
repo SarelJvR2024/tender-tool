@@ -73,7 +73,17 @@ test("closingCountdown: days and hours both shown", () => {
 });
 
 test("closingCountdown: more than 7 days away is not urgent", () => {
-  const future = new Date(Date.now() + 10 * 24 * 60 * 60_000).toISOString();
+  // closingCountdown() floors to whole hours (lib/dates.ts: deliberately -
+  // a closing-deadline countdown must never overstate time remaining), so a
+  // `future` computed exactly 10*24h from `Date.now()` is already a few ms
+  // in the past relative to Date.now() by the time closingCountdown() itself
+  // calls Date.now() again a moment later, which floors the result down to
+  // "9 days 23 hours" - genuinely flaky (not this pass's own finding's area,
+  // found incidentally while running the full suite). Padded by one extra
+  // minute, the same way the adjacent "days and hours both shown" test
+  // already pads its own boundary, so the real elapsed time between these
+  // two lines can never push the result under the 10-day mark.
+  const future = new Date(Date.now() + 10 * 24 * 60 * 60_000 + 60_000).toISOString();
   const result = closingCountdown(future);
   assert.equal(result?.urgent, false);
   assert.match(result!.text, /^closes in 10 days/);

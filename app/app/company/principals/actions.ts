@@ -113,10 +113,21 @@ export async function savePrincipal(formData: FormData) {
   const update: Record<string, unknown> = { ...row };
   if (id && natural && !idNumber && formData.get("clear_id_number") !== "1") delete update.id_number;
 
-  const { error } = id
-    ? await supabase.from("company_principals").update(update).eq("id", id)
-    : await supabase.from("company_principals").insert(row);
-  if (error) fail(friendly(error.message), anchor);
+  if (id) {
+    // .select("id").maybeSingle() matters: PostgREST returns a 2xx with
+    // `error: null` and zero rows affected when RLS's own "company_principals:
+    // tenant isolation" (using (is_company_member(company_id)), re-evaluated
+    // against the OLD row) no longer matches - e.g. this user's own
+    // company_members row being removed between page load and this write -
+    // indistinguishable from a real update by `error` alone. Same shape, same
+    // fix, as this file's own uploadPrincipalDocument() below.
+    const { data, error } = await supabase.from("company_principals").update(update).eq("id", id).select("id").maybeSingle();
+    if (error) fail(friendly(error.message), anchor);
+    if (!data) fail("That person is no longer in your register - it may have been removed. Refresh and try again.", "#add");
+  } else {
+    const { error } = await supabase.from("company_principals").insert(row);
+    if (error) fail(friendly(error.message), anchor);
+  }
 
   revalidatePath(BACK);
   redirect(`${BACK}?saved=1${anchor}`);
@@ -132,10 +143,20 @@ export async function deletePrincipal(formData: FormData) {
     .select("certified_id_path, disability_proof_path")
     .eq("id", id)
     .maybeSingle();
-  const { error } = await supabase.from("company_principals").delete().eq("id", id);
+  // .select("id").maybeSingle() matters here even more than on an update:
+  // without it, a zero-row-match delete (the same RLS race as savePrincipal()
+  // above - this user's own company_members row removed between the
+  // `existing` read and this delete) is indistinguishable from a real one by
+  // `error` alone, and the code below would go on to destroy this person's
+  // still-referenced documents from storage while the person's row survives
+  // untouched.
+  const { data: deleted, error } = await supabase.from("company_principals").delete().eq("id", id).select("id").maybeSingle();
   if (error) {
     console.error("company_principals delete failed");
     fail("Could not delete this person - try again. If it keeps happening, let us know.");
+  }
+  if (!deleted) {
+    fail("That person is no longer in your register - it may have been removed. Refresh and try again.");
   }
   // Personal documents go with the person (POPIA: don't keep what has no purpose).
   const paths = [existing?.certified_id_path, existing?.disability_proof_path].filter(Boolean) as string[];

@@ -206,7 +206,22 @@ export async function deleteExperience(formData: FormData) {
   if (!id) redirect("/experience");
 
   const { data } = await supabase.from("experience_items").select("storage_path").eq("id", id).maybeSingle();
-  await supabase.from("experience_items").delete().eq("id", id);
+  // .select("id").maybeSingle() matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own tenant-isolation
+  // `using` clause (re-evaluated against the OLD row) no longer matches -
+  // e.g. this user's own company_members row being removed between the read
+  // above and this delete - indistinguishable from a real delete by `error`
+  // alone (which the previous version of this function did not even check).
+  // Without this check, the still-referenced file was destroyed from storage
+  // below regardless of whether the row itself was actually deleted.
+  const { data: deleted, error } = await supabase.from("experience_items").delete().eq("id", id).select("id").maybeSingle();
+  if (error) {
+    console.error("experience_items delete failed", error);
+    redirect(`/experience?error=${encodeURIComponent("Could not delete this item - try again. If it keeps happening, let us know.")}`);
+  }
+  if (!deleted) {
+    redirect(`/experience?error=${encodeURIComponent("That item is no longer there - it may have been removed. Refresh and try again.")}`);
+  }
   if (data?.storage_path) {
     await supabase.storage.from("experience-documents").remove([data.storage_path]);
   }

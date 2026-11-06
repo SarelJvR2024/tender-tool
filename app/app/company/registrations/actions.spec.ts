@@ -204,3 +204,57 @@ describe("saveHeldRegistration - real update still succeeds", () => {
     expect(uploadCalls).toHaveLength(0); // no file attached in this case
   });
 });
+
+// 23b43b4 fixed this file's own edit path (above) but left deleteHeldRegistration()
+// with the identical, worse shape: it reads the registration's own certificate
+// storage_path BEFORE deleting the row, then unconditionally removes that file
+// from storage with no gate on the delete having actually matched a row. On the
+// same membership-revoked-mid-request race, the registration survives untouched
+// while its real, still-referenced certificate is destroyed - and the page
+// reports "removed".
+describe("deleteHeldRegistration - membership revoked mid-request (delete matches zero rows)", () => {
+  it("does not report success and does not destroy the still-referenced certificate", async () => {
+    const heldId = "11111111-1111-1111-1111-111111111111";
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+        [{ data: { storage_path: "company-1/registrations/" + heldId + "/certificate.pdf" }, error: null }], // existing select
+        [{ data: null, error: null }], // delete(...).eq("id", id) - 0 rows matched
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deleteHeldRegistration } = await import("./actions");
+
+    const fd = formDataWith({ held_id: heldId });
+
+    const url = await expectRedirect(deleteHeldRegistration(fd));
+
+    expect(url).not.toContain("saved=removed");
+    expect(url).toContain("/company/registrations?error=");
+    expect(removeCalls).toHaveLength(0); // the real certificate must survive
+  });
+});
+
+describe("deleteHeldRegistration - real delete still succeeds", () => {
+  it("still removes the certificate from storage when the delete genuinely matches the row", async () => {
+    const heldId = "11111111-1111-1111-1111-111111111111";
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: { storage_path: "company-1/registrations/" + heldId + "/certificate.pdf" }, error: null }],
+        [{ data: { id: heldId }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { deleteHeldRegistration } = await import("./actions");
+
+    const fd = formDataWith({ held_id: heldId });
+
+    const url = await expectRedirect(deleteHeldRegistration(fd));
+
+    expect(url).toContain("saved=removed");
+    expect(removeCalls.flat()).toContain("company-1/registrations/" + heldId + "/certificate.pdf");
+  });
+});
