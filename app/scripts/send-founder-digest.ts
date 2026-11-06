@@ -31,8 +31,20 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { founderDailyDigestEmail } from "../lib/emailTemplatesTier3.ts";
 import { sendNotification } from "../lib/notificationEngine.ts";
 import { adminNotificationEmail } from "../lib/resendEmail.ts";
+import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 type SupabaseService = SupabaseClient;
+
+// `tender_packs` here is read under the SERVICE ROLE key with no company
+// filter at all - the same shared/cross-tenant shape `scripts/send-deadline-reminders.ts`'s
+// own header comment documents (summed across EVERY company's own pursuit of
+// every tender, not one company's slice), which is exactly the shape that
+// silently hits PostgREST's 1000-row db-max-rows cap on a plain, unranged
+// `.select()` (lib/supabasePaging.ts). Past that cap this digest would
+// silently undercount "tenders closing within 48h" for whichever
+// pack/tender/company rows sort past row 1000 - a wrong founder-facing
+// business number, not a cosmetic gap.
+const MAX_TENDER_PACK_ROWS = 20_000;
 
 // "Active bid" = the same pipeline_stage set migration 0048/0106 already
 // treats as "still being worked" (found/assessing/building/submitted) -
@@ -68,15 +80,20 @@ async function countActiveSubscriptions(supabase: SupabaseService): Promise<numb
 
 async function countClosingWithin48h(supabase: SupabaseService, now: Date): Promise<number> {
   const windowEnd = now.getTime() + CLOSING_WINDOW_HOURS * 60 * 60 * 1000;
-  const { data, error } = await supabase
-    .from("tender_packs")
-    .select("tender_id, pipeline_stage, companies(is_test_company), tenders(closing_date)")
-    .in("pipeline_stage", ACTIVE_PIPELINE_STAGES);
+  const { rows: data, error } = await fetchAllRows<Record<string, unknown>>(
+    (from, to) =>
+      supabase
+        .from("tender_packs")
+        .select("tender_id, pipeline_stage, companies(is_test_company), tenders(closing_date)")
+        .in("pipeline_stage", ACTIVE_PIPELINE_STAGES)
+        .range(from, to),
+    MAX_TENDER_PACK_ROWS,
+  );
   if (error) {
     console.error("founder-digest: could not count tenders closing within 48h", error);
     return 0;
   }
-  const rows = (data ?? []) as unknown as { tender_id: string; companies: { is_test_company: boolean } | null; tenders: { closing_date: string | null } | null }[];
+  const rows = data as unknown as { tender_id: string; companies: { is_test_company: boolean } | null; tenders: { closing_date: string | null } | null }[];
   const tenderIds = new Set<string>();
   for (const r of rows) {
     if (r.companies?.is_test_company) continue;

@@ -32,8 +32,29 @@ import { nudgeFirstTenderEmail, nudgeVaultKickstartEmail, trialDay7MilestoneEmai
 import { sendNotification, type NotificationType } from "../lib/notificationEngine.ts";
 import { daysUntil } from "../lib/dates.ts";
 import { VAULT_DOCUMENTS } from "../lib/vaultDocuments.ts";
+import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 type SupabaseService = SupabaseClient;
+
+// `tender_packs` is the shared/cross-tenant shape `scripts/send-deadline-reminders.ts`'s
+// own header comment documents (one row per company x tender, summed across
+// EVERY company at once under this service-role client - not one company's
+// own slice) - the same shape that silently hits PostgREST's 1000-row
+// db-max-rows cap on a plain, unranged `.select()` (lib/supabasePaging.ts).
+// Both runFirstTender() and companySubscriptions() below need the SAME full
+// company_id list from this table, so it's paginated once here and reused,
+// rather than two separate unranged `.select("company_id")` calls each
+// silently truncating past row 1000 as this table grows with total platform
+// usage (every company's own tender-pursuit history, not one company's).
+const MAX_TENDER_PACK_ROWS = 20_000;
+
+async function allTenderPackCompanyIds(supabase: SupabaseService): Promise<{ companyIds: string[]; error: string | null }> {
+  const { rows, error } = await fetchAllRows<{ company_id: string }>(
+    (from, to) => supabase.from("tender_packs").select("company_id").range(from, to),
+    MAX_TENDER_PACK_ROWS,
+  );
+  return { companyIds: rows.map((r) => r.company_id), error };
+}
 
 type Recipient = { userId: string; email: string };
 
@@ -104,15 +125,15 @@ async function runVaultKickstart(supabase: SupabaseService, appUrl: string): Pro
 }
 
 async function runFirstTender(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
-  const [{ data: companyRows, error: companyError }, { data: packRows, error: packError }] = await Promise.all([
+  const [{ data: companyRows, error: companyError }, { companyIds: packCompanyIds, error: packError }] = await Promise.all([
     supabase.from("companies").select("id, legal_name, created_at").eq("is_test_company", false),
-    supabase.from("tender_packs").select("company_id"),
+    allTenderPackCompanyIds(supabase),
   ]);
   if (companyError || packError) {
     console.error("nudge-first-tender: could not read companies/tender_packs", companyError ?? packError);
     return { sent: 0, candidates: 0 };
   }
-  const companyIdsWithAPack = new Set(((packRows ?? []) as { company_id: string }[]).map((p) => p.company_id));
+  const companyIdsWithAPack = new Set(packCompanyIds);
   const candidates = firstTenderCandidates((companyRows ?? []) as FirstTenderCompanyRow[], companyIdsWithAPack);
   let sent = 0;
   for (const company of candidates) {
@@ -131,17 +152,17 @@ async function runFirstTender(supabase: SupabaseService, appUrl: string): Promis
 }
 
 async function companySubscriptions(supabase: SupabaseService): Promise<{ rows: (TrialSubscriptionRow & { legal_name: string | null })[]; packCountByCompany: Map<string, number> }> {
-  const [{ data: subRows, error: subError }, { data: packRows, error: packError }] = await Promise.all([
+  const [{ data: subRows, error: subError }, { companyIds: packCompanyIds, error: packError }] = await Promise.all([
     supabase.from("company_subscriptions").select("company_id, status, trial_ends_at, companies(legal_name)"),
-    supabase.from("tender_packs").select("company_id"),
+    allTenderPackCompanyIds(supabase),
   ]);
   if (subError || packError) {
     console.error("trial-lifecycle: could not read company_subscriptions/tender_packs", subError ?? packError);
     return { rows: [], packCountByCompany: new Map() };
   }
   const packCountByCompany = new Map<string, number>();
-  for (const p of (packRows ?? []) as { company_id: string }[]) {
-    packCountByCompany.set(p.company_id, (packCountByCompany.get(p.company_id) ?? 0) + 1);
+  for (const companyId of packCompanyIds) {
+    packCountByCompany.set(companyId, (packCountByCompany.get(companyId) ?? 0) + 1);
   }
   const rows = ((subRows ?? []) as unknown as { company_id: string; status: string; trial_ends_at: string | null; companies: { legal_name: string | null } | null }[]).map((r) => ({
     company_id: r.company_id,
