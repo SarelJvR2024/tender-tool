@@ -27,8 +27,24 @@
 // and "digest" (engine/notify/daily_digest.py) didn't fit either existing
 // group, so they get their own - not merged into one of the others just to
 // avoid a third entry.
+//
+// Standing review pass, 2026-11-06 (follow-up to the fix above, same day):
+// the 2026-11-06 fix's own "every real source" accounting missed one -
+// "onboarding" (not "onboarding_scan") is ALSO a real, distinct source:
+// engine/worker/run_bridges.py's BRIDGES dict key "onboarding" is passed
+// directly as system_alerts.record()'s source for a bridge-PROCESS-level
+// failure (the bridge couldn't even start, timed out, or exited non-zero -
+// all "critical" severity), separate from "onboarding_scan"'s job-level OCR/
+// classification failures raised from inside that same bridge once it's
+// running. The pre-2026-11-06 list DID correctly cover "onboarding" (it was
+// listed, just alongside the wrong job-level literal); replacing it with
+// "onboarding_scan" instead of adding both re-opened that coverage gap for
+// the bridge-level alerts specifically. Confirmed by reading
+// run_bridges.py's BRIDGES dict (cv/cv_extract/pack/general/narrative all
+// use the SAME literal for both their bridge- and job-level alerts, which is
+// why only "onboarding" needs its own second entry here).
 export const HEALTH_SOURCE_GROUPS: Record<string, string[]> = {
   "Scraper / Discovery feed": ["discovery", "scraper", "tender_changes", "tender_updates"],
-  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "ocr", "onboarding_scan", "worker"],
+  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "ocr", "onboarding", "onboarding_scan", "worker"],
   "Deadline watch & daily digest": ["deadlines", "digest"],
 };

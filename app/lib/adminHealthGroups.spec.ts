@@ -20,7 +20,12 @@ import { HEALTH_SOURCE_GROUPS } from "./adminHealthGroups";
 //   engine/pack/process_pack_jobs.py                      -> "pack"
 //   engine/discovery/tender_changes.py                    -> "tender_changes"
 //   engine/discovery/watch_tender_updates.py              -> "tender_updates"
-//   engine/worker/run_bridges.py                          -> "worker"
+//   engine/worker/run_bridges.py                          -> "worker", and (its
+//     BRIDGES dict keys, used directly as system_alerts.record()'s source for
+//     a bridge-process-level failure - distinct from each bridge's own job-
+//     level source) "onboarding" specifically (the other BRIDGES keys - cv,
+//     cv_extract, pack, general, narrative - already match their own job-
+//     level literal, so only "onboarding" needs a second, separate entry)
 const REAL_SYSTEM_ALERT_SOURCES = [
   "cv",
   "cv_extract",
@@ -30,6 +35,7 @@ const REAL_SYSTEM_ALERT_SOURCES = [
   "general",
   "narrative",
   "ocr",
+  "onboarding",
   "onboarding_scan",
   "pack",
   "tender_changes",
