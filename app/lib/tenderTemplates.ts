@@ -43,3 +43,9 @@ export const TENDER_TEMPLATE_ORDER = Object.keys(TENDER_TEMPLATES) as TenderTemp
 export function isTenderTemplateType(v: string | null): v is TenderTemplateType {
   return !!v && Object.prototype.hasOwnProperty.call(TENDER_TEMPLATES, v);
 }
+
+// Every template this list marks `required: true`, in TENDER_TEMPLATE_ORDER's
+// own order - the single source of truth for "which templates are required",
+// derived here rather than hand-kept a second time elsewhere (compliance-data.ts's
+// PACK_REQUIRED_TEMPLATES, which gates actual pack generation, re-exports this).
+export const REQUIRED_TENDER_TEMPLATES = TENDER_TEMPLATE_ORDER.filter((t) => TENDER_TEMPLATES[t].required);

@@ -17,6 +17,7 @@ import { chooseEvidenceRule, evaluateEvidence, type EvaluationRules } from "@/li
 import { TENDER_ROLE_COLUMNS, roleCodeForPosition, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
 import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
 import { CONDITIONAL_REGISTRATION_COLUMNS, loadHeldCatalogRegistrations } from "@/lib/personCredentials";
+import { REQUIRED_TENDER_TEMPLATES } from "@/lib/tenderTemplates";
 
 /**
  * The compliance report's data, loaded once per request (React cache()) and
@@ -257,9 +258,15 @@ export type TenderComplianceData = NonNullable<Awaited<ReturnType<typeof loadTen
 /**
  * Blank SANRAL templates engine/pack/process_pack_jobs.py needs on file
  * (tender_documents.doc_type). financial_xlsm is optional: without it the
- * pack says so on its contents page instead of failing.
+ * pack says so on its contents page instead of failing. Re-exported from
+ * tenderTemplates.ts's own REQUIRED_TENDER_TEMPLATES (derived from each
+ * template's `required` field) rather than hand-listed here a second time -
+ * the upload-templates UI (tender-templates.tsx) and this pack-readiness
+ * gate were two independently maintained "which templates are required"
+ * lists, currently identical in effect but a drift risk if one were ever
+ * updated without the other.
  */
-export const PACK_REQUIRED_TEMPLATES = ["technical_xlsm", "a_forms", "c111_form_of_offer", "c123_contract_data"] as const;
+export const PACK_REQUIRED_TEMPLATES = REQUIRED_TENDER_TEMPLATES;
 
 /** What the submission-pack card shows and records with each request. */
 export type PackReadiness = {
