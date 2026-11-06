@@ -40,6 +40,22 @@ test("pricePoints: rounds to 2 decimals", () => {
   assert.equal(p, Math.round(p * 100) / 100);
 });
 
+test("pricePoints: Pt = 2 x Pmin is exactly the zero boundary of the raw formula", () => {
+  // Ps = 80 * (1 - (2,000,000 - 1,000,000) / 1,000,000) = 80 * (1 - 1) = 0.
+  assert.equal(pricePoints("80/20", 2_000_000, 1_000_000), 0);
+  assert.equal(pricePoints("90/10", 2_000_000, 1_000_000), 0);
+});
+
+test("pricePoints: floors at 0, never negative, once Pt > 2 x Pmin (a real, unvalidated input on the public calculator)", () => {
+  // Without the floor, Ps = 80 * (1 - 1.5) = -40 - a negative "preference
+  // point" score, which SBD 6.1's own claim form has no box for and no SCM
+  // practice note ever produces.
+  assert.equal(pricePoints("80/20", 2_500_000, 1_000_000), 0);
+  assert.equal(pricePoints("90/10", 2_500_000, 1_000_000), 0);
+  // An even more extreme ratio stays at 0, not increasingly negative.
+  assert.equal(pricePoints("80/20", 10_000_000, 1_000_000), 0);
+});
+
 test("pricePoints throws on a non-positive Pmin", () => {
   assert.throws(() => pricePoints("80/20", 100, 0));
   assert.throws(() => pricePoints("80/20", 100, -5));

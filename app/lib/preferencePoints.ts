@@ -54,16 +54,27 @@ export function maxPoints(system: PreferenceSystem): { maxPricePoints: number; m
 /** reg 4 / reg 5 price-points formula: Ps = system-max x (1 - (Pt - Pmin) / Pmin).
  * Pmin must be > 0 (it's the lowest acceptable tender's price). Returns
  * the result rounded to 2 decimals, per the regulation's own rounding
- * rule, and never above the system's max (a tender priced below Pmin -
- * which shouldn't happen since Pmin is defined as the lowest - is capped
- * rather than allowed to exceed the max point by a rounding fluke). */
+ * rule, clamped to [0, system-max]: never above the max (a tender priced
+ * below Pmin - which shouldn't happen since Pmin is defined as the lowest -
+ * is capped rather than allowed to exceed the max point by a rounding
+ * fluke), and never below 0 (the raw formula goes negative once
+ * Pt > 2 x Pmin, more than double the lowest acceptable price - a real,
+ * reachable input on this public calculator, which has no upper bound on
+ * the tendered-price field. A preference-points scoresheet has no negative
+ * score: SBD 6.1's own claim form has no box for one, and no SCM practice
+ * note or worked example treats a high bid as anything other than 0 price
+ * points, not a negative figure. Found 2026-11-06, standing review: the
+ * public /tools/bee-preference-points UI rendered the raw negative number
+ * verbatim, e.g. "-40 / 80", for any realistic "I priced well above the
+ * lowest bidder" scenario - confusing on a lead-magnet tool with no
+ * validation stopping that input). */
 export function pricePoints(system: PreferenceSystem, tenderPriceZar: number, lowestAcceptablePriceZar: number): number {
   if (lowestAcceptablePriceZar <= 0) {
     throw new Error("lowestAcceptablePriceZar (Pmin) must be greater than 0");
   }
   const { maxPricePoints } = maxPoints(system);
   const raw = maxPricePoints * (1 - (tenderPriceZar - lowestAcceptablePriceZar) / lowestAcceptablePriceZar);
-  const capped = Math.min(raw, maxPricePoints);
+  const capped = Math.min(Math.max(raw, 0), maxPricePoints);
   return Math.round(capped * 100) / 100;
 }
 
