@@ -29,10 +29,27 @@ const CATEGORY_DOT: Record<ActivityCategory, string> = {
 export async function ActivityLog({ tenderId, showAll }: { tenderId: string; showAll: boolean }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: membership } = user
+  const { data: membership, error: membershipError } = user
     ? await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle()
-    : { data: null };
-  if (!user || !membership) return null;
+    : { data: null, error: null };
+  if (membershipError) console.error("activity-log: company_members read failed", membershipError);
+  if (!user) return null;
+  if (!membership) {
+    // A failed read (membershipError truthy) is indistinguishable from the
+    // genuine "no company" case otherwise - rather than silently hiding the
+    // whole "Notes & activity" section with no hint anything went wrong
+    // (the pre-fix behaviour for both cases), say so explicitly on a real
+    // read failure; a genuine no-company case still renders nothing, same
+    // as before.
+    if (membershipError) {
+      return (
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+          Couldn&apos;t load notes &amp; activity - try refreshing.
+        </div>
+      );
+    }
+    return null;
+  }
   const companyId = membership.company_id as string;
 
   const [tenderRes, commentsRes, tasksRes, packRes, templatesRes, jobsRes, cvsRes, answersRes, labelsRes, updatesRes] = await Promise.all([

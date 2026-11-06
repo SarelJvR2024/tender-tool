@@ -21,8 +21,29 @@ export default async function NewTenderPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const { data: membership, error: membershipError } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
+  if (membershipError) console.error("tenders/new: company_members read failed", membershipError);
+  if (!membership) {
+    // A failed read (membershipError truthy) is indistinguishable from the
+    // genuine "no company yet" case below unless flagged explicitly - an
+    // already-onboarded user hitting a transient Supabase blip here would
+    // otherwise be redirected straight to onboarding's Screen 1 ("create
+    // your company"), the same established bug class already fixed for
+    // onboarding/page.tsx, document-scan/page.tsx and proxy.ts (PR #177).
+    if (membershipError) {
+      return (
+        <AppShell>
+          <div className="mx-auto box-border w-full max-w-[760px] flex-1 px-4 py-5 font-sans">
+            <Link href="/dashboard" className="text-xs font-semibold text-accent no-underline">← Tenders</Link>
+            <div className="mt-3 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+              Couldn&apos;t check your company - try refreshing. If it keeps happening, let us know.
+            </div>
+          </div>
+        </AppShell>
+      );
+    }
+    redirect("/onboarding");
+  }
 
   return (
     <AppShell>
