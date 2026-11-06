@@ -664,6 +664,17 @@ def main():
                              + registration_reminders.find_due_property_documents(url, key, seen, today, args.doc_lead_days))
         tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
         before_closing = find_documents_lapsing_before_closing(url, key, seen, today, args.doc_lead_days)
+        # Finding 132's person-credential half (QA pass, 2026-11-06, commit 0a17f78):
+        # find_person_credentials_lapsing_before_closing() was built, tested
+        # (test_watch_deadlines_urgency.py) and wired into daily_digest.py's live
+        # mode - the channel that actually emails a real company - but never into
+        # THIS script's own --out report, even though its company-wide sibling
+        # (find_documents_lapsing_before_closing, just above) always has been.
+        # Confirmed safe to add here: it reads its own seen-store keys
+        # ("person_before_closing::...") and this script uses a different
+        # consumer ('watch_deadlines') from daily_digest.py's ('daily_digest'),
+        # so the two can never collide or double-report against one seen store.
+        person_before_closing = find_person_credentials_lapsing_before_closing(url, key, seen, today, args.doc_lead_days)
         written = save_seen_db(client, seen, loaded)
     except Exception as e:
         system_alerts.record("deadlines", f"The deadline-reminder watch failed: {type(e).__name__}: {e}",
@@ -695,13 +706,21 @@ def main():
     for d in before_closing:
         print(f"  {d['company_name']!r:<30} {d['label']:<32} expires {d['expiry_date']} - {d['tender_label']} closes {d['closing_date']}")
 
+    print(f"\n{len(person_before_closing)} key person registration(s) that will have lapsed by the closing date of "
+          f"the tender they're confirmed onto:")
+    for p in person_before_closing:
+        print(f"  {p['company_name']!r:<30} {p['person_name']!r:<24} {p['label']:<34} expires {p['expiry_date']} - "
+              f"{p['tender_label']} closes {p['closing_date']}")
+
     print(f"\n{len(tasks_due)} tender task(s) newly due for a reminder "
           f"(within {args.task_lead_days} days or already overdue):")
     for t in tasks_due:
         print(f"  {t['tender_label']:<20} {t['description']:<50} due {t['due_date']}  "
               f"({t['days_left']} days{' overdue' if t['days_left'] < 0 else ' left'})")
 
-    report = {"documents": documents_due, "person_credentials": credentials_due, "registrations": registrations_due, "documents_before_closing": before_closing, "tasks": tasks_due}
+    report = {"documents": documents_due, "person_credentials": credentials_due, "registrations": registrations_due,
+              "documents_before_closing": before_closing, "person_credentials_before_closing": person_before_closing,
+              "tasks": tasks_due}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report, f, indent=2)
