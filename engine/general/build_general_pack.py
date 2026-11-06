@@ -319,7 +319,11 @@ def write_guide(path, manifest, ctx, form_results, by_hand):
             continue
         status = form_results.get(f["code"], {}).get("status") or ("filled" if f["status"] == "auto" else "by hand")
         placed = form_results.get(f["code"], {}).get("placed") or []
-        hd = d.add_paragraph(f"{f['label']} - {f['title']} ({status})")
+        # f['label']/f['title'] are internal (FORMS dict), but this function's own
+        # 2026-11-04 fix (above) didn't reach every write here - complete it rather
+        # than leave a second, un-sanitised path in the same function (QA pass,
+        # 2026-11-06). Cheap, no downside, matches this file's own stated intent.
+        hd = d.add_paragraph(_safe_text(f"{f['label']} - {f['title']} ({status})"))
         hd.runs[0].bold = True
         tbl = d.add_table(rows=1, cols=3)
         tbl.style = "Table Grid"
@@ -345,7 +349,16 @@ def write_guide(path, manifest, ctx, form_results, by_hand):
         hd = d.add_paragraph("STILL TO DO BY HAND")
         hd.runs[0].bold = True
         for b in by_hand:
-            para = d.add_paragraph(f"{b['title']}: {b['reason']}", style="List Bullet")
+            # by_hand's own title/reason trace back through requirements.py's
+            # forms/buyer_forms building to e["name"]/d["name"] - an uploaded
+            # document's own FILENAME, not a value this codebase controls (the
+            # company's own upload, sometimes carrying the buyer's own naming
+            # straight through) - interpolated into "reason" at several call
+            # sites above (e.g. "Only a scanned PDF edition was published
+            # (<name>, read by OCR)..."). Same risk class as every OTHER
+            # control-character fix this session, just one hop further from
+            # the raw buyer text than most. QA pass, 2026-11-06.
+            para = d.add_paragraph(_safe_text(f"{b['title']}: {b['reason']}"), style="List Bullet")
             para.runs[0].font.size = Pt(9)
     d.save(path)
     return path

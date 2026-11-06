@@ -7732,3 +7732,38 @@ all re-ran clean.
 `write_docx()`, ~15 lines including comment); `engine/test_company_documents.py` (1 new case, "6c").
 No change to `fill_fields()`, `guard_only_company_wording()`, `render_guideline()`'s own AI-placement
 logic, or any other document type's handling.
+
+### Finding 137 (CONFIRMED, FIXED, moderate - `build_general_pack.write_guide()`'s own 2026-11-04 control-character fix sanitised the tender-level fields but missed two OTHER writes in the SAME function, left un-sanitised and un-tested)
+
+**Area:** non-SANRAL pack (`engine/general/build_general_pack.py`'s `write_guide()` - the completion
+guide every general (non-SANRAL) pack build produces).
+
+**Scenario:** `write_guide()` already carries a dated 2026-11-04 fix (its own docstring cites it
+directly) applying `_safe_text()` to `contract_no`/`buyer`/`description` and every `guide_rows()` value -
+but the SAME function has two OTHER writes that fix never reached: the per-form heading
+(`f"{f['label']} - {f['title']} ({status})"`) and the "STILL TO DO BY HAND" list
+(`f"{b['title']}: {b['reason']}"`). `by_hand`'s own `reason` traces back through `requirements.py`'s
+`forms`/`buyer_forms` building to an UPLOADED document's own filename (`e["name"]`/`d["name"]`),
+interpolated directly into several `reason` strings there (e.g. `"Only a scanned PDF edition was
+published (<name>, read by OCR) - ..."`) - a company's own upload, not a value this codebase controls.
+Confirmed the existing sibling test (`test_write_guide_survives_a_control_character_in_tender_text()`,
+added with the 2026-11-04 fix) never actually exercised either of these two writes at all: it always
+passed `manifest = {"forms": []}` and `by_hand = []`, so the per-form loop and the by-hand loop never
+ran under that test.
+
+**Fix:** applied the identical `_safe_text()` call already used elsewhere in this same function to both
+remaining writes - no new import needed (`_safe_text` was already imported at the top of the file for
+the 2026-11-04 fix).
+
+**Verified red-then-green.** New test
+`test_write_guide_survives_a_control_character_in_a_forms_label_or_by_hand_reason()` in
+`engine/pack/test_pdf_merge.py` (alongside the sibling test, same file) - a `manifest["forms"]` entry
+and a `by_hand` entry each carrying a control character, confirming `write_guide()` no longer crashes.
+Revert-and-confirm-red on the production file alone: failed exactly as predicted; restored:
+`0 failure(s)` across the whole file. `py_compile` clean on both touched files. Regression:
+`pack/test_assemble_pack.py` and `general/test_process_general_jobs.py` both re-ran clean.
+
+**Regression:** `engine/general/build_general_pack.py` (`write_guide()`, 2 `_safe_text()` calls added,
+~12 lines including comments); `engine/pack/test_pdf_merge.py` (1 new test function, wired into
+`main()`). No change to the 2026-11-04 fix's own already-sanitised writes, `guide_rows()`, or any
+other function in the file.

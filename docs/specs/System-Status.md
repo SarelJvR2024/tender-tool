@@ -2988,6 +2988,46 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-06, standing QA/robustness review): fix - `build_general_pack.write_guide()`'s own 2026-11-04 control-character fix sanitised the tender-level fields but missed two OTHER writes in the SAME function, left un-sanitised AND un-tested
+
+Oriented from `e353baa` (own prior pass: Finding 136, company_documents.write_docx()). `git fetch`/
+`merge --ff-only` found one new sibling commit (`d29f221` - a real fix, `fill_docx_forms.py` was a 7th
+docx writer missing this same control-character guard, found by the "standing solution-architect
+review" session continuing the same sweep my own Finding 136 kicked off; no overlap). Fast-forwarded
+cleanly. Open PRs re-checked via the GitHub API: `#164`/`#165` only, both unchanged, no collision.
+Re-checked again immediately before this push - still clean.
+
+Rotated to non-SANRAL pack (SANRAL pack was last). With the control-character bug class now found 7
+times across the engine, re-read `build_general_pack.py`'s own `write_guide()` specifically - it
+already carries a dated 2026-11-04 fix (cited in its own docstring) - to check whether that fix
+actually reached every write in the function, not just re-trust the "fixed" label.
+
+**Found and fixed Finding 137 (CONFIRMED, moderate)**: it didn't. The 2026-11-04 fix sanitised
+`contract_no`/`buyer`/`description` and every `guide_rows()` value, but two OTHER writes in the SAME
+function - the per-form heading and the "STILL TO DO BY HAND" list - were never touched.
+`by_hand`'s own `reason` traces back through `requirements.py` to an UPLOADED document's own filename,
+interpolated directly into several real `reason` strings there - a company's own upload, not code-
+controlled text. Confirmed the existing sibling test from the 2026-11-04 fix never actually exercised
+either of these two writes: it always passed empty `forms`/`by_hand` lists.
+
+**Fix:** applied the identical `_safe_text()` call already used elsewhere in this same function to both
+remaining writes - no new import needed.
+
+**Verified red-then-green.** New test in `engine/pack/test_pdf_merge.py`, alongside the existing
+sibling test, with a control character in a form's label and in a by_hand reason. Reverted the
+production file alone: failed exactly as predicted; restored: `0 failure(s)`. `py_compile` clean on
+both files. Regression: `pack/test_assemble_pack.py` and `general/test_process_general_jobs.py` both
+re-ran clean.
+
+Backlog: unchanged at 18 items - a contained bug-class recurrence fix, not one of Sarel's own 18
+numbered backlog items.
+
+Verify yourself: `cd engine/pack && python3 test_pdf_merge.py` -> `0 failure(s)`. Diff: `git show
+<this commit> -- engine/general/build_general_pack.py` (2 `_safe_text()` calls added, ~12 lines
+including comments).
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): fix - `company_documents.write_docx()` was the ONE docx writer in this engine that never got the control-character guard every sibling writer needed; a stray control character crashed the WHOLE SANRAL pack build, not just the authority letter
 
 Oriented from `13f3f4d` (own prior pass: Finding 135, eskom_bulletin.py). `git fetch`/`merge --ff-only`

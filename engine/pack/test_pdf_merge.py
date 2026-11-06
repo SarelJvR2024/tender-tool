@@ -169,6 +169,33 @@ def test_write_guide_survives_a_control_character_in_tender_text():
         check("a control character in contract_no/buyer/description does not crash the completion guide", ok)
 
 
+def test_write_guide_survives_a_control_character_in_a_forms_label_or_by_hand_reason():
+    print("build_general_pack.write_guide(): a control character in a form's own label/title or a "
+          "by_hand reason (traced back to an uploaded document's own filename) must not crash the completion guide")
+    # Finding (2026-11-06): the sibling test above only ever exercised write_guide()'s
+    # top-level tender fields (contract_no/buyer/description) - manifest["forms"] was
+    # always [] and by_hand always [] there, so the per-form loop (writing f['label']/
+    # f['title']) and the "STILL TO DO BY HAND" loop (writing by_hand's own title/
+    # reason, which traces back through requirements.py to an uploaded document's own
+    # filename) were never actually run under this control-character test at all.
+    import tempfile
+
+    import build_general_pack as bgp
+    manifest = {"forms": [{"code": "1", "label": "SBD\x0b1", "title": "Invitation to bid\x0b", "status": "manual"}]}
+    ctx = {"tender": {"contract_no": "C1", "buyer": "A buyer", "description": "a description"},
+           "company": {}, "answers": {}, "signatory": {}}
+    by_hand = [{"title": "SBD 4", "reason": "Only a scanned PDF edition was published (scan\x0b.pdf, read by OCR) - "
+                                            "nothing can be typed onto a scan."}]
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "guide2.docx")
+        try:
+            bgp.write_guide(path, manifest, ctx, {}, by_hand)
+            ok = os.path.exists(path)
+        except ValueError:
+            ok = False
+        check("a control character in a form's label/title or a by_hand reason does not crash the completion guide", ok)
+
+
 def test_stamp_renders_a_smart_quote_en_dash_as_the_real_glyph_not_a_question_mark():
     print("_stamp()/_pdf_text(): a smart quote/en-dash in the stamp text must render as the real character")
     # Finding 131 (2026-11-05, same bug class as engine/general/fill_flat_pdf.py's
@@ -205,6 +232,7 @@ def main():
     test_sync_position_suggestions_skips_a_tender_closed_real_yesterday()
     test_contents_docx_survives_a_control_character_in_tender_text()
     test_write_guide_survives_a_control_character_in_tender_text()
+    test_write_guide_survives_a_control_character_in_a_forms_label_or_by_hand_reason()
     test_stamp_renders_a_smart_quote_en_dash_as_the_real_glyph_not_a_question_mark()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
