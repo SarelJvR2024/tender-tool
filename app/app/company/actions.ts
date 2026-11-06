@@ -80,8 +80,21 @@ export async function uploadVaultDocument(companyId: string, formData: FormData)
     redirect(`/company?error=${encodeURIComponent(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`)}`);
   }
 
-  const { error } = await supabase.from("companies").update({ [column]: storagePath }).eq("id", companyId);
-  if (error) {
+  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own `using
+  // (is_company_member(id))` (0001, re-evaluated against the OLD row) no
+  // longer matches - e.g. another admin's removeMember() (0114) revoking
+  // this user's own company_members row between the read above and this
+  // write - indistinguishable from a real update by `error` alone. Without
+  // this check, that race left the just-uploaded file orphaned AND deleted
+  // the still-referenced previous file below regardless.
+  const { data: updated, error } = await supabase
+    .from("companies")
+    .update({ [column]: storagePath })
+    .eq("id", companyId)
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) {
     console.error("companies update failed for vault document", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);
     redirect(`/company?error=${encodeURIComponent("Could not save this document - try again. If it keeps happening, let us know.")}`);

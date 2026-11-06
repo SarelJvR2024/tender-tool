@@ -147,12 +147,25 @@ export async function savePropertyDocument(formData: FormData) {
     row.original_filename = file.name;
   }
 
-  const { error } = existing
-    ? await supabase.from("property_documents").update(row).eq("id", existing.id)
-    : await supabase.from("property_documents").insert(row);
-  if (error) {
+  // .select("id").maybeSingle() on the update branch matters: PostgREST
+  // returns a 2xx with `error: null` and zero rows affected when RLS's own
+  // `using (is_company_member(company_id))` (0050, re-evaluated against the
+  // OLD row) no longer matches - e.g. this user's own company_members row
+  // being removed between the `existing` read above and this write -
+  // indistinguishable from a real update by `error` alone. Without this
+  // check, that race left a newly-uploaded file orphaned AND unconditionally
+  // deleted the still-referenced previous file below regardless.
+  let saveError: { message: string } | null = null;
+  if (existing) {
+    const { data, error } = await supabase.from("property_documents").update(row).eq("id", existing.id).select("id").maybeSingle();
+    saveError = error ?? (data ? null : { message: "This document's building record is no longer there - it may have been removed. Refresh and try again." });
+  } else {
+    const { error } = await supabase.from("property_documents").insert(row);
+    saveError = error;
+  }
+  if (saveError) {
     if (newPath) await supabase.storage.from(VAULT_BUCKET).remove([newPath]);
-    fail(error.message, anchor);
+    fail(saveError.message, anchor);
   }
   if (newPath && existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
   revalidatePath(BACK);
