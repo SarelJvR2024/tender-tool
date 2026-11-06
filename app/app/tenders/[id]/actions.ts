@@ -7,6 +7,8 @@ import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./
 import { loadB7State } from "./b7-data";
 import { advanceFoundToAssessing } from "@/lib/pipeline";
 import { staleSyncedProjectRows } from "./won-project-sync-logic";
+import { loadPackReviewSnapshot } from "./pack-review-data";
+import { computeTenderReadiness } from "./tender-readiness";
 
 /**
  * Tenant check, same pattern as app/app/people/actions.ts's own
@@ -151,6 +153,35 @@ export async function requestSubmissionPack(formData: FormData) {
   // that applies (or can't be ruled out) is never generated blank.
   const b7 = await loadB7State(tenderId);
   if (b7.blocker) fail(b7.blocker);
+
+  // Standing review finding, 2026-11-06: "Submit button: disabled while any
+  // Fix item is open" (app/AGENTS.md, prompt 9 part 2) was only ever built
+  // as submission-pack.tsx's own button `disabled` attribute - a client-
+  // rendered HTML attribute, which a direct POST to this Server Action
+  // (the browser's own devtools, a saved/replayed form, or any client that
+  // doesn't re-render the disabled state) never goes through. Confirmed by
+  // reading every hard stop in this function before this line and
+  // request_submission_pack_checked() (0115) in full: neither one re-checks
+  // computeTenderReadiness(...).fix at all - only unfilledPositions/missing
+  // templates/B7/quota/already-queued. So a tender with a real, disqualifying
+  // Fix item open (e.g. a mandatory compliance document never confirmed)
+  // could still have its submission pack requested and built, with the UI's
+  // own gate being the only thing standing in the way. Re-reads the exact
+  // same cached snapshot the button's own disabledReason already computes,
+  // so this can never disagree with what's shown on the page.
+  const packReviewSnapshot = await loadPackReviewSnapshot(tenderId);
+  if (!packReviewSnapshot.mapped) {
+    // Reaching here with tenderPackId set already means a SANRAL pack was
+    // requested, so "not mapped" here is never the genuine "different
+    // buyer family" case the UI's own cosmetic reading of this same flag
+    // means elsewhere - it means loadTenderCompliance's own `tenders` read
+    // failed just now. Fail closed (deny on uncertain, same as every other
+    // read-failure fix in this review loop), not open - a transient blip
+    // here must never be able to skip the Fix check below entirely.
+    fail("Couldn't check this tender's compliance readiness just now - try again.");
+  }
+  const fixCount = computeTenderReadiness(packReviewSnapshot.sections).fix.length;
+  if (fixCount > 0) fail(`Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above.`);
 
   const { data: active } = await supabase
     .from("pack_generation_jobs")

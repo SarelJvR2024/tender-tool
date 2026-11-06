@@ -12,6 +12,8 @@ import { safeFileName } from "@/lib/safeFileName";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
 import { advanceFoundToAssessing } from "@/lib/pipeline";
+import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
+import { computeTenderReadiness } from "./tender-readiness";
 
 async function requireMember() {
   const supabase = await createClient();
@@ -160,6 +162,25 @@ async function requestJob(formData: FormData, kind: "extract_requirements" | "ge
       .maybeSingle();
     if (!reviewRow?.reviewed_at) {
       redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
+    }
+    // Standing review finding, 2026-11-06: "Submit button: disabled while
+    // any Fix item is open" (app/AGENTS.md, prompt 9 part 2) was only ever
+    // built as general-workspace.tsx's own button `disabled` attribute -
+    // never re-checked here, in the one place that actually queues the
+    // job, or in request_general_job_checked() (0115), which only checks
+    // billing quota. A direct POST to this Server Action (bypassing the
+    // disabled button) could request a pack with a real, disqualifying Fix
+    // item still open. Re-reads the exact same cached snapshot the button's
+    // own disabledReason computes - fails closed (blocks) rather than open
+    // when it can't be checked, same reasoning as requestSubmissionPack()'s
+    // identical fix, same pass.
+    const generalReviewSnapshot = await loadGeneralPackReviewSnapshot(tenderId);
+    if (!generalReviewSnapshot.mapped) {
+      redirect(back(tenderId, `?error=${encodeURIComponent("Couldn't check this tender's compliance readiness just now - try again.")}`));
+    }
+    const fixCount = computeTenderReadiness(generalReviewSnapshot.sections).fix.length;
+    if (fixCount > 0) {
+      redirect(back(tenderId, `?error=${encodeURIComponent(`Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Pack review above.`)}`));
     }
   }
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();

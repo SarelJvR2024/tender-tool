@@ -166,12 +166,28 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   // the workspace header's readiness score reads, so this can't disagree
   // with what the header already shows.
   const packReviewSnapshot = await loadPackReviewSnapshot(tenderId);
-  const fixCount = packReviewSnapshot.mapped ? computeTenderReadiness(packReviewSnapshot.sections).fix.length : 0;
-  const disabledReason = fixCount > 0
-    ? `Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above`
-    : !reviewed
-      ? "Confirm the Pack review above first"
-      : null;
+  // Standing review finding, 2026-11-06: this component only ever mounts
+  // for a confirmed-SANRAL tender (page.tsx's own isSanralPackFamily gate),
+  // so packReviewSnapshot.mapped being false here is never the genuine
+  // "different buyer family" case - it means loadTenderCompliance's own
+  // `tenders` read failed on THIS render. The old `fixCount = ... : 0`
+  // fallback silently zeroed the Fix count on that failure, which could
+  // re-enable this button (if `reviewed` was already true from an earlier
+  // visit) with the Fix check never actually having run - the exact
+  // "a failed read looks falsely ready" shape this review loop watches
+  // for, just reached through the newer Fix-gate rather than an old field.
+  // Treating !mapped as "can't check it right now" (disabled, not silently
+  // skipped) matches requestSubmissionPack()'s own server-side re-check of
+  // this same snapshot, added the same pass - the button and the action it
+  // submits to can no longer disagree about this.
+  const fixCount = packReviewSnapshot.mapped ? computeTenderReadiness(packReviewSnapshot.sections).fix.length : null;
+  const disabledReason = fixCount === null
+    ? "Couldn't check compliance readiness just now - refresh and try again"
+    : fixCount > 0
+      ? `Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above`
+      : !reviewed
+        ? "Confirm the Pack review above first"
+        : null;
 
   // Signed links for ready packs (private 'submission-packs' bucket, 10 min).
   const paths = jobs
