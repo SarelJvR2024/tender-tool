@@ -739,11 +739,31 @@ export async function applyCvExtraction(formData: FormData) {
     back("Nothing was ticked. Tick the fields to save, or discard the extraction.");
   }
 
+  // .select("id").maybeSingle() on both writes below matters: PostgREST
+  // returns a 2xx with `error: null` and zero rows affected when RLS's own
+  // USING clause (re-evaluated against the OLD row) no longer matches at
+  // write time - e.g. another admin's removeMember() (0114) revoking this
+  // user's own company_members row mid-request. No file/destructive
+  // consequence here (the "plain update twin" shape), but checking only
+  // `error` would silently no-op either write while this function still
+  // redirects as if both succeeded, leaving cv_extraction_results stuck on
+  // 'pending_review' with the UI believing it was already applied. Same
+  // shape, same fix, as this function's own documented sibling,
+  // app/app/my-cv/actions.ts applyMyCvExtraction() - found unswept here
+  // (the original this file's sibling was modeled on) in the standing
+  // review, 2026-11-06.
   if (Object.keys(personUpdate).length > 0) {
-    const { error } = await supabase.from("people").update({ ...personUpdate, updated_at: new Date().toISOString() }).eq("id", personId);
-    if (error) {
+    const { data: updatedPerson, error } = await supabase
+      .from("people")
+      .update({ ...personUpdate, updated_at: new Date().toISOString() })
+      .eq("id", personId)
+      .select("id")
+      .maybeSingle();
+    if (error || !updatedPerson) {
       console.error("people update failed for CV extraction", error);
-      back("Could not save the person's fields - try again. If it keeps happening, let us know.");
+      back(error
+        ? "Could not save the person's fields - try again. If it keeps happening, let us know."
+        : "This person's roster record is no longer there to update - refresh and try again.");
     }
   }
   if (projectRows.length > 0) {
@@ -754,7 +774,7 @@ export async function applyCvExtraction(formData: FormData) {
     }
   }
 
-  const { error: markError } = await supabase
+  const { data: marked, error: markError } = await supabase
     .from("cv_extraction_results")
     .update({
       review_status: "applied",
@@ -762,10 +782,14 @@ export async function applyCvExtraction(formData: FormData) {
       reviewed_at: new Date().toISOString(),
       applied: { person_fields: Object.keys(personUpdate), edited_fields: edited, projects_added: projectRows.length },
     })
-    .eq("id", extractionId);
-  if (markError) {
+    .eq("id", extractionId)
+    .select("id")
+    .maybeSingle();
+  if (markError || !marked) {
     console.error("cv_extraction_results update failed", markError);
-    back("Saved, but the extraction couldn't be marked as reviewed - try again. If it keeps happening, let us know.");
+    back(markError
+      ? "Saved, but the extraction couldn't be marked as reviewed - try again. If it keeps happening, let us know."
+      : "Saved, but the extraction result is no longer there to mark reviewed - refresh and try again.");
   }
 
   const queueError = await queueStandardCvs(supabase, companyId, personId!, user?.id ?? null);
@@ -783,15 +807,23 @@ export async function discardCvExtraction(formData: FormData) {
   const extractionId = str(formData, "extraction_id");
   if (!personId || !extractionId) redirect("/people");
 
-  const { error } = await supabase
+  // Same zero-rows-matched race as applyCvExtraction()'s writes above -
+  // checked only `error` before, so a membership revocation mid-request (or
+  // the row having moved on from 'pending_review' already) would silently
+  // match zero rows while still redirecting as if the discard happened.
+  const { data: discarded, error } = await supabase
     .from("cv_extraction_results")
     .update({ review_status: "discarded", reviewed_by: user?.id ?? null, reviewed_at: new Date().toISOString() })
     .eq("id", extractionId)
     .eq("person_id", personId)
-    .eq("review_status", "pending_review");
-  if (error) {
+    .eq("review_status", "pending_review")
+    .select("id")
+    .maybeSingle();
+  if (error || !discarded) {
     console.error("cv_extraction_results discard update failed", error);
-    redirect(`/people/${personId}?error=${encodeURIComponent("Could not discard this extraction - try again. If it keeps happening, let us know.")}`);
+    redirect(`/people/${personId}?error=${encodeURIComponent(error
+      ? "Could not discard this extraction - try again. If it keeps happening, let us know."
+      : "That extraction result is no longer there to discard - refresh and try again.")}`);
   }
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);

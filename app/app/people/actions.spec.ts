@@ -134,7 +134,7 @@ describe("applyCvExtraction - source_note's 'today' is SAST-anchored, not a naiv
       [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId's company_members lookup
       [pendingExtraction], // cv_extraction_results select
       [{ data: null, error: null }], // projects insert
-      [{ data: null, error: null }], // cv_extraction_results update (mark applied)
+      [{ data: { id: "extraction-1" }, error: null }], // cv_extraction_results update().select("id").maybeSingle() (mark applied) - real match
       [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs' own "already queued" check - skips the insert branch entirely
     ]);
     supabaseState.current = client;
@@ -192,6 +192,107 @@ describe("savePerson - edit path, real update still succeeds", () => {
 
     const fd = formDataWith({ id: "person-1", name: "Jane Doe" });
     const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+  });
+});
+
+// applyCvExtraction()/discardCvExtraction() - the same membership-revoked-
+// mid-request "plain update twin" shape as savePerson() above, found
+// unswept in THIS file (standing review, 2026-11-06). Notably,
+// app/app/my-cv/actions.ts's own applyMyCvExtraction()/
+// discardMyCvExtraction() - explicitly documented there as "same shape as
+// app/app/people/actions.ts applyCvExtraction" - were already fixed for
+// this exact race; the original this file's sibling was modeled on had
+// never itself been swept. No file/destructive consequence (person fields
+// just don't get re-applied; cv_extraction_results can get stuck on
+// 'pending_review'), but still a real silent-false-success.
+const extractionTickedPersonField = {
+  person_id: "person-1",
+  extraction_id: "extraction-1",
+  use_ecsa_level: "on",
+  f_ecsa_level: "Professional Engineer",
+};
+
+describe("applyCvExtraction - person update matches zero rows", () => {
+  it("does not report success, and does not go on to insert projects or mark the extraction applied", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [pendingExtraction], // cv_extraction_results select
+      [{ data: null, error: null }], // people update().select("id").maybeSingle() - zero-row RLS match
+    ]);
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(applyCvExtraction(formDataWith(extractionTickedPersonField)));
+
+    expect(url).not.toContain("cv_applied=");
+    expect(url).toContain("/people/person-1?error=");
+  });
+});
+
+describe("applyCvExtraction - person update matches, but marking the extraction applied matches zero rows", () => {
+  it("does not report success, leaving the extraction genuinely re-checkable rather than silently stuck on 'pending_review'", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [pendingExtraction],
+      [{ data: { id: "person-1" }, error: null }], // people update - real match
+      [{ data: null, error: null }], // cv_extraction_results update().select("id").maybeSingle() - zero-row RLS match
+    ]);
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(applyCvExtraction(formDataWith(extractionTickedPersonField)));
+
+    expect(url).not.toContain("cv_applied=");
+    expect(url).toContain("/people/person-1?error=");
+  });
+});
+
+describe("applyCvExtraction - person update + mark-applied both genuinely match", () => {
+  it("still succeeds normally with the added .select().maybeSingle() gates", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [pendingExtraction],
+      [{ data: { id: "person-1" }, error: null }], // people update - real match
+      [{ data: { id: "extraction-1" }, error: null }], // cv_extraction_results update - real match
+      [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs' "already queued" check
+    ]);
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(applyCvExtraction(formDataWith(extractionTickedPersonField)));
+
+    expect(url).toContain("/people/person-1?cv_applied=");
+    expect(url).not.toContain("error=");
+  });
+});
+
+describe("discardCvExtraction - matches zero rows (revoked mid-request, or already moved on)", () => {
+  it("does not redirect as if the discard happened", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: null, error: null }], // update().select("id").maybeSingle() - zero-row match
+    ]);
+    supabaseState.current = client;
+
+    const { discardCvExtraction } = await import("./actions");
+    const url = await expectRedirect(discardCvExtraction(formDataWith({ person_id: "person-1", extraction_id: "extraction-1" })));
+
+    expect(url).toContain("/people/person-1?error=");
+  });
+});
+
+describe("discardCvExtraction - real update still succeeds", () => {
+  it("redirects back to the person's page with no error when the discard genuinely matches", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "extraction-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { discardCvExtraction } = await import("./actions");
+    const url = await expectRedirect(discardCvExtraction(formDataWith({ person_id: "person-1", extraction_id: "extraction-1" })));
 
     expect(url).toBe("/people/person-1");
   });
