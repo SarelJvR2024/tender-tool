@@ -128,6 +128,25 @@ def test_control_characters_are_stripped_not_crashed_on():
         check("a control character in profile text does not crash docx generation", False, f"{type(e).__name__}: {e}")
 
 
+def test_company_legal_name_control_character_in_footer_is_stripped_not_crashed_on():
+    print("a control character in company legal_name (the footer every CV format shares) does not crash docx generation")
+    person = {"name": "Jane Doe", "qualifications": {},
+              "projects": [{"client_and_number": "Proj A", "value_rm": 5, "position_held": "Engineer",
+                             "start": "2020", "end": "2021", "contact": "Bob", "contact_phone": "012"}]}
+    profile = {"company": {"legal_name": "Test\x0bCo (Pty) Ltd"}}
+    log = ProvenanceLog(source="test")
+    import tempfile
+    try:
+        doc = gc.build_world_bank(profile, person, "person_1", "summary", None, None, log)
+        footer_text = doc.paragraphs[-1].text
+        with tempfile.TemporaryDirectory() as d:
+            doc.save(os.path.join(d, "test_control_char_footer.docx"))
+        check("a control character in company legal_name does not crash docx generation", True)
+        check("the footer paragraph itself has the control character stripped", "\x0b" not in footer_text, repr(footer_text))
+    except Exception as e:
+        check("a control character in company legal_name does not crash docx generation", False, f"{type(e).__name__}: {e}")
+
+
 def test_years_experience_uses_sast_not_naive_utc_today():
     print("Form B2.1: years-of-experience fallback 'as of today' uses SAST, not a naive UTC date")
     # Finding (2026-10-21): the standard (non-tender) CV path's fallback
@@ -401,6 +420,7 @@ def main():
     test_person_name_cannot_escape_out_dir_via_path_traversal()
     test_null_projects_and_qualifications_degrade_instead_of_crashing()
     test_control_characters_are_stripped_not_crashed_on()
+    test_company_legal_name_control_character_in_footer_is_stripped_not_crashed_on()
     test_years_experience_uses_sast_not_naive_utc_today()
     test_world_bank_project_with_null_fields_does_not_print_the_word_none()
     test_world_bank_project_with_null_position_held_does_not_print_the_word_none()

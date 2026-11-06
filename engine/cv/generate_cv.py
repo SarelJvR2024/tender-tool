@@ -546,15 +546,21 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
     )
     d.add_paragraph()
     d.add_paragraph("Signature of staff member: _________________________  Date: ____________")
-    d.add_paragraph(f"Day/month/year.  Full name of authorized representative of {comp['legal_name']}: "
+    d.add_paragraph(f"Day/month/year.  Full name of authorized representative of {_safe_text(comp['legal_name'])}: "
                      f"_________________________")
     _footer(d, comp)
     return d
 
 
 def _footer(d, comp):
+    # QA pass, 2026-11-06: comp["legal_name"] is the same real, user-editable
+    # company field already routed through _safe_text() everywhere else this
+    # function/file writes it (e.g. the _kv_table() rows above) - this write
+    # and the one just above calling into this function were the two left
+    # unguarded in generate_cv.py itself, the file every other control-
+    # character fix this session imports _safe_text() FROM.
     d.add_paragraph()
-    p = d.add_paragraph(comp.get("legal_name", ""))
+    p = d.add_paragraph(_safe_text(comp.get("legal_name", "")))
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].italic = True
 
