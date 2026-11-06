@@ -366,3 +366,65 @@ describe("discardOnboardingDocument - real update still succeeds", () => {
     expect(removedPaths).toContain("company-1/onboarding/raw-discard.pdf");
   });
 });
+
+// skipOnboardingDocument() - another sibling, in this SAME file, never
+// checked before this pass (TS-sweep's own "actions.ts out of scope"
+// continuation, standing review, 2026-11-06). Pre-fix it did
+// `.update({ review_status: "skipped" }).eq("id", result.id)` with NO check
+// at all - not even `error` - then unconditionally redirected with
+// "saved=skipped". A membership-revoked-mid-request zero-row match left the
+// row stuck on "pending_review" (so it silently stays in the "To review"
+// queue) while the UI still reported the skip as having worked.
+const pendingSkipResult = {
+  data: {
+    id: "result-4",
+    company_id: "company-1",
+    onboarding_upload_id: "upload-4",
+    document_kind: "unknown",
+    fields: {},
+    review_status: "pending_review",
+    onboarding_uploads: { storage_path: "company-1/onboarding/raw-skip.pdf", original_filename: "skip.pdf" },
+  },
+  error: null,
+};
+
+describe("skipOnboardingDocument - membership revoked mid-request (update matches zero rows)", () => {
+  it("does not report success", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingSkipResult], // loadPendingResult
+        [{ data: null, error: null }], // skip update - membership revoked -> 0 rows
+      ],
+    });
+    supabaseState.current = client;
+
+    const { skipOnboardingDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-4" });
+    const url = await expectRedirect(skipOnboardingDocument(fd));
+
+    expect(url).not.toContain("saved=skipped");
+    expect(url).toContain("/company/document-scan?error=");
+  });
+});
+
+describe("skipOnboardingDocument - real update still succeeds", () => {
+  it("reports success when the update genuinely matches the row", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingSkipResult],
+        [{ data: { id: "result-4" }, error: null }], // real match
+      ],
+    });
+    supabaseState.current = client;
+
+    const { skipOnboardingDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-4" });
+    const url = await expectRedirect(skipOnboardingDocument(fd));
+
+    expect(url).toContain("saved=skipped");
+  });
+});

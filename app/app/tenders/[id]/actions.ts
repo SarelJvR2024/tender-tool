@@ -322,11 +322,15 @@ export async function reassignTenderTask(taskId: string, tenderId: string, perso
   const companyId = await requireCompanyId();
   const supabase = await createClient();
 
-  await supabase
+  // Logging only, no behavioral branch changed - same TS-sweep grep blind
+  // spot as ensureClosingMilestone()/ensureBriefingMilestone() above
+  // (standing review, 2026-11-06).
+  const { error } = await supabase
     .from("tender_tasks")
     .update({ assigned_to: personId || null })
     .eq("id", taskId)
     .eq("company_id", companyId);
+  if (error) console.error("tender_tasks reassign failed", error);
 
   revalidatePath(`/tenders/${tenderId}`);
 }
@@ -348,11 +352,14 @@ export async function advanceTaskStatus(taskId: string, tenderId: string, curren
   const idx = TASK_STATUSES.indexOf(currentStatus);
   const next = TASK_STATUSES[Math.min(idx + 1, TASK_STATUSES.length - 1)];
 
-  await supabase
+  // Logging only, no behavioral branch changed - same TS-sweep grep blind
+  // spot as reassignTenderTask() above.
+  const { error } = await supabase
     .from("tender_tasks")
     .update({ status: next })
     .eq("id", taskId)
     .eq("company_id", companyId);
+  if (error) console.error("tender_tasks status advance failed", error);
 
   revalidatePath(`/tenders/${tenderId}`);
 }
@@ -374,7 +381,13 @@ export async function ensureClosingMilestone(tenderId: string, closingDate: stri
   const companyId = await requireCompanyId();
   const supabase = await createClient();
 
-  await supabase.from("tender_tasks").upsert(
+  // Logging only, no behavioral branch changed - found via the TS-sweep's
+  // own grep blind spot: a bare `await supabase....upsert(...)` with no
+  // destructuring at all, not even `error`, never matched the sweep's
+  // "const { data" pattern (standing review, 2026-11-06). A failed seed here
+  // just means the "Tender closes" reminder task doesn't appear this page
+  // load - re-attempted idempotently (ignoreDuplicates) on the next.
+  const { error } = await supabase.from("tender_tasks").upsert(
     {
       company_id: companyId,
       tender_id: tenderId,
@@ -385,6 +398,7 @@ export async function ensureClosingMilestone(tenderId: string, closingDate: stri
     },
     { onConflict: "company_id,tender_id,kind", ignoreDuplicates: true }
   );
+  if (error) console.error("tender_tasks closing-milestone seed failed", error);
 }
 
 /**
@@ -400,7 +414,9 @@ export async function ensureBriefingMilestone(tenderId: string, briefingDate: st
   const companyId = await requireCompanyId();
   const supabase = await createClient();
 
-  await supabase.from("tender_tasks").upsert(
+  // Logging only, no behavioral branch changed - same TS-sweep grep blind
+  // spot as ensureClosingMilestone() above.
+  const { error } = await supabase.from("tender_tasks").upsert(
     {
       company_id: companyId,
       tender_id: tenderId,
@@ -411,6 +427,7 @@ export async function ensureBriefingMilestone(tenderId: string, briefingDate: st
     },
     { onConflict: "company_id,tender_id,kind", ignoreDuplicates: true }
   );
+  if (error) console.error("tender_tasks briefing-milestone seed failed", error);
 }
 
 const REMINDER_KINDS = ["submission", "opening"] as const;

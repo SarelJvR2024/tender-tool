@@ -75,7 +75,17 @@ export async function saveGeneralAnswers(formData: FormData) {
     }
   }
   if (cleared.length > 0) {
-    await supabase.from("tender_answers").delete().eq("company_id", companyId).eq("tender_id", tenderId).in("field_key", cleared).is("storage_path", null);
+    // Logging only, no behavioral branch changed (standing review,
+    // 2026-11-06 - found via the TS-sweep's own grep blind spot: a bare
+    // `await supabase....` with no destructuring at all, not even `error`,
+    // never matched the sweep's "const { data" pattern). A silently-failed
+    // clear just leaves the field's old value on file instead of blank -
+    // not destructive, but previously invisible even to this function's own
+    // console - logged here so a future pass can tell a genuine failure
+    // apart from an honest no-op (nothing WAS cleared) instead of both
+    // looking identical forever.
+    const { error: clearError } = await supabase.from("tender_answers").delete().eq("company_id", companyId).eq("tender_id", tenderId).in("field_key", cleared).is("storage_path", null);
+    if (clearError) console.error("tender_answers clear-delete failed", clearError);
   }
   if (Object.keys(companyUpdate).length > 0) {
     const { error } = await supabase.from("companies").update(companyUpdate).eq("id", companyId);
@@ -268,7 +278,17 @@ export async function removePrivateTenderDocument(formData: FormData) {
     .eq("tender_id", tenderId);
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).eq("company_id", companyId).maybeSingle();
   if (pack && (count ?? 0) === 0) {
-    await supabase.from("tender_packs").update({ document_requirements: null, intake: null }).eq("id", pack.id as string);
+    // Logging only, no behavioral branch changed - traced and deferred by
+    // name in the immediately-preceding pass's own entry ("general-actions.ts:269
+    // ... not fixed - noted as a real but minor candidate"), picked up again
+    // via the TS-sweep's grep blind spot for a bare unchecked write (standing
+    // review, 2026-11-06). A failed reset here just means a removed
+    // document's old document_requirements/intake is skipped once, leaving
+    // stale (not falsely-fresher) data until the next edit touches the same
+    // pack - logged so a future pass can tell a real failure apart from an
+    // honest no-op.
+    const { error: resetError } = await supabase.from("tender_packs").update({ document_requirements: null, intake: null }).eq("id", pack.id as string);
+    if (resetError) console.error("tender_packs document_requirements reset failed", resetError);
   } else if (pack) {
     // 0115: same atomic checked-insert as requestJob() - extract_requirements
     // has no quota gate either way, but this keeps every real pack_generation_jobs

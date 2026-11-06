@@ -122,12 +122,27 @@ export async function confirmPositionPerson(
     ? { suggested_person_id: sugg.suggestion.id, suggested_score: sugg.suggestion.score, suggested_rationale: sugg.suggestion.why }
     : {};
 
-  await supabase
+  // Logging only, no behavioral branch changed - found via the TS-sweep's
+  // own grep blind spot: a bare `await supabase....upsert(...)` with no
+  // destructuring at all, not even `error`, never matched the sweep's
+  // "const { data" pattern (standing review, 2026-11-06). Traced the real
+  // consequence rather than assuming severity from the shape: everything
+  // downstream of this write - the allConfirmed/confirmed sets computed a
+  // few lines below, the tender_packs.status flip that follows, AND
+  // engine/pack/process_pack_jobs.py's own "unassigned" gate at pack-
+  // generation time - all RE-READ tender_pack_assignments.confirmed_person_id
+  // fresh from the DB rather than trusting this call succeeded, so a
+  // silently-failed upsert here degrades to "the click did nothing, DB
+  // state is unchanged" (self-correcting on the next genuine attempt),
+  // never to a false-confirmed/false-cleared state surviving into the
+  // actual pack-generation gate.
+  const { error: assignError } = await supabase
     .from("tender_pack_assignments")
     .upsert(
       { tender_pack_id: tenderPackId, position_code: positionCode, confirmed_person_id: personId || null, ...suggestedFields },
       { onConflict: "tender_pack_id,position_code" },
     );
+  if (assignError) console.error("tender_pack_assignments upsert failed for confirmPositionPerson", assignError);
 
   const [{ data: reqRows }, { data: asgRows }] = await Promise.all([
     supabase.from("tender_requirements").select("position_code").eq("tender_id", tenderId).eq("is_alternate", false),
@@ -140,13 +155,22 @@ export async function confirmPositionPerson(
   const confirmed = new Set((asgRows ?? []).filter((a) => a.confirmed_person_id).map((a) => a.position_code as string));
   const allConfirmed = required.size > 0 && [...required].every((c) => confirmed.has(c));
 
+  // Logging only, no behavioral branch changed - same TS-sweep grep blind
+  // spot as the upsert above. tender_packs.status is display-only in this
+  // app (app/lib/dashboardStats.ts's readiness check, the page.tsx badge) -
+  // the real pack-generation gate (confirm_pack.py/process_pack_jobs.py)
+  // is driven entirely by tender_pack_assignments.confirmed_person_id, read
+  // fresh at generation time, never by this flag - so a silently-failed
+  // flip here is a stale badge, not a false-confirmed gate.
   if (allConfirmed && pack.status === "suggested") {
-    await supabase
+    const { error: confirmError } = await supabase
       .from("tender_packs")
       .update({ status: "confirmed", confirmed_by: userId, confirmed_at: new Date().toISOString() })
       .eq("id", tenderPackId);
+    if (confirmError) console.error("tender_packs status->confirmed update failed", confirmError);
   } else if (!allConfirmed && pack.status !== "suggested") {
-    await supabase.from("tender_packs").update({ status: "suggested", confirmed_by: null, confirmed_at: null }).eq("id", tenderPackId);
+    const { error: unconfirmError } = await supabase.from("tender_packs").update({ status: "suggested", confirmed_by: null, confirmed_at: null }).eq("id", tenderPackId);
+    if (unconfirmError) console.error("tender_packs status->suggested update failed", unconfirmError);
   }
 
   revalidatePath(`/tenders/${tenderId}`);

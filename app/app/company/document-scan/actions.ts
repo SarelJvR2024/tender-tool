@@ -147,9 +147,24 @@ async function loadPendingResult(supabase: SupabaseClient, companyId: string, re
 }
 
 async function markApplied(supabase: SupabaseClient, resultId: string, userId: string | null, applied: Record<string, unknown>) {
-  await supabase.from("onboarding_document_results").update({
+  // Logging only, no behavioral branch changed - this runs AFTER the real
+  // write (companies/experience_items/cv_uploads/company_principals, plus
+  // the onboarding source file already being removed in several callers) has
+  // already succeeded, so there is nothing left to roll back if this update
+  // itself fails or matches zero rows. The real consequence is the
+  // onboarding_document_results row staying stuck on "pending_review" even
+  // though the document was actually filed - it stays visible in the "to
+  // review" queue, confusing but not destructive (a re-confirm attempt would
+  // just fail cleanly, since the onboarding source file is already gone by
+  // then). Found via the TS-sweep's own grep blind spot: a bare
+  // `await supabase....update(...)` with no destructuring at all, not even
+  // `error`, never matched the sweep's "const { data" pattern (standing
+  // review, 2026-11-06) - logged here so a future pass can tell a genuine
+  // failure apart from this already-accepted shape.
+  const { error } = await supabase.from("onboarding_document_results").update({
     review_status: "applied", applied, reviewed_by: userId, reviewed_at: new Date().toISOString(),
   }).eq("id", resultId);
+  if (error) console.error("onboarding_document_results mark-applied failed", resultId, error);
 }
 
 function ticked(formData: FormData, key: string): boolean {
@@ -388,8 +403,26 @@ export async function skipOnboardingDocument(formData: FormData) {
   const resultId = str(formData, "result_id");
   if (!resultId) fail("Missing document.");
   const result = await loadPendingResult(supabase, companyId, resultId!);
-  await supabase.from("onboarding_document_results").update({ review_status: "skipped" }).eq("id", result.id);
   const back = backTo(formData);
+  // .select("id").maybeSingle() here matters, same shape as
+  // discardOnboardingDocument() right below (and confirmVaultDocument() /
+  // confirmIdDocument() above) - pre-fix this checked nothing at all, not
+  // even `error`: a membership-revoked-mid-request zero-row match on this
+  // update still redirected with "saved=skipped" while the row stayed stuck
+  // on "pending_review" - a silent false-success, not a destructive one
+  // (no storage file is touched here), but the same dominant shape, found
+  // sweeping this file's own siblings for the TS-side unprotected-read sweep
+  // (standing review, 2026-11-06).
+  const { data: updated, error } = await supabase
+    .from("onboarding_document_results")
+    .update({ review_status: "skipped" })
+    .eq("id", result.id)
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) {
+    console.error("onboarding_document_results skip update failed", error);
+    fail("This document is no longer there - refresh and try again.");
+  }
   revalidatePath(back);
   redirect(`${back}?saved=skipped`);
 }

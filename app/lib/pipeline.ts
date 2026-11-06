@@ -182,9 +182,15 @@ export async function advanceFoundToAssessing(
   supabase: SupabaseClient,
   tenderPackId: string
 ) {
-  await supabase
+  // Logging only, no behavioral branch changed - this function's own
+  // docstring already calls it best-effort, but the failure was previously
+  // invisible even to this function's own console (TS-sweep grep blind
+  // spot: a bare `await supabase....update(...)` with no destructuring at
+  // all, not even `error` - standing review, 2026-11-06).
+  const { error } = await supabase
     .from("tender_packs")
     .update({ pipeline_stage: "assessing" })
     .eq("id", tenderPackId)
     .eq("pipeline_stage", "found");
+  if (error) console.error("tender_packs advanceFoundToAssessing failed", error);
 }
