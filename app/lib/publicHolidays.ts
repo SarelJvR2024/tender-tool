@@ -123,6 +123,25 @@ export function isBusinessDay(dateStr: string): boolean {
   return !isWeekend(dateStr) && !isPublicHoliday(dateStr);
 }
 
+// Today's calendar date in South African time (SAST, UTC+2, no DST), as
+// "YYYY-MM-DD" - the default start/from date for the working-day deadline
+// calculator (DeadlineCalculatorClient.tsx), and the right way for any
+// future caller here to get "today" as a date-only string. This file's own
+// holiday math is already explicit about SAST vs UTC (s2A's "falls on a
+// Sunday" rule, the Easter-derived dates); "what day is it" needs the same
+// care, and `new Date().toISOString().slice(0, 10)` - the calculator's own
+// prior `today()` - does NOT give that: toISOString() is always UTC, so for
+// anyone, anywhere, in the ~2 hours before UTC midnight (00:00-02:00 SAST,
+// since SAST = UTC+2 with no DST) it silently returns YESTERDAY's date, a
+// real, reachable, daily bug (confirmed: 2026-11-05T23:30Z, 01:30 SAST on
+// 2026-11-06, produced "2026-11-05"). "en-CA" + the explicit SAST timeZone
+// is this codebase's own established pattern for exactly this
+// (scripts/send-founder-digest.ts's sastDateKey). `now` is injectable only
+// for tests; every real caller leaves it as `new Date()`.
+export function sastToday(now: Date = new Date()): string {
+  return now.toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" });
+}
+
 // Adds N working days (business days, excluding weekends and SA public
 // holidays) to a start date. N may be negative to go backwards. The start
 // date itself is never counted - "5 business days from Monday" lands on

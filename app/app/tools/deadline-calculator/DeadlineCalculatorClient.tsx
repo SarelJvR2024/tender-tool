@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
-import { addBusinessDays, businessDaysBetween, holidaysForYear, isPublicHoliday, isWeekend } from "@/lib/publicHolidays";
+import { addBusinessDays, businessDaysBetween, holidaysForYear, isPublicHoliday, isWeekend, sastToday } from "@/lib/publicHolidays";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -18,10 +18,6 @@ const CARD = "rounded-xl border border-border bg-card p-5";
 const LABEL = "mb-1.5 block text-xs font-semibold text-foreground";
 const INPUT = "min-h-11 w-full rounded-lg border border-border px-3 text-sm";
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function subscribeNever() {
   return () => {};
 }
@@ -35,7 +31,10 @@ function getServerToday() {
 // this route is static-prerendered, and Next.js's build rejects a
 // prerender-time read of the current time outright. useSyncExternalStore's
 // getServerSnapshot (empty string) is what the prerender actually sees;
-// `today()` only runs once this is live in a real browser.
+// `sastToday()` only runs once this is live in a real browser - and it's
+// the SAST-aware one (see its own comment in lib/publicHolidays.ts), not a
+// raw `new Date().toISOString()`, which this component used to call
+// directly and which is wrong for ~2 hours every day.
 //
 // `embedded` (spec v3 O03): true when rendered inside the signed-in app's
 // own /toolkit route, where AppShell already supplies navigation/chrome -
@@ -45,7 +44,7 @@ function getServerToday() {
 // identical either way so the two contexts can never drift apart.
 export default function DeadlineCalculatorClient({ embedded = false }: { embedded?: boolean } = {}) {
   const [mode, setMode] = useState<"add" | "count">("add");
-  const clientToday = useSyncExternalStore(subscribeNever, today, getServerToday);
+  const clientToday = useSyncExternalStore(subscribeNever, sastToday, getServerToday);
   const [startDateInput, setStartDateInput] = useState("");
   const [days, setDays] = useState(10);
   const [endDateInput, setEndDateInput] = useState("");

@@ -6,6 +6,7 @@ import {
   isBusinessDay,
   addBusinessDays,
   businessDaysBetween,
+  sastToday,
 } from "./publicHolidays.ts";
 
 test("2026 holiday table has the 12 permanent holidays plus Easter-derived dates", () => {
@@ -108,4 +109,23 @@ test("businessDaysBetween is negative, and symmetric in magnitude, when end is b
   const fwd = businessDaysBetween("2026-01-05", "2026-01-12");
   const back = businessDaysBetween("2026-01-12", "2026-01-05");
   assert.equal(back, -fwd);
+});
+
+test("sastToday returns the South African calendar date, not the UTC one, in the pre-midnight-UTC window", () => {
+  // 23:30 UTC = 01:30 SAST the FOLLOWING day (SAST is UTC+2, no DST) - the
+  // ~2-hour daily window where a plain `new Date().toISOString().slice(0, 10)`
+  // (the deadline calculator's old, buggy `today()`) returns yesterday's
+  // date instead of today's real South African calendar date.
+  const instant = new Date("2026-11-05T23:30:00Z");
+  assert.equal(sastToday(instant), "2026-11-06");
+  assert.notEqual(
+    instant.toISOString().slice(0, 10),
+    sastToday(instant),
+    "this instant is exactly the daily window where the UTC date and the real SAST date disagree"
+  );
+});
+
+test("sastToday agrees with the UTC date outside the pre-midnight-UTC window", () => {
+  const instant = new Date("2026-11-06T10:00:00Z"); // midday UTC = midday SAST, same calendar date either way
+  assert.equal(sastToday(instant), "2026-11-06");
 });
