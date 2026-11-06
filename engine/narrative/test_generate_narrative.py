@@ -168,6 +168,43 @@ def test_uniqueness_check_never_retries_more_than_once_even_if_still_similar():
     check("regenerated_for_distinctness is still recorded as true", result["regenerated_for_distinctness"] is True)
 
 
+def test_similarity_is_recomputed_against_the_review_loop_s_own_output():
+    """Standing review pass, 2026-11-06. The review loop always returns full
+    corrected text, even on a clean "no issues found" pass, and nothing told
+    it to preserve distinctiveness - so its own rewrite can legitimately
+    drift the wording toward something that reads like a competitor's own
+    document. The returned/stored similarity_score and similarity_flagged
+    must describe the text the review loop actually produced (what gets
+    saved as generated_text), never the pre-review draft that was
+    discarded."""
+    distinct_first_draft = _sections_json(
+        "Introduction", "Mahlangu Civils will deploy its own dedicated grader fleet and site agent.")
+    competitor_text = "We propose a phased construction methodology with weekly site meetings and dedicated quality control."
+    # A clean review pass ("no issues found") that nonetheless rewrites the
+    # paragraph into something close to the competitor's own wording - a
+    # real, plausible side-effect of a review turn that was only asked to
+    # check correctness/quality, not distinctiveness.
+    review_rewrites_toward_competitor = _review_json(
+        "Introduction",
+        "We propose a phased construction methodology with weekly site meetings and dedicated quality control!",
+        no_issues_found=True,
+    )
+
+    client = StubClient([StubResponse(distinct_first_draft), StubResponse(review_rewrites_toward_competitor)])
+    result = gn.generate_with_uniqueness_check(CONTEXT, other_texts=[competitor_text], client=client, threshold=0.6)
+
+    check("one generation call, no distinctness retry needed pre-review, one review pass",
+          len(client.calls) == 2, len(client.calls))
+    check("not regenerated for distinctness - the FIRST draft was genuinely distinct",
+          result["regenerated_for_distinctness"] is False)
+    check("the final text is the review loop's own (near-duplicate) rewrite, not the first draft",
+          "phased construction methodology" in result["plain_text"])
+    check("similarity_flagged is recomputed against the review loop's own output and is now True",
+          result["similarity_flagged"] is True, result["similarity_flagged"])
+    check("similarity_score matches the final text's real similarity, not the discarded first draft's low score",
+          result["similarity_score"] > 0.6, result["similarity_score"])
+
+
 def test_invalid_style_values_are_rejected_before_any_llm_call():
     bad_context = {**CONTEXT, "style": {"length": "extremely-long", "detail": "detailed", "visual": "structured"}}
     client = StubClient([])
@@ -243,6 +280,7 @@ def main():
     test_uniqueness_check_does_not_retry_when_no_similar_documents_exist()
     test_uniqueness_check_retries_once_when_the_first_draft_is_too_similar()
     test_uniqueness_check_never_retries_more_than_once_even_if_still_similar()
+    test_similarity_is_recomputed_against_the_review_loop_s_own_output()
     test_invalid_style_values_are_rejected_before_any_llm_call()
     test_review_passes_stop_as_soon_as_a_pass_finds_nothing_wrong()
     test_review_passes_chain_corrections_into_the_next_pass()

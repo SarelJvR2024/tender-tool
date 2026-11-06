@@ -196,14 +196,42 @@ def generate_with_uniqueness_check(context, other_texts, client=None, model=None
     at automatically.
 
     Once the uniqueness question is settled, runs the mandatory self-review
-    loop (run_review_passes) on whichever draft that left us with - review
-    passes are last-mile correctness/quality polish, not re-run through the
-    uniqueness check again (which would risk chasing the two checks against
-    each other); this is a deliberate ordering choice, not an oversight.
+    loop (run_review_passes) on whichever draft that left us with. This does
+    NOT trigger a second distinctness retry even if the review loop's own
+    edits push the text back into range - deliberately, to avoid the two
+    checks chasing each other (retry -> review -> retry -> review...) - but
+    the score/flagged pair that gets RETURNED (and is what process_narrative_
+    jobs.py actually stores on the row next to generated_text) is always
+    recomputed against the text that comes out of the review loop, not the
+    pre-review draft.
+
+    Found and fixed, standing review pass 2026-11-06: the review loop
+    (run_review_passes) always returns the model's full corrected text, even
+    on a pass that reports "no issues found" - the model is asked to
+    re-check correctness/quality, never told to preserve distinctiveness, so
+    its own rewrite can legitimately drift the wording back toward
+    something generic/boilerplate-shaped, which is exactly the shape this
+    module's own similarity check exists to catch. Before this fix, the
+    returned/stored similarity_score and similarity_flagged were computed
+    ONCE, before run_review_passes ran, and never recomputed against the
+    text the review loop actually produced - so a draft that cleared the
+    uniqueness check pre-review could be rewritten by the review pass into
+    something highly similar to a competitor's ready document for the SAME
+    tender, saved as generated_text, and still carry similarity_flagged:
+    false. Reproduced directly: a first draft scoring 0.42 (not flagged)
+    against a competitor text, run through a review pass that reports "no
+    issues found" but rewrites the paragraph close to the competitor's own
+    wording, saved a final document scoring 0.94 (genuinely over threshold)
+    while the stored flag still read false. Recomputing here (not
+    regenerating/retrying again) fixes exactly that mismatch without
+    reintroducing the "chasing" risk the ordering comment above already
+    correctly avoids - no new LLM call is added, only a second, cheap, local
+    difflib comparison of the text that is actually about to be saved.
 
     Returns a dict: sections, plain_text, similarity_score, flagged,
     regenerated_for_distinctness, quality_review_passes, quality_flagged,
-    quality_review_notes.
+    quality_review_notes. similarity_score/flagged always describe the
+    returned plain_text, never an earlier draft.
     """
     _validate_style(context["style"])
     kwargs = {"threshold": threshold} if threshold is not None else {}
@@ -226,6 +254,12 @@ def generate_with_uniqueness_check(context, other_texts, client=None, model=None
 
     sections, review_meta = run_review_passes(context, sections, client=client, model=model)
     plain_text = sections_to_plain_text(sections)
+    # Recompute against the review loop's own output - see the header
+    # comment above. No further regeneration is triggered either way; this
+    # only makes sure what gets returned/stored is honest about the text
+    # that was actually produced, the same "a human decides" discipline
+    # quality_flagged already applies to the review loop's own output.
+    score, flagged, _idx = check_uniqueness(plain_text, other_texts, **kwargs)
 
     return {
         "sections": sections,
