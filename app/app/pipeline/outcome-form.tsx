@@ -1,6 +1,6 @@
 import { formatRand, toNumber } from "@/lib/dealEconomics";
 import { recordOutcomeAndMoveStage } from "./actions";
-import type { PipelineStage } from "@/lib/pipeline";
+import { OUTCOME_FORM_STAGES, type PipelineStage } from "@/lib/pipeline";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -16,26 +16,31 @@ export type Outcome = {
  * "Moving to Awarded/Lost opens an outcome form" (prompt 10, item 4): winning
  * company, winning price, number of bidders, reason lost - see
  * recordOutcomeAndMoveStage (pipeline/actions.ts) for why these 4 live in
- * tender_answers rather than a new table/migration. Shown on Submitted (to
- * record the outcome as part of the move) and on Awarded/Lost (to correct
- * it later) - never on Found/Bidding, which have no outcome yet.
+ * tender_answers rather than a new table/migration. Shown on every stage
+ * OUTCOME_FORM_STAGES names (lib/pipeline.ts) - Submitted and
+ * briefing_shortlisted (to record the outcome as part of either real move
+ * straight to an outcome) and Awarded/Lost (to correct it later) - never on
+ * Found/Assessing/Building, which have no outcome yet. Fixed 2026-11-06:
+ * this used to hand-list only 'submitted', so a tender moved via
+ * briefing_shortlisted got no outcome form at all - see OUTCOME_FORM_STAGES'
+ * own comment.
  *
  * Design-system audit fix (2026-10-21): converted from inline-CSSProperties
  * stale hex to Tailwind + design tokens (shadcn Input/Label/Button, the
  * same min-h-11 touch-target convention the rest of the app's forms use).
  */
 export function OutcomeForm({ tenderId, stage, outcome }: { tenderId: string; stage: PipelineStage; outcome: Outcome }) {
-  if (stage !== "submitted" && stage !== "won" && stage !== "lost") return null;
+  if (!OUTCOME_FORM_STAGES.includes(stage)) return null;
   const hasOutcome = !!(outcome.winningCompany || outcome.winningPriceZar || outcome.biddersCount || outcome.reasonLost);
-  const summaryText =
-    stage === "submitted"
-      ? "Record outcome"
-      : hasOutcome
-        ? `Outcome: ${outcome.winningCompany ?? (stage === "won" ? "us" : "unknown winner")}${outcome.winningPriceZar ? ` · ${formatRand(toNumber(outcome.winningPriceZar))}` : ""}`
-        : "Add outcome details";
+  const isPreOutcome = stage !== "won" && stage !== "lost"; // submitted or briefing_shortlisted - not yet at an outcome
+  const summaryText = isPreOutcome
+    ? "Record outcome"
+    : hasOutcome
+      ? `Outcome: ${outcome.winningCompany ?? (stage === "won" ? "us" : "unknown winner")}${outcome.winningPriceZar ? ` · ${formatRand(toNumber(outcome.winningPriceZar))}` : ""}`
+      : "Add outcome details";
 
   return (
-    <details className="mt-2 border-t border-border pt-2" open={stage === "submitted" && !hasOutcome}>
+    <details className="mt-2 border-t border-border pt-2" open={isPreOutcome && !hasOutcome}>
       <summary className="min-h-8 cursor-pointer text-xs font-semibold text-muted-foreground">{summaryText}</summary>
       <form action={recordOutcomeAndMoveStage} className="mt-1 flex flex-col gap-2">
         <input type="hidden" name="tender_id" value={tenderId} />

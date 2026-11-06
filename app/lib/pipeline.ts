@@ -132,6 +132,34 @@ export const PREVIOUS_STAGE: Record<PipelineStage, PipelineStage | null> = {
   lost: "submitted",
 };
 
+// The two stages that must never be reached except through an outcome
+// capture (recordOutcomeAndMoveStage) - whatever stage a tender is coming
+// from. Used below to derive, rather than hand-list a second time, every
+// stage OutcomeForm (pipeline/outcome-form.tsx) has to render on - see that
+// constant's own comment for the bug this fixed (2026-11-06): briefing_
+// shortlisted was added to NEXT_STAGES.submitted as an alternative path to
+// won/lost (0105), but OutcomeForm's own stage gate and the plain-button
+// bar's "hide forward buttons" check were both still hand-listing only
+// 'submitted', so a tender sitting at briefing_shortlisted got plain Won/
+// Lost buttons with no outcome form at all, AND 'submitted' itself had no
+// way to reach briefing_shortlisted in the first place (the whole forward-
+// button bar was hidden for it). Both symptoms were one root cause: two
+// stage lists that had to be kept in sync by hand and weren't.
+export const OUTCOME_STAGES: readonly PipelineStage[] = ["won", "lost"];
+
+/**
+ * Every stage OutcomeForm must render on: won/lost themselves (to add or
+ * correct the outcome later) plus every stage NEXT_STAGES can move straight
+ * to won/lost FROM (so that move can never skip the outcome capture,
+ * whichever of the two real paths - straight from submitted, or via
+ * briefing_shortlisted first - a tender actually took). Computed from
+ * NEXT_STAGES itself rather than listed separately, so a future stage added
+ * to NEXT_STAGES's own won/lost targets can't silently reopen this gap again.
+ */
+export const OUTCOME_FORM_STAGES: readonly PipelineStage[] = PIPELINE_STAGES.filter(
+  (s) => OUTCOME_STAGES.includes(s) || NEXT_STAGES[s].some((next) => OUTCOME_STAGES.includes(next))
+);
+
 /** The 4 outcome fields (prompt 10, item 4), namespaced in tender_answers - see recordOutcomeAndMoveStage (pipeline/actions.ts) for why this table and not a new one. Lives here, not actions.ts, because a "use server" file can only export async functions. */
 export const OUTCOME_FIELD_KEYS = {
   winningCompany: "outcome:winning_company",

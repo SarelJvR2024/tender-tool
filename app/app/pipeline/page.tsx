@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { closingCountdown, daysUntil, formatClosingDateTime } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { IN_PROGRESS_STAGES, LEGACY_BIDDING_STAGE, NEXT_STAGES, normalizeStage, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { IN_PROGRESS_STAGES, LEGACY_BIDDING_STAGE, NEXT_STAGES, normalizeStage, OUTCOME_FIELD_KEYS, OUTCOME_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -612,6 +612,14 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
   const verdict = card.verdict ? VERDICT_CHIP[card.verdict] : null;
   const open = card.stage === "found" || card.stage === "assessing" || card.stage === "building";
   const back = PREVIOUS_STAGE[card.stage];
+  // won/lost are never offered as a plain forward button - only through
+  // OutcomeForm below, whichever of the two real paths (straight from
+  // submitted, or via briefing_shortlisted first) got the tender here. See
+  // OUTCOME_FORM_STAGES's own comment (lib/pipeline.ts) for the bug this
+  // fixed: briefing_shortlisted used to get plain Won/Lost buttons with no
+  // outcome form at all, and submitted had no button to reach
+  // briefing_shortlisted in the first place.
+  const forwardStages = NEXT_STAGES[card.stage].filter((s) => !OUTCOME_STAGES.includes(s));
   const owner = card.economics?.submitted_by_person_id ? people.find((p) => p.id === card.economics!.submitted_by_person_id)?.name ?? null : null;
   const price = toNumber(card.economics?.submitted_price_zar);
   const action = primaryAction(card);
@@ -696,17 +704,12 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
         </div>
       </Link>
 
-      {card.stage !== "submitted" && (NEXT_STAGES[card.stage].length > 0 || back) && (
+      {(forwardStages.length > 0 || back) && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-          {NEXT_STAGES[card.stage].map((next) => (
+          {forwardStages.map((next) => (
             <StageButton key={next} tenderId={card.id} stage={next} primary />
           ))}
           {back && <StageButton tenderId={card.id} stage={back} />}
-        </div>
-      )}
-      {card.stage === "submitted" && back && (
-        <div className="mt-2.5 border-t border-border pt-2">
-          <StageButton tenderId={card.id} stage={back} />
         </div>
       )}
 
