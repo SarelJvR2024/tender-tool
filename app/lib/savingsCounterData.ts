@@ -17,13 +17,34 @@ import type { SavingsCounterSummary } from "@/components/tt/savings-counter-card
  * fetcher here, a unit-tested pure calculator there). RLS already scopes
  * savings_counted_steps to the signed-in user's own company (0085), so no
  * explicit company_id filter is needed on the select.
+ *
+ * Standing review, 2026-11-06: both reads used to be destructured as just
+ * `{ data }`, with no error captured at all - a failed `companies` read
+ * returned `company: null` (same as the real "no row yet" case), and a
+ * failed `savings_counted_steps` read fell through the existing `rows ?? []`
+ * fallback, same as a real "zero steps counted" company. Either way, the
+ * caller (dashboard/analytics' own SavingsCounterCard) rendered the
+ * ordinary "Finish your first bid to see your savings" empty state on a
+ * real Supabase failure - the same silent-empty-state-on-error bug class
+ * already fixed on `admin/tenders`/`market-intelligence`/`analytics`'s own
+ * briefing-attendance section (System-Status.md, this entry's own
+ * predecessor). Both errors are now captured, logged, and surfaced to the
+ * caller as `error: true` instead of being swallowed.
  */
-export async function fetchSavingsCounterSummary(supabase: SupabaseClient): Promise<SavingsCounterSummary | null> {
-  const [{ data: company }, { data: rows }] = await Promise.all([
+export async function fetchSavingsCounterSummary(
+  supabase: SupabaseClient,
+): Promise<{ summary: SavingsCounterSummary | null; error: boolean }> {
+  const [
+    { data: company, error: companyError },
+    { data: rows, error: rowsError },
+  ] = await Promise.all([
     supabase.from("companies").select("savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
     supabase.from("savings_counted_steps").select("tender_id, hours, counted_at").order("counted_at", { ascending: true }),
   ]);
-  if (!company) return null;
+  if (companyError) console.error("companies select failed (savings counter)", companyError);
+  if (rowsError) console.error("savings_counted_steps select failed (savings counter)", rowsError);
+  const hadError = Boolean(companyError) || Boolean(rowsError);
+  if (!company) return { summary: null, error: hadError };
 
   // Spec v3 §18: resolveBaseline() is the one place that decides "confirmed
   // or placeholder default" - previously this read the raw columns
@@ -60,10 +81,13 @@ export async function fetchSavingsCounterSummary(supabase: SupabaseClient): Prom
   const allTime = summaryFor(allRows);
 
   return {
-    thisMonth,
-    allTime,
-    extraCapacityThisMonth: extraCapacity(thisMonth.hoursSaved, thisMonth.tendersCounted, baselineHours),
-    usingDefaultBaseline: baseline.isDefault,
+    summary: {
+      thisMonth,
+      allTime,
+      extraCapacityThisMonth: extraCapacity(thisMonth.hoursSaved, thisMonth.tendersCounted, baselineHours),
+      usingDefaultBaseline: baseline.isDefault,
+    },
+    error: hadError,
   };
 }
 

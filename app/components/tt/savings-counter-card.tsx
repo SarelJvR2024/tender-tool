@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/tt/empty-state";
+import { ErrorState } from "@/components/tt/error-state";
 import { formatRand, type SavingsTotals } from "@/lib/savingsCounter";
 
 export type SavingsCounterSummary = {
@@ -21,11 +22,27 @@ export type SavingsCounterSummary = {
  */
 export function SavingsCounterCard({
   summary,
+  error = false,
   baselineHref = "/company#savings-baseline",
 }: {
   summary: SavingsCounterSummary | null;
+  /** True when fetchSavingsCounterSummary()'s own reads failed - renders a destructive-tone ErrorState instead of the ordinary "no savings yet" EmptyState, so a real Supabase failure never reads as "you haven't done anything yet" (same bug class as analytics' own briefing-attendance fix). */
+  error?: boolean;
   baselineHref?: string;
 }) {
+  if (error) {
+    return (
+      <Card className="gap-2 px-5 py-4 shadow-sm">
+        <ErrorState
+          icon={Sparkles}
+          title="Couldn't load your savings"
+          description="Try refreshing - if it keeps happening, let us know."
+          className="py-4"
+        />
+      </Card>
+    );
+  }
+
   if (!summary || summary.allTime.tendersCounted === 0) {
     return (
       <Card className="gap-2 px-5 py-4 shadow-sm">

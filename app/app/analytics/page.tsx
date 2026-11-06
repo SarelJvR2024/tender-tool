@@ -51,7 +51,7 @@ type TenderRow = {
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
-  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks, error: briefingTasksError }, savingsSummary] = await Promise.all([
+  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks, error: briefingTasksError }, { summary: savingsSummary, error: savingsSummaryError }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -325,7 +325,7 @@ export default async function AnalyticsPage() {
         {/* 7. Savings (spec §9, reused here per spec §10's own instruction) */}
         <section>
           <h2 className="mb-3 text-sm font-semibold text-foreground">Time and cost saved</h2>
-          <SavingsCounterCard summary={savingsSummary} />
+          <SavingsCounterCard summary={savingsSummary} error={savingsSummaryError} />
         </section>
       </div>
     </AppShell>

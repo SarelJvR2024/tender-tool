@@ -165,7 +165,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary, documentExpiryRows, { data: peopleRows }] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, { summary: savingsSummary, error: savingsSummaryError }, documentExpiryRows, { data: peopleRows }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -434,7 +434,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
         </div>
 
         <div className="mb-5">
-          <SavingsCounterCard summary={savingsSummary} />
+          <SavingsCounterCard summary={savingsSummary} error={savingsSummaryError} />
         </div>
 
         {isNewCompany ? (
