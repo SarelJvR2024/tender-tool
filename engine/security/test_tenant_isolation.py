@@ -953,6 +953,7 @@ insert into tenders (id, slug, title, closing_date, family) values
 insert into tender_packs (id, company_id, tender_id) values ('{i['pack']}', '{i['c']}', '{i['t']}');
 insert into financial_captures (company_id, tender_id) values ('{i['c']}', '{i['t']}');
 insert into bank_accounts (company_id, bank_name, account_holder, account_number) values ('{i['c']}', 'ABC Bank', 'Iso Employee Co', '123456789');
+insert into company_tender_preferences (company_id, hide_sanral_board, interested_disciplines) values ('{i['c']}', false, '{{}}');
 select 1;""")
     uEmp, uOwner, c = i["uEmp"], i["uOwner"], i["c"]
 
@@ -985,15 +986,31 @@ select 1;""")
     for q in (f"select count(*) from tenders where id = '{i['t']}'",
               f"select count(*) from tender_packs where company_id = '{c}'",
               f"select count(*) from financial_captures where company_id = '{c}'",
-              f"select count(*) from bank_accounts where company_id = '{c}'"):
+              f"select count(*) from bank_accounts where company_id = '{c}'",
+              f"select count(*) from company_tender_preferences where company_id = '{c}'"):
         check(db.one(q, uEmp) == "0", f"employee sees 0 via: {q.split('from ')[1][:40]}")
     bad, _ = refused(db, f"insert into tender_packs (company_id, tender_id) values ('{c}', '{i['t']}')", uEmp)
     check(bad, "employee can't open a tender pack")
+    # 0118: setOpportunityPreferences() (app/discovery/preferencesActions.ts)
+    # upserts this table by company_id alone, no role check of its own - the
+    # RESTRICTIVE policy below is what actually stops an employee from
+    # flipping hide_sanral_board/interested_disciplines for the whole
+    # company (standing review, 2026-11-06 - same "added after 0077's own
+    # sweep, never covered" shape 0117 found in company_subscriptions).
+    bad, _ = refused(
+        db, f"insert into company_tender_preferences (company_id, hide_sanral_board, interested_disciplines) "
+            f"values ('{c}', true, array['roads-and-stormwater']) on conflict (company_id) do update "
+            f"set hide_sanral_board = excluded.hide_sanral_board, interested_disciplines = excluded.interested_disciplines",
+        uEmp)
+    check(bad, "employee can't change the company's opportunity preferences")
 
     print("  -- owner/admin/member access is completely unchanged by the restrictive policies --")
     check(db.one(f"select count(*) from people where company_id = '{c}'", uOwner) == "2", "owner still sees every person in the company")
     check(db.one(f"select count(*) from tenders where id = '{i['t']}'", uOwner) == "1", "owner still sees the tender")
     check(db.one(f"select count(*) from bank_accounts where company_id = '{c}'", uOwner) == "1", "owner still sees the bank account")
+    ok, _, err = db.run(
+        f"update company_tender_preferences set hide_sanral_board = true where company_id = '{c}'", uOwner)
+    check(ok, f"owner can still change the company's opportunity preferences ({err.splitlines()[0] if err else 'ok'})")
 
     print("  -- cross-tenant: an employee gets no MORE access to another company than a member would --")
     other = str(uuid.uuid4())
