@@ -57,12 +57,28 @@ export async function saveCompanyOffice(formData: FormData) {
     notes: str(formData, "notes"),
   };
 
-  const { error } = id
-    ? await supabase.from("company_offices").update(row).eq("id", id)
-    : await supabase.from("company_offices").insert(row);
-  if (error) {
-    console.error("company_offices write failed", error);
-    fail("Could not save this office - try again. If it keeps happening, let us know.");
+  if (id) {
+    // .select("id").maybeSingle() matters: PostgREST returns a 2xx with
+    // `error: null` and zero rows affected when RLS's own "company_offices:
+    // tenant isolation" (0015, using (is_company_member(company_id))) no
+    // longer matches - e.g. this user's own company_members row being
+    // removed between page load and this write - indistinguishable from a
+    // real update by `error` alone. Same shape, same fix, as this app's own
+    // saveProperty()/savePrincipal()/saveHeldRegistration()/saveBankAccount()
+    // (standing review, 2026-11-07) - this file's own plain update twin was
+    // never swept for it until now.
+    const { data, error } = await supabase.from("company_offices").update(row).eq("id", id).select("id").maybeSingle();
+    if (error) {
+      console.error("company_offices update failed", error);
+      fail("Could not save this office - try again. If it keeps happening, let us know.");
+    }
+    if (!data) fail("That office is no longer there - it may have been removed. Refresh and try again.");
+  } else {
+    const { error } = await supabase.from("company_offices").insert(row);
+    if (error) {
+      console.error("company_offices insert failed", error);
+      fail("Could not save this office - try again. If it keeps happening, let us know.");
+    }
   }
 
   revalidatePath("/company");
