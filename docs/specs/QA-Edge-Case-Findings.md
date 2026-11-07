@@ -8068,3 +8068,126 @@ every other direct/indirect consumer of `assess_tender.py` or `CIDB_RE` -
 comments); `engine/general/test_requirements.py` (1 new test function, wired into `main()`). No change
 to any other regex in this file, `extract_signals()`'s own dispatch, or `requirements.py`'s own CIDB
 handling logic beyond what the corrected regex now feeds it.
+
+### Finding 144 (CONFIRMED, FIXED, moderate - `document-scan/page.tsx`'s own `company_principals`/`people`/`companies` reads were never captured, so a failed read is indistinguishable from the genuine "nothing on file yet" case, and for `companies` specifically silently drops the real CIDB-contractor-name-mismatch check with no sign it was ever meant to run)
+
+**Area:** Onboarding bulk document scan (`app/app/company/document-scan/page.tsx`), feeding
+`review.tsx`'s `DocumentReviewCard`.
+
+**Scenario:** traced from the standing "49-hit `const { data"` read-grep" thread's own remaining
+untraced `.tsx` hits (System-Status.md, 2026-11-06 entry, line ~156: `document-scan/page.tsx:96`
+listed but never traced to its real consequence). The page's one `Promise.all` fetches `pending`,
+`principals`, `people`, `queuedCount`, `company` and `failed` - only `pending` and `failed` captured
+`error`; `principals`, `people` and `company` did not, read straight into `principals ?? []`/
+`people ?? []`/`company?.legal_name ?? null` with no distinction from a genuine empty/missing row.
+Traced both consumers in `review.tsx`, not stopped at "returns `[]`, looks safe": (1) for an
+`id_document`/`cv` row, `principals.length === 0`/`people.length === 0` renders "Nobody is on your
+directors/shareholders register yet - add them first" / "Nobody is on your People page yet - add them
+first" (lines 252-256/270-272) - on a transient read failure this tells a company that already has
+directors/people on file that it doesn't, and (since both `<select>`s are `required`) leaves the
+reviewer with no way to pick the right one until they refresh. (2) `companyLegalName` feeds
+`cidbMismatch` (`cidbNameMismatchWarning()`, review.tsx:168-174) - the real CIDB-contractor-name-vs-
+registered-name compliance-mismatch warning this same findings log already documented once
+(commit `2d4c124`). A failed `companies` read makes `company` `null`, so `companyLegalName` is `null`,
+so `cidbMismatch` is always `null` for that render - the mismatch check silently never runs, with
+nothing on the page to say so; a reviewer could confirm a CIDB document with a real name mismatch
+undetected, for no reason other than a transient read failure on an unrelated table.
+
+**Fix:** same established convention as `people/bulk-cv/page.tsx`'s identical-shaped fix
+(`bc1e7b5`, 2026-11-06): captured `error` on all three reads, logged each via `console.error`, and
+added a banner ("Couldn't load your directors/people or company record just now - the review cards
+below may wrongly say nobody is on file yet, or miss a name-mismatch check. Try refreshing before
+confirming anything.") shown whenever any of the three failed and there is at least one document
+actually waiting for review. No change to the non-error path, to `review.tsx` itself, or to any
+Server Action - the underlying data flow into `DocumentReviewCard` is unchanged; only the
+previously-silent failure is now visible.
+
+**Verification run myself, real exit codes - no red/green test, honest limitation.** This is a
+React Server Component page with no extracted testable logic and no existing test file (consistent
+with the same honest-limitation precedent this doc's companion `System-Status.md` has already used
+for `submission-pack.tsx`/`general-workspace.tsx`/`ImpersonationBanner.tsx`): correctness rests on
+`npm run typecheck` (0 errors), `npx eslint .` (0 errors, same 3 pre-existing warnings), `npx next
+build` (compiled successfully, same route table), and a plain reading of the diff and its two traced
+consumers - not an actual red/green cycle. `npx vitest run` (458/458, 58/58 files - unchanged, no
+test file touched) and the per-file `*.test.ts` loop (27 files, 0 failures - unchanged) both confirm
+no regression anywhere else.
+
+**Regression:** `app/app/company/document-scan/page.tsx` only (~27 lines added: 3 more
+destructured `error` fields, 3 `console.error` calls, 1 derived `reviewDataError` boolean, 1 new
+conditional banner). No change to `review.tsx`, `actions.ts`, or any other file in this directory.
+
+### Finding 145 (CONFIRMED, FIXED, moderate - `send-discovered-tenders.ts`'s own fixed 2-day `created_at` lookback window, already flagged as a real residual gap by the 2026-11-07d fix, permanently and silently lost whichever opportunities aged out of it before a zero-recipient company ever got a recipient)
+
+**Area:** Notify (`app/scripts/send-discovered-tenders.ts`'s candidate query, `app/lib/discoveredTendersDigest.ts`).
+
+**Scenario:** this file's own header comment, written by the 2026-11-07d fix that closed the
+zero-recipients-batched-send bug for this and `send-compliance-digest.ts`, explicitly named the
+residual it deliberately left open: "the read below is bounded to the last 2 days (`sinceIso`) on
+the assumption every row gets claimed-or-skipped daily. A company with zero recipients for MORE
+than 2 consecutive days will still lose whichever of its opportunities aged out of that window in
+the meantime... Widening the window, or querying for genuinely-unclaimed rows directly instead of
+a fixed lookback, would close that residual edge; left for a future pass." Picked up directly, per
+the standing review's own priority list naming this item as concrete and fixable, not a Sarel
+policy call.
+
+Re-derived the actual gap from the code, not trusted from the comment alone: `main()`'s candidate
+query was `.gte("created_at", sinceIso).in("verdict", [...])` with `sinceIso = now - 2 days` - a
+row outside that window is never even fetched, regardless of whether it was ever claimed. Once a
+row ages out, nothing in this script (or anywhere else - grepped `engine/`, `app/scripts/` for any
+other reader of `discovered_opportunities` by id) ever revisits it. Confirmed `discovered_opportunities`
+itself has no bound on age the way the query's own window implied: `verdict` is written once at
+discovery/re-score time and is never swept back to `closed` as a tender's own deadline later passes
+(read every writer of that column - `seed_supabase_opportunities.py`, `tender_changes.py`, the
+`discovery_downgrades.py` re-assessment path - none of them re-visit an existing row's verdict
+purely because its closing date arrived), and `app/app/discovery/page.tsx`'s own module comment
+independently confirms the same growth characteristic drove an earlier, separate pagination fix
+there (PR #111/Sarel, 2026-10-23: "discovered_opportunities accumulates one row per OCDS release
+ever scored against this company, forever").
+
+**Fix:** replaced the `created_at` window with a `closing_date`-bounded one - the thing that
+actually decides whether a "newly discovered tender" email is still worth sending at all. A tender
+that has already closed is never worth this email, no matter when it was discovered or how long a
+company went without a recipient, so bounding on `closing_date is null OR closing_date >= now`
+closes the gap outright instead of just widening it, while staying naturally bounded: unlike
+`discovered_opportunities`' own ever-growing full history, the set of currently-open tenders any
+company has ever been matched against does not grow without bound (an old row's `closing_date` is a
+fixed fact in the past, so it drops out of this filter on its own once that date arrives, regardless
+of its stale `verdict`). Extracted as a pure, testable `openDiscoveredOpportunityWindow(now)` in
+`discoveredTendersDigest.ts` rather than inlined, so the exact filter shape has its own unit tests
+independent of a live Supabase connection (same convention this file's other pure helpers already
+use). Also added a loud `console.error` if the existing `MAX_CANDIDATE_ROWS` (20,000) ceiling is
+ever actually hit post-fix - removing the 2-day bound changes what that ceiling is a ceiling ON (a
+running "every still-open candidate" total instead of "one day's worth"), and a silently-truncated
+success is exactly this review's own dominant tracked bug-class shape; this is a precaution against
+introducing a new instance of it, not a confirmed-live problem (not measured against real
+production volume at the new scope - flagged honestly, not assumed safe).
+
+**Verified red-then-green.** New tests in `discoveredTendersDigest.spec.ts` (4 tests) pin the exact
+filter shape: the 3 verdicts unchanged, the `.or()` string built correctly from a frozen clock, the
+cutoff moving with the clock, and the no-argument default using the real current time. `git stash
+push -- app/lib/discoveredTendersDigest.ts` (keeping the new tests and `send-discovered-tenders.ts`'s
+own changes in place) and re-ran: all 4 new tests failed with `TypeError: ... is not a function`
+(the function didn't exist pre-fix) - confirmed these tests actually exercise the new code, not a
+tautology. `git stash pop` restored the fix; `npx vitest run lib/discoveredTendersDigest.spec.ts` -
+12/12 passed again. Full regression: `npx vitest run` from `app/` - 462/462 passed, 58/58 files (up
+from 458/58: +4 new tests, no file added). The per-file `*.test.ts` loop (no `--test` flag) - 27
+files, 0 failures, unchanged (neither touched file is a `*.test.ts`). `npm run typecheck` - 0
+errors. `npx eslint .` on all touched files - 0 errors, same 3 pre-existing warnings. `npx next
+build` - compiled successfully, same route table. Ran `send-discovered-tenders.ts` directly with no
+env vars set - identical pre-fix "must both be set" exit-1 message, confirming the CLI-arg/env guard
+above the changed query is unaffected.
+
+**Not independently verified against live production data** (no live Supabase credentials in this
+environment) - whether removing the 2-day bound causes the real `discovered_opportunities` table's
+closing_date>=now row count to approach `MAX_CANDIDATE_ROWS` is reasoned from its growth
+characteristics (above), not measured against a real production count; the new `console.error` is
+the safety net if that reasoning turns out wrong, not a guarantee it won't happen.
+
+**Regression:** `app/lib/discoveredTendersDigest.ts` (1 new exported const, 1 new exported pure
+function, ~35 lines including comments); `app/lib/discoveredTendersDigest.spec.ts` (4 new tests);
+`app/scripts/send-discovered-tenders.ts` (query construction swapped to use the new helper, 1 new
+truncation-warning check, header/`MAX_CANDIDATE_ROWS` comments updated - no change to
+`processDiscoveredTenderCompany()`, the claim/send/log logic, or any other function). No change to
+`send-compliance-digest.ts` (that file never had this residual - its own candidates are re-derived
+from live expiry dates every run, not a creation-date window, per the 2026-11-07d entry) or any
+other sender script.
