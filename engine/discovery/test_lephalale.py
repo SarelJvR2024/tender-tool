@@ -116,6 +116,26 @@ check("the batch PDF itself is kept as this release's one document (it's where t
       len(rel["documents"]) == 1 and rel["documents"][0]["url"] == "https://example.org/batch.pdf")
 check("is_closed computed correctly (19 Oct 2026 is in the past relative to this fixture's own 'today')",
       rel["is_closed"] is True)
+check("published_date defaults to None when normalize() isn't given the batch's own 'Date uploaded' "
+      "value (backward-compatible default, not a required 7th positional arg everywhere)",
+      rel["published_date"] is None, rel["published_date"])
+
+# Standing review, 2026-11-07: fetch_releases() reads each batch row's own
+# "Date uploaded" column (rows[0][2] here, from the real FIXTURE_LISTING -
+# "2026-10-05" for the September batch) and binds it in its own loop
+# variable, but normalize() never took it as a parameter - so it was
+# silently discarded on every call, and every Lephalale release's
+# published_date was always None, unlike every sibling direct-site reader
+# with an equivalent field (kouga.py/vaal_central_water.py/
+# dbsa_procurement.py/cidb_tenders.py all pass theirs through). This is the
+# exact wiring fetch_releases() uses - rows[0] is the September batch row
+# parse_listing() returned above, sept_rows[0] is the one tender parse_batch()
+# found inside it.
+rel_with_uploaded = lephalale.normalize(*sept_rows[0], "https://example.org/batch.pdf",
+                                        "September Batch 2026", rows[0][2])
+check("published_date is wired through from the batch's own 'Date uploaded' column, matching the "
+      "real sibling readers' convention for an equivalent field",
+      rel_with_uploaded["published_date"] == "2026-10-05T00:00:00+02:00", rel_with_uploaded["published_date"])
 
 # --- the "0 batch rows" / "0 tenders from N opened batches" safety checks ---
 

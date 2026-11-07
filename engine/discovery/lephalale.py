@@ -232,7 +232,7 @@ def _disambiguate_reused_refs(rels):
             r["ocid"] = f"lephalale:{ref}:{slug}"
 
 
-def normalize(internal_ref, tnumber, desc, closing_dt, batch_url, batch_label):
+def normalize(internal_ref, tnumber, desc, closing_dt, batch_url, batch_label, uploaded=None):
     ref = f"8/2/{internal_ref}" if "/" not in internal_ref else internal_ref
     title = (f"{tnumber}: {desc}" if tnumber else desc) or batch_label
     return sh.release(
@@ -244,6 +244,29 @@ def normalize(internal_ref, tnumber, desc, closing_dt, batch_url, batch_label):
         documents=[{"title": batch_label, "url": batch_url}],
         source=SOURCE, source_id=ref, source_url=LIST_URL,
         status="advertised", tender_type="Tender",
+        # The listing's own "Date uploaded" column for this batch (`uploaded`,
+        # from parse_listing() - the identical field vaal_central_water.py
+        # calls `published_date` from, same column name, same source shape).
+        # Standing review, 2026-11-07: fetch_releases() already read this per
+        # batch row and bound it in its own loop variable, but normalize()
+        # never took it as a parameter, so it was silently discarded on every
+        # call - every Lephalale tender's `published_date` was always None,
+        # never the real "Date uploaded" value the page genuinely states for
+        # every tender in that batch (confirmed the page's own column is
+        # literally named "Date uploaded" - FIXTURE_LISTING in test_lephalale.py).
+        # kouga.py/vaal_central_water.py/dbsa_procurement.py/cidb_tenders.py -
+        # every sibling direct-site reader with an equivalent field - all pass
+        # it through to published_date; Lephalale was the one that dropped it.
+        # Two real, live downstream consumers silently lost this field's
+        # effect for Lephalale only: tender_changes.py's diff_listing() uses
+        # published_date to flag a late-added addendum on first sighting
+        # (never fires for Lephalale without it), and its relistings() sorts
+        # same-bid-number listings by published_date to say which one is
+        # newer when a buyer lists the same bid number twice (falls back to
+        # an arbitrary ocid-string sort for Lephalale, risking the exact
+        # wrong-newest-listing call its own docstring says this buyer's
+        # re-advertisement pattern can trigger).
+        published_date=sh.iso_sast(uploaded),
     )
 
 
@@ -266,7 +289,7 @@ def fetch_releases(cutoff_days=FETCH_CUTOFF_DAYS, log=print):
             log(f"  WARNING: lephalale batch {label!r} - pdftotext could not read it")
             continue
         for internal_ref, tnumber, desc, closing_dt in parse_batch(text):
-            rels.append(normalize(internal_ref, tnumber, desc, closing_dt, url, label))
+            rels.append(normalize(internal_ref, tnumber, desc, closing_dt, url, label, uploaded))
     if opened and not rels:
         raise RuntimeError(
             f"lephalale: {opened} recent batch(es) opened, 0 tenders parsed from any of them - "
