@@ -1,5 +1,111 @@
 # System Status
 
+## This pass (2026-11-07q, standing solution-architect review): read every `.github/workflows/*.yml` file end to end for trigger drift (angle (c)) - found one real gap, `bridge-worker-ci.yml`'s path filter doesn't cover `app/lib/**`/`app/scripts/**`, which will matter the moment PR #181 merges; fixed the narrower, immediately-actionable part of it (zero test coverage of `render-pack-ready-email.ts`'s actual subprocess contract) and named the Dockerfile-dependent part explicitly for whoever merges #181, rather than implementing it speculatively against code not yet on `main`
+
+Oriented from `646ace6` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. `#181`'s own branch (`fix/worker-pack-ready-email-node`) re-fetched and its diff re-confirmed
+(`gh api repos/sareljvr2024/tender-tool/pulls/181/files`): still exactly `.dockerignore` +
+`engine/worker/Dockerfile`, nothing else - not touched or amended by this pass.
+
+**Why this angle.** The standing directive's own idea (c): read `.github/workflows/*.yml` end to
+end for any workflow whose trigger conditions, cron schedule, or path filters have drifted from
+what the code it protects actually looks like now. All 15 workflow files read in full.
+
+**Method and result.** 13 of the 15 are cron-only (the daily/periodic notification jobs plus the
+two reachability smoke tests and the manual Resend test) with no path filter to drift - checked
+each one's own deliberately-staggered schedule comment against the others for overlap or a gap and
+found none; all internally consistent, no change needed. Of the 2 path-filtered workflows:
+`app-ci.yml`'s own filter (`app/**` plus itself) is broad enough that it can't drift behind
+anything under `app/` - no gap there. `bridge-worker-ci.yml`'s filter is narrower and by
+construction has to be kept in sync with `engine/worker/Dockerfile`'s own `COPY` lines by hand -
+exactly the kind of thing that drifts. Checked its current filter
+(`engine/**`, `templates/forms/**`, `templates/general_samples/**`, `fingerprints/**`,
+`config/discipline_taxonomy.json`, `app/supabase/migrations/**`, `.dockerignore`, itself) against
+every `COPY` line in `engine/worker/Dockerfile` as it stands on `main` right now - matches cleanly,
+no drift against the CURRENT image. Also checked the two directories the Dockerfile's whole-folder
+`COPY templates templates` / `COPY config/test_companies config/test_companies` lines pull in that
+aren't individually named in the path filter (`templates/samples/`, `config/test_companies/`) -
+traced every real (non-test, non-harness) importer of each and confirmed both are dev/CLI-fixture
+directories only ever read from argparse `--help` text or dev-harness scripts
+(`admin_harness.py`, `pack/harness_pack.py`, `pack/bridge_selftest.py`, `general_harness.py` - all
+already-established dev/CI-only tools, not reached by any of the 6 registered bridges at runtime),
+not a real used-but-untracked runtime dependency - not a gap, same category the 2026-11-07p pass
+already established for `bridge_selftest.py` itself.
+
+**The one real gap - forward-looking, not yet true of `main`, but concretely about to become true.**
+PR #181 (`fix/worker-pack-ready-email-node`, Finding 152) adds two new `COPY app/lib app/lib` /
+`COPY app/scripts app/scripts` lines to `engine/worker/Dockerfile` - re-confirmed by reading that
+branch's own diff directly, not assumed from the prior pass's write-up. `bridge-worker-ci.yml`'s
+path filter was never updated to match, on that branch or anywhere else. The moment #181 merges, a
+push that touches only `app/lib/**` or `app/scripts/**` (most directly
+`app/scripts/render-pack-ready-email.ts` itself or its one real dependency,
+`app/lib/emailTemplatesTier1.ts`) will not trigger `bridge-worker-ci.yml` at all - no
+`container-build` job, no real `docker build`, nothing re-verifying the worker image's render step
+still works. This is exactly the review's own dominant failure shape one level up: not a discarded
+Supabase error this time, but a CI gate silently not firing for code it's now supposed to cover.
+
+**What was fixed this pass, and what wasn't, on purpose.** Did NOT add `app/lib/**`/`app/scripts/**`
+to `bridge-worker-ci.yml` on `main` today - `engine/worker/Dockerfile` on `main` right now does not
+copy either directory (that's only true on #181's own unmerged branch), so doing it now would
+itself be a path filter that doesn't match what the code it protects currently looks like, i.e. the
+same drift bug in the other direction (needless `docker build` runs on every unrelated `app/lib`
+push). Named explicitly here instead, for whoever merges #181, to add those two paths in that same
+change. DID fix the narrower, not-PR-181-dependent part: `render-pack-ready-email.ts` had zero test
+coverage anywhere of the one way it's actually invoked (`node --experimental-strip-types <script>
+'<json>'` as a subprocess, matching `send_pack_ready_email.py`'s own call) - confirmed by grepping
+the whole repo for the filename (5 hits total: this doc, `QA-Edge-Case-Findings.md`, the Python
+caller, the script itself, `emailTemplatesTier1.ts` - no test file). TypeScript's own `typecheck`
+and Next.js's own `build` both resolve a value import of a type-only symbol just fine (they have
+full type information); `--experimental-strip-types` cannot (it only erases syntactically-marked
+`import type`/`type` declarations) - so a future edit that silently turns
+`emailTemplatesTier1.ts`'s own `import type { NotificationEmail }` into a plain value import would
+pass typecheck, build, and every existing unit test, then fail exactly the way Finding 152 did,
+silently, only inside the real worker image. See Finding 153
+(`QA-Edge-Case-Findings.md`) for the full write-up.
+
+**Verified genuinely, red-then-green.** Added `app/scripts/render-pack-ready-email.test.ts`
+(spawns the real script as a real child process, not an `import` - the script's own unconditional
+`main()` reads `process.argv[2]` and calls `process.exit()`, so importing it under a test runner
+would kill the process). Ran it green first. Then reproduced the exact failure this test exists to
+catch: temporarily changed `emailTemplatesTier1.ts`'s `import type { NotificationEmail }` to a
+plain `import { NotificationEmail }` and re-ran the test directly - real `SyntaxError: The
+requested module './notificationEngine.ts' does not provide an export named 'NotificationEmail'`,
+all 3 subtests fail, exit 1. Reverted (confirmed `git diff app/lib/emailTemplatesTier1.ts` empty
+afterward) and re-ran - all 3 pass, exit 0. Then ran the full baseline for real: `npm run typecheck`
+clean; `npx eslint .` 0 errors, same 3 pre-existing warnings as the standing baseline; `npx vitest
+run` **60 files / 469 tests, all passing**, unchanged (no `.spec.ts` added); the full per-file
+`*.test.ts` node loop with no `--test` flag, **28 files now** (27 baseline + this one), **0
+failures by real exit code**.
+
+**Backlog status.** No change to any standing item except this pass's own addition. `start_payfast_checkout()`'s
+revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched, per the standing guardrail.
+PR #176/#178/#179/#180/#181 (all awaiting Sarel's own merge decision) remain exactly as described -
+not touched, not amended. PR #164/#165 (stale drafts) not touched. Migrations `0117`-`0120` still
+on `main`, still not applied to production - untouched, still genuinely unverifiable from inside
+this environment. The `cidbGrading.ts`-into-`cidbGradingStep()` automation question (named
+2026-11-07p) remains open, Sarel's own call. **New backlog note, action item for whoever merges
+PR #181:** add `app/lib/**` and `app/scripts/**` to `bridge-worker-ci.yml`'s own `on.push.paths`
+in the same change (or immediately after) that merges #181's `engine/worker/Dockerfile`
+`COPY app/lib app/lib` / `COPY app/scripts app/scripts` lines - otherwise a future change to the
+pack-ready email's render script or its import chain will not trigger a real Docker-build
+re-verification at all, only this pass's new unit test (which catches the import-erasure bug shape
+specifically, not a Dockerfile `COPY`/install regression).
+
+To verify independently: read all 15 `.github/workflows/*.yml` files; confirm the 13 cron-only ones
+have no path filter and no schedule overlap; confirm `app-ci.yml`'s filter is `app/**`; confirm
+`bridge-worker-ci.yml`'s filter lacks `app/lib/**`/`app/scripts/**` and that
+`gh api repos/sareljvr2024/tender-tool/pulls/181/files` shows those two `COPY` lines added only on
+that branch, not on `main`. Re-run this pass's own red-then-green: toggle
+`app/lib/emailTemplatesTier1.ts`'s `import type { NotificationEmail }` to a plain `import { ... }`,
+run `node --experimental-strip-types app/scripts/render-pack-ready-email.test.ts` before and after
+reverting, and confirm fail-then-pass.
+
+---
+
 ## This pass (2026-11-07p, standing solution-architect review): took the just-closed node/pack-ready-email gap (2026-11-07o, PR #181, Finding 152) as a hypothesis that there could be siblings, and ran the same structural audit against every OTHER subprocess/cross-language call reachable from the real worker image - genuinely exhaustive this time (all 6 registered bridges traced through their full import chains, not just a top-level grep), and came up clean: no second instance of "used-but-not-installed" or "needed-but-excluded-by-`.dockerignore`" anywhere else in `engine/`. Two adjacent angles checked opportunistically while tracing the same subprocess call sites, both also clean. One competitor-feature claim (CIDB "grade check") chased end-to-end and found to be a deliberate, already-documented disclosed design choice, not a silent bug. No code changed this pass - a genuine negative result, not a forced one.
 
 Oriented from `36936cd` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`

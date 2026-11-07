@@ -8983,3 +8983,109 @@ fully confirm it (an actual `docker build` of the real image) cannot be run in t
 named) - the real build-and-boot confirmation this pass could get came from manually dispatching
 the repo's own `bridge-worker-ci.yml` `container-build` job on GitHub Actions against the fix
 branch, not from a direct push with an unverified Docker-build risk.
+
+---
+
+### Finding 153 (CONFIRMED, FIXED, minor-but-real - `render-pack-ready-email.ts` had zero test
+coverage of the one way it is actually run, so the exact bug class Finding 152 just fixed could
+recur with every check green)
+
+**Area:** `app/scripts/render-pack-ready-email.ts`, consumed by
+`engine/notify/send_pack_ready_email.py`'s `_render()`. Adjacent to, but distinct from, Finding 152
+(the Dockerfile/`.dockerignore` fix in PR #181).
+
+**How this was found.** This pass's angle was (c) from the standing directive: read every
+`.github/workflows/*.yml` file end to end and look for a trigger (path filter, cron, condition)
+that has drifted from what the code it's supposed to protect actually looks like now. All 15
+workflow files read in full. The 13 schedule-only notification workflows
+(`compliance-alerts`/`corrigendum-alerts`/`daily-digest`/`daily-discovery`/`deadline-reminders`/
+`founder-digest`/`onboarding-nudges`/`operational-alerts`/`returnables-digest`/`scout-alerts`/the
+two reachability test workflows/`test-resend-setup`) are all cron-only with no path filter to drift
+- checked their stagger (deliberately offset minutes, documented in each file's own comments) and
+found no overlap or gap. The two path-filtered workflows (`app-ci.yml`, `bridge-worker-ci.yml`) are
+where a path filter actually could drift from the code.
+
+**The gap.** `bridge-worker-ci.yml`'s own `on.push.paths` list (`engine/**`, `templates/forms/**`,
+`templates/general_samples/**`, `fingerprints/**`, `config/discipline_taxonomy.json`,
+`app/supabase/migrations/**`, `.dockerignore`, plus itself) does **not** include `app/lib/**` or
+`app/scripts/**` - but `engine/worker/Dockerfile`, on the still-open PR #181
+(`fix/worker-pack-ready-email-node`, confirmed by reading that branch's own diff:
+`gh api repos/sareljvr2024/tender-tool/pulls/181/files` shows only `.dockerignore` and
+`engine/worker/Dockerfile` touched), adds exactly those two directories as new `COPY` lines because
+the worker image's render step now genuinely depends on them. Once #181 merges, a future change to
+`app/scripts/render-pack-ready-email.ts` or anything in its import chain (most directly
+`app/lib/emailTemplatesTier1.ts`) will **not** trigger `bridge-worker-ci.yml` at all - no
+`container-build` run, no real `docker build`, no re-verification that the render step still works
+inside the actual stripped-down worker image. `app-ci.yml` does already trigger on both paths
+(its own filter is the much broader `app/**`), but confirmed its steps (`typecheck`, `lint`,
+`build`, the `*.spec.ts`/`*.test.ts` loops) never actually invoke
+`node --experimental-strip-types app/scripts/render-pack-ready-email.ts` the way the real worker
+does - grepped the whole repo for `render-pack-ready-email` (`Grep`, excluding
+`app/tsconfig.tsbuildinfo`) and found exactly 5 hits: this doc, `System-Status.md`, the Python
+caller, the script itself, and `emailTemplatesTier1.ts` - no test file anywhere exercised it as a
+subprocess before this pass. That matters because TypeScript's own typecheck, and Next.js's own
+build, both resolve a plain value import of a type-only symbol just fine (full type information is
+available to both) - `--experimental-strip-types` cannot: it has no type information and can only
+erase declarations the TypeScript *syntax* itself marks type-only (`import type { X }`, or an
+inline `type` keyword). So a future edit that silently changes
+`emailTemplatesTier1.ts`'s own `import type { NotificationEmail } from "./notificationEngine.ts"`
+to a plain value import would typecheck clean, build clean, pass every existing unit test - and
+then fail exactly the way Finding 152 did, silently, in production only, the first time the worker
+actually tries to render a real pack-ready email.
+
+**Reproduced the exact failure mode, not assumed.** Temporarily changed that one import in
+`app/lib/emailTemplatesTier1.ts` from `import type { NotificationEmail }` to
+`import { NotificationEmail }` and ran the new test directly
+(`node --experimental-strip-types app/scripts/render-pack-ready-email.test.ts`): real
+`SyntaxError: The requested module './notificationEngine.ts' does not provide an export named
+'NotificationEmail'`, all 3 subtests fail, exit code 1. Reverted the import
+(confirmed `git diff app/lib/emailTemplatesTier1.ts` empty afterward) and re-ran: all 3 subtests
+pass, exit code 0. Genuine red-then-green on the exact bug shape this finding is about.
+
+**Fix.** Added `app/scripts/render-pack-ready-email.test.ts` - a `node:test` file that spawns the
+real script as a real child process (`node --experimental-strip-types
+app/scripts/render-pack-ready-email.ts '<json>'`, `cwd` set to `app/`, matching
+`send_pack_ready_email.py`'s own `_render()` call exactly), not an `import` of it (the script's own
+unconditional `main()` reads `process.argv[2]` and calls `process.exit()`, so importing it directly
+under a test runner would kill the test process on the wrong argv). Covers: a real render with a
+realistic `packReadyEmail()` payload (asserts exit 0 and the `{subject, html, text}` shape, with the
+reference/buyer/page-count actually present in the output); no `argv[2]` at all (exit 1, `Usage` on
+stderr, nothing on stdout); unparsable JSON (exit 1, parse-error message on stderr, nothing on
+stdout) - the script's own documented error contract, now actually checked rather than only
+described in a comment. Picked up automatically by `app-ci.yml`'s existing per-file `*.test.ts`
+loop, which already triggers on any `app/**` push today, independent of whether PR #181 has merged.
+
+**Verified for real, not just asserted.** Ran the new test file directly both before (green) and
+during the deliberate-break red state above. Then ran the full baseline: `npm run typecheck`
+(clean), `npx eslint .` (0 errors, the same 3 pre-existing warnings as the standing baseline -
+`Logo.tsx` x2, `analytics/page.tsx` x1), `npx vitest run` (**60 files, 469 tests, all passing** -
+unchanged from the standing baseline, since this change added no `.spec.ts` file), and the full
+per-file `*.test.ts` node loop with no `--test` flag (**28 files now** - the standing baseline's 27
+plus this new one - **0 failures**, checked by real exit code, not a string grep).
+
+**What this does NOT close.** This test only catches the "non-erasable import" bug shape (the one
+TypeScript alone can't catch). It does **not** replace a real `docker build` as the only thing that
+can confirm the Dockerfile's own `COPY`/`apt-get` lines are still correct once PR #181's actual
+change lands - that gap (`bridge-worker-ci.yml`'s path filter missing `app/lib/**`/`app/scripts/**`)
+is **not fixed by this pass**, deliberately: `engine/worker/Dockerfile` on `main` right now does
+**not** copy `app/lib` or `app/scripts` at all (that only happens on PR #181's own unmerged branch),
+so adding those paths to `bridge-worker-ci.yml` on `main` today would trigger a real `docker build`
+job on every unrelated `app/lib`/`app/scripts` push for a dependency the current image doesn't
+actually have yet - a path filter that doesn't match what the code it protects currently looks
+like, which is exactly the kind of drift this angle was looking for in the other direction. The
+right fix is for whoever merges PR #181 to add `app/lib/**` and `app/scripts/**` to
+`bridge-worker-ci.yml`'s own `on.push.paths` in the same change (or immediately after) - named here
+explicitly so it isn't missed, not implemented speculatively against code that isn't on `main` yet.
+This is a genuine, if narrower, risk than it looks: this new unit test (and `app-ci.yml`'s existing
+`typecheck`/`build`) would catch an import-shape regression, but neither would catch a regression in
+the Dockerfile's own `COPY` lines or apt/NodeSource install step itself (e.g. a future `app/lib`
+file added to the real import chain that isn't under the two `COPY` lines PR #181 adds) - only a
+real `docker build`, gated on the right paths, catches that.
+
+**Regression:** one new file, `app/scripts/render-pack-ready-email.test.ts` (+93 lines). No existing
+file changed (the deliberate-break-and-revert during verification left `emailTemplatesTier1.ts`
+byte-for-byte unchanged - confirmed via `git diff`, empty).
+
+**Pushed directly to `main`** - small, narrow, additive (one new test file), does not touch
+RLS/money paths/hard-stop gates, and does not change what the production worker image
+installs/copies (that remains scoped to PR #181, untouched by this pass).
