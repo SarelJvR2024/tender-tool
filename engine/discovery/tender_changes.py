@@ -494,7 +494,26 @@ def run(res, store, lookback_days=14, log=print):
         try:
             cancelled = etenders_portal.fetch_releases("cancelled", since=since, log=log)
         except Exception as e:
+            # Found 2026-11-07t: this used to only log() a local WARNING and
+            # fall back to cancelled=[] - the exact dominant bug class this
+            # whole review tracks, one call further in than usual. Nothing
+            # here ever raises, so neither caller of run() (watch_new_tenders.py's
+            # daily fan-out, daily_digest.py) ever sees an exception to alert
+            # on - the failure is swallowed before it can reach either of
+            # their own try/except wrappers. Consequence: EVERY cancellation
+            # this run (cancellations() below) and every cancelled-tender match
+            # readvertisements() makes against the lookback window silently go
+            # undetected, for every tender, with zero visibility to Sarel - the
+            # eTenders OCDS feed can't show a cancellation at all (this
+            # module's own docstring), so there is no fallback signal either.
             log(f"  WARNING: portal Cancelled tab failed: {e}")
+            system_alerts.record("tender_changes",
+                                 f"The eTenders portal's Cancelled tab could not be read this run: "
+                                 f"{type(e).__name__}: {e} - no cancellations or cancelled-tender "
+                                 "re-advertisement matches were detected this run (every other change "
+                                 "type - closing/briefing/title moves, addenda, Eskom notices - was "
+                                 "still checked normally).",
+                                 "error", exc=e, context={"lookback_days": lookback_days})
             cancelled = []
     releases = res["releases"]
     keys = [r.get("ocid") or f"{r.get('source')}:{r.get('contract_number')}" for r in releases]

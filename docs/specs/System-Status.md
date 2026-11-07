@@ -1,5 +1,150 @@
 # System Status
 
+## This pass (2026-11-07t, standing solution-architect review): continued the backlog note
+2026-11-07s left (the tender-change/update-tracking subsystem read, not yet exhaustively audited
+line-by-line for siblings of Finding 156's bug shape) into `tender_changes.py` and found a real
+one, one call further in than usual: `run()`'s own live read of the eTenders portal's Cancelled
+tab - the ONLY source cancellation/re-advertisement-vs-cancelled detection comes from (the OCDS
+feed can't show a cancellation at all) - failing used to only `log()` a local WARNING and silently
+fall back to `cancelled=[]`, so EVERY cancellation and cancelled-tender re-advertisement match went
+undetected for the whole run, for every tender, with zero visibility to Sarel. Worse: because
+nothing there ever raised, neither of `run()`'s own two real callers (`watch_new_tenders.py`'s
+daily fan-out, `daily_digest.py`) ever saw an exception to alert on themselves - the failure was
+swallowed before it could reach either of their own try/except wrappers. Fixed both the internal
+swallow and a second, independent asymmetry found while fixing it: `watch_new_tenders.py`'s own
+call site around `tender_changes.run()` caught any OTHER exception from it with a local print()
+only, unlike `daily_digest.py`'s own identical call site which already calls
+`system_alerts.record()` - fixed to match.
+
+Oriented from `016b986` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. No PR was touched or amended.
+
+**Why this angle.** 2026-11-07s's own backlog note named this exact continuation: the tender-
+change/update-tracking subsystem (`watch_tender_updates.py`, `tender_changes.py`, `tender_updates.py`,
+`detail.py`) was read that pass but not yet audited line-by-line for siblings of its own Finding
+156 bug shape (an asymmetric or missing `system_alerts.record()` call on a failure path). Checked
+`git log -1` on all three remaining files first: `tender_changes.py` (last real commit `4141a75`,
+2026-10-20), `tender_updates.py` (`d5a6727`, 2026-10-17), `detail.py` (`8d0a953`, 2026-10-17) - none
+touched since, no overlap with the sibling session's own recent work (`ed08e7c`, `confirm_pack.py`,
+a different subsystem entirely).
+
+**`detail.py`:** read in full - a standalone CLI/library module (`fetch_detail()`), no
+`system_alerts` usage of its own and none expected: every caller that matters (`watch_tender_updates.py`'s
+own SANRAL branch) already wraps the call in its own try/except with its own alert, confirmed
+already fixed and in place (Finding 156). Not a gap.
+
+**`watch_tender_updates.py` itself:** re-read in full this pass (not just the OCDS branch Finding
+156 already fixed) to confirm there's no second asymmetry nearby. `OcdsDays.releases()` (one bad
+day's fetch) alerts; `_sanral_closing()`'s malformed-date branch alerts; `_watch_one()`'s per-tender
+try/except in `run()` alerts; `main()`'s own top-level try/except alerts "critical" on any run-wide
+crash. Genuinely clean now - Finding 156 closed the one real gap in this file.
+
+**`tender_updates.py`:** read in full - pure classification helpers (`classify_document()`,
+`to_date()`, date/briefing-agreement logic) with no I/O and no failure path of its own to alert on;
+every exception a caller of it needs handling for is already the caller's own responsibility
+(confirmed: `watch_tender_updates.py`'s `read_new_document()` already treats an unreadable document
+as `title_only`, never a swallowed error). Not a gap.
+
+**`tender_changes.py` - the real finding.** `run()`'s own live Cancelled-tab read:
+
+```python
+cancelled = res.get("cancelled")
+if cancelled is None:
+    import etenders_portal
+    since = datetime.datetime.now(sh.SAST) - datetime.timedelta(days=lookback_days)
+    try:
+        cancelled = etenders_portal.fetch_releases("cancelled", since=since, log=log)
+    except Exception as e:
+        log(f"  WARNING: portal Cancelled tab failed: {e}")
+        cancelled = []
+```
+
+Confirmed `res.get("cancelled")` is ALWAYS `None` at both of `run()`'s real call sites (`grep -rn
+"cancelled" gov_sources.py watch_new_tenders.py daily_digest.py` - zero hits: `gov_sources.fetch_all()`
+never sets it), so this live-fetch branch runs on every real invocation, not a rare fallback.
+Compared it against the sibling per-listing catch three lines below in `detect()` (same file),
+which already calls `system_alerts.record("tender_changes", ..., "warning", ...)` on a single bad
+listing - the Cancelled-tab catch had no such call at all, just the `log()` line. The module's own
+docstring says plainly the OCDS feed "can't show this" (a cancellation) - the portal's Cancelled
+tab is the ONLY signal for `cancellations()` and part of what `readvertisements()` matches against,
+so a failed fetch here silently zeroes out an entire change-detection category for the whole run,
+every tender, every company - the exact dominant bug class this review tracks, one call further in
+than the usual "discarded exception on one record" shape: here it is an entire source read for the
+whole run, inside a function with its own existing, working alert pattern for a narrower failure
+right next to it.
+
+**The second, independent finding found while fixing the first.** Traced both of `run()`'s real
+callers to see whether either would have caught this if it HAD raised (it never does, by design -
+the catch above is what swallows it) - and found they are not symmetric either.
+`daily_digest.py` (`engine/notify/daily_digest.py:815-828`) wraps its own call to
+`tender_changes.run()` in try/except and calls `system_alerts.record("digest", ..., "error", exc=e)`
+on any exception. `watch_new_tenders.py` (`engine/discovery/watch_new_tenders.py:493-497`, the
+DAILY scheduled fan-out, `daily-discovery.yml`) wraps the identical call in try/except too, but only
+`print()`s a local WARNING - no alert at all. The higher-traffic of run()'s two real callers was the
+one missing it.
+
+**Fix.** `tender_changes.run()`'s Cancelled-tab catch now calls `system_alerts.record("tender_changes",
+..., "error", exc=e, context={"lookback_days": lookback_days})` before falling back to
+`cancelled=[]` - the fallback behaviour itself (the run must continue; a listing-level failure
+elsewhere in the same run must not be made worse) is unchanged, only the silence is fixed.
+`watch_new_tenders.py`'s own call site gained the matching `system_alerts.record("discovery", ...,
+"error", exc=e)` call, same shape as `daily_digest.py`'s own. Three lines + one explanatory comment
+block in each file; no other behaviour touched.
+
+**Verified genuinely, red-then-green.** Added `test_cancelled_tab_fetch_failure_alerts_sarel()` to
+`test_tender_changes.py` (the dedicated file, not `test_gov_sources.py`): monkeypatches
+`etenders_portal.fetch_releases` to raise, calls `tc.run()` with no `'cancelled'` key in `res` (so
+the live-fetch branch is exercised, matching both real callers), captures alerts via
+`system_alerts.set_sink()`. Before the fix: `git stash`-isolated the fix, re-ran - **red**, `run()`
+didn't raise (confirmed the run-must-continue behaviour is intact) but zero alerts recorded.
+Restored the fix (`git stash pop`), re-ran - **green**: one alert, severity `error`, naming the
+real exception and explaining what went undetected. Full regression: `test_tender_changes.py` (new
+test added, 6/6 pass), `test_discovery_fanout.py` and `test_gov_sources.py` re-run in full (both
+clean, confirming `watch_new_tenders.py`'s edited call site and `tender_changes.py`'s own existing
+coverage are both untouched elsewhere); the complete `engine/` per-file test loop
+(`find . -maxdepth 2 -name "test_*.py"`, real exit codes) - **86 files, 0 failures** (the actual
+current count of test files in the tree - this pass added a test FUNCTION to an existing file, not
+a new file, so the file count is unchanged from whatever it genuinely was before this pass;
+confirmed by `find` itself, not assumed from a prior entry's own stated number). `py_compile` clean
+on both edited source files. `ruff check` on the three touched files shows 23 warnings (all
+pre-existing `BLE001` "blind except" style, 20 of which were already there before this pass's own 3
+additions, which follow the exact same already-pervasive, deliberate broad-except convention this
+whole file and its siblings already use throughout, documented inline each time, e.g. "one bad day
+must not end the run") - `ruff` is not wired into any CI gate for `engine/` (confirmed: zero hits in
+`.github/workflows/*.yml`), so this is a style note, not a regression or a gate failure.
+
+**Pushed directly to `main`** - small, narrow (one catch block in `tender_changes.py` gains the
+alert its own sibling catch already had; one catch block in `watch_new_tenders.py` gains the alert
+its own sibling caller already had), does not touch RLS/money paths/hard-stop gates, and does not
+change what the production worker image installs/copies.
+
+**Backlog status.** No change to any standing item except this pass's own entries above.
+`start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched,
+per the standing guardrail. PR #176/#178/#179/#180/#181 (all awaiting Sarel's own merge decision)
+remain exactly as described - not touched, not amended. PR #164/#165 (stale drafts) not touched.
+The tender-change/update-tracking subsystem backlog note (2026-11-07s) is now closed: all four
+files (`watch_tender_updates.py`, `tender_changes.py`, `tender_updates.py`, `detail.py`) have been
+read line-by-line for this specific bug shape, with one real finding (this entry) and three
+confirmed-clean. The 2026-11-07r reused-ref `ocid` backlog item (`lephalale.py`, `randwater.py`
+genuinely unreachable; `sars_procurement.py`/`vaal_central_water.py` clean on real data but
+architecturally unchanged) is unchanged by this pass - not re-checked this round, no claim made
+either way beyond what 2026-11-07s already recorded.
+
+To verify independently: run `engine/discovery/test_tender_changes.py` and confirm `0 failure(s)`,
+including `test_cancelled_tab_fetch_failure_alerts_sarel`. Read `tender_changes.run()`'s Cancelled-
+tab `except` block and confirm it now calls `system_alerts.record(..., "error", ...)` before
+`cancelled = []`. Read `watch_new_tenders.py`'s own `tender_changes.run()` call site (around line
+493) and confirm its `except` block now also calls `system_alerts.record("discovery", ..., "error",
+exc=e)`, matching `daily_digest.py`'s own identical call site. Confirm via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open` that `#176`/`#178`/`#179`/`#180`/`#181` are still
+open and unmerged.
+
+---
+
 ## This pass (2026-11-07s, standing solution-architect review): priority 1 - re-checked all 4
 sibling direct-buyer readers 2026-11-07r left unreachable-or-unverified for the DBSA-shaped
 reused-reference `ocid` collision; 2 were reachable this time (one newly so) and came back clean,

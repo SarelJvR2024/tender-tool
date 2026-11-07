@@ -494,7 +494,18 @@ def main():
                 new_changes, _, _ = tender_changes.run(res, store)
                 print(f"  Listing changes: {len(new_changes)} new (cancellations, date moves, addenda listed...)")
             except Exception as e:
+                # Found 2026-11-07t: this call site only ever printed a local
+                # WARNING on an exception from tender_changes.run() - unlike
+                # daily_digest.py's own identical call site (engine/notify/
+                # daily_digest.py), which already calls system_alerts.record()
+                # here. This is the DAILY, scheduled fan-out run (daily-
+                # discovery.yml) - the higher-traffic of the two callers - so
+                # a real failure here (e.g. the snapshot/change store itself
+                # can't be reached) went to Sarel even less reliably than from
+                # the digest. Matches daily_digest.py's own severity/shape.
                 print(f"  WARNING: listing change tracking failed ({e}) - new-tender scoring continues.")
+                system_alerts.record("discovery", f"The daily discovery run could not track listing changes: "
+                                     f"{type(e).__name__}: {e}", "error", exc=e)
         normalized = gov_sources.published_since(normalized, date_from)
     if args.buyer:
         needle = args.buyer.lower()

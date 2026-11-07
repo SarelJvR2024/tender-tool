@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "alerts"))
 import tender_changes as tc  # noqa: E402
 import source_http as sh  # noqa: E402
+import system_alerts  # noqa: E402
 
 FAILS = []
 
@@ -199,12 +200,51 @@ def test_same_day_multiple_real_oscillations_all_reported():
         shutil.rmtree(tmp)
 
 
+def test_cancelled_tab_fetch_failure_alerts_sarel():
+    print("standing review, 2026-11-07t: run()'s own live read of the eTenders portal's "
+          "Cancelled tab (the ONLY source cancellations/re-advertisement-vs-cancelled matches "
+          "come from - the OCDS feed can't show a cancellation at all, this module's own "
+          "docstring) failing used to only log() a local WARNING and fall back to cancelled=[] "
+          "- the dominant bug class this review tracks, one call further in than usual: nothing "
+          "here ever raised, so neither of run()'s own two real callers (watch_new_tenders.py's "
+          "daily fan-out, daily_digest.py) ever saw an exception to alert on themselves")
+    import etenders_portal
+    real_fetch = etenders_portal.fetch_releases
+
+    def broken_fetch(*a, **k):
+        raise RuntimeError("portal timed out")
+
+    etenders_portal.fetch_releases = broken_fetch
+    alerts = []
+    system_alerts.set_sink(lambda payload: alerts.append(payload))
+    tmp = tempfile.mkdtemp()
+    try:
+        store = tc.LocalStore(os.path.join(tmp, "snaps.json"), os.path.join(tmp, "changes.json"))
+        res = {"releases": [_release()]}  # no 'cancelled' key -> run() must fetch it live
+        new, events, had = tc.run(res, store)
+        check("run() does not raise - new-tender scoring/the digest must continue even when "
+              "the Cancelled tab is down", isinstance(new, list))
+        check("the fetch failure is recorded as a system alert, not just a local print()",
+              len(alerts) == 1, f"{len(alerts)} alert(s): {alerts}")
+        if alerts:
+            check("severity is 'error' (every other change type was still checked - this is a "
+                  "real, run-wide capability loss, not a per-listing warning)",
+                  alerts[0]["p_severity"] == "error", alerts[0]["p_severity"])
+            check("alert names the real exception", "portal timed out" in alerts[0]["p_message"])
+            check("alert explains what silently went undetected", "cancellation" in alerts[0]["p_message"].lower())
+    finally:
+        etenders_portal.fetch_releases = real_fetch
+        system_alerts.set_sink(None)
+        shutil.rmtree(tmp)
+
+
 def main():
     test_oscillating_closing_date_every_occurrence_reported()
     test_same_day_retry_still_deduplicates()
     test_different_listings_never_collide_on_dedupe_key()
     test_disagreement_dedupe_also_time_bucketed()
     test_same_day_multiple_real_oscillations_all_reported()
+    test_cancelled_tab_fetch_failure_alerts_sarel()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
