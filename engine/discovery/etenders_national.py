@@ -95,10 +95,24 @@ MAX_PAGES = 200  # hard stop so a bug can't loop forever against a live governme
 
 def fetch_page(date_from, date_to, page, retries=3, backoff=2.0):
     url = f"{API_BASE}?dateFrom={date_from}&dateTo={date_to}&PageNumber={page}&PageSize={PAGE_SIZE}"
+    # Explicit User-Agent, defensively - standing-review pass 2026-11-07: this
+    # was the one urllib call left anywhere in engine/ hitting a real external
+    # API with Python's bare default UA (System-Status.md's own 0369f50 found
+    # exactly this shape blocked by Resend's edge WAF with a 403, 4 days
+    # running, invisible to the workflow's own "success" status). Live-tested
+    # 2026-11-07 against the real OCDS API with NO headers at all and it still
+    # returned 200 - this endpoint is not currently blocking on UA - so this
+    # is precautionary hardening, not a fix for a confirmed-live break here.
+    # Kept consistent with every other external call in this file/repo rather
+    # than left as the one exception, since a government API WAF rule can
+    # change without notice and this exact failure mode has already bitten
+    # production once in this codebase.
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "TenderTool-Discovery/1.0 (+https://tenderready.app)"})
     last_err = None
     for attempt in range(retries):
         try:
-            with urllib.request.urlopen(url, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=30) as r:
                 return json.load(r)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
             last_err = e
