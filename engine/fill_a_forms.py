@@ -48,12 +48,36 @@ A2's real action is on the checklist.
 
 Usage: python3 fill_a_forms.py <A_Forms.docx> <profile.json> <out_dir> <contract_label> <nra_ref>
 """
+import os
 import sys
 import re
 import json
 import datetime
 import docx
 from provenance import ProvenanceLog
+
+# Standing review, 2026-11-07: this is the OTHER half of run_forms_pipeline.py's
+# docx bundle (fill_docx_forms.py was fixed for this in d29f221, 2026-11-06 -
+# "the 7th docx writer missing the control-character guard" - but that pass's
+# own fix only touched fill_docx_forms.py; its header comment flagged
+# assemble_pack.py's unguarded run_forms_pipeline.main() call but didn't
+# notice this sibling file, invoked by that exact same unguarded call, was
+# still wide open). Every function below writes real company/signatory/
+# director text (legal_name, signatory name, capacity, CSD/bank fields)
+# straight into python-docx runs/cells/paragraphs with no sanitisation -
+# confirmed to reproduce the identical "python-docx raises ValueError on a
+# stray control character" crash already fixed 7 times elsewhere in this
+# codebase (generate_cv.py, make_envelope_covers.py, pdf_merge.py,
+# build_general_pack.py, sanral_fill.py, company_documents.py,
+# fill_docx_forms.py) - reproduced directly against fill_declaration_blanks,
+# fill_footer and fill_a8_litigation_table with a control character in the
+# company/signatory name. Worse here than fill_docx_forms.py's own case:
+# assemble_pack.py's call to run_forms_pipeline.main() (which runs this
+# file's main() right after fill_docx_forms.py's) has no try/except at all,
+# so one bad character anywhere in this data still crashes the WHOLE SANRAL
+# pack build, not just the A-Forms bundle.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "cv"))
+from generate_cv import _safe_text  # noqa: E402
 
 
 # Same constant/pattern as engine/compliance/watch_deadlines.py's own SAST
@@ -79,6 +103,7 @@ def clear_paragraph(p):
 
 def set_paragraph_text(p, text):
     clear_paragraph(p)
+    text = _safe_text(text)
     if p.runs:
         p.runs[0].text = text
     else:
@@ -156,7 +181,7 @@ def fill_declaration_blanks(doc, name, position, company, log):
             summary += f", {found[1]}"
         if len(found) >= 3:
             summary += f", on behalf of {found[2]}"
-        new_p = p.insert_paragraph_before(summary)
+        new_p = p.insert_paragraph_before(_safe_text(summary))
         if new_p.runs:
             new_p.runs[0].bold = True
         any_match = True
@@ -235,7 +260,7 @@ def fill_a3_not_applicable(doc, company, log):
     p = para_matching(doc, "In the event of a Joint Venture, attach")
     if p is not None:
         new_p = p.insert_paragraph_before(
-            f"NOT APPLICABLE - {company} is tendering independently, not as part of a Joint Venture."
+            _safe_text(f"NOT APPLICABLE - {company} is tendering independently, not as part of a Joint Venture.")
         )
         new_p.runs[0].bold = True
         # assumed_default, not confirmed: a JV is a per-tender decision and
@@ -255,7 +280,7 @@ def fill_a8_litigation_table(doc, company, log):
             row = t.rows[1]
             row.cells[0].text = "None"
             row.cells[1].text = "-"
-            row.cells[2].text = f"No litigation on file for {company} in the past 10 years"
+            row.cells[2].text = _safe_text(f"No litigation on file for {company} in the past 10 years")
             row.cells[3].text = "-"
             row.cells[4].text = "-"
             log.assumed_default(
@@ -322,10 +347,10 @@ def fill_a10_no_deviations(doc, company, log):
             # the NRA reference line sits directly under the heading; insert
             # the statement into the first blank line below that, not the heading.
             target = paras[i + 2] if i + 2 < len(paras) else p
-            new_p = target.insert_paragraph_before(
+            new_p = target.insert_paragraph_before(_safe_text(
                 f"No deviations or qualifications from the tender conditions are recorded for "
                 f"{company} as at the date these documents were prepared."
-            )
+            ))
             new_p.runs[0].italic = True
             log.assumed_default(
                 "a_forms.A10.deviations_or_qualifications", "None",
@@ -365,8 +390,11 @@ def fill_a16_addenda(doc, log, updates=None):
     rows = [r for r in t.rows[2:]]
     if updates:
         for r, u in zip(rows, updates):
-            r.cells[1].text = u.get("date") or ""
-            r.cells[2].text = u.get("title") or ""
+            # title/date come from the tender's own published addenda (the
+            # update watch), not confirmed company data - same "scraped/OCR'd
+            # external text" risk the rest of this fix addresses.
+            r.cells[1].text = _safe_text(u.get("date") or "")
+            r.cells[2].text = _safe_text(u.get("title") or "")
         log.assumed_default(
             "a_forms.A16.addenda_received", "; ".join(f"{u.get('date') or '?'} {u.get('title') or ''}".strip() for u in updates),
             "Listed from the documents Tender Tool's update watch saw published on this tender - check the buyer's "
