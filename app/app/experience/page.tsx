@@ -101,7 +101,7 @@ export default async function ExperiencePage({
   let pendingResults: (OnboardingResult & { onboarding_uploads: { original_filename: string } | null })[] = [];
   let queuedCount = 0;
   if (companyId) {
-    const [{ data: pending, error: pendingError }, { count }] = await Promise.all([
+    const [{ data: pending, error: pendingError }, { count, error: queuedError }] = await Promise.all([
       supabase
         .from("onboarding_document_results")
         .select("id, document_kind, document_kind_reason, fields, warnings, text_method, model, created_at, onboarding_uploads(original_filename)")
@@ -116,6 +116,14 @@ export default async function ExperiencePage({
         .in("status", ["classification_requested", "classifying"]),
     ]);
     if (pendingError) console.error("onboarding_document_results select failed (experience)", pendingError);
+    // Standing review, 2026-11-07: this count's own error had no console.error
+    // at all (System-Status.md's 2026-11-07cc backlog note) - unlike every
+    // sibling fix in this review loop, the consequence here is low-severity,
+    // not a false fact: a failed read just means queuedCount falls back to 0,
+    // so AutoRefresh/the "still being read" banner silently stay off instead
+    // of showing a wrong one, same safe direction as before. Logged only, not
+    // gated, since there is nothing here worth failing closed over.
+    if (queuedError) console.error("onboarding_uploads count select failed (experience queuedCount)", queuedError);
     pendingResults = (pending ?? []) as unknown as (OnboardingResult & { onboarding_uploads: { original_filename: string } | null })[];
     queuedCount = count ?? 0;
   }

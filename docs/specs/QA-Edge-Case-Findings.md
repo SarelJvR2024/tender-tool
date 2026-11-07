@@ -10180,3 +10180,56 @@ count line branches on `peopleRowsError` before rendering `peopleCount`/`readine
 Confirm `npx next build` still compiles with the same route table. Confirm `app/lib/companyReadinessData.ts`
 and `app/app/company/page.tsx` still read as described above (the former logs-only by design, the
 latter already fully guarded) - re-check, not re-litigate, unless either file changes.
+
+---
+
+### Finding 166 (CONFIRMED, FIXED, low-severity logging-only gap - `app/experience/page.tsx`'s own `queuedCount` discarded its own `error` with no `console.error` at all, the one loose end Finding 165's own backlog note left for a future pass)
+
+**Area:** Experience (`app/app/experience/page.tsx`), the `onboarding_uploads` in-progress count
+(`queuedCount`) that drives the "still being read" auto-refresh banner and `AutoRefresh active={...}`.
+
+**Scenario:** this pass's own brief named this exact gap as a quick, optional pickup, already
+flagged (not fixed) by Finding 165's own backlog note. Read the file: the `Promise.all` destructure
+at the `onboarding_uploads` count read (`{ count }`) never destructured `error` at all - unlike its
+own sibling read one line above it in the same `Promise.all` (`pendingError`, already captured and
+already logged). A failed count read silently fell back to `queuedCount = count ?? 0`, i.e. 0, with
+nothing printed anywhere - no `console.error`, no banner, nothing distinguishing a real Supabase
+failure from "genuinely nothing queued."
+
+**Why fixed, not escalated:** lower severity than Findings 160-165's shape, confirmed by reading what
+`queuedCount` actually gates: `AutoRefresh active={queuedCount > 0}` (a client-side auto-refresh
+timer) and a cosmetic "N documents still being read - this updates itself automatically." info banner.
+Neither is a fact about the customer's own data (unlike Finding 165's "N team profiles" or Finding
+164's "Team: N of X") - on a failed read the page just doesn't show the banner and doesn't
+auto-refresh, the same safe direction `queuedCount ?? 0` already produced. A customer with real
+documents mid-classification would, in the rare case this specific read fails, see no self-updating
+banner on that one page load and need to refresh manually to see progress - a worse UX moment, not a
+wrong fact. So the fix here is logging-only, not a new "couldn't load" gate like Findings 160-165.
+
+**Fix:** destructured `error: queuedError` from the `onboarding_uploads` count read (same `Promise.all`
+as `pendingError`, no new query) and added a `console.error` for it, with an inline comment stating
+explicitly that this is deliberately logged, not gated, given the cosmetic-only consequence above -
+so a future pass re-reading this exact line doesn't mistake the lack of a UI branch for an oversight.
+`queuedCount = count ?? 0` is otherwise untouched; the happy path is byte-for-byte identical.
+
+**Verification run myself, real exit codes - no red/green test, honest limitation, same precedent as
+Findings 144/164/165 for an untestable RSC page.** `find . -iname "*experience*" -not -path
+"*/node_modules/*"` confirms no test file exists for this page or this read. `npm run typecheck` -
+**0 errors**. `npx eslint .` - **0 errors**, same 3 pre-existing warnings (`Logo.tsx` x2,
+`analytics/page.tsx` x1). `npx next build` - compiled successfully, same route table, `Proxy
+(Middleware)` present. `npx vitest run` - **493/493, 63 files**, unchanged (confirmed before and
+after this change). The `*.test.ts` node loop (no `--test` flag, real exit codes) - **28 files, 0
+failures**, unchanged. Full `engine/` sweep file count - **86 files** (no Python touched by this fix,
+so the suite itself was not re-run - this is a file-count-only confirmation that the baseline is
+unmoved, not a claim of having re-executed it).
+
+**Regression:** `app/app/experience/page.tsx` only (6 lines: one destructured field, one
+`console.error`, one explanatory comment). No other file touched.
+
+**Pushed directly to `main`** - a logging-only addition on a cosmetic, already-safe-direction
+fallback, no RLS/money/hard-stop/worker-image-install surface touched.
+
+To verify independently: read `app/app/experience/page.tsx`'s `onboarding_uploads` count read and
+confirm `error` is now destructured as `queuedError` and logged via `console.error` immediately
+after `pendingError`'s own log line. Confirm `npx next build` still compiles with the same route
+table.

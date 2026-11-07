@@ -1,5 +1,140 @@
 # System Status
 
+## This pass (2026-11-07dd, standing solution-architect review): primary job this pass was the
+6-PR health check the brief asked for (#176-#181 against current `main`), not another bug-hunt pass
+- the notification-engine and customer-facing-page sweeps really are exhausted per the last 6
+passes' own notes, confirmed again, not re-litigated. Also picked up Finding 165's own
+flagged-but-not-required loose end (`app/experience/page.tsx`'s `queuedCount` logging gap) since
+the PR-health check left time. Finding 166.
+
+**PR-health check (#176-#181), the actual point of this pass.** Oriented from `77e90f9`
+(immediately-preceding pass's own verified HEAD). `git fetch origin main`: clean, local matched
+`origin/main` exactly (`77e90f9`), no sibling commits landed before this pass started. Checked each
+PR's base commit against current `main`'s 118-commit (oldest, #176) to 16-commit (newest, #181)
+gap, then did a REAL local `git merge-tree --write-tree origin/main <pr-branch>` for every one of
+the 6 (not just read `mergeable_state`, which GitHub's API returned as `"unknown"` - not yet
+computed - for all 6; a local merge-tree is the actual, authoritative answer, not a proxy for it):
+
+- **#176** (`employee-rls-systematic-sweep-0119`, base `84c5093`, 118 commits behind): clean
+  merge, no conflict. Files touched - `app/supabase/migrations/0119_employee_rls_systematic_sweep.sql`,
+  `engine/security/test_tenant_isolation.py` - overlap with zero files touched by any of Findings
+  160-165's own commits or any other commit that landed on `main` since its base. CI: Vercel deploy
+  check green (the only status GitHub reports for this PR).
+- **#177** (`fix/proxy-company-members-read-error`, base `9fddd8f`, 71 commits behind, still
+  `draft: true`): clean merge, no conflict. One file (`app/proxy.ts`), zero overlap with anything
+  that landed since.
+- **#178** (`fix/submission-pack-fix-gate-server-side`, base `12de22a`, 58 commits behind): clean
+  merge against `main`, no conflict. Touches `app/app/tenders/[id]/actions.ts`, `general-actions.ts`,
+  `general-workspace.tsx`, `submission-pack.tsx` - zero overlap with Findings 160-165's own commits.
+  **But it does overlap with PR #180 itself** (below) - already disclosed by #180's own PR
+  description ("left a comment on #178 flagging this rather than editing that PR directly"), not a
+  new finding, just independently re-confirmed by reading both diffs rather than taking the
+  description's word for it.
+- **#179** (`fix/reuse-past-submission-target-stage-gate`, base `e096b50`, 44 commits behind): **the
+  one real merge conflict found this pass.** `git merge-tree` reports `CONFLICT (content)` in
+  `app/lib/pastSubmissionReuse.ts`. Root cause, traced to an exact commit, not just "main moved":
+  `829dbb9` (2026-11-06, "TS-sweep's 4th grep blind spot", landed AFTER `e096b50`) rewrote the same
+  `buildReusePlan()` `Promise.all` destructure PR #179 also rewrites - `829dbb9` added
+  `error`-capturing variants of the same `{ data: people }`/`{ data: packs }` pair #179 widens to
+  add `pipeline_stage` to the `tender_packs` select, both touching the identical 2 lines. This is a
+  real, line-level conflict a reviewer would hit on a literal "Merge" click today, not a cosmetic
+  "behind main" staleness - confirmed via `git fetch origin pull/179/head:pr179 && git merge-tree
+  --write-tree origin/main pr179`, reproducible exactly. Resolving it is a trivial 3-way merge (keep
+  both the `error` captures and the `pipeline_stage` column), but it is a real conflict Sarel or
+  whoever merges this should expect, not a surprise. Not resolved by this session - PR #179's branch
+  was not touched, per the standing guardrail against rebasing/rewriting a PR this session didn't
+  open.
+- **#180** (`fix/tender-readiness-section-read-failure`, base `16a34c7`, 29 commits behind): clean
+  merge against `main` itself, no conflict. Touches 8 files including `general-workspace.tsx` and
+  `submission-pack.tsx` - the same 2 files PR #178 touches, both at the exact same `disabledReason`
+  computation inside each (#178 adds the Fix-count server-side-parity gate; #180 adds the
+  `hasUnreadSection` fail-closed signal). **Merging both as-is, in either order, will conflict with
+  each other** even though each merges cleanly against `main` alone - confirmed by reading both
+  diffs side by side (both rewrite the same lines of `disabledReason`'s ternary), not merely
+  inferred from the file list. #180's own PR description already names this interaction and says a
+  comment was left on #178 rather than editing it directly - re-confirmed, not a new finding, but
+  worth restating plainly here since the brief specifically asked about file overlap between these
+  6 PRs, not just overlap with `main`.
+- **#181** (`fix/worker-pack-ready-email-node`, base `c2480f3`, 16 commits behind, the newest of the
+  6): clean merge, no conflict. Two files (`.dockerignore`, `engine/worker/Dockerfile`), zero
+  overlap with anything else.
+
+**Test-count staleness in the PRs' own descriptions - real, and worth flagging plainly.** Current
+`main`'s real baseline, reconfirmed by actually running it this pass (not assumed from the brief):
+`npx vitest run` - **493/493 tests, 63 files** (ran it myself, matches exactly). The `*.test.ts`
+node-test loop, no `--test` flag - **28 files, 0 failures** (ran it myself). `engine/`
+`test_*.py` file count - **86 files** (counted, not re-run - no Python touched this pass). Checked
+each PR's own stated numbers against that:
+- **#176**: no vitest/node-test-loop count claimed at all (SQL + Python-test-file only PR) - nothing
+  to go stale.
+- **#177**: claims `npx vitest run - 434/434 passed, 54/54 files (unchanged)` and the node-test loop
+  `27 files, 301 tests, 0 failures (unchanged)`. Both now meaningfully stale - real baseline has
+  grown to 493/63 and 28 files respectively since this PR's own verification run. The PR's own word
+  "(unchanged)" is now false on its face; a reviewer trusting that word without re-running would be
+  misled into thinking no regression check is needed.
+- **#178**: same `434/434, 54/54 files` and `27 files, 301 tests` claims, same staleness, same risk.
+- **#179**: claims `55/55 files, 440/440 tests` - stale against 63/493.
+- **#180**: claims `453/453 passed, 56/56 files` - stale against 63/493.
+- **#181**: states no specific vitest/node-test-loop numbers (points to a real CI docker-build run
+  instead) - nothing stale to flag for this PR specifically.
+
+None of this means any of #176-#181's own fix is wrong - every one of these PRs' own diffs is
+unaffected by what's landed on `main` since (confirmed by the file-overlap check above, zero overlap
+with Findings 160-165). It means: **whoever merges any of #177/#178/#179/#180 should re-run the full
+suite before trusting their own "unchanged"/count claims**, since those numbers were true when
+written and are not true today - ordinary drift from 6 more passes' worth of fixes landing in
+between, not a defect in any PR. Not fixed or amended by this session (per the standing guardrail
+against rebasing/rewriting a PR branch this session didn't open) - reported for Sarel's own
+judgment, exactly as the brief asked.
+
+**Finding 166 - `app/experience/page.tsx`'s `queuedCount`, fixed (small, optional, time allowed).**
+Full write-up: Finding 166 in `docs/specs/QA-Edge-Case-Findings.md`. One-line summary: the
+`onboarding_uploads` in-progress count's own `Promise.all` destructure never captured `error` at
+all (unlike its sibling `pendingError` one line above it in the same block) - a failed read silently
+fell back to `queuedCount = count ?? 0`, with nothing logged anywhere. Low severity, confirmed by
+reading what it gates: a cosmetic "still being read" auto-refresh banner and `AutoRefresh`'s own
+`active` flag, never a fact about the customer's own data - so this is a logging-only fix, not a new
+"couldn't load" display gate like Findings 160-165. Added `error: queuedError` to the existing
+destructure and one `console.error`, with an inline comment stating explicitly this is deliberately
+logged-not-gated given the cosmetic consequence. `queuedCount ?? 0`'s own fallback is untouched -
+happy path byte-for-byte identical.
+
+**Verification, run myself, real exit codes - no red/green test, honest limitation (same precedent
+as Findings 144/164/165 for an untestable RSC page with no extracted logic to unit-test).**
+`find . -iname "*experience*" -not -path "*/node_modules/*"` confirms no test file exists for this
+page. `npm run typecheck` - **0 errors**. `npx eslint .` - **0 errors**, same 3 pre-existing
+warnings. `npx next build` - compiled successfully, same route table, `Proxy (Middleware)` present.
+`npx vitest run` - **493/493, 63 files**, unchanged (ran before and after this specific change).
+The `*.test.ts` node loop - **28 files, 0 failures**, unchanged. `engine/` file count - **86 files**
+unchanged (no Python touched, so the suite itself was not re-run this pass beyond the file-count
+check already done above for the PR-staleness comparison).
+
+**Pushed directly to `main`** - a logging-only addition on an already-safe-direction cosmetic
+fallback, no RLS/money/hard-stop/worker-image-install surface touched.
+
+**Backlog status.** The notification-engine sweep and the customer-facing-page "discarded read
+error -> false zero" sweep both remain exhausted, per the last 6 passes' own notes - not re-touched,
+not re-litigated this pass. PR #179's real merge conflict (above) and PR #178/#180's own mutual file
+overlap (above, already self-disclosed by #180) are both new, concrete, independently-reproducible
+findings from this pass worth a future pass re-confirming only if either PR's branch changes -
+otherwise stable until someone resolves them. The 4 PRs' own stale test-count claims (#177/#178/
+#179/#180, above) are cosmetic to each PR's description text, not to its code, and don't need a
+re-check unless someone wants to correct the PR descriptions themselves (not done here - editing
+another PR's description wasn't asked for and isn't a code fix). `start_payfast_checkout()`'s
+revenue-integrity gap (2026-11-07e) remains untouched, per the standing guardrail.
+PR #176/#178/#179/#180/#181 (awaiting Sarel's own merge decision) and #164/#165(draft)/#177
+(stale drafts/awaiting decision) remain exactly as described - not touched, not amended, not merged.
+
+To verify independently: `git fetch origin pull/179/head:pr179 && git merge-tree --write-tree
+origin/main pr179` and confirm the reported conflict in `app/lib/pastSubmissionReuse.ts`. Read
+PR #178's and PR #180's own diffs for `app/app/tenders/[id]/general-workspace.tsx` and
+`submission-pack.tsx` and confirm both rewrite the same `disabledReason` lines. Run `npx vitest run`
+from `app/` and confirm **493/493, 63 files** against each PR's own stale claim. Read
+`app/app/experience/page.tsx`'s `onboarding_uploads` count read and confirm `error` is now
+destructured as `queuedError` and logged.
+
+---
+
 ## This pass (2026-11-07cc, standing solution-architect review): followed Finding 164's own
 flagged-but-not-fixed avenue - swept other customer-facing pages for the same "discarded Supabase
 read error -> false 0/empty display" shape - and found one real instance: `app/dashboard/page.tsx`'s
