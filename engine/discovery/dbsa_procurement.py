@@ -13,6 +13,7 @@ Usage:
     python3 dbsa_procurement.py [--out FILE.json]
 """
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -109,11 +110,56 @@ def _parse_dbsa_closing(s):
     return sh.iso_sast(s)
 
 
+def _disambiguate_reused_refs(rels):
+    """DBSA's own procurement page lists one RFP more than once when it is
+    relisted with an addendum - confirmed live, 2026-11-07: ref
+    "RFP185/2026" was two separate table rows, same closing date, slightly
+    different title wording (one names "Addendum 01" and the compulsory
+    briefing's GPS coordinates), published on two different dates (28 Oct
+    and 2 Nov) - a real re-advertisement/addendum notice, not a parsing
+    artefact or a duplicate row to collapse.
+
+    Left alone, both rows get the identical ocid
+    ("dbsa-procurement:<ref>"), and this engine's own per-release scoring/
+    seeding (watch_new_tenders.fan_out()'s own release_key(),
+    seed_supabase_opportunities.seed()'s own (company_id, ocid) upsert)
+    would treat them as the SAME release scored and reported twice in one
+    run, with whichever is written last silently overwriting the other's
+    discovered_opportunities row and reasons - the exact pattern kouga.py's
+    own _disambiguate_reused_refs() (2026-11-06) found and fixed for
+    Kouga's reused Ref No.
+
+    DBSA's own page has no stable per-row detail URL to suffix with the way
+    Kouga's own per-card link let that fix do it (every DBSA row shares the
+    one list page as source_url) - published_date is the one field that
+    differed between the two real duplicate rows checked live, so it is
+    used instead; a short hash of the title is the last-resort fallback for
+    the (unseen in practice) case where even published_date collides too,
+    so two such rows are never silently merged into one. Only a colliding
+    ocid is touched: every non-colliding row keeps exactly the ocid it
+    always had, so this doesn't re-trigger a "new tender" alert for every
+    other DBSA tender that was never ambiguous."""
+    by_ocid = {}
+    for r in rels:
+        by_ocid.setdefault(r["ocid"], []).append(r)
+    for base_ocid, group in by_ocid.items():
+        if len(group) < 2:
+            continue
+        seen_suffix = set()
+        for r in group:
+            suffix = r.get("published_date") or ""
+            if not suffix or suffix in seen_suffix:
+                suffix = hashlib.sha256((r.get("title") or "").encode()).hexdigest()[:10]
+            seen_suffix.add(suffix)
+            r["ocid"] = f"{base_ocid}:{suffix}"
+
+
 def fetch_releases(log=print):
     page = fetch_list()
     rows = parse_table(page)
     out = [normalize(r) for r in rows]
     out = [r for r in out if not r["is_closed"]]
+    _disambiguate_reused_refs(out)
     log(f"  DBSA procurement: {len(out)} open RFPs/RFRs")
     return out
 

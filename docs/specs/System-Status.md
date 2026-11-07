@@ -1,5 +1,124 @@
 # System Status
 
+## This pass (2026-11-07r, standing solution-architect review): read the Discovery fan-out/scoring
+path end to end as one coherent system (never attempted as a single pass before, though repeatedly
+suggested) - that slice itself came up clean, but following up on `kouga.py`'s own very recent
+"reused Ref No collides two distinct tenders onto one ocid" fix (2026-11-06) across every other
+direct-buyer reader found the exact same bug shape, live, in `dbsa_procurement.py` right now - a
+real DBSA RFP currently listed twice under the same reference, both rows silently sharing one
+`ocid`. Fixed and verified red-then-green against the real live collision; four more readers with
+the same architecturally-vulnerable `ocid` construction named as an unverified-but-unfixed backlog
+item (two unreachable from this sandbox tonight, two with too small a live sample to confirm either
+way).
+
+Oriented from `e5e2135` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. Neither PR was touched or amended.
+
+**Why this angle.** The standing directive's own idea (a), explicitly flagged as "repeatedly
+suggested but no pass has actually tried it yet": a subsystem-level read of a meaningful SLICE of
+the discovery pipeline as one coherent system, rather than file-by-file. Picked the fan-out/scoring
+path specifically: `run_discovery.py`, `watch_new_tenders.py` (the fan-out itself, `fan_out()`,
+`_pending()`, the seen-store read/write pair), `assess_tender.py` (`read_release()`/`score_release()`/
+`assess_fit()`), `company_profiles.py` (per-company profile construction + fingerprinting),
+`discovery_downgrades.py` and `seed_supabase_opportunities.py` (the downstream consumers of
+`fan_out()`'s own output), `download_discovered_documents.py`, `score_outlook.py` and `taxonomy.py`
+(`fit_overlap()`, the core discipline-matching logic `assess_fit()` depends on) - all read in full,
+each one's own documented contract cross-checked against how its caller actually uses it.
+
+**That slice itself: clean, genuinely - re-ran its own full existing test suite for real, not just
+read the code.** `test_discovery_fanout.py`, `test_discovery_downgrades.py`, `test_taxonomy.py`,
+`test_score_outlook.py`, `test_score_outlook_functionality.py`, `test_assess_tender.py`,
+`test_download_discovered_documents.py`, `test_gov_sources.py` - all green by real exit code before
+touching anything. Chased two specific hypotheses formed while reading `fan_out()`/`taxonomy.active()`
+to a disproof rather than leaving them as hunches: (1) `cidb_tenders.py`'s `ocid` keys on the site's
+own numeric `tender_ID` with no fallback - checked live whether that id is ever null/reused (25 real
+rows fetched live just now, all distinct, zero nulls) - not a gap. (2) `taxonomy.active()`'s
+lazily-initialised module-global cache (`_ACTIVE`) has a real but harmless race if several of
+`fan_out()`'s own `ThreadPoolExecutor` workers call it concurrently before it's first set (each
+would independently build and assign its own `Taxonomy` object) - traced through and confirmed
+every concurrently-built instance reads the identical underlying data, so the race can never
+produce a wrong answer, only (at most) one redundant rebuild - not worth a fix.
+
+**The real finding - followed `kouga.py`'s own fix to its logical conclusion across every sibling
+reader, rather than treating it as closed.** `kouga.py` (2026-11-06, `cb35c24`) found and fixed
+"Kouga reuses the same Ref No for an original listing and its later re-advertisement" - both got
+the identical `ocid`, and `seed_supabase_opportunities.py`'s own `(company_id, ocid)` upsert would
+let whichever is written second silently overwrite the other. Checked every OTHER direct-buyer
+reader's own `ocid=` construction for the identical shape (an `ocid` built from the raw,
+human-entered reference number alone, with no secondary unique identifier) rather than assuming the
+one fix closed the whole bug class: `transnet_etenders.py`/`eskom_bulletin.py` key on a
+site-internal row id (safe); `capetown_procurement.py` prefers one too, only falling back to the
+raw ref when a row has no detail link (low risk); `cidb_tenders.py` keys on the site's own numeric
+id (checked live above - safe). Five readers are built exactly like Kouga's pre-fix code:
+`dbsa_procurement.py`, `sars_procurement.py`, `lephalale.py`, `vaal_central_water.py`,
+`randwater.py`.
+
+**Checked live against real current data, not left as a theoretical pattern-match.** Ran each of
+those five readers' own `fetch_releases()` against the real live site: `dbsa_procurement.py` -
+**10 open rows, only 9 distinct ocids** - a genuine, live collision: ref `RFP185/2026` is currently
+TWO separate rows on DBSA's own page (an original tender notice and its own addendum/re-listing,
+same closing date, different published dates, slightly different title wording) - this is the one
+fixed this pass. `sars_procurement.py` - 2 open rows today, no collision found (sample too small to
+clear the risk, not because the code is any safer). `lephalale.py`/`vaal_central_water.py` -
+unreachable from this sandbox tonight (connection reset / 403 respectively - the same
+sandbox-vs-real-network gap this project already names for `randwater.py`), so not checked live
+this pass. `randwater.py` - same reachability gap, not checked.
+
+**Fix.** `dbsa_procurement.py` gained `_disambiguate_reused_refs()`, the same shape as Kouga's own
+fix, called at the end of `fetch_releases()`. DBSA's page has no stable per-row detail URL to
+suffix with the way Kouga's own per-card link let that fix do it (every DBSA row shares one list
+page as `source_url`) - `published_date` is the field that actually differed between the two real
+duplicate rows, used as the suffix instead, with a short title hash as the last-resort fallback if
+even that collides. Only a colliding `ocid` is touched - every non-colliding DBSA tender keeps
+exactly the ocid it always had.
+
+**Verified genuinely, red-then-green, against the real live collision - not a synthetic-only
+test.** Added `test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision()` to `test_gov_sources.py`
+with a fixture trimmed directly from the two real duplicate rows above, run through
+`dbsa_procurement.fetch_releases()` itself (not the disambiguation function in isolation) via a
+monkeypatched `fetch_list()`. Ran it before the fix: red (both rows shared one ocid). Applied the
+fix, re-ran: green, plus the pre-existing non-colliding fixture still gets plain ocids through the
+same entry point. Then re-ran `fetch_releases()` against the REAL live DBSA site again, post-fix:
+**10 open rows, 10 distinct ocids now** - the live collision is genuinely closed, not just a
+fixture passing. Full regression: `test_gov_sources.py` - ALL PASSED; the complete `engine/`
+per-file test loop - **84 files, 0 failures**, matching the standing baseline exactly (no other
+file touched this pass). See Finding 154 (`QA-Edge-Case-Findings.md`) for the full write-up.
+
+**What this does NOT close.** The identical architectural risk is still unverified-but-unfixed in
+`sars_procurement.py`, `lephalale.py`, `vaal_central_water.py` and `randwater.py` - named as a
+concrete, scoped backlog item (ideally for a pass that can reach `lephalale.gov.za`/
+`vaal_central_water`'s own site, or dispatches the check from a GitHub Actions runner the way this
+project already does for `randwater.py`'s own reachability), not fixed speculatively against code
+with no demonstrated live collision - the standing directive's own "don't force it" rule, applied
+to NOT over-fixing just as much as to not under-fixing.
+
+**Backlog status.** No change to any standing item except this pass's own addition above.
+`start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched,
+per the standing guardrail. PR #176/#178/#179/#180/#181 (all awaiting Sarel's own merge decision)
+remain exactly as described - not touched, not amended. PR #164/#165 (stale drafts) not touched.
+`bridge-worker-ci.yml`'s own missing `app/lib/**`/`app/scripts/**` path filter (2026-11-07q) remains
+exactly as named - still an action item for whoever merges PR #181, not implemented speculatively
+against code not yet on `main`. **New backlog note:** `sars_procurement.py`, `lephalale.py`,
+`vaal_central_water.py` and `randwater.py` all build their own `ocid` from a raw reference number
+alone, the same shape Kouga's and DBSA's own fixes just closed - a future pass with real network
+access to each of their own sites (or a GitHub Actions dispatch) should check each live for an
+actual reused-reference collision before fixing, the same discipline this pass used for DBSA.
+
+To verify independently: run `engine/discovery/test_gov_sources.py` and confirm
+`test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision` passes; read
+`dbsa_procurement._disambiguate_reused_refs()` and confirm it only touches a colliding base `ocid`.
+Re-run `python3 -c "import dbsa_procurement as m; rels = m.fetch_releases(log=lambda *a,**k: None);
+print(len(rels), len({r['ocid'] for r in rels}))"` against the real live site and confirm the two
+counts now match (they didn't, 10 vs 9, before this fix). Read `sars_procurement.py`/`lephalale.py`/
+`vaal_central_water.py`/`randwater.py`'s own `ocid=` lines and confirm each still builds it from the
+raw reference alone, with no secondary disambiguator - the backlog item above.
+
+---
+
 ## This pass (2026-11-07q, standing solution-architect review): read every `.github/workflows/*.yml` file end to end for trigger drift (angle (c)) - found one real gap, `bridge-worker-ci.yml`'s path filter doesn't cover `app/lib/**`/`app/scripts/**`, which will matter the moment PR #181 merges; fixed the narrower, immediately-actionable part of it (zero test coverage of `render-pack-ready-email.ts`'s actual subprocess contract) and named the Dockerfile-dependent part explicitly for whoever merges #181, rather than implementing it speculatively against code not yet on `main`
 
 Oriented from `646ace6` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`

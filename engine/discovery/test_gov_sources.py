@@ -119,6 +119,16 @@ DBSA_TABLE_HTML = """<table><tr><th>OPEN RFP's and RFR's</th><th>Date Published<
 <tr><td>RFP 186/2026:  A typo&#39;d closing date tender</td><td>2 October 2026</td><td>23 Ocober 2026 @ 23H55</td></tr>
 </table>"""
 
+# Confirmed live, 2026-11-07: DBSA's own page listed ref "RFP185/2026" TWICE -
+# a later addendum notice alongside the original tender, same closing date,
+# slightly different title wording ("Addendum 01" / GPS coordinates added),
+# different published dates (28 Oct vs 2 Nov). Trimmed from the real rows,
+# not an invented example.
+DBSA_REUSED_REF_HTML = """<table><tr><th>OPEN RFP's and RFR's</th><th>Date Published</th><th>Closing Date and Time</th></tr>
+<tr><td>RFP 185/2026: The Appointment of a Security Services Company Tender Volume , Addendum 01 Onsite Compulsory Briefing Session</td><td>2 November 2026</td><td>23 November 2026 @ 23H55</td></tr>
+<tr><td>RFP185/2026: The Appointment of a Security Services Company Tender Volume Onsite Compulsory Tender Briefing</td><td>28 October 2026</td><td>23 November 2026 @ 23H55</td></tr>
+</table>"""
+
 
 def sanral_site(reference, closing, scm=None, title=None, slug=None):
     r = sh.release(ocid=f"sanral:{slug or sh.norm_ref(reference)}", contract_number=reference, title=title or reference,
@@ -261,6 +271,48 @@ def test_new_sources():
           <= set(gov_sources.ALL_SOURCES))
     check("new sources have labels", all(gov_sources.SOURCE_LABELS.get(s) for s in
           ("sars_procurement", "cidb_tenders", "dbsa_procurement")))
+
+
+def test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision():
+    # DBSA's own procurement page lists one RFP twice when it is relisted
+    # with an addendum (same pattern kouga.py's own _disambiguate_reused_refs()
+    # closed for Kouga's reused Ref No, 2026-11-06) - confirmed live,
+    # 2026-11-07, DBSA_REUSED_REF_HTML above. Left alone, both rows get the
+    # identical ocid ("dbsa-procurement:RFP185/2026"), and this engine's own
+    # per-release scoring/seeding (watch_new_tenders.fan_out()'s own
+    # release_key(), seed_supabase_opportunities.seed()'s own
+    # (company_id, ocid) upsert) would treat them as the SAME release scored
+    # and reported twice in one run, whichever is written last silently
+    # overwriting the other's discovered_opportunities row.
+    print("dbsa_procurement: reused ref disambiguation")
+    real_fetch_list = dbsa_procurement.fetch_list
+    dbsa_procurement.fetch_list = lambda: DBSA_REUSED_REF_HTML
+    try:
+        rels = dbsa_procurement.fetch_releases(log=lambda *a, **k: None)
+    finally:
+        dbsa_procurement.fetch_list = real_fetch_list
+    same_ref = [r for r in rels if r["contract_number"] == "RFP185/2026"]
+    check("both the original and its addendum notice are present (same ref, 2 rows)",
+          len(same_ref) == 2, len(same_ref))
+    check("...but they do NOT share an ocid (the collision this fix closes)",
+          len({r["ocid"] for r in same_ref}) == 2, [r["ocid"] for r in same_ref])
+    check("...and each disambiguated ocid still starts with the shared ref, for traceability",
+          all(r["ocid"].startswith("dbsa-procurement:RFP185/2026:") for r in same_ref),
+          [r["ocid"] for r in same_ref])
+
+    # The ORIGINAL (non-colliding) fixture still gets plain, unsuffixed
+    # ocids through the same fetch_releases() entry point - confirms the fix
+    # doesn't touch refs that were never ambiguous, which would otherwise
+    # re-trigger a "new tender" alert for every DBSA tender, not just the
+    # genuinely reused ones.
+    dbsa_procurement.fetch_list = lambda: DBSA_TABLE_HTML
+    try:
+        plain_rels = dbsa_procurement.fetch_releases(log=lambda *a, **k: None)
+    finally:
+        dbsa_procurement.fetch_list = real_fetch_list
+    check("every non-colliding ref keeps its plain, unsuffixed ocid",
+          all(r["ocid"] == f"dbsa-procurement:{r['contract_number']}" for r in plain_rels if r["contract_number"]),
+          [r["ocid"] for r in plain_rels])
 
 
 def test_new_sources_are_in_buyer_family():
@@ -484,6 +536,7 @@ if __name__ == "__main__":
     test_eskom()
     test_transnet_capetown()
     test_new_sources()
+    test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision()
     test_new_sources_are_in_buyer_family()
     test_merge()
     test_scope_enrichment_hook()

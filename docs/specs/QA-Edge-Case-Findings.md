@@ -9089,3 +9089,116 @@ byte-for-byte unchanged - confirmed via `git diff`, empty).
 **Pushed directly to `main`** - small, narrow, additive (one new test file), does not touch
 RLS/money paths/hard-stop gates, and does not change what the production worker image
 installs/copies (that remains scoped to PR #181, untouched by this pass).
+
+---
+
+### Finding 154 (CONFIRMED, FIXED, moderate - DBSA's own procurement page currently lists one real
+RFP twice under the same reference number, which gave both rows the identical `ocid` and would let
+this engine's per-release scoring/seeding silently score and report the same tender twice in one
+run, with whichever copy is written last overwriting the other's `discovered_opportunities` row)
+
+**Area:** `engine/discovery/dbsa_procurement.py` (`normalize()`/`fetch_releases()`), reached from
+`gov_sources.py`'s `ALL_SOURCES` -> `watch_new_tenders.py`'s fan-out/scoring -> `seed_supabase_opportunities.py`.
+
+**How this was found.** This pass's angle was a subsystem-level read of the Discovery fan-out/
+scoring path as one coherent system (`run_discovery.py`, `watch_new_tenders.py`, `assess_tender.py`,
+`company_profiles.py`, `discovery_downgrades.py`, `seed_supabase_opportunities.py`,
+`download_discovered_documents.py`, `score_outlook.py`, `taxonomy.py`) - all read start to finish,
+cross-checked against each other's own contracts, plus the full existing test suite for that path
+re-run for real (all green: `test_discovery_fanout.py`, `test_discovery_downgrades.py`,
+`test_taxonomy.py`, `test_score_outlook*.py`, `test_assess_tender.py`,
+`test_download_discovered_documents.py`, `test_gov_sources.py`). That slice itself came up clean.
+
+The real finding came from following up on `kouga.py`'s own very recent fix (2026-11-06,
+`cb35c24`: "Kouga reuses the same Ref No for an original listing and its later re-advertisement" ->
+both got the identical `ocid`, fixed with `_disambiguate_reused_refs()`). Checked whether the same
+*shape* of bug (a direct-buyer reader building its `ocid` from the raw, human-entered reference
+number alone, with no secondary unique identifier) exists in any of this pipeline's other direct
+readers - not assumed, checked each one's own `ocid=` line:
+`transnet_etenders.py` (`rowKey`, a site-internal id - safe), `eskom_bulletin.py` (`TENDER_ID`, a
+site-internal id - safe), `capetown_procurement.py` (`detail_id or ref` - prefers a site-internal
+id, only falls back to `ref` when the row has no detail link - low risk), `cidb_tenders.py`
+(`tender_ID`, a site-internal id - safe, and confirmed live: 25 distinct, non-null ids today, zero
+collisions). Five readers build `ocid` from the raw reference alone, the same pre-fix shape as
+Kouga: `dbsa_procurement.py`, `sars_procurement.py`, `lephalale.py`, `vaal_central_water.py`,
+`randwater.py`.
+
+**Checked live, not assumed, for each of the five - confirmed on real, current data, not a
+hypothetical.** Ran each reader's own `fetch_releases()` against the real live site through this
+sandbox's outbound proxy and counted distinct `ocid`s vs. total rows:
+- `dbsa_procurement.py`: **10 open rows, only 9 distinct ocids** - a genuine collision, confirmed
+  real: ref `RFP185/2026` appears as two separate table rows right now - "RFP 185/2026: ... Tender
+  Volume , Addendum 01 Onsite Compulsory Briefing Session ..." (published 2 Nov) and "RFP185/2026:
+  ... Tender Volume Onsite Compulsory Tender Briefing ..." (published 28 Oct) - same closing date
+  (23 Nov 23:55), a genuine addendum re-listing of the same RFP, not a parsing artefact.
+  **This is the one fixed this pass** (below).
+- `sars_procurement.py`: 2 open rows today, both distinct - no live collision found (too small a
+  sample to rule the risk out, the code shape is still identical to Kouga's pre-fix one).
+- `lephalale.py` / `vaal_central_water.py`: unreachable from this sandbox right now (`lephalale.gov.za`
+  reset the connection after 3 retries; `vaal_central_water`'s own site returned a flat 403) - the
+  same sandbox-vs-real-network gap this project has already named for `randwater.py`
+  (`gov_sources.py`'s own comment: confirmed only reachable from a GitHub Actions runner, not this
+  sandbox). Not checked live this pass for that reason, not because the risk doesn't apply.
+- `randwater.py`: same reachability gap, not checked live.
+
+**The real consequence, traced through the pipeline, not assumed from the collision alone.**
+`gov_sources.merge()`'s own "never fold two rows of the same source into each other" rule (so
+SANRAL's bid and its own lot aren't merged) means merge() does **not** collapse the two DBSA rows
+either - both pass straight through to the merged release list, still sharing one `ocid`. From
+there: `watch_new_tenders.py`'s `release_key()` (`ocid` first) treats them as the SAME release, so
+`fan_out()`'s Pass 1 loop creates one shared `seen` entry and schedules BOTH rows into `prepared`
+pointing at that same shared entry object; Pass 3 then scores every company against the FIRST
+row's reading, then re-scores (and overwrites `entry["companies"][key]`) against the SECOND row's
+reading - double the document fetch/scoring cost for every affected tender, and TWO separate
+`out` entries (same ocid, slightly different title/description text) both flow into
+`seed_supabase_opportunities.seed()`, whose `(company_id, ocid)` upsert means the SECOND one
+processed silently overwrites the FIRST's `discovered_opportunities` row and reasons within the
+same run - and, worse, because `seed()` re-reads `_existing()` fresh for each `company_results`
+entry in the same call, the second row's `discovery_downgrades.flag_update()` check runs against
+the row the FIRST one *just wrote* a moment earlier in the same run, which could raise a spurious
+same-run "downgrade" flag purely from this duplicate-listing artifact if the two near-identical
+texts ever happened to classify differently - exactly the kind of false signal
+`discovery_downgrades.py` exists to prevent, not cause.
+
+**Fix**, mirroring `kouga.py`'s own `_disambiguate_reused_refs()` (2026-11-06) in shape: added
+`dbsa_procurement._disambiguate_reused_refs()`, called at the end of `fetch_releases()` (after the
+`is_closed` filter, same spot Kouga's fix runs). Only a colliding `ocid` is touched - every row
+whose base ocid is unique keeps exactly the ocid it always had, so this cannot re-trigger a "new
+tender" alert for any of DBSA's other, never-ambiguous tenders. DBSA's own page has no stable
+per-row detail URL to suffix with the way Kouga's own per-card link let that fix do it (every DBSA
+row shares the one list page as its `source_url`) - `published_date` is the field that actually
+differed between the two real duplicate rows, so it is used as the suffix instead; a short hash of
+the title is the last-resort fallback for the (unseen in practice) case where even `published_date`
+collides too, so two such rows are never silently re-merged into one.
+
+**Verified genuinely, red-then-green, against the real live collision.** Added
+`test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision()` to `test_gov_sources.py`, with a fixture
+(`DBSA_REUSED_REF_HTML`) trimmed directly from the real live duplicate rows above, run through
+`dbsa_procurement.fetch_releases()` itself (not just the disambiguation function in isolation) via
+a monkeypatched `fetch_list()`. Ran it before the fix: **red** - both rows shared one ocid, the
+two new "do NOT share an ocid" assertions failed. Applied the fix, re-ran: **green** - all 4 new
+checks pass, plus the pre-existing `DBSA_TABLE_HTML` fixture (two genuinely different refs) run
+through the same `fetch_releases()` entry point still gets plain, unsuffixed ocids. Then re-ran
+`dbsa_procurement.fetch_releases()` against the REAL live site again, post-fix: **10 open rows, 10
+distinct ocids now** (`dbsa-procurement:RFP185/2026:2026-11-02T00:00:00+02:00` and
+`...:2026-10-28T00:00:00+02:00`) - the live collision is genuinely closed, not just the synthetic
+fixture. Full regression: the complete `test_gov_sources.py` suite - **ALL PASSED**; the full
+`engine/` per-file test loop (`for f in find . -maxdepth 2 -name "test_*.py"`, real exit codes) -
+**84 files, 0 failures**, matching the standing baseline exactly (no other file touched).
+
+**What this does NOT close.** The same architectural risk (an `ocid` built from the raw reference
+alone, no secondary disambiguator) remains unverified-but-unfixed in `sars_procurement.py`,
+`lephalale.py`, `vaal_central_water.py` and `randwater.py` - named here as a concrete, scoped
+backlog item for a future pass (ideally one that can reach `lephalale.gov.za`/
+`vaal_central_water`'s site, or dispatches a check from a GitHub Actions runner the way this
+project's own Dockerfile-shaped verifications already do for `randwater.py`), not fixed
+speculatively against code with no demonstrated live collision - the standing directive's own
+"don't force it" rule.
+
+**Regression:** `engine/discovery/dbsa_procurement.py` (+46 lines, one new function + its call site),
+`engine/discovery/test_gov_sources.py` (+53 lines, one new fixture + one new test function). No
+other file touched.
+
+**Pushed directly to `main`** - small, narrow (one reader's own de-duplication logic), does not
+touch RLS/money paths/hard-stop gates, and does not change what the production worker image
+installs/copies.
