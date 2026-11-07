@@ -188,7 +188,7 @@ export default async function PipelinePage({
 }
 
 async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>, actionError: string | undefined) {
-  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }, { data: outcomeRows }, { data: preferencesRow, error: preferencesError }] = await Promise.all([
+  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows, error: peopleError }, { data: outcomeRows }, { data: preferencesRow, error: preferencesError }] = await Promise.all([
     supabase
       .from("tenders")
       .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, submission_type, ${ECONOMICS_COLUMNS})`)
@@ -222,6 +222,11 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     supabase.from("company_tender_preferences").select("hide_sanral_board").maybeSingle(),
   ]);
   if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
+  // Logged, not gated: a failed read here just omits the owner avatar/credit
+  // picker's name for this render (EconomicsForm's own select now keeps the
+  // real assignment selected regardless - see its own comment) rather than
+  // showing anything false.
+  if (peopleError) console.error("people select failed for pipeline board owner/credit lookups", peopleError);
   const hideSanralBoard = (preferencesRow as { hide_sanral_board: boolean } | null)?.hide_sanral_board ?? false;
   const people = (peopleRows ?? []) as CreditPerson[];
   const peopleById = new Map(people.map((p) => [p.id, p.name]));

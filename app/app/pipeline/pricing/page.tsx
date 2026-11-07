@@ -108,7 +108,7 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
   const outcome = (OUTCOMES as readonly string[]).includes(sp.outcome ?? "") ? (sp.outcome as (typeof OUTCOMES)[number]) : "all";
 
   const supabase = await createClient();
-  const [{ data: packs, error }, { data: peopleRows }, { data: opportunities }] = await Promise.all([
+  const [{ data: packs, error }, { data: peopleRows, error: peopleError }, { data: opportunities }] = await Promise.all([
     supabase
       .from("tender_packs")
       .select(`tender_id, pipeline_stage, submitted_at, ${ECONOMICS_COLUMNS}, tenders(contract_no, title, description, buyer, family, ocid)`)
@@ -138,6 +138,12 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
   if (error) console.error("tender_packs select failed for pricing history", error);
+  // Logged, not gated: EconomicsForm's own select now keeps the real
+  // submitted_by_person_id assignment selected regardless of whether this
+  // read failed (see its own comment) - this page's own name display below
+  // just can't resolve the name for this render, so it says so rather than
+  // falsely claiming the person was removed.
+  if (peopleError) console.error("people select failed for pricing history credit names", peopleError);
 
   const categoriesByKey = new Map<string, string[]>();
   for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; tender_id: string | null; categories: string[] | null }[]) {
@@ -170,7 +176,9 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
       submittedAt: p.submitted_at,
       price: toNumber(p.submitted_price_zar),
       inclVat: p.submitted_price_incl_vat !== false,
-      person: p.submitted_by_person_id ? nameById.get(p.submitted_by_person_id) ?? "(removed person)" : null,
+      person: p.submitted_by_person_id
+        ? nameById.get(p.submitted_by_person_id) ?? (peopleError ? "(couldn't load name)" : "(removed person)")
+        : null,
       commission: commissionText(p),
       pack: p,
       defaultSector: derived,

@@ -1,5 +1,77 @@
 # System Status
 
+## This pass (2026-11-07xi, standing solution-architect review): oriented from `2973a3c`
+(immediately-preceding pass's own verified HEAD, Finding 174's `general-workspace.tsx`/
+`intake-card.tsx` fix, this chain's own `app/app/tenders/[id]/` sweep closing out with one genuine
+finding after 6 passes). `git fetch origin main` clean, local matched `origin/main` exactly at the
+start and again immediately before this pass's own push - `2973a3c` throughout, no sibling commits
+landed during this pass. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`:
+`#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`
+(both draft) are all still open, same `updated_at` timestamps every preceding pass has recorded
+(`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md`
+myself - 174 was the highest recorded at this handoff, confirming no new finding had landed from a
+sibling session either, before this pass's own Finding 175 below.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrails already allow (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle: `app/app/pipeline/pricing/` (named in this pass's own brief as touched once by
+PR #180 for `pipelineCardHelpers.ts`/`pipeline/page.tsx`, but the `pricing` subpage itself never
+swept).** Read `app/app/pipeline/pricing/page.tsx` in full: its own `tender_packs` read already
+captures and renders `error`, but the sibling `people` select discards its own `error` entirely -
+this review's dominant bug class. Traced the consequence rather than stopping at "discarded error,
+logged" - it does not stop at a false display fact here, the way most prior instances of this bug
+class have. `people` also feeds `app/app/pipeline/economics-form.tsx`'s shared "Credit for the
+submission" `<select>` (used by both `/pipeline` and `/pipeline/pricing`), whose `defaultValue`
+matches no `<option>` when the credited person is missing from an empty `people` list - the browser
+silently defaults to "Nobody yet", and `saveTenderEconomics` (`app/app/pipeline/actions.ts`) writes
+every field of this always-whole-row form together on every save, so the NEXT unrelated save (e.g.
+correcting just the price) silently nulls out a real, previously-recorded credit/commission
+attribution. This also corrects Finding 165's own "genuinely clean" judgment on
+`app/app/pipeline/page.tsx`'s `peopleRows` - right about that page's own direct display uses, but
+it never traced the same read into this shared form component, where the real, severe consequence
+lives. Full write-up, the three-part fix, and the red/green verification are in
+`docs/specs/QA-Edge-Case-Findings.md`'s own Finding 175 entry - not duplicated here.
+
+**Verification.** `npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, the same 3
+pre-existing warnings. `npx next build` - compiled successfully, same route table, `/pipeline` and
+`/pipeline/pricing` both still Partial Prerender routes. `npx vitest run` - **497/497, 64 files**
+(493/63 baseline plus this fix's own new `app/lib/dealEconomics.spec.ts`, 4 tests). The `*.test.ts`
+node loop (no `--test` flag, real exit codes) - **28 files, 0 failures**, unchanged. Red-then-green
+run myself on the new test: reverted `needsCreditFallbackOption()`'s body to `return false;` alone,
+confirmed the exact predicted 2-of-4 failures, restored, confirmed green again. `engine/` sweep not
+re-run - this fix touches no Python.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. The rest of `app/app/pipeline/` (`outcome-form.tsx`, `loading.tsx`) and
+`market-comparison.tsx` were read in passing and are clean against this same bug class (the latter
+already correctly handled per Finding 158's own writeup). `app/app/people/` (including `[id]/`,
+`_components/`, `bulk-cv/`) and `app/app/company/` (including `bank-accounts/`, `principals/`,
+`properties/`, `registrations/`, `team/`, `document-scan/`, `_components/`) remain genuinely fresh
+surfaces this pass's own time did not reach - good next candidates, per this pass's own brief.
+`engine/discovery/`'s still-not-re-swept direct-buyer readers
+(`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/`sars_procurement.py`) and
+`randwater.py`'s own TLS-blocked live-fetch limitation also remain live angles for a future pass.
+
+To verify independently: read `app/lib/dealEconomics.ts`'s `needsCreditFallbackOption()`,
+`app/app/pipeline/economics-form.tsx`'s `<select>` block, and `app/app/pipeline/page.tsx`'s/
+`app/app/pipeline/pricing/page.tsx`'s own `people` select error capture, and confirm each matches
+`docs/specs/QA-Edge-Case-Findings.md`'s own Finding 175 writeup. Run `npm run typecheck`, `npx
+eslint .`, `npx next build`, `npx vitest run` (497/497, 64 files), and the `*.test.ts` node loop
+(28 files, 0 failures) yourself and confirm the same results. Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged at the same `updated_at`
+timestamps listed above, and that `git log --oneline -1 origin/main` is this pass's own new commit
+(one ahead of `2973a3c`), with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07x, standing solution-architect review): oriented from `878a679`
 (immediately-preceding pass's own verified HEAD, `transnet_etenders.py`'s live sweep, this chain's
 5th consecutive genuine negative). `git fetch origin main` clean, local matched `origin/main`

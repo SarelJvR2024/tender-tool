@@ -1,5 +1,5 @@
 import { taxonomyGroups, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
-import { commissionText, formatRand, sectorLabel, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
+import { commissionText, formatRand, needsCreditFallbackOption, sectorLabel, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { saveTenderEconomics } from "./actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,7 +50,8 @@ export function EconomicsForm({
   toggleLabel?: string;
 }) {
   const price = toNumber(economics?.submitted_price_zar);
-  const person = people.find((p) => p.id === economics?.submitted_by_person_id);
+  const assignedPersonId = economics?.submitted_by_person_id ?? null;
+  const person = people.find((p) => p.id === assignedPersonId);
   const commission = economics ? commissionText(economics) : null;
   const pct = toNumber(economics?.commission_percent);
   const amount = toNumber(economics?.commission_amount_zar);
@@ -103,8 +104,19 @@ export function EconomicsForm({
 
         <div>
           <Label htmlFor={`person-${tenderId}`} className="mb-1 text-[11px] font-semibold text-muted-foreground">Credit for the submission</Label>
-          <select id={`person-${tenderId}`} name="person_id" defaultValue={economics?.submitted_by_person_id ?? ""} className={selectClass}>
+          <select id={`person-${tenderId}`} name="person_id" defaultValue={assignedPersonId ?? ""} className={selectClass}>
             <option value="">Nobody yet</option>
+            {/* Keeps whoever is already credited selected even if the people
+                list came back empty (a discarded `people`-select error on the
+                calling page, or a since-removed person) - without this, the
+                browser falls back to "Nobody yet" (no option matches
+                defaultValue), and saving ANY other field on this form (price,
+                VAT, commission...) resubmits person_id="" and silently wipes
+                the real credit assignment, since this form always writes
+                every field together (saveTenderEconomics, pipeline/actions.ts). */}
+            {needsCreditFallbackOption(assignedPersonId, people) && (
+              <option value={assignedPersonId as string}>(unavailable right now - keeping this pick)</option>
+            )}
             {people.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}

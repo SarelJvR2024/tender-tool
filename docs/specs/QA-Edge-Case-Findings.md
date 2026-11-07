@@ -10947,3 +10947,129 @@ in the Overview tab (~line 1211, right before `generalSections?.overview`). Run 
 via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged, and that `git log
 --oneline -1 origin/main` is this pass's own new commit, with no further sibling commits having
 landed in between.
+
+### Finding 175 (CONFIRMED, FIXED, severe - the Pipeline board's and Pricing history's shared "Credit for the submission" `<select>` silently wiped a real credit/commission attribution on ANY unrelated save, whenever its own `people` read came back empty)
+
+**Area:** `app/app/pipeline/economics-form.tsx` (`EconomicsForm`, shared by `/pipeline` and
+`/pipeline/pricing`), fed by `app/app/pipeline/page.tsx` and `app/app/pipeline/pricing/page.tsx`'s
+own discarded `people`-select errors.
+
+**How this was found.** Finding 174 closed out `app/app/tenders/[id]/` after 6 consecutive
+negatives there; this pass's own brief named `app/app/pipeline/pricing/` as a genuinely fresh
+surface (touched once by PR #180, but the `pricing` subpage itself never swept). Read
+`app/app/pipeline/pricing/page.tsx` in full: its `Promise.all` destructures `tender_packs`' own
+`error` and renders a banner on it, but discards the sibling `people` select's `error` entirely
+(`const [{ data: packs, error }, { data: peopleRows }, { data: opportunities }] = await
+Promise.all([...])`) - the exact dominant bug class this review tracks. Tracing the consequence
+turned up something this review's own prior pass on `/pipeline` (Finding 165's "genuinely clean"
+writeup) had judged too quickly: Finding 165 checked `app/app/pipeline/page.tsx`'s own `peopleRows`
+and found it fed only "a verdict badge per card, an assignee-name map... a real failure there means
+a missing badge or blank assignee name, not a false '0 of X' fact; thin, but not this bug shape" -
+true for that page's own direct uses, but it never followed `peopleRows` into the shared
+`EconomicsForm` component both pages hand it to as their `people` prop, which is where the real,
+severe consequence actually lives.
+
+`EconomicsForm`'s "Credit for the submission" `<select>` is built as `defaultValue={economics
+?.submitted_by_person_id ?? ""}` with one `<option>` per entry in `people`, plus a hardcoded `""`
+("Nobody yet") - no fallback option for an id not in `people`. When the `people` read fails (or,
+less commonly, the credited person is since removed), `people` is `[]`/missing that id, so the
+`<select>`'s `defaultValue` matches NO `<option>` - the browser silently renders its first option
+("Nobody yet", value `""`) as selected instead, with nothing on screen to say the real pick is
+anything other than "nobody". This is already a false-display instance of the dominant bug class -
+but this form's own save path (`saveTenderEconomics`, `app/app/pipeline/actions.ts` line 107:
+`submitted_by_person_id: typeof personId === "string" && personId ? personId : null`) always
+writes `person_id` fresh from EVERY submit of this form, together with price/VAT/commission/sector/
+note in one `.update()`. So the very next time anyone saves ANY other field on this form - correcting
+the price, say - while the `people` read happened to have failed for that render, the browser
+resubmits `person_id=""`, and `saveTenderEconomics` writes `submitted_by_person_id: null`,
+**silently and permanently erasing a real, previously-recorded credit/commission attribution**,
+with zero error anywhere, triggered by someone doing something that has nothing to do with the
+credited person at all. This is the same root cause (a discarded `people`-select error) as the
+dominant bug class, but a more severe variant than this review has flagged before: not a false
+*read*, a silent, persisted *write* that destroys real data.
+
+On `/pipeline/pricing/page.tsx` specifically, the same discarded `peopleRows` error additionally
+makes the page's own name column (`person: p.submitted_by_person_id ? nameById.get(p
+.submitted_by_person_id) ?? "(removed person)" : null`) falsely claim every single credited person
+was "(removed person)" on a transient failure - the familiar false-display shape Findings 164/165
+already fixed elsewhere, compounding the write-path bug above on the exact same page.
+
+**Fixed, in three parts:**
+1. **`app/lib/dealEconomics.ts`:** added a tiny pure helper, `needsCreditFallbackOption
+(assignedPersonId, people)`, returning whether the currently-credited person is missing from the
+loaded `people` list (true whether that's a discarded read error upstream or a genuine removal).
+2. **`app/app/pipeline/economics-form.tsx`:** the `<select>` now renders a synthetic `<option
+value={assignedPersonId}>(unavailable right now - keeping this pick)</option>` whenever
+`needsCreditFallbackOption` is true, so `defaultValue` always matches a real `<option>` and an
+unrelated save can never again silently null out a real attribution. The happy path (person
+resolved normally) renders byte-for-byte as before - the new option only ever appears when it is
+needed.
+3. **`app/app/pipeline/page.tsx` and `app/app/pipeline/pricing/page.tsx`:** both now capture `error:
+peopleError` on their own `people` select and `console.error` it (logged, not gated - the
+`EconomicsForm` fix above already makes the credited value safe regardless, so these are
+visibility-only). `pricing/page.tsx`'s own name column additionally now says "(couldn't load name)"
+instead of the false "(removed person)" specifically when `peopleError` is set, leaving the genuine-
+removal case worded exactly as before.
+
+**Verified red-then-green, real exit codes.** Added `app/lib/dealEconomics.spec.ts` (4 tests) for
+the new pure helper - the one piece of this fix with extractable, testable logic (the `<select>`
+JSX itself has none, same honest-limitation shape as Findings 144/164/165/166/174 for the rest of
+the diff). Green: `npx vitest run lib/dealEconomics.spec.ts` - **4/4 passed**, exit 0. Red: reverted
+only `needsCreditFallbackOption`'s own body to `return false;` (the pre-fix behavior - never adds
+the fallback option), kept the test file as-is, re-ran - **exit 1, 2 of 4 failed**, exactly the two
+predicted "needs fallback" cases (`AssertionError: expected false to be true`), with both negative-
+control cases ("nobody credited", "person already in the list") still passing. Restored the real
+fix from backup, re-ran - **4/4 passed, exit 0** again, confirmed by `grep`-reading the restored
+file's own body back out.
+
+Full suite after restoring the real fix: `npm run typecheck` - 0 errors, exit 0. `npx eslint .` - 0
+errors, the same 3 pre-existing warnings, exit 0. `npx next build` - compiled successfully, exit 0,
+same route table (`/pipeline` and `/pipeline/pricing` both still Partial Prerender routes). `npx
+vitest run` - **497/497, 64 files** (the baseline 493/63 plus this fix's own new 4/1) - exit 0. The
+`*.test.ts` node loop (plain `node <file>`, no `--import tsx`, no `--test` flag, real exit codes) -
+**28 files, 0 failures**, unchanged, exit 0 on every file. `engine/` sweep not re-run - this fix
+touches no Python.
+
+**Regression:** `app/lib/dealEconomics.ts` (+16 lines, one new pure function), `app/lib
+/dealEconomics.spec.ts` (new file, 4 tests), `app/app/pipeline/economics-form.tsx` (~12 lines: one
+renamed local, one new conditional `<option>`, one new import), `app/app/pipeline/page.tsx` (~6
+lines: one destructured `error`, one `console.error`), `app/app/pipeline/pricing/page.tsx` (~10
+lines: one destructured `error`, one `console.error`, the name-fallback wording split). No other
+file touched.
+
+**Pushed directly to `main`** - a read-path logging addition plus a write-path correctness fix that
+only ever changes behavior on an already-broken-upstream render (the happy path's rendered HTML and
+written data are unchanged), with a genuine red/green unit test added; no RLS, no money-processing
+path (this only affects which person a company credits internally, not Payfast/billing), no
+worker-image-install surface touched - same category and direct-push precedent Findings 164-166/
+170-174 all used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged
+(re-checked this pass via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/
+`#180`/`#181`/`#182` and the two stale drafts `#164`/`#165`, same `updated_at` timestamps every
+preceding pass has recorded) - none touched, amended, or merged by this pass. This finding is also
+a correction to Finding 165's own "genuinely clean" judgment on `app/app/pipeline/page.tsx`'s
+`peopleRows` - that judgment was right about the page's own direct display uses, but incomplete
+about the shared `EconomicsForm` component it also feeds; worth flagging explicitly so a future pass
+doesn't treat a "feeds only a cosmetic lookup" finding as closing out every consumer of a given
+read without tracing each one, this file included. `app/app/pipeline/pricing/market-comparison.tsx`
+was re-confirmed clean in passing (already correctly captures and renders its own `loadOutcomesFor
+Tenders` error, per Finding 158's own writeup on this exact call site - not re-litigated).
+`engine/discovery/`'s still-not-re-swept direct-buyer readers (`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/
+`lephalale.py`/`sars_procurement.py`) and `randwater.py`'s own TLS-blocked live-fetch limitation
+remain live angles for a future pass, as does the rest of `app/app/people/` and `app/app/company/`
+(bank-accounts/principals/properties/registrations/team subpages, and the `_components/` folder),
+genuinely fresh surfaces this pass's own time went to `/pipeline` instead.
+
+To verify independently: read `app/lib/dealEconomics.ts`'s `needsCreditFallbackOption()` and
+`app/app/pipeline/economics-form.tsx`'s `<select>` block and confirm the synthetic fallback
+`<option>` only renders when the credited person is missing from `people`. Confirm `app/app
+/pipeline/page.tsx` and `app/app/pipeline/pricing/page.tsx` both now destructure `error` from their
+own `people` select and log it. Run `npx vitest run lib/dealEconomics.spec.ts` (4/4), then revert
+only `needsCreditFallbackOption`'s body to `return false;` and re-run to see the same 2 failures
+this entry describes. Run `npm run typecheck`, `npx eslint .`, `npx next build`, and the full `npx
+vitest run` yourself and confirm the same results (497/497, 64 files). Confirm via `mcp__github
+__list_pull_requests` that all 9 PRs are still open/unmerged at the same timestamps, and that `git
+log --oneline -1 origin/main` is this pass's own new commit, with no further sibling commits having
+landed in between.

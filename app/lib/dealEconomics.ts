@@ -130,6 +130,23 @@ export function commissionText(e: Pick<PackEconomics, "submitted_price_zar" | "c
   return null;
 }
 
+/**
+ * Whether the "Credit for the submission" <select> (economics-form.tsx)
+ * needs a synthetic fallback option for the already-credited person: true
+ * when someone is credited but isn't in the loaded `people` list - whether
+ * because that read failed (a discarded Supabase `people`-select error on
+ * the calling page) or the person was since removed from the company.
+ * Without that fallback option, the <select>'s `defaultValue` matches no
+ * `<option>`, the browser silently falls back to its first option ("Nobody
+ * yet"), and saving ANY other field on this always-whole-row form (price,
+ * VAT, commission...) resubmits `person_id=""` and wipes the real credit
+ * assignment - `saveTenderEconomics` (app/pipeline/actions.ts) always writes
+ * `submitted_by_person_id` straight from the submitted form field, every save.
+ */
+export function needsCreditFallbackOption(assignedPersonId: string | null, people: { id: string }[]): boolean {
+  return assignedPersonId !== null && !people.some((p) => p.id === assignedPersonId);
+}
+
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const s = [...values].sort((a, b) => a - b);
