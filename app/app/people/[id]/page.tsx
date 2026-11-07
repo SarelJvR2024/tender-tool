@@ -303,14 +303,27 @@ export default async function PersonDetailPage({
     }
 
     // Tender role catalog + this person's tags (migration 0016).
-    const [{ data: roleRows, error: roleErr }, { data: tagRows }] = await Promise.all([
+    const [{ data: roleRows, error: roleErr }, { data: tagRows, error: tagErr }] = await Promise.all([
       supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS).order("sort_order"),
       supabase.from("person_role_eligibility").select("role_code").eq("person_id", id),
     ]);
     roleCatalog = (roleRows ?? []) as TenderRole[];
     taggedRoles = new Set((tagRows ?? []).map((r) => r.role_code as string));
     if (roleErr) console.error("Failed to load tender_roles catalog:", roleErr.message);
-    rolesError = roleErr?.message ?? null;
+    if (tagErr) console.error("person_role_eligibility select failed for person detail", tagErr.message);
+    // tagErr folded into rolesError (not just logged) deliberately: saveRoleEligibility
+    // below diffs the submitted checkboxes against a FRESH read of this same table taken
+    // at submit time, and DELETES every role_code that's "have but not wanted"
+    // (app/app/people/actions.ts, saveRoleEligibility). If this read fails here, taggedRoles
+    // comes back empty while the person's real tags are still in the DB - every checkbox
+    // renders unchecked, and simply clicking "Save role tags" with nothing touched submits
+    // `wanted = {}`, so the action's own fresh `have` read (which usually succeeds, since
+    // this was a transient failure) computes `toRemove = all of them` and silently deletes
+    // every real tag this person has. Folding tagErr into rolesError hides the save form
+    // behind the existing warning banner instead, the same way roleErr already did - same
+    // write-path-from-a-discarded-read shape as Finding 175, here via a delete-diff instead
+    // of a null-out.
+    rolesError = roleErr?.message ?? tagErr?.message ?? null;
 
     const { data: projectRows, error: projectsErr } = await supabase
       .from("projects")

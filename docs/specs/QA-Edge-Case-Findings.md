@@ -11073,3 +11073,110 @@ vitest run` yourself and confirm the same results (497/497, 64 files). Confirm v
 __list_pull_requests` that all 9 PRs are still open/unmerged at the same timestamps, and that `git
 log --oneline -1 origin/main` is this pass's own new commit, with no further sibling commits having
 landed in between.
+
+### Finding 176 (CONFIRMED, FIXED, severe - `app/app/people/[id]/page.tsx`'s `person_role_eligibility` read discarded its own error, so a transient failure there made the "Save role tags" form submit an empty checklist against a REAL, successful fresh read inside the save action itself, silently deleting every real role tag this person actually has)
+
+**Area:** `app/app/people/` - one of this review's own two still-fresh, twice-named-but-not-yet-
+reached candidate surfaces (`app/app/people/` and `app/app/company/`), per this pass's own brief.
+
+**Scenario:** read every file under `app/app/people/` (`page.tsx`, `[id]/page.tsx`, `[id]/cv-review
+.tsx`, `_components/bulk-cv-upload.tsx`, `_components/cv-led-add-person.tsx`,
+`_components/role-source-info.tsx`, `bulk-cv/page.tsx`, `actions.ts`). Most of this surface is
+already careful about this review's dominant bug class - `[id]/page.tsx`'s own primary `person`
+read, its 5 secondary reads (`projects`/`cv_uploads`/`cv_extraction_results`/`generated_cvs`/
+`signatory_scopes`, folded into one `secondaryLoadError` banner), and its `tender_roles` catalog
+read (`roleErr`) all already capture and surface their own errors. But the SECOND half of that same
+`Promise.all` - the `person_role_eligibility` select that produces `tagRows` (the person's own
+currently-held role tags, used only to compute `taggedRoles` for the checkbox list below) -
+discarded its `error` entirely (`const [{ data: roleRows, error: roleErr }, { data: tagRows }] =
+await Promise.all([...])`, line ~306, pre-fix).
+
+**Why this isn't just a cosmetic display bug, following this chain's own standing methodology of
+tracing a discarded read into every shared/downstream consumer rather than stopping at "its direct
+display use looks fine":** `taggedRoles` feeds two things - the "Tagged for: ..." summary text
+(cosmetic) and, more importantly, every checkbox's `defaultChecked={taggedRoles.has(r.code)}` in
+the `saveRoleEligibility` form (lines ~761-792). On a transient `person_role_eligibility` read
+failure, `taggedRoles` becomes an empty `Set` while the person's real tags are still in the
+database - every checkbox renders **unchecked**, with the existing `rolesError` gate (which checked
+only `roleErr`, the *catalog* read, not this one) never firing, so the form still renders as
+normal, giving no indication anything is wrong. `saveRoleEligibility` itself
+(`app/app/people/actions.ts` lines 874-914) does NOT trust the page's own `taggedRoles` for
+correctness - it re-reads `person_role_eligibility` fresh at submit time (`current`), builds `have`
+from that fresh read, diffs it against `wanted` (the checkboxes actually submitted), and then
+`DELETE`s every `role_code` that's in `have` but not in `wanted` (`toRemove`). So: the page's read
+fails transiently -> every checkbox shows unchecked -> a user who simply clicks "Save role tags"
+without touching anything (or who adds one new, unrelated tag without noticing the existing ones
+look wrong) submits `wanted = {}` or `wanted = {the one new tag}` -> the action's own fresh read
+(usually succeeding, since the page's failure was transient) returns the real, full `have` set ->
+`toRemove` becomes every real tag the person has -> they are silently, permanently deleted, with
+zero error anywhere since the delete itself succeeds. This is the identical shape to Finding 175 (a
+discarded secondary-read error feeding a save path that destroys real, previously-recorded data on
+an unrelated/no-op-looking submit) - this time via a `DELETE ... WHERE role_code IN (toRemove)`
+diff instead of a whole-row `null`-out, and on role eligibility tags (which gate which CVs/key-
+position matches a tender's compliance check trusts) rather than credit/commission attribution.
+
+**Fixed:** `app/app/people/[id]/page.tsx` now captures `error: tagErr` on the
+`person_role_eligibility` select alongside the existing `roleErr`, logs it
+(`console.error("person_role_eligibility select failed for person detail", tagErr.message)`), and -
+the actual fix - folds it into `rolesError` (`rolesError = roleErr?.message ?? tagErr?.message ??
+null`) instead of `rolesError` depending on `roleErr` alone. `rolesError` already gates the whole
+`saveRoleEligibility` form behind the existing "Couldn't load role options — try again shortly."
+warning banner (this exact mechanism `roleErr` already used) - so a failed `tagRows` read now hides
+the save form entirely instead of rendering it with silently-wrong (empty) checkbox state, the same
+"surface the failure instead of letting it look like real data" fix shape as the rest of this page's
+already-correct reads. The catalog-failure path (`roleErr`) is completely unchanged; only the
+previously-undistinguished `tagErr` case is newly folded in.
+
+**Verification run myself, real exit codes - no red/green test, honest limitation, same as Findings
+144/164/165/166/174.** `page.tsx` has no extracted pure logic for this specific diff (the fix is a
+destructuring addition plus a `??` fallback, not a function); `find app/app/people -iname
+"*.test.ts*"` turns up only `app/app/people/actions.spec.ts`, which does not touch this read.
+Correctness rests on: `npm run typecheck` - 0 errors, exit 0. `npx eslint .` - 0 errors, the same 3
+pre-existing warnings, exit 0. `npx next build` - compiled successfully, exit 0, same route table
+(`/people/[id]` still a Partial Prerender route). `npx vitest run` - **497/497, 64 files**,
+unchanged (this fix adds no test). The `*.test.ts` node loop (plain `node <file>`, no `--import
+tsx`, no `--test` flag, real exit codes, run as a loop over all 28 files individually) - **28
+files, 0 failures**, unchanged. A plain reading of the diff confirms every other branch (the
+catalog-failure banner, the "not tagged for any role yet" empty state, the checkbox list itself,
+`saveRoleEligibility`'s own diff/delete logic) is byte-for-byte unchanged - only the new `tagErr`
+capture and its fold into `rolesError`. `engine/` sweep not re-run - this fix touches no Python.
+
+**Regression:** `app/app/people/[id]/page.tsx` only (+13 lines: one destructured `error`, one
+`console.error`, one comment block, one changed assignment). No other file touched.
+
+**Pushed directly to `main`** - a read-failure-surfacing fix that only changes behavior on an
+already-broken-upstream render (gating a form behind an existing warning banner that already exists
+for the sibling read), no RLS, no money-processing path, no worker-image-install surface touched -
+same category and direct-push precedent Findings 164-166/170-175 all used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged (re-checked this pass via
+`mcp__github__list_pull_requests`: `#176` is now THIS finding's own number by coincidence of
+sequence, not to be confused with PR `#176` "12 SECURITY DEFINER RPCs bypassed employee RLS
+entirely" - the PR numbering and this doc's Finding numbering are two independent sequences, same
+as every prior pass's own writeup; `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two stale drafts `#164`/`#165` are all still open, same `updated_at` timestamps every preceding
+pass has recorded) - none touched, amended, or merged by this pass. The rest of `app/app/people/`
+(`page.tsx`, `[id]/cv-review.tsx`, `_components/bulk-cv-upload.tsx`,
+`_components/cv-led-add-person.tsx`, `_components/role-source-info.tsx`, `bulk-cv/page.tsx`,
+`actions.ts` beyond `saveRoleEligibility`) was read in full this pass and found clean against this
+same bug class - every other read on this surface already captures and surfaces its own error (see
+Scenario above); this is the one genuine gap this pass's full read turned up. `app/app/company/`
+(including `bank-accounts/`, `principals/`, `properties/`, `registrations/`, `team/`,
+`document-scan/`, `_components/`) remains a genuinely fresh surface this pass's own time did not
+reach - still a good next candidate. `engine/discovery/`'s still-not-re-swept direct-buyer readers
+(`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/`sars_procurement.py`) and
+`randwater.py`'s own TLS-blocked live-fetch limitation also remain live angles for a future pass.
+
+To verify independently: read `app/app/people/[id]/page.tsx`'s `Promise.all` for `roleRows`/
+`tagRows` (~line 306) and confirm `tagErr` is now captured and folded into `rolesError`. Read
+`app/app/people/actions.ts`'s `saveRoleEligibility` (lines 874-914) and confirm it re-reads
+`person_role_eligibility` fresh at submit time and deletes every `role_code` in `have` but not in
+`wanted` - the mechanism this finding's consequence depends on. Confirm the checkbox list's
+`defaultChecked={taggedRoles.has(r.code)}` (~line 779) is the only consumer of `taggedRoles` besides
+the cosmetic "Tagged for: ..." summary line. Run `npm run typecheck`, `npx eslint .`, `npx next
+build`, the full `npx vitest run` (497/497, 64 files), and the `*.test.ts` node loop (28 files, 0
+failures) yourself and confirm the same results. Confirm via `mcp__github__list_pull_requests` that
+all 9 PRs are still open/unmerged at the same timestamps, and that `git log --oneline -1
+origin/main` is this pass's own new commit, with no further sibling commits having landed in
+between.

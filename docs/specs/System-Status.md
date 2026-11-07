@@ -1,5 +1,73 @@
 # System Status
 
+## This pass (2026-11-07xii, standing solution-architect review): oriented from `32a3154`
+(immediately-preceding pass's own verified HEAD, Finding 175's three-part `EconomicsForm`/
+credit-attribution fix). `git fetch origin main` clean, local matched `origin/main` exactly at the
+start and again immediately before this pass's own push - `32a3154` throughout, no sibling commits
+landed during this pass. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`:
+`#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`
+(both draft) are all still open, same `updated_at` timestamps every preceding pass has recorded
+(`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md`
+myself - 175 was the highest recorded at this handoff, confirming no new finding had landed from a
+sibling session either, before this pass's own Finding 176 below.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrails already allow (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle: `app/app/people/` (named as a candidate by two prior passes, not yet
+reached).** Read every file under this surface in full (`page.tsx`, `[id]/page.tsx`, `[id]/cv
+-review.tsx`, `_components/bulk-cv-upload.tsx`, `_components/cv-led-add-person.tsx`,
+`_components/role-source-info.tsx`, `bulk-cv/page.tsx`, `actions.ts`). Most of it is already
+careful about this review's dominant bug class - `[id]/page.tsx`'s primary `person` read, its 5
+secondary reads (folded into one `secondaryLoadError` banner), and its `tender_roles` catalog read
+all already capture and surface their own errors. But the sibling half of that same `Promise.all` -
+the `person_role_eligibility` select producing `tagRows` - discarded its own error entirely, and
+(tracing it into its one non-cosmetic consumer, per this chain's own standing methodology rather
+than stopping at "looks like just a display variable") feeds every checkbox's `defaultChecked` in
+the "Save role tags" form. `saveRoleEligibility` (`app/app/people/actions.ts`) re-reads the same
+table fresh at submit time and `DELETE`s everything "have but not wanted" - so a transient read
+failure on the page silently empties every checkbox, and a no-op-looking "Save role tags" click
+then wipes every real role tag the person has, via the action's own successful fresh read. Same
+shape as Finding 175 (discarded secondary read -> real write-path data loss), via a delete-diff
+instead of a null-out. Full write-up, the fix, and the verification are in `docs/specs
+/QA-Edge-Case-Findings.md`'s own Finding 176 entry - not duplicated here.
+
+**Verification.** `npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, the same 3
+pre-existing warnings. `npx next build` - compiled successfully, same route table, `/people/[id]`
+still a Partial Prerender route. `npx vitest run` - **497/497, 64 files**, unchanged (no test added
+- no extractable pure logic for this specific diff, same honest limitation as Findings
+144/164/165/166/174). The `*.test.ts` node loop (no `--test` flag, real exit codes) - **28 files, 0
+failures**, unchanged. `engine/` sweep not re-run - this fix touches no Python.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. The rest of `app/app/people/` was read in full and is clean against this same
+bug class - every other read on this surface already captures and surfaces its own error.
+`app/app/company/` (including `bank-accounts/`, `principals/`, `properties/`, `registrations/`,
+`team/`, `document-scan/`, `_components/`) remains a genuinely fresh surface this pass's own time
+did not reach - still the best next candidate, named by three prior passes running now.
+`engine/discovery/`'s still-not-re-swept direct-buyer readers
+(`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/`sars_procurement.py`) and
+`randwater.py`'s own TLS-blocked live-fetch limitation also remain live angles for a future pass.
+
+To verify independently: read `app/app/people/[id]/page.tsx`'s `Promise.all` for `roleRows`/
+`tagRows` and confirm `tagErr` is now captured and folded into `rolesError`, and
+`app/app/people/actions.ts`'s `saveRoleEligibility` to confirm the fresh-read/delete-diff mechanism
+this finding's consequence depends on. Run `npm run typecheck`, `npx eslint .`, `npx next build`,
+`npx vitest run` (497/497, 64 files), and the `*.test.ts` node loop (28 files, 0 failures) yourself
+and confirm the same results. Confirm via `mcp__github__list_pull_requests` that all 9 PRs are
+still open/unmerged at the same `updated_at` timestamps listed above, and that `git log --oneline
+-1 origin/main` is this pass's own new commit (one ahead of `32a3154`), with no further sibling
+commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xi, standing solution-architect review): oriented from `2973a3c`
 (immediately-preceding pass's own verified HEAD, Finding 174's `general-workspace.tsx`/
 `intake-card.tsx` fix, this chain's own `app/app/tenders/[id]/` sweep closing out with one genuine
