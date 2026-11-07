@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtraction";
 import { safeFileName } from "@/lib/safeFileName";
 import { sastToday } from "@/lib/publicHolidays";
+import { queueStandardCvs } from "@/lib/standardCvQueue";
 
 /**
  * Every write here goes through the signed-in user's own Supabase client, so
@@ -318,9 +319,6 @@ export async function deleteProject(formData: FormData) {
  * same "path in storage, not the file itself" pattern as
  * companies.logo_storage_path.
  */
-const STANDARD_CV_FORMATS = ["sanral_keyperson", "world_bank"] as const;
-const STANDARD_CV_DETAILS = ["summary", "detailed"] as const;
-
 export async function uploadCv(formData: FormData) {
   const companyId = await requireCompanyId();
   const supabase = await createClient();
@@ -635,56 +633,6 @@ export async function bulkUploadCvs(formData: FormData) {
   revalidatePath("/people");
   const summary = `${attached} CV${attached === 1 ? "" : "s"} uploaded${created > 0 ? `, ${created} new ${created === 1 ? "person" : "people"} added` : ""}${errors.length > 0 ? `. ${errors.length} failed: ${errors.join(" ")}` : ""}.`;
   redirect(`/people?bulk=${encodeURIComponent(summary)}`);
-}
-
-/**
- * Queue the four standard CV formats for one person, unless a set is already
- * waiting to be built (re-confirming twice shouldn't stack duplicate jobs).
- * Returns true on failure, null on success.
- *
- * Unlike requestTenderCv()'s own dedupe check, this one has NO database-level
- * backstop - migration 0075 (generated_cvs_dedupe_pending_idx) deliberately
- * scoped its unique index to tender_pack_id is not null, explicitly leaving
- * the standard (non-tender) path "out of scope... left out of scope
- * deliberately rather than guessing at a different dedupe rule for it" (see
- * that migration's own header). So THIS read failing silently and treating
- * an unreadable "pending?" check as "no, nothing pending" is not a safe-
- * direction cosmetic gap the way the tender-specific path's equivalent check
- * is (that one has 0075's unique index catching the race) - it is the one
- * and only thing stopping a transient read failure from queueing a second,
- * fully duplicate set of 4 standard-CV jobs onto the shared worker pool,
- * exactly the "unlimited generation jobs on a worker pool shared across
- * every company" abuse 0075's own header names as the original finding.
- * Found via the standing TS-sweep's own re-check of its "actions.ts out of
- * scope" exclusion (2026-11-06) - this file matches that literal substring
- * and was never one of the sweep's grep hits as a result.
- */
-async function queueStandardCvs(supabase: Awaited<ReturnType<typeof createClient>>, companyId: string, personId: string, userId: string | null) {
-  const { data: pending, error: pendingError } = await supabase
-    .from("generated_cvs")
-    .select("id")
-    .eq("person_id", personId)
-    .is("tender_id", null)
-    .in("status", ["requested", "generating"])
-    .limit(1);
-  if (pendingError) {
-    console.error("generated_cvs pending-check failed for standard CV queue", pendingError);
-    return true;
-  }
-  if ((pending ?? []).length > 0) return null;
-  const standardJobs = STANDARD_CV_FORMATS.flatMap((format) =>
-    STANDARD_CV_DETAILS.map((detail) => ({
-      company_id: companyId,
-      person_id: personId,
-      format,
-      detail,
-      status: "requested" as const,
-      requested_by: userId,
-    }))
-  );
-  const { error } = await supabase.from("generated_cvs").insert(standardJobs);
-  if (error) console.error("generated_cvs insert failed for standard CV queue", error);
-  return error ? true : null;
 }
 
 /**

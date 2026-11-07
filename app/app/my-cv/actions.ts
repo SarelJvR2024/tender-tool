@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { safeFileName } from "@/lib/safeFileName";
+import { queueStandardCvs } from "@/lib/standardCvQueue";
 
 /**
  * Self-service actions for the My CV page (0065: employee role). Every
@@ -122,9 +123,19 @@ export async function uploadMyCv(formData: FormData) {
  * app/app/people/actions.ts applyCvExtraction but scoped to self and with
  * no project-adding step (kept deliberately small for this page - projects
  * stay something an owner/admin/member adds on the full People page).
+ *
+ * Also queues the same four standard (non-tender-specific) CV formats
+ * applyCvExtraction() does, via the now-shared queueStandardCvs()
+ * (app/lib/standardCvQueue.ts) - found missing here entirely (standing
+ * solution-architect review, 2026-11-07): this function is the ONLY way an
+ * employee using My CV self-service ever confirms their own extracted
+ * fields, and apply_my_cv_extraction_checked()/apply_cv_extraction_checked()
+ * both require review_status to still be 'pending_review', so once this
+ * ran without queuing anything, nobody - not even an owner on the full
+ * People page - could ever trigger it for that extraction again.
  */
 export async function applyMyCvExtraction(formData: FormData) {
-  const { supabase, personId } = await requireOwnPerson();
+  const { supabase, userId, companyId, personId } = await requireOwnPerson();
   const extractionId = str(formData, "extraction_id");
   if (!extractionId) redirect(BACK);
 
@@ -170,6 +181,8 @@ export async function applyMyCvExtraction(formData: FormData) {
     fail(error.message);
   }
 
+  const queueError = await queueStandardCvs(supabase, companyId, personId, userId);
+  if (queueError) fail("Fields saved, but your standard CVs could not be queued - try again. If it keeps happening, let us know.");
   redirect(`${BACK}?saved=extracted`);
 }
 

@@ -35,10 +35,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 type Resp = { data: unknown; error: { message: string } | null };
 
-function makeChain(queue: Resp[]) {
+function makeChain(queue: Resp[], insertCalls?: unknown[]) {
   const chain: Record<string, unknown> = {};
-  const methods = ["select", "update", "insert", "delete", "eq", "order", "single"];
+  const methods = ["select", "update", "delete", "eq", "order", "single", "is", "in", "limit"];
   for (const m of methods) chain[m] = () => chain;
+  chain.insert = (payload: unknown) => {
+    insertCalls?.push(payload);
+    return chain;
+  };
   chain.maybeSingle = () => chain;
   (chain as { then: unknown }).then = (resolve: (r: Resp) => void) => {
     const next = queue.shift();
@@ -51,12 +55,13 @@ function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
   let fromCallIndex = 0;
   let rpcCallIndex = 0;
   const rpcCalls: { name: string; params: unknown }[] = [];
+  const insertCalls: unknown[] = [];
   return {
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from: () => {
       const queue = fromQueues[fromCallIndex] ?? [];
       fromCallIndex += 1;
-      return makeChain(queue);
+      return makeChain(queue, insertCalls);
     },
     // apply_my_cv_extraction_checked() (0123) moved the read-gate-write
     // sequence into one locked Postgres transaction - from this TS-level
@@ -69,6 +74,7 @@ function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
       return next;
     },
     rpcCalls,
+    insertCalls,
   };
 }
 
@@ -193,6 +199,7 @@ describe("applyMyCvExtraction - apply_my_cv_extraction_checked rpc succeeds", ()
       [
         ...requireOwnPersonOk(),
         [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: [], error: null }], // queueStandardCvs' own "already queued?" check - nothing pending
       ],
       [{ data: null, error: null }],
     );
@@ -206,6 +213,72 @@ describe("applyMyCvExtraction - apply_my_cv_extraction_checked rpc succeeds", ()
     expect(supabase.rpcCalls[0].name).toBe("apply_my_cv_extraction_checked");
     const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
     expect(params.p_person_fields).toEqual({ ecsa_level: "Pr Eng" });
+  });
+});
+
+// Finding (standing solution-architect review, 2026-11-07): this function is
+// the one true sibling of app/app/people/actions.ts applyCvExtraction() that
+// never called queueStandardCvs() at all - no comment anywhere said this was
+// deliberate, unlike the already-documented "no project-adding step" scope
+// cut in this function's own header comment above. Confirmed via
+// engine/general/process_general_jobs.py's own per-role generated_cvs
+// lookup (takes the newest 'ready' row regardless of tender_id) that these
+// standard rows are a real fallback CV source for general-tender packs, not
+// just the "My generated CVs" read-only card on this same page - so a CV
+// confirmed exclusively through My CV never got a single standard CV
+// queued, with no way to retry once apply_my_cv_extraction_checked() had
+// already moved the extraction's review_status off 'pending_review'.
+describe("applyMyCvExtraction - also queues the 4 standard CV formats on success, same as applyCvExtraction", () => {
+  it("inserts the 4 standard (tender_id-less) generated_cvs rows after the rpc succeeds", async () => {
+    const supabase = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: [], error: null }], // queueStandardCvs' own "already queued?" check - nothing pending
+      ],
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(applyMyCvExtraction(formDataWith(EXTRACTION_FORM)));
+
+    expect(url).toBe("/my-cv?saved=extracted");
+    expect(supabase.insertCalls).toHaveLength(1);
+    const rows = supabase.insertCalls[0] as { company_id: string; person_id: string; format: string; detail: string; status: string; requested_by: string }[];
+    expect(rows).toHaveLength(4);
+    expect(rows.map((r) => `${r.format}/${r.detail}`).sort()).toEqual([
+      "sanral_keyperson/detailed",
+      "sanral_keyperson/summary",
+      "world_bank/detailed",
+      "world_bank/summary",
+    ]);
+    for (const r of rows) {
+      expect(r.company_id).toBe("company-1");
+      expect(r.person_id).toBe("person-1");
+      expect(r.status).toBe("requested");
+      expect(r.requested_by).toBe("user-1");
+    }
+  });
+});
+
+describe("applyMyCvExtraction - queueStandardCvs' own pending-check read fails", () => {
+  it("reports failure instead of silently dropping the CV queue request", async () => {
+    supabaseState.current = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: null, error: { message: "read failed" } }], // queueStandardCvs' own pending check - errors
+      ],
+      [{ data: null, error: null }],
+    );
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(applyMyCvExtraction(formDataWith(EXTRACTION_FORM)));
+
+    expect(url).not.toContain("saved=extracted");
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("could not be queued"));
   });
 });
 
