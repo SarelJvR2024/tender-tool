@@ -1,5 +1,182 @@
 # System Status
 
+## This pass (2026-11-07xvi, standing solution-architect review): oriented from `ac644ec`
+(immediately-preceding pass's own verified HEAD, Finding 178's `set_opportunity_tag()` race fix).
+`git fetch origin main` at the start found one sibling commit already landed - `d9e7b4c`, a
+DIFFERENT standing chain's own pass (`docs/specs/System-Status.md`'s "standing QA/robustness
+review" entries, a separate section from this chain's own, inserted at its own continuation point
+rather than this chain's top-of-file slot - see that entry for detail): `fix(compliance):
+registrations catalog never got the "lapses before closing" check, for company-held rows`,
+touching only `engine/compliance/`/`engine/notify/daily_digest.py` - no file this pass touched or
+considered. `git merge --ff-only` picked it up cleanly, no collision; re-fetched again immediately
+before finishing this pass - still `d9e7b4c`, nothing further landed. Grepped `Finding [0-9]+` in
+`docs/specs/QA-Edge-Case-Findings.md` myself before starting - 179 is the highest recorded (the
+sibling chain's own new finding, from `d9e7b4c` above), confirming no new finding had landed from
+within this chain specifically. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`:
+`#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`
+(both draft) are all still open, same `updated_at` timestamps every preceding pass has recorded
+(`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle, per the task brief's own priority order: first, the suggested whole-schema
+grep for siblings of Finding 178's unlocked-`%rowtype`-into-`array_append`/`array_remove`/
+arithmetic-into-`update` race shape, across every one of the 111 files in
+`app/supabase/migrations/`; the grep turned up nothing new, so this pass fell back to a fresh
+`app/app/` surface per the brief's own fallback instruction.** Both are genuine negatives, with the
+specific reasoning for each candidate recorded here so a future pass does not have to re-derive it.
+
+**Grep pass (Finding 178-class race), genuinely clean - every `%rowtype`/`select * into` read
+across the whole schema checked on its own merits, not pattern-matched blindly:**
+- `grep -lE "%rowtype"` across `app/supabase/migrations/*.sql` → 11 files; cross-referenced against
+  `grep -lE "array_append|array_remove"` (3 files: `0058`, `0089`, `0121`) and a separate scan for
+  `set <col> = ... || ...` and counter-style `col +/- n` writes (one hit: `0024`'s
+  `document_urls || docs`, below). `0089`/`0121` are Finding 178 itself, already fixed - not a new
+  finding.
+- `0058_discipline_group_tag_scope.sql`'s `array_remove`/`array_append` calls on
+  `discipline_categories.keywords` are inside one-time, single-statement bulk `update ... where
+  slug = '...'` migration DML (run once, already applied), not a repeatedly-invoked function - a
+  single `update` statement's own row lock makes the read-modify-write atomic regardless of
+  concurrency; nothing to race against a second call of a function that doesn't exist at runtime.
+- `0024_manual_tender_load.sql`'s `add_manual_tender_documents()` (line 221) reads `tenders%rowtype
+  t` with no lock, but only for a permission check (`t.source`, `t.owner_company_id`) and to derive
+  `docs` via the pure/immutable `_manual_tender_documents()` helper - the actual append
+  (`update tenders set document_urls = document_urls || docs ... where id = p_tender_id`, line 237)
+  operates on the LIVE `document_urls` column value inside the `update` statement itself, never on
+  `t`'s stale snapshot. This is exactly the safe shape 0121's own fix converged on (the append
+  expression evaluated under the row's own lock at write time) - genuinely clean, not a near-miss.
+- `0018`/`0024`/`0051_government_listing_changes.sql`'s three successive versions of
+  `pursue_discovered_opportunity()` (latest: 0051) read `discovered_opportunities%rowtype opp` with
+  no lock, then `insert into tenders ... on conflict (slug) do update set last_seen_at = now()` and
+  `update discovered_opportunities set tender_id = t_id where id = opp.id` - re-verified against
+  this pass's own stricter "could a concurrent call silently clobber a value" test, not just
+  reread: both writes are naturally idempotent (the tenders upsert only ever bumps `last_seen_at`
+  from a fresh `now()`, never from a stale field of `opp`; the `tender_id` write derives from
+  `t_id`, computed fresh in the SAME call, not from `opp`'s own snapshot) - two concurrent calls on
+  the same opportunity converge to the same end state, matching Finding 178's own prior "safe"
+  conclusion for `set_opportunity_interest()`, now re-confirmed for this function too rather than
+  assumed.
+- `0043_cross_tenant_integrity.sql`'s now-superseded `record_tender_document()` (reads
+  `tender_documents%rowtype v_existing` with no lock, gates a cross-company "already on file"
+  exception on it, then does an unconditional `insert ... on conflict (tender_id, doc_type) do
+  update`) WOULD have had a genuine TOCTOU race - two different companies' concurrent first uploads
+  on a shared tender could both pass the stale "not found" check before either commits, and the
+  second's upsert then silently overwrites the first's file/company attribution with no error
+  either side. Traced forward to confirm whether this still exists: `0045_company_template_copies
+  .sql` (dated 2026-10-17, a POPIA cross-tenant audit fix, unrelated to this review's own prior
+  passes) completely replaced this function before it ever shipped with today's schema - the
+  current `record_tender_document()` has NO `select * into`/stale-read gate at all; the conflict
+  key is now `(tender_id, doc_type, company_id)`, so two different companies physically cannot
+  collide on the same row, and same-company concurrent re-uploads correctly last-write-win on their
+  own data. Confirmed via `grep -n "record_tender_document" app/app/tenders/[id]/pack-inputs-
+  actions.ts` that the app still calls the same RPC name/signature the current (safe) version
+  exports. A real hazard, but already closed by an earlier, independent migration - not a live
+  finding.
+- `0050_principals_registrations_properties.sql`'s `tt_held_registrations_check()` (and the
+  sibling `tt_bank_accounts_check()`/`tt_property_rows_check()` triggers) read a lookup-table
+  `%rowtype` (`registration_types`) with no lock, but only to validate the trigger's own `new` row
+  before insert/update - never written back to the table they read from. No write-back, no race.
+- `0048`/`0106`/`0111`'s three successive versions of `accept_tender_update_date()` already had
+  `for update` on both its reads (`tender_watched_documents`, `tenders`) since 0048's own original
+  migration - 0106/0111 only widened an unrelated `IN` clause (pipeline-stage gating, per their own
+  header comments), never touched the lock. Not a retrofit this review did; already correct.
+- `0054_taxonomy_admin_and_etenders_category.sql`'s `approve_discipline_suggestion()` already uses
+  `select * into s from discipline_category_suggestions ... for update` plus an explicit `s.status
+  <> 'pending'` guard - the same lock-plus-status-recheck pattern this chain has fixed elsewhere
+  into. Already correct, not a retrofit.
+- No `col +/- n` arithmetic read-then-write pattern found anywhere in the 111 migration files
+  (checked with a separate regex for `count`/`quantity`/`balance`/`credits`/`used`/`remaining`/
+  `total`/`score`/`views`/`seen_count` near `+`/`-` inside a `set`) - the one quota-style check,
+  `0083`'s `company_can_request_pack()`, is a pure read-only `stable` gate (counts existing rows,
+  returns a boolean) with the actual insert done separately by the caller; it has its own
+  check-then-insert TOCTOU exposure in principle, but that is a quota-bypass risk (a company could
+  in theory squeeze one extra pack through on a tight race), not the lost-update/silent-data-loss
+  shape this review's two named bug classes describe, and is a pre-existing, already-documented
+  shape common to this kind of counting gate - flagged here for completeness, not fixed
+  speculatively.
+
+**Fresh `app/app/` surface, genuinely clean: `app/app/onboarding/` in full, plus every Server
+Action write path under `app/app/admin/`.** Applied both named angles (a discarded read's error
+feeding a stale value into a write; an unlocked concurrent write) to every Supabase/Postgres
+read-then-write path found.
+- `app/app/onboarding/actions.ts`'s `createCompanyBasics()`: the one write path with a Supabase
+  call creates a brand-new `companies` row via `create_company_and_join()` RPC, then an `update`
+  scoped to that SAME just-created id (trading name/registration number) - no prior row exists to
+  go stale against, so neither named bug class applies. The welcome-email `catch` and the
+  `updateError` log are both already explicitly non-fatal by design (comment: "must never block
+  someone from reaching Screen 2") and touch no data other than the two just-created fields.
+- `app/app/onboarding/page.tsx` already captures and surfaces its own `company_members` read's
+  error explicitly (`membershipError`), with an in-file comment reasoning through exactly why a
+  silent failure would be dangerous here (indistinguishable from "no company yet") - this is the
+  discarded-read class's OWN fix already applied proactively, not a gap.
+- `AddDocumentsScreen.tsx`/`WizardShell.tsx`/`Step1.tsx`/`fields.tsx`: confirmed zero direct
+  Supabase calls (`grep -n "supabase\|createClient\|\.rpc(\|\.from("` → no matches in the three
+  pure-UI files); `AddDocumentsScreen` only reuses `app/app/company/document-scan/upload-form.tsx`,
+  an already-existing surface outside this pass's own fresh-ground scope.
+- `app/app/admin/actions.ts`, `taxonomy/actions.ts`, `discovered-opportunities/actions.ts`,
+  `customers/impersonation-actions.ts`, `notifications/actions.ts`,
+  `requirement-extractions/actions.ts` (every Server Action file under `app/app/admin/`, found via
+  `grep -rn` for every `.rpc(`/`.from(`/`.update(`/`.insert(`/`.delete(` call in the directory):
+  every write is either a parameterized `update`/RPC call built straight from submitted form
+  fields (never from a previously-fetched row - no stale value to go bad), or already defends
+  itself with an optimistic-lock `where status = 'pending'`/similar guard
+  (`rejectSuggestion()`, mirroring `approve_discipline_suggestion()`'s own DB-side guard above).
+  One genuinely low-severity, pre-existing-pattern miss, not a new finding: `addCategory()`'s
+  `select ... order by sort_order desc limit 1` (discarded error) feeds a cosmetic-only
+  `sort_order` default on a brand-new row - `discipline_categories.sort_order` (0040) carries no
+  unique constraint, so a failed read or a concurrent double-add can only produce a display-order
+  tie, never lost or overwritten data; the same "cosmetic, not data loss" direction this chain has
+  already judged safe elsewhere (Finding 175's own precedent).
+- `app/app/admin/layout.tsx`'s `is_platform_admin()` RPC read also discards its error, but fails
+  CLOSED (`notFound()` on anything falsy) - the safe direction for an access gate, not a finding.
+- Every remaining `app/app/admin/**/page.tsx` (`tenders`, `telemetry`, `customers`, `billing`,
+  `settings`, `requirement-extractions`, `discovered-opportunities`, top-level `page.tsx`,
+  `notifications`, `taxonomy`) is read-only display data (RPC calls or plain `select`s feeding a
+  table/dashboard) - no write path beyond what the `actions.ts` files above already cover.
+
+**No code changed this pass - both angles investigated came back genuinely clean, with specific,
+falsifiable reasoning recorded above for every candidate, not a surface-level pattern match.**
+Verification suite not re-run (no file touched); the standing suite's last confirmed-green state is
+whatever the immediately-preceding code-changing pass (Finding 178, `ac644ec`) already recorded.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. `app/supabase/migrations/` is now genuinely swept whole-schema for Finding
+178's own specific race shape - a future pass should not re-run this exact grep without new
+evidence (a new migration landing, or a different hazard shape to search for). `app/app/onboarding/`
+and `app/app/admin/`'s own Server Action write paths are both now genuinely swept. Remaining
+named-but-not-yet-opened candidates for a future pass: `app/app/dashboard/`'s own write paths beyond
+Finding 165 (named by two prior passes now, still not itself opened), and - a fresh angle not yet
+tried by this chain - re-running this pass's own TOCTOU-style tracing (not just the lost-update
+class) against every OTHER `security definer` function that does a `select ... into` scalar/count
+(not a `%rowtype`) followed by a conditional `raise exception` gate and then a SEPARATE,
+unconditional `insert`/`update` statement - `record_tender_document()`'s now-superseded shape (this
+entry, above) is a worked real-world example of exactly that pattern turning into a live bug once,
+so it is worth checking whether any OTHER currently-shipping function still has it, rather than
+assuming 0045's own fix was the only instance. `engine/discovery/`'s `sars_procurement.py`
+listing-drop risk (no live reproduction yet, lower priority per the task's own brief) remains open,
+unchanged.
+
+To verify independently: re-run this pass's own two greps (`grep -lE "%rowtype"
+app/supabase/migrations/*.sql` and `grep -lE "array_append|array_remove"
+app/supabase/migrations/*.sql`) and confirm the same file lists; read `0024`'s
+`add_manual_tender_documents()`, `0051`'s `pursue_discovered_opportunity()`, and `0045`'s current
+`record_tender_document()` against the specific reasoning above. Read `app/app/onboarding/` and
+every `app/app/admin/**/actions.ts` file in full and confirm the same. Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged at the same timestamps
+listed above, and that `git log --oneline -1 origin/main` is still `d9e7b4c` (this pass pushed no
+new commit, since it changed no code - only this doc entry, appended to the sibling chain's
+`d9e7b4c` directly).
+
+---
+
 ## This pass (2026-11-07xv, standing solution-architect review): oriented from `c18485c`
 (immediately-preceding pass's own verified HEAD, a genuine negative sweeping `experience/`,
 `sanral-schedules/`, `toolkit/`, `billing/`'s last file, plus a 6-reader `engine/discovery/`
