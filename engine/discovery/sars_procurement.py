@@ -55,6 +55,42 @@ TENDER_LINK = re.compile(r'<a[^>]+href="([^"]+/tender/[^"]+)"[^>]*>([^<]+)</a>',
 REF = re.compile(r"\b(RF[PIQ]\s*\d{1,3}\s*/\s*20\d{2})\b", re.I)
 DOC_LINK = re.compile(r'<a[^>]+href="([^"]+\.(?:pdf|docx?|xlsx?|zip))"[^>]*>([^<]{1,150})</a>', re.I)
 
+# Found 2026-11-07, live: EVERY document link SARS's own detail page gives -
+# including its own primary tender pack, not just an "addendum"-style
+# update - is a WordPress pretty permalink with NO file extension in the URL
+# at all (e.g. "/rfp18-2026-tender-pack/", "/rfp-18-2026-qa/", 301-redirecting
+# server-side to the real .pdf - confirmed with a real `curl -L`). DOC_LINK
+# above, which requires the href to literally END in a file extension,
+# matched ZERO of these against the real live detail page for EITHER of
+# SARS's 2 currently open tenders (RFP14/2026, RFP18/2026) - confirmed by
+# running the real, unmodified fetch_documents() against the real live HTML:
+# every SARS tender's own documents, including the one thing a bidder
+# actually needs (the tender pack itself), have been silently captured as an
+# empty list since this reader's first commit (cace3f7) - a bigger, more
+# fundamental gap than the "bare addendum announcement" risk this was
+# originally opened to check (QA-Edge-Case-Findings.md, Finding 183).
+#
+# The real detail page always wraps its real document links the same way: a
+# `<p><strong>Main</strong></p>` marker (the tender pack), optionally
+# followed by a `<p><strong>Supporting</strong></p>` marker and more links
+# (briefing presentations, Q&A, pricing templates - confirmed live on
+# RFP18/2026), all inside the post's own one `elementor-widget-theme-post-
+# content` widget's `elementor-widget-container`. Its <a> tags are sometimes
+# wrapped in a <span> (the live "Price template" link) but the <a> itself is
+# never nested inside another <a>. Scoping to this one widget - stopping at
+# its own container's first closing </div> - is deliberate: the detail
+# page's shared nav/footer chrome (Home/About SARS/Careers/Media/...) is ALSO
+# a plain `<a href="https://www.sars.gov.za/...">` link with no extension;
+# naively dropping DOC_LINK's extension requirement page-wide would have
+# swept all of that in as bogus "documents" instead of fixing the real gap.
+_DOC_SECTION = re.compile(r"<p>\s*<strong>\s*Main\s*</strong>\s*</p>(.*?)</div>", re.S | re.I)
+# No {1,150} title cap here (unlike DOC_LINK/TENDER_LINK) - confirmed live,
+# RFP18/2026's own primary tender-pack link reuses the FULL tender title as
+# its link text (168 characters), longer than DOC_LINK's own cap. Safe
+# without a cap because this pattern only ever runs against the small,
+# already-scoped _DOC_SECTION match above, never the whole page.
+_SECTION_LINK = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>', re.I)
+
 
 def _text(fragment):
     return sh.clean(html.unescape(re.sub(r"<[^>]+>", " ", fragment or "")))
@@ -91,7 +127,17 @@ def fetch_list():
 def fetch_documents(url):
     page = sh.http_get(url, timeout=60).decode("utf-8", errors="replace")
     docs, seen = [], set()
-    for m in DOC_LINK.finditer(page):
+    # DOC_LINK (raw-file-extension hrefs) first, then the "Main"/"Supporting"
+    # section match (pretty-permalink hrefs, see _DOC_SECTION's own comment
+    # above - this is the one that actually matches anything on the real
+    # live site today). Both run: if SARS's own site ever starts linking a
+    # raw .pdf directly again (a template/CMS change), that's still picked
+    # up too, not replaced by this fix.
+    candidates = list(DOC_LINK.finditer(page))
+    section_m = _DOC_SECTION.search(page)
+    if section_m:
+        candidates += list(_SECTION_LINK.finditer(section_m.group(1)))
+    for m in candidates:
         # DOC_LINK has no scheme requirement (unlike TENDER_LINK/transnet_etenders.py's
         # own doc-link pattern) - a relative href ("/files/x.pdf") is a normal thing for
         # a real site's HTML, resolved here against the page it was found on (not just

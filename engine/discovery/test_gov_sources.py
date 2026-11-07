@@ -288,6 +288,82 @@ def test_new_sources():
     check("SARS: an already-absolute href is left exactly as it was",
           any(d["url"] == "https://www.sars.gov.za/files/addendum.pdf" for d in docs), docs)
 
+    # Finding 183, QA-Edge-Case-Findings.md: live-fetched 2026-11-07 from the
+    # real RFP18/2026 detail page (https://www.sars.gov.za/tender/rfp18-2026-
+    # ...-36-months/) - the exact byte sequence of its own
+    # elementor-widget-theme-post-content widget, with its own real nav-bar
+    # chrome (also plain, extension-less https://www.sars.gov.za/... links)
+    # kept immediately before it, unmodified. DOC_LINK alone matched ZERO of
+    # this real page's own 4 real documents (confirmed separately against
+    # the live page before this fix) because every one is a pretty permalink
+    # with no file extension, and its own primary "tender pack" link's text
+    # is 168 characters - longer than DOC_LINK's own 150-character cap too.
+    SARS_DETAIL_RFP18_REAL = (
+        '<a href="https://www.sars.gov.za/">Home</a>'
+        '<a href="https://www.sars.gov.za/about/">About SARS</a>'
+        '<a href="https://www.sars.gov.za/careers/">Careers</a>'
+        '<div class="elementor-element elementor-element-5217bc6 elementor-widget '
+        'elementor-widget-theme-post-content" data-id="5217bc6">'
+        '<div class="elementor-widget-container">'
+        '<p><strong>Main</strong></p>\n'
+        '<p><a href="https://www.sars.gov.za/rfp18-2026-tender-pack/">Appointment of service '
+        'provider(s) for the supply, maintenance of sanitary, and health care services for the '
+        'SARS offices, countrywide for a period of 36 months</a></p>\n'
+        '<p><strong>Supporting</strong></p>\n'
+        '<p><a href="https://www.sars.gov.za/briefing-session-presentation-rfp-18-2026-hygiene-'
+        'services-v2/">Briefing session presentation</a></p>\n'
+        '<p><a href="https://www.sars.gov.za/rfp-18-2026-qa/">Questions and answers</a></p>\n'
+        '<p><span style="color: #ff0000;"><a style="color: #ff0000;" href="https://www.sars.gov.za/'
+        'rfp18-2026_hygiene-pricing-template-final/">Price template with editable GC &amp; GS '
+        'cluster</a></span></p>\n'
+        '\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t\t\t</div>\n\t\t</div>'
+        '<a href="https://www.sars.gov.za/media/">Media</a>'
+        '<a href="https://www.sars.gov.za/sitemap/">Site Map</a>'
+    )
+    real_http_get2 = sars_procurement.sh.http_get
+    sars_procurement.sh.http_get = lambda url, timeout=60: SARS_DETAIL_RFP18_REAL.encode()
+    try:
+        rfp18_docs = sars_procurement.fetch_documents(
+            "https://www.sars.gov.za/tender/rfp18-2026-appointment-of-service-providers-for-the-"
+            "supply-maintenance-of-sanitary-and-health-care-services-for-the-sars-offices-"
+            "countrywide-for-a-period-of-36-months/")
+    finally:
+        sars_procurement.sh.http_get = real_http_get2
+    check("SARS: real detail page's own extension-less 'Main' tender-pack link is captured",
+          any(d["url"] == "https://www.sars.gov.za/rfp18-2026-tender-pack/"
+              and d["title"].startswith("Appointment of service provider(s)") for d in rfp18_docs),
+          rfp18_docs)
+    check("SARS: a 'Main' link title over DOC_LINK's own 150-char cap is NOT truncated/dropped",
+          any(len(d["title"]) > 150 for d in rfp18_docs), [len(d["title"]) for d in rfp18_docs])
+    check("SARS: real detail page's own 3 'Supporting' addendum-style links (briefing/Q&A/pricing) "
+          "are all captured, not just the main tender pack",
+          {d["url"] for d in rfp18_docs} == {
+              "https://www.sars.gov.za/rfp18-2026-tender-pack/",
+              "https://www.sars.gov.za/briefing-session-presentation-rfp-18-2026-hygiene-services-v2/",
+              "https://www.sars.gov.za/rfp-18-2026-qa/",
+              "https://www.sars.gov.za/rfp18-2026_hygiene-pricing-template-final/",
+          }, rfp18_docs)
+    check("SARS: the page's own real nav-bar chrome (Home/About SARS/Careers/Media/Site Map - also "
+          "plain extension-less https://www.sars.gov.za/... links) is NOT swept in as a bogus doc",
+          all(d["url"] not in (
+              "https://www.sars.gov.za/", "https://www.sars.gov.za/about/",
+              "https://www.sars.gov.za/careers/", "https://www.sars.gov.za/media/",
+              "https://www.sars.gov.za/sitemap/") for d in rfp18_docs), rfp18_docs)
+
+    # RFP14/2026's real detail page has no "Supporting" section at all (just
+    # its own "Main" tender pack) - confirmed live the same pass. A detail
+    # page with no document section whatsoever (no "Main" marker at all)
+    # must not raise - _DOC_SECTION.search() returning None is the normal,
+    # expected case there, not an error.
+    real_http_get3 = sars_procurement.sh.http_get
+    sars_procurement.sh.http_get = lambda url, timeout=60: b"<p>No Main marker on this page at all.</p>"
+    try:
+        no_section_docs = sars_procurement.fetch_documents("https://www.sars.gov.za/tender/x/")
+    finally:
+        sars_procurement.sh.http_get = real_http_get3
+    check("SARS: a detail page with no 'Main' document section at all still returns cleanly (no crash)",
+          no_section_docs == [], no_section_docs)
+
     open_r = cidb_tenders.normalize(CIDB_FEED_OPEN)
     awarded_r = cidb_tenders.normalize(CIDB_FEED_AWARDED)
     check("cidb: status field ('active') is NOT the open signal", CIDB_FEED_AWARDED["status"] == "active")

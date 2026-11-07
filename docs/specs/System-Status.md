@@ -1,5 +1,144 @@
 # System Status
 
+## This pass (2026-11-07xx, standing solution-architect review): oriented from `19b541c`
+(immediately-preceding pass's own verified HEAD, Finding 182's `lephalale.py` reused-ref fix).
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`19b541c` - and again immediately before pushing this pass's own fix, still `19b541c`, no sibling
+commit landed during this pass (the sibling "QA/robustness review" track, a different session,
+confirmed quiet this pass too). Grepped `### Finding [0-9]+` in `docs/specs/QA-Edge-Case-
+Findings.md` myself before picking a number - 182 was the highest recorded, confirming no new
+finding had landed from either chain since the preceding pass's own writeup - this pass's own fix
+below is Finding 183. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`: `#176`/
+`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`(both
+draft) are all still open - nothing merged, closed, or rebased by anyone since (standing numbering-
+coincidence caveat re-confirmed: these PR *numbers* are a completely different sequence from this
+doc's own `### Finding N` numbers).
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle, per the task brief's own priority order 1: `sars_procurement.py`'s own still-
+open "bare addendum announcements outside the `<ul>`-wrapped section" candidate, named but never
+opened by the two immediately preceding passes.**
+
+Fetched the real live `https://www.sars.gov.za/procurement/published-tenders/` page directly
+(`curl`, HTTP 200, 274,730 bytes - read as raw HTML, not WebFetch's markdown conversion, since the
+exact tag structure is what the regexes need) and found the real "What's New" `<ul>` entries for
+RFP18/2026 ("Price template", "Questions and answers", "Briefing session presentation") and RFP01/
+2026 ("Extension of validity period") that the task brief named. Checked each against the real
+page, not assumed: RFP18/2026's 3 "What's New" links turned out to be pure DUPLICATES of document
+links already present on that tender's own detail page (fetched separately, `curl`, HTTP 200) - so
+on their own they carry no new information. RFP01/2026's one link, fetched through its own real
+301 redirect to a 323KB `application/pdf` and read with `pypdf`, is a formal SARS letter extending
+the VALIDITY of bids already submitted (to 30 December 2026, evaluation still in progress) for a
+tender that no longer appears anywhere else on the live page at all (no `/tender/` link, no
+"Published Tenders" Closing-Date entry - it's already closed). **Conclusion on the originally-posed
+question: the `<ul>`-outside section does NOT carry a closing-date change, a genuinely new ref, or
+a cancellation not otherwise captured - the one real negative finding this specific lead was
+checking for.** The one non-duplicated item (RFP01's validity extension) is real but concerns an
+already-closed tender's evaluation status, a field this open-tender discovery reader doesn't track
+at all - named below as a declined, out-of-scope candidate, not fixed.
+
+**Following that duplication one level deeper surfaced the real, bigger bug.** If
+`fetch_documents()` worked correctly, RFP18/2026's "What's New" document links would be fully
+redundant with its own detail page, by design (both link the same 3 documents). Running the real,
+unmodified `fetch_documents()` against the real live detail-page HTML for BOTH of SARS's 2
+currently open tenders (RFP14/2026, RFP18/2026) returned **`[]` for both** - zero documents,
+including the tender's own primary "advert"/specification pack, not just a later addendum. Root
+cause, read directly off the real HTML: SARS's WordPress site links every tender document through
+a pretty permalink with NO file extension in the URL at all (e.g. "/rfp18-2026-tender-pack/",
+confirmed 301-redirecting server-side to the real `.pdf` via `curl -L -v`) - `DOC_LINK`'s own regex,
+requiring the href to literally END in a file extension, matched zero of them. This has been true
+since this reader's first commit (`cace3f7`): every SARS tender ever discovered has had its own
+real documents silently recorded as empty, contradicting `download_discovered_documents.py`'s own
+docstring, which wrongly asserts this source "gives a direct, unauthenticated link" the same way
+the other 7 sources genuinely do. The only existing test for `fetch_documents()` used a synthetic
+fixture with hrefs already ending in `.pdf` - never checked against the real site's actual URL
+shape, which is why this went undetected through every prior pass that touched this file. A second,
+compounding gap found the same way: RFP18/2026's own real "Main" tender-pack link text reuses the
+full 168-character tender title, longer than `DOC_LINK`'s own 150-character cap - a page-wide
+extension-agnostic fix alone would still have missed it.
+
+**Fix.** Read the real detail-page HTML for both open tenders to find the real, consistent
+structure: every document link sits inside the post's own single `elementor-widget-theme-post-
+content` widget, under a `<p><strong>Main</strong></p>` marker (optionally followed by `<p><strong>
+Supporting</strong></p>` and more links). New `_DOC_SECTION` regex scopes to exactly that one
+widget's own container (stopping at its first closing `</div>`) - deliberately NOT a page-wide
+match, since the page's shared nav/footer chrome ("Home"/"About SARS"/"Careers"/...) is ALSO a
+plain extension-less `https://www.sars.gov.za/...` link; matching page-wide would have swept all of
+that in as bogus "documents". New `_SECTION_LINK` regex (no title-length cap, safe since it only
+ever runs against this small, already-scoped section) extracts every real link inside it.
+`fetch_documents()` now merges `DOC_LINK`'s matches (kept, unchanged, in case a raw file link ever
+appears again) with the new section match, de-duplicated by resolved URL exactly as before.
+
+**Verified against the real live site.** Re-ran the fixed `fetch_documents()` against the real
+`curl`-fetched HTML: RFP18/2026 now returns its real 4 documents (Main tender pack + all 3
+Supporting links, 168-char title included, uncapped); RFP14/2026 (no "Supporting" section on its
+own real page) now returns its 1 real Main document, no crash from the missing section.
+
+**Verified red-then-green, real exit codes, no pipe before capture.** New checks added to
+`test_gov_sources.py`'s SARS block, using the EXACT real byte sequence of RFP18/2026's own widget
+(copied verbatim from the real fetch, with the real page's own nav-bar chrome kept immediately
+around it), plus a no-"Main"-marker-at-all crash-safety case. RED (`git show
+5aeafee:engine/discovery/sars_procurement.py` restored, pre-fix body, test file kept): `python3
+test_gov_sources.py` - real exit code **1**, exactly the 3 new checks failed as predicted, every
+other check (including the nav-chrome-not-swept-in and no-crash checks, which don't depend on the
+fix) still passed. GREEN (post-fix file restored): exit **0**, ALL PASSED. Full regression: `find
+engine -name "test_*.py" | wc -l` = **86**, looped every one with plain `python3 <file>` (not
+piped, real exit codes) - **86 files, 0 failures**, matching the standing baseline exactly. No
+TypeScript/JS file touched - `typecheck`/`eslint`/`vitest`/the node `*.test.ts` loop/`next build`
+not re-run, per the standing rule's own scope (Python-only change). See Finding 183
+(`QA-Edge-Case-Findings.md`) for the full write-up and the exact real-byte fixture.
+
+**Declined, named for the record, not fixed:** RFP01/2026's own bid-validity-extension status has
+no home in this reader's output, since the tender has already fallen out of both sections this
+reader parses. Fixing this would mean this open-tender discovery reader also tracking already-
+closed tenders awaiting evaluation - a scope change, not a bug fix, and one single live instance is
+too thin a basis to design that against. Left open only if a clearer, repeated pattern or an
+explicit product ask shows up.
+
+**Pushed directly to `main`** - a narrow, purely additive change to a single discovery-reader file
+(two new regexes plus a merged-candidate-list change inside `fetch_documents()`, `DOC_LINK` itself
+untouched), verified red-then-green against both a real live-byte fixture and the real live site
+directly; touches no RLS policy, no money/Payfast path, no production worker-image install/copy
+surface - same direct-push precedent this file's own prior fix (Finding 181) and its siblings
+(`kouga.py`/`dbsa_procurement.py`/`lephalale.py`, Findings 180-182) used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. `sars_procurement.py`'s own "bare addendum announcements" candidate, named by
+three consecutive prior passes, is now genuinely opened and closed - not with the fix those passes
+guessed at (the `<ul>` section itself needed no new parsing), but with a bigger, real document-
+capture gap found by following that lead one level deeper. The one narrow residue (RFP01/2026's
+bid-validity-extension status for an already-closed tender) is a declined, low-value, out-of-scope
+candidate, not a live bug. `randwater.py`'s own still-open reused-ref risk (Findings 181/182's own
+backlog note) remains exactly as those passes left it - unverifiable from this sandbox, needing
+real network access (e.g. a GitHub Actions dispatch). A future pass should pick a genuinely fresh
+surface or angle rather than re-running either of this review's two exhausted whole-schema SQL
+greps or the now-fully-closed-out ref-reuse-ocid-collision sweep again without new evidence - e.g.
+a GitHub-Actions-dispatched live check of `randwater.py` itself, or auditing `download_discovered_
+documents.py`'s own per-source assumptions (this pass found one, SARS's, was wrong for years
+without being checked against a real fetch - the other 7 sources' own "direct, unauthenticated
+link" claims in that file's docstring have likewise never been individually re-verified against
+each source's REAL current live HTML in one pass, only assumed from each reader's own original
+commit).
+
+To verify independently: run `engine/discovery/test_gov_sources.py` and confirm the four new SARS
+checks pass. Read `sars_procurement._DOC_SECTION`/`_SECTION_LINK` and confirm the section scope
+stops at the widget's own first closing `</div>`, and that `fetch_documents()` merges its matches
+with `DOC_LINK`'s rather than replacing them. Re-run `python3 -c "import sars_procurement as m;
+print(m.fetch_documents('https://www.sars.gov.za/tender/rfp18-2026-appointment-of-service-
+providers-for-the-supply-maintenance-of-sanitary-and-health-care-services-for-the-sars-offices-
+countrywide-for-a-period-of-36-months/'))"` against the real live site and confirm it returns real
+documents, not `[]`. Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still open/
+unmerged, and that `git log --oneline -1 origin/main` is this pass's own new commit, with no
+further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xix, standing solution-architect review): oriented from `5aeafee`
 (immediately-preceding pass's own verified HEAD, Finding 181's `sars_procurement.py` reused-ref
 fix). `git fetch origin main` at the start found local already matching `origin/main` exactly -
