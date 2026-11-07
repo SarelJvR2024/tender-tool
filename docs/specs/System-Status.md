@@ -1,5 +1,158 @@
 # System Status
 
+## This pass (2026-11-07xxxviii, standing solution-architect review, background worker): both of Finding 199's own named leads resolved as genuine negatives - `retryCvExtraction()`/`retryOnboardingUpload()`'s zero-row races have no observable consequence; a from-scratch re-walk of Finding 197's own insert/upsert field-list sibling sweep found one undercounted site (conclusion still holds) and two never-named table families (both already deliberate, in-file-documented splits) - no new bug, nothing pushed to `main`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `e293f30`
+(Finding 199's own write-up commit, the immediately preceding pass in this track). A concurrent
+sibling session (the separate QA/robustness review track) pushed `6e18290` (Finding 200,
+`award_outcomes.py`'s `parse_rand()`) partway through this pass - re-fetched and fast-forward-merged
+before doing anything that would write to `main`, since this pass made no production change of its
+own to conflict with it. Re-checked all 10 open PRs via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open` at the start and again after picking up Finding
+200: same set as every preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/
+`#182`/`#183`) - nothing merged, closed, or rebased by anyone since; none merged by this session
+either. Per the binding guardrails, `#164`/`#165` were not touched, no PR was opened or merged, and
+neither Finding 168 nor the `start_payfast_checkout()` revenue-integrity gap was implemented, and
+Finding 190's own pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped
+`Finding [0-9]+` in both docs before concluding this pass needed no new number - `200` is the
+current highest, landed mid-pass from the sibling track, not from this one. No scratch Postgres
+database or `git worktree` was needed this pass - every check below was either a direct code read
+or a trace through existing worker source, the same techniques this family already uses - so there
+is nothing to clean up.
+
+**This pass's own task, per the standing brief: pick up Finding 199's own named lead
+(`retryCvExtraction()`/`retryOnboardingUpload()`), then apply the re-verification methodology to
+another past "fixed all N files" claim.**
+
+**Lead (`people/actions.ts`'s `retryCvExtraction()` and `document-scan/actions.ts`'s
+`retryOnboardingUpload()`, around line 486) - read both in full, re-derived rather than trusted the
+prior pass's own characterization, and found one real correction to it: genuine negative for both,
+but for two different reasons.**
+
+Both do the identical shape: a 3-`.eq()` (`id`/`company_id`/status-guard) `.update()` with no
+`.select()` at all, so a zero-row match (an RLS race, or the row having already moved off the
+guarded status) produces `error: null` and is indistinguishable from a real update by `error`
+alone.
+
+`retryCvExtraction()` (`app/app/people/actions.ts`) redirects to `/people/${personId}` with **no**
+`?saved=`/`?error=` param either way on this path - confirmed by reading the function to its last
+line, not assumed. A zero-row match therefore changes nothing observable: the page re-renders
+whatever the row's TRUE current status actually is (via `revalidatePath`), which is exactly what
+the user should see regardless of whether this particular click caused it. No path in this file
+deletes a `cv_uploads` row either (only `deletePerson()`'s own cascade does, a generic
+concurrent-delete race shared by every action on this page, not specific to this zero-row shape).
+
+`document-scan/actions.ts`'s `retryOnboardingUpload()` does **not** match the prior pass's own
+characterization - re-reading it line by line found it actually redirects `${back}?saved=retrying`
+on success, which `page.tsx`'s own `SAVED` map renders as "Queued again - this page updates itself
+as the result comes in." - a real, user-visible toast the prior pass's description missed. That
+matters, because it means a zero-row match here CAN surface a "success" toast with no matching
+write; the real question is whether that toast is ever actually false. Traced every path that can
+move `onboarding_uploads.status` away from `classification_failed`: `engine/onboarding/
+process_onboarding_jobs.py`'s own worker and its stale-`classifying`-row reclaim logic (lines
+~98-142) never touch a `classification_failed` row at all - only rows already in `classifying` get
+reclaimed. The ONLY write that can ever move a row OFF `classification_failed` is this same action.
+So the only way to reach a zero-row match here is two submissions of the same retry racing each
+other (a double-click, two tabs, or two users) - Postgres's own row-level locking means exactly one
+of two concurrent `UPDATE ... WHERE status = 'classification_failed'` statements actually matches
+and moves the row; the other sees `status != 'classification_failed'` and matches zero rows, with
+no error. Both callers still land on the "retrying" toast - but the document genuinely IS being
+retried in that case, just caused by the other click, not this one. There is no `onboarding_uploads`
+row-delete path anywhere in this file (confirmed by grep - no `.delete()` on this table in
+`document-scan/actions.ts`), so there's no "retry an already-deleted upload" variant of this race to
+worry about either. The toast's own copy hedges exactly this ("this page updates itself as the
+result comes in") rather than asserting a fact only this specific click could have caused.
+**Genuine negative for both functions, for two different reasons** - logged here rather than
+`QA-Edge-Case-Findings.md` (there's no fix to anchor a Finding number to) so a future pass doesn't
+need to re-open this exact question, and so the `?saved=retrying` correction above isn't lost.
+
+**Second task: re-verified another past "fixed all N files" claim from scratch.** Checked this
+doc's own history for the 3 candidates the standing brief itself named - the
+`system_alerts.record()`/`company_id` family, the `requireCompanyId()` sweep, the discovery-reader
+ocid-collision sweep - before picking a target, rather than assuming any of them was still open
+ground: all 3 are already confirmed exhausted by this doc's own prior entries.
+`requireCompanyId()`: re-verified twice over (`2026-11-06` `b002f4e`, re-checked again
+`2026-11-07h` `9fcde8f`, both explicitly re-run from scratch and come back clean). `system_alerts.
+record()`/`company_id`: closed by Finding 198 itself, this track's immediately-preceding-but-one
+pass, which widened to the FULL `engine/` tree (89 real call sites, not just Finding 192's original
+6 files) and declared it "genuinely exhausted... every one of the 89 real call sites... has been
+read and judged." The ocid-collision sweep: explicitly declared "fully closed out" across 5 prior
+findings, without new evidence, as of this doc's own `2026-11-07` entry. Re-running any of these a
+third or fourth time with no new angle would just reproduce an already-confirmed-clean result -
+picked a genuinely different claim instead: **Finding 197's own "Angle 2" `.insert`/`.update`/
+`.upsert` field-list sibling-divergence sweep**, which grouped tables written from more than one
+call site and claimed no family had a genuine field-list omission.
+
+Re-ran that grep from scratch rather than trusting its own 7-table-family list, then parsed every
+`.from("table").insert/update/upsert(` call site with a small script instead of eyeballing it, to
+catch a thin match a manual read might miss. The base file list this pass's own grep returned (27
+files, `app/app/**/*.ts*` excluding `spec`/`test`) doesn't reconcile exactly against Finding 197's
+own reported 32 - not chased down further, since every table family in Finding 197's own list was
+still present and accounted for in this pass's own list, so the discrepancy (almost certainly a
+difference in exactly which `spec`/`test`-adjacent files each grep's own exclusion caught) doesn't
+change either pass's conclusion.
+
+**Found one real undercount; the underlying conclusion still holds - not a bug.** `tender_answers`
+has 5 real upsert call sites, not the 4 Finding 197 named - `pipeline/actions.ts`'s
+`recordOutcomeAndMoveStage()` (the Won/Lost outcome form) was never in that list. Read it directly:
+it also sets `answered_by: user.id` alongside `company_id`/`tender_id`/`field_key`/`value`, the
+identical shape as the other 4 - so Finding 197's own conclusion ("all upsert sites set
+`answered_by`") still holds true for this 5th site too; it was just counting the wrong total.
+Corrected here so a future pass citing "4 upsert sites" for this family isn't working from a stale
+count.
+
+**Two more table families Finding 197's own list never named at all - both checked and ruled out as
+deliberate, already in-file-documented design, not a miss.** `people` has 3 insert sites, all inside
+`people/actions.ts` itself (`savePerson()`'s full ~20-field form; the CV-first quick-add flow's
+`{company_id, name}`-only insert; the bulk name-list add's identical `{company_id, name}`-only
+insert) - the file's own header comment on the second explicitly explains this is deliberately
+smaller than `savePerson()`'s field set (a person's name captured before an AI-extraction CV review
+fills in the rest), not a parallel data model that drifted apart. `experience_items` has 2 insert
+sites across 2 files (`experience/actions.ts`'s manual-add form, 6 fields;
+`document-scan/actions.ts`'s AI-reviewed-document flow, 12 fields including `client_name`/
+`contract_number`/`value_rm`/the 3 `reference_contact_*` columns) - `experience/actions.ts`'s own
+file header ("Two separate steps") and its own later `saveExperienceTags()` `.update()` confirm the
+manual form's smaller insert is deliberately followed by a separate tagging/enrichment step, not a
+missing-field bug; the two insert sites are for two genuinely different document-kind flows, not
+siblings that should match in the first place. No genuine field-list divergence found in either
+family.
+
+**Is this angle exhausted?** For Finding 197's own "Angle 2" claim specifically: yes - re-verified
+clean with one count correction, no new finding. The broader insert/update/upsert-sibling-divergence
+method is not fully exhausted: `tender_packs` (16 call sites across 7 files - `pipeline/actions.ts`,
+`tenders/[id]/actions.ts`, `general-actions.ts`, `logistics-actions.ts` x2, `pack-inputs-actions.ts`
+x3) was deliberately NOT re-walked this pass for field-list divergence, since each of those 7 sites
+updates its own distinct, feature-owned subset of one wide shared row (pricing vs. stage vs.
+logistics vs. dispatch vs. pack-input columns) rather than writing a comparable "the same logical
+fact" shape the way `cv_uploads`/`tender_answers`/`held_registrations` do - a genuinely different
+question (whether any TWO of those 16 sites ever clobber the SAME column with different values, not
+whether one omits a field another sets) that this pass's own method doesn't actually answer and
+didn't attempt. That is a concrete, fresh candidate for a future pass.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via the GitHub REST API twice this pass; nothing merged, closed, or rebased by anyone
+else (the sibling track's own Finding 200 was a normal push to `main`, not a PR, and touched no PR).
+**Nothing pushed to `main` by this pass** - both leads resolved as genuine negatives with no code to
+fix, so this docs entry is the only change.
+
+To verify independently: read `app/app/people/actions.ts`'s `retryCvExtraction()` (no `?saved=`/
+`?error=` param on its redirect) and `app/app/company/document-scan/actions.ts`'s
+`retryOnboardingUpload()` (redirects `?saved=retrying`; `page.tsx`'s `SAVED` map renders it as a
+toast) side by side with `engine/onboarding/process_onboarding_jobs.py` (confirm its stale-row
+reclaim only ever touches `classifying` rows, never `classification_failed`) to confirm the race
+argument above. For the second task, rerun `grep -rln "\.insert(\|\.update(\|\.upsert(" app
+--include="*.ts" --include="*.tsx" | grep -v spec | grep -v test` and compare against Finding 197's
+own 7-family list; confirm `pipeline/actions.ts`'s `recordOutcomeAndMoveStage()` sets `answered_by`
+on its `tender_answers` upsert, and that `people/actions.ts`'s 2nd/3rd `people` inserts and
+`document-scan/actions.ts`'s `experience_items` insert are each explained by an in-file comment, not
+silently drifted. Confirm via the GitHub REST API that all 10 PRs are still open/unmerged, and that
+`git log --oneline -2 origin/main` shows `6e18290` (Finding 200, sibling track) then `e293f30`
+(Finding 199, this track) with no other commit in between.
+
+---
+
 ## This pass (2026-11-07xxxvii, standing solution-architect review, background worker): Finding 199 - a from-scratch re-grep of every `.update(` site in `app/app` for the "plain update twin" RLS-zero-row shape found 6 more sites across 5 files Finding 197's own 6-file family never named; `held_registrations`'s own two insert sites confirmed genuinely already fixed for the same pattern - fixed, 5 test files extended/added, pushed to `main`, oriented from `523f6e7`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `523f6e7`
