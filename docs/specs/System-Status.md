@@ -1,5 +1,160 @@
 # System Status
 
+## This pass (2026-11-07xviii, standing solution-architect review): oriented from `3b18576`
+(immediately-preceding pass's own verified HEAD, Finding 180's `redeem_company_invite()` TOCTOU
+fix). `git fetch origin main` at the start found local already matching `origin/main` exactly -
+`3b18576` - and again immediately before pushing this pass's own fix, still `3b18576`, no sibling
+commit landed during this pass. Grepped `### Finding [0-9]+` in
+`docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - 180 was the highest recorded,
+confirming no new finding had landed from either chain since the preceding pass's own writeup -
+this pass's own fix below is Finding 181. Re-checked all 9 open PRs via
+`gh api repos/sareljvr2024/tender-tool/pulls?state=open` (`gh pr list`'s GraphQL path is blocked in
+this session): `#176`(not draft)/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old
+stale drafts `#164`/`#165` (both draft) are all still open, same `updated_at` timestamps every
+preceding pass has recorded (`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180`
+2026-11-06T22:40:26Z, `#179` 2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177`
+2026-11-06T19:08:44Z, `#176` 2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164`
+2026-10-26T20:14:25Z) - nothing merged, closed, or rebased by anyone since.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle, per the task brief's own priority order: first, `app/app/dashboard/`'s own
+write paths - named by FOUR consecutive prior passes now as the highest-value unopened candidate,
+never itself swept.** Read `app/app/dashboard/page.tsx` (598 lines) and `app/app/dashboard/
+loading.tsx` (46 lines) in full - the only two files in the directory (`find app/app/dashboard
+-type f` confirms this). **Genuinely clean, and more fundamentally so than any prior candidate this
+backlog note has named: the surface has NO write path of its own at all, not merely a safe one.**
+Checked explicitly, not assumed:
+- `grep -n "\.rpc(\|\.update(\|\.insert(\|\.delete(\|'use server'" app/app/dashboard/page.tsx` -
+  zero matches. The page is a pure Server Component: every Supabase call is a `.select()`/
+  `.maybeSingle()` read (`tenders`, `discovered_opportunities`, `companies`, `people`, plus the
+  `fetchCompanyReadiness()`/`getNotifications()`/`fetchSavingsCounterSummary()`/
+  `loadDocumentExpiryOverview()`/`loadDispatchCards()` helper reads it calls into), and there is no
+  `"use server"` Server Action anywhere in the file or `loading.tsx`.
+- Every interactive element on the page (`components/tt/command-center.tsx`'s
+  `CriticalDispatchBanner`/`NeedsDecisionLane`/`UrgentActionsLane`/`DispatchLane` lanes, the
+  dashboard's own CTAs) is a plain `<Link href=.../>` navigating to `/tenders/[id]` or a specific
+  tender anchor - confirmed via `grep -n "onClick\|Link href\|formAction\|href="
+  components/tt/command-center.tsx`: every hit is a `href`, zero `onClick`/`formAction`. No button
+  on this page performs a write of its own; every one of them is a doorway to a write path that
+  lives (and has already been swept) on a different route.
+- `loading.tsx` is a pure static skeleton (`AppShellSkeleton`/`Skeleton`/`SectionCardSkeleton`/
+  `TableRowsSkeleton` placeholders only) - no data access, no Supabase import at all.
+- Went one level deeper than the directory itself, since the page's own helper libs run on every
+  dashboard load: checked `lib/dashboardStats.ts`, `lib/dispatchDashboard.ts`,
+  `lib/companyReadinessData.ts`, `lib/notifications.ts`, `lib/documentExpiry.ts`,
+  `lib/supabasePaging.ts` for any `.update(`/`.insert(`/`.delete(`/`.rpc(`/`upsert(` call - only one
+  hit anywhere in that set: `lib/savingsCounterData.ts`'s `recordSavingsStep()` (an `insert` into
+  `savings_counted_steps`). Read it in full: it is called from pack-generation/CV-tailoring code
+  elsewhere in the app, NEVER from the dashboard page itself (`fetchSavingsCounterSummary()`, the
+  only savings-counter function the dashboard actually calls, is pure-read); and even where it IS
+  called, it does no prior read at all - it relies on the table's own `(company_id, tender_id,
+  step_key)` unique constraint for its once-per-tender dedupe (a Postgres `23505` unique-violation
+  is the expected, correctly-handled "already counted" outcome), so neither named bug class (a
+  discarded read feeding a stale write; an unlocked read-then-write race) applies to it regardless
+  of who calls it.
+
+This closes out a backlog item four consecutive passes have named as "the highest-value unopened
+candidate" without anyone actually opening it - the honest resolution turns out to be that there was
+never a write path there to find, not that one was overlooked. No code changed for this item; it is
+removed from the backlog below.
+
+**Task brief's own item 3, taken next since item 1 came back clean and no other fresh `app/app/`
+surface was named in this doc's most recent entries (including the sibling QA/robustness track's
+own section): `engine/discovery/sars_procurement.py`'s "listing-drop on ref reuse" risk - named by
+three prior passes, never attempted, explicitly offered for a synthetic-fixture regression test
+even without a live reproduction.** Read `sars_procurement.py` in full. Its `ocid` construction
+(`f"sars-procurement:{entry['ref'] or sh.norm_ref(entry['url'])}"`) has the identical raw-ref-alone
+shape `kouga.py`'s and `dbsa_procurement.py`'s own `_disambiguate_reused_refs()` fixes already closed
+for their sibling readers - but reading `fetch_releases()` itself surfaced something the backlog
+note hadn't specifically named: its own in-page "same tender mentioned twice" de-duplication
+(`key = e["ref"] or e["url"]`) runs BEFORE `normalize()`, so a genuine re-advertisement reusing the
+same ref under a DIFFERENT detail-page URL doesn't just collide at the `ocid` stage - it is silently
+DROPPED from the output entirely before it is ever normalized. Worse than the two already-fixed
+siblings' own failure mode (a vanished release, not a merged/overwritten one).
+
+**Checked live first, per the standing real-document verification standard**: fetched the real
+`https://www.sars.gov.za/procurement/published-tenders/` page directly and ran the actual
+`parse_listing()`/`fetch_releases()` against the real bytes - **2 open tenders today, 2 distinct
+refs**, no live collision right now (same conclusion the immediately preceding pass recorded; the
+sample is just too small to ever show one). Did find concrete, real evidence the risk is not merely
+theoretical: the live page's own HTML carries THREE separate "addendum"-style announcements for
+`RFP18/2026` (28 Oct/3 Nov/5 Nov) sitting outside the `<ul>`-wrapped section this reader actually
+parses, on top of that ref's own original "9 October - New Tender" dated entry - SARS's site
+genuinely does re-announce the same ref under a new heading in practice; today's instances just
+happen to fall in a page section this reader doesn't read at all (a separate, narrower, not-yet-
+pursued gap), not inside the `<ul>` section the fix below guards.
+
+**Reproduced red on a synthetic fixture before fixing anything.** Built a minimal fixture (an
+original "16 October - New Tender" entry + a "5 November - New Tender" re-advertisement, same ref
+`RFP99/2026`, two different URLs) and ran the real pre-fix code against it directly: 2 entries
+parsed, only 1 kept after `fetch_releases()`'s own dedup - the second, re-advertised entry silently
+dropped, exactly as read from the source.
+
+**Fix**, same shape as `kouga.py`'s/`dbsa_procurement.py`'s own fixes: (1) the in-page dedup key
+changed from `e["ref"] or e["url"]` to `e["url"]` alone - still collapses a genuine same-tender/
+same-URL duplicate, no longer conflates that with two different tenders sharing a reused ref; (2) a
+new `_disambiguate_reused_refs()` suffixes a colliding `ocid` with its own URL slug (SARS always has
+a distinct per-tender URL, so no hash fallback is needed the way DBSA's version required). Only a
+colliding ref's `ocid` is touched - every non-colliding tender keeps its plain `ocid`.
+
+**Verified red-then-green, real exit codes, no pipe before capture.** Added
+`test_sars_reused_ref_gets_distinct_ocids_not_dropped()` to `engine/discovery/test_gov_sources.py`
+with a new synthetic fixture, run through `fetch_releases()` itself via a monkeypatched
+`fetch_list()`. RED (`git stash` on `sars_procurement.py` only): `python3 test_gov_sources.py` - exit
+**1**, exactly the 3 new checks failed, nothing else. GREEN (`git stash pop`): exit **0**, ALL
+PASSED, including the pre-existing non-colliding fixture still getting plain ocids and the genuine
+same-URL duplicate still collapsing to 2 (not 3) rows. Re-ran against the REAL live site post-fix:
+still 2 open tenders, 2 distinct plain ocids, byte-identical to the pre-fix live output - the fix
+changes nothing about today's real data. Full regression: `find engine -name "test_*.py" | wc -l` =
+**86**, looped every one with plain `python3 <file>` (not piped, real exit codes) - **86 files, 0
+failures**, matching the standing baseline exactly. No TypeScript/JS file touched - `typecheck`/
+`eslint`/`vitest`/the node `*.test.ts` loop/`next build` not re-run, per the standing rule's own
+scope for a Python-only change. See Finding 181 (`QA-Edge-Case-Findings.md`) for the full write-up,
+the exact fixture HTML, and the live-page addendum-announcement detail.
+
+**Pushed directly to `main`** - a narrow, two-function addition to one discovery-reader file (a
+changed dedup key plus one new, purely additive disambiguation function called only at the end of
+`fetch_releases()`), verified red-then-green against both a synthetic fixture and the real live
+site (today's real output byte-identical before and after); touches no RLS policy, no money/Payfast
+path, no production worker-image surface - same direct-push precedent `kouga.py`'s/
+`dbsa_procurement.py`'s own sibling fixes used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by every
+preceding pass. `app/app/dashboard/` is now genuinely swept - confirmed to have NO write path of its
+own at all - and should be removed from the backlog unless a future change actually adds one; a
+future pass should not re-open this specific candidate without new evidence (a real code change to
+`app/app/dashboard/page.tsx` or its helpers). `engine/discovery/sars_procurement.py`'s reused-ref
+risk is now fixed and regression-tested; its three still-open siblings (`lephalale.py`,
+`vaal_central_water.py`, `randwater.py`) were NOT touched this pass (each needs its own live page
+read before fixing, not a speculative copy-paste of this exact fix) and remain the named
+continuation of this specific item. **New backlog note:** `sars_procurement.py` itself still has a
+separate, narrower, not-yet-pursued gap of its own - the page's bare "addendum"-style announcements
+(no `<ul>` wrapper, e.g. the live `RFP18/2026`/28 Oct/3 Nov/5 Nov entries found this pass) are never
+read by this reader at all, so a re-advertisement or amendment notice that only ever appears in that
+page section (never inside the `<ul>`-wrapped dated list this reader does parse) would still be
+missed entirely - a real, separate opportunity for a future pass, not fixed here since it needs its
+own dedicated read of that section's own markup shape, not a byproduct of this pass's own fix.
+
+To verify independently: confirm `app/app/dashboard/page.tsx` and `app/app/dashboard/loading.tsx`
+remain the only two files in the directory and contain no `.rpc(`/`.update(`/`.insert(`/`.delete(`/
+`"use server"`. Run `engine/discovery/test_gov_sources.py` and confirm
+`test_sars_reused_ref_gets_distinct_ocids_not_dropped` passes. Read `sars_procurement.fetch_releases()`
+and confirm its in-page dedup key is `e["url"]`, and that `_disambiguate_reused_refs()` only touches
+a colliding `ocid`. Re-run `python3 -c "import sars_procurement as m; rels =
+m.fetch_releases(with_documents=False, log=lambda *a,**k: None); print(len(rels),
+len({r['ocid'] for r in rels}))"` against the real live site and confirm both counts still match.
+Confirm via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` that all 9 PRs are still
+open/unmerged at the same timestamps listed above, and that `git log --oneline -1 origin/main` is
+this pass's own new commit, with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xvii, standing solution-architect review): oriented from `14a591d`
 (immediately-preceding pass's own verified HEAD, a genuine negative sweeping `app/app/onboarding/`
 and `app/app/admin/`, plus a whole-schema grep for Finding-178-class siblings). `git fetch origin

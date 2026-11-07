@@ -188,14 +188,66 @@ def normalize(entry, docs=None):
     )
 
 
+# Standing review, 2026-11-07: named as a live backlog item three prior
+# passes running (System-Status.md) after kouga.py's and dbsa_procurement.py's
+# own sibling fixes - SARS's own `ocid` (normalize(), above) is built from
+# the raw Ref No. alone, with no secondary disambiguator, the identical
+# pre-fix shape both of those readers had. No live collision has been
+# observed on SARS's own page yet (2 open tenders checked live 2026-11-07,
+# 2 distinct refs - too small a sample to clear the risk, not proof the
+# code is any safer) - fixed proactively here with a synthetic-fixture
+# regression test (test_gov_sources.py's test_sars_reused_ref_...), per
+# this review's own standing instruction to close out a named, scoped risk
+# even without a live reproduction, rather than leaving it open indefinitely
+# on the "wait for a live example" theory alone.
+#
+# Fixing the ocid alone would have been incomplete: fetch_releases()'s own
+# in-page dedup below used to key on `ref or url`, so a genuine
+# re-advertisement reusing the SAME ref under a DIFFERENT detail-page URL
+# was silently DROPPED here, before it ever reached normalize()/ocid at
+# all - worse than a downstream ocid collision (a dropped release, not just
+# a merged one). Confirmed red on a synthetic fixture mirroring Kouga's and
+# DBSA's own real reused-ref cases (an original "16 October" dated entry and
+# a later "5 November" re-advertisement, same ref, two different URLs): the
+# old `key = e["ref"] or e["url"]` kept only the first of the two. The dedup
+# is now keyed on `url` alone, which still correctly collapses the SAME
+# tender mentioned twice in different page sections (the dedup's own
+# original, still-valid purpose - two mentions of one tender always share
+# the identical detail-page URL) without conflating that with two
+# DIFFERENT tenders that merely happen to reuse the same Ref No.
+def _disambiguate_reused_refs(rels):
+    """Suffixes a colliding ocid with its own URL slug - SARS always gives
+    each tender its own stable detail-page URL (unlike DBSA, which shares
+    one list page as source_url for every row), so no hash fallback is
+    needed the way dbsa_procurement.py's own version requires. Only a
+    colliding ref's ocid is touched: every non-colliding tender keeps
+    exactly the ocid it always had, so this doesn't re-trigger a "new
+    tender" alert for any SARS tender that was never ambiguous."""
+    by_ref = {}
+    for r in rels:
+        by_ref.setdefault(r["contract_number"], []).append(r)
+    for ref, group in by_ref.items():
+        if not ref or len(group) < 2:
+            continue
+        for r in group:
+            slug = (r["source_url"] or "").rstrip("/").rsplit("/", 1)[-1]
+            r["ocid"] = f"sars-procurement:{ref}:{slug}"
+
+
 def fetch_releases(with_documents=True, log=print):
     page = fetch_list()
     entries = parse_listing(page)
     # Same tender can appear once per section re-listing (e.g. a "What's
-    # New" summary plus its own dated entry) - keep the first occurrence.
+    # New" summary plus its own dated entry) - keyed on `url` (not ref, see
+    # _disambiguate_reused_refs()'s own comment above for why a reused-but-
+    # genuinely-different ref must NOT be collapsed here): two mentions of
+    # the one real tender always share the identical detail-page URL, so
+    # this still keeps the first occurrence of those; two DIFFERENT tenders
+    # that happen to reuse the same Ref No. have different URLs and are now
+    # both kept, to be disambiguated by ocid below instead of dropped.
     seen, out = set(), []
     for e in entries:
-        key = e["ref"] or e["url"]
+        key = e["url"]
         if key in seen:
             continue
         seen.add(key)
@@ -206,6 +258,7 @@ def fetch_releases(with_documents=True, log=print):
             except Exception as ex:
                 log(f"  WARNING: SARS documents for {e['ref']} failed: {ex}")
         out.append(normalize(e, docs))
+    _disambiguate_reused_refs(out)
     log(f"  SARS Published Tenders: {len(out)} open tenders")
     return out
 

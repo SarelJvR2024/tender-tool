@@ -141,6 +141,24 @@ CIDB_FEED_DESC_LINK_UNQUOTED = {
     "status": "active", "realstatus": "Awarded",
 }
 
+# Synthetic, not a live reproduction (SARS's own live page had only 2 open
+# tenders, 2 distinct refs, when checked 2026-11-07 - too small a sample to
+# ever show a real collision) - mirrors Kouga's and DBSA's own REAL reused-ref
+# cases: an original "16 October" dated entry and a later "5 November"
+# re-advertisement, same Ref No. ("RFP99/2026"), two different detail-page
+# URLs. Fixed proactively per this review's own standing backlog note, closed
+# with this regression test rather than left open indefinitely.
+SARS_REUSED_REF_HTML = """<h2>What&#8217;s New</h2><ul><li><strong>16 October 2026 &#8211; New Tender</strong><ul>
+<li><a href="https://www.sars.gov.za/tender/rfp99-2026-original/">RFP99/2026: Original listing | South African Revenue Service</a></li>
+</ul></li><li><strong>5 November 2026 &#8211; New Tender</strong><ul>
+<li><a href="https://www.sars.gov.za/tender/rfp99-2026-readvertised/">RFP99/2026: Re-advertised listing | South African Revenue Service</a></li>
+</ul></li></ul>
+<h2>Published Tenders</h2>
+<p><strong>RFP99/2026: Original listing</strong><br>
+(<a href="https://www.sars.gov.za/tender/rfp99-2026-original/">Click here for tender documents</a>)</p>
+<p><strong>RFP99/2026: Re-advertised listing</strong><br>
+(<a href="https://www.sars.gov.za/tender/rfp99-2026-readvertised/">Click here for tender documents</a>)</p>"""
+
 DBSA_TABLE_HTML = """<table><tr><th>OPEN RFP's and RFR's</th><th>Date Published</th><th>Closing Date and Time</th></tr>
 <tr><td><a href="/sites/default/files/x.pdf">RFP 164/2026:  Appointment of a Professional Service Provider</a></td><td>12 October 2026</td><td>02 November 2026 @ 23H55</td></tr>
 <tr><td>RFP 186/2026:  A typo&#39;d closing date tender</td><td>2 October 2026</td><td>23 Ocober 2026 @ 23H55</td></tr>
@@ -320,6 +338,59 @@ def test_new_sources():
           <= set(gov_sources.ALL_SOURCES))
     check("new sources have labels", all(gov_sources.SOURCE_LABELS.get(s) for s in
           ("sars_procurement", "cidb_tenders", "dbsa_procurement")))
+
+
+def test_sars_reused_ref_gets_distinct_ocids_not_dropped():
+    # Standing backlog item (System-Status.md, named three prior passes
+    # running): SARS's own ocid is built from the raw Ref No. alone, the
+    # identical pre-fix shape kouga.py's and dbsa_procurement.py's own
+    # _disambiguate_reused_refs() already closed for their own sibling
+    # readers. No live collision observed yet (SARS's real page had only 2
+    # open tenders, 2 distinct refs, 2026-11-07) - fixed proactively with
+    # this synthetic fixture (SARS_REUSED_REF_HTML above), not a live
+    # reproduction.
+    #
+    # Left alone, this used to be WORSE than a plain ocid collision: the old
+    # fetch_releases() de-duped entries on `ref or url` before normalize()
+    # ever ran, so the second (re-advertised) entry was silently DROPPED
+    # from the output entirely, never even reaching the DB - a real tender
+    # that a company would otherwise be told about, simply never appearing.
+    print("sars_procurement: reused ref disambiguation")
+    import html as html_mod
+    real_fetch_list = sars_procurement.fetch_list
+    # fetch_list() normally does the html.unescape() itself (sars_procurement.py's
+    # own fetch_list, replaced here) - replicated explicitly since these
+    # fixtures carry raw HTML entities ("&#8211;") the same way SARS_PAGE_HTML
+    # does above.
+    sars_procurement.fetch_list = lambda: html_mod.unescape(SARS_REUSED_REF_HTML)
+    try:
+        rels = sars_procurement.fetch_releases(with_documents=False, log=lambda *a, **k: None)
+    finally:
+        sars_procurement.fetch_list = real_fetch_list
+    same_ref = [r for r in rels if r["contract_number"] == "RFP99/2026"]
+    check("both the original and its re-advertisement are present (same ref, 2 rows) - "
+          "not silently dropped by the in-page dedup", len(same_ref) == 2, len(same_ref))
+    check("...but they do NOT share an ocid (the collision this fix closes)",
+          len({r["ocid"] for r in same_ref}) == 2, [r["ocid"] for r in same_ref])
+    check("...and each disambiguated ocid still starts with the shared ref, for traceability",
+          all(r["ocid"].startswith("sars-procurement:RFP99/2026:") for r in same_ref),
+          [r["ocid"] for r in same_ref])
+
+    # The ORIGINAL (non-colliding) fixture still gets plain, unsuffixed
+    # ocids through the same fetch_releases() entry point, and the genuine
+    # same-tender-mentioned-twice case (SARS_PAGE_HTML's own "What's New" +
+    # dated-entry duplicate shape) still correctly collapses to one row -
+    # confirms the fix doesn't touch refs that were never ambiguous.
+    sars_procurement.fetch_list = lambda: html_mod.unescape(SARS_PAGE_HTML)
+    try:
+        plain_rels = sars_procurement.fetch_releases(with_documents=False, log=lambda *a, **k: None)
+    finally:
+        sars_procurement.fetch_list = real_fetch_list
+    check("every non-colliding ref keeps its plain, unsuffixed ocid",
+          all(r["ocid"] == f"sars-procurement:{r['contract_number']}" for r in plain_rels if r["contract_number"]),
+          [r["ocid"] for r in plain_rels])
+    check("SARS: still exactly 2 tenders from the original fixture (no new duplicate introduced)",
+          len(plain_rels) == 2, len(plain_rels))
 
 
 def test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision():
@@ -585,6 +656,7 @@ if __name__ == "__main__":
     test_eskom()
     test_transnet_capetown()
     test_new_sources()
+    test_sars_reused_ref_gets_distinct_ocids_not_dropped()
     test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision()
     test_new_sources_are_in_buyer_family()
     test_merge()
