@@ -1,5 +1,183 @@
 # System Status
 
+## This pass (2026-11-07xxi, standing solution-architect review): oriented from `980bf79`
+(immediately-preceding pass's own verified HEAD, Finding 183's `sars_procurement.py` document-
+extraction fix). `git fetch origin main` at the start found local already matching `origin/main`
+exactly - `980bf79` - and again just before writing this pass's own docs-only commit, still
+`980bf79`, no sibling commit landed during this pass (the sibling "QA/robustness review" track
+confirmed quiet this pass too). Grepped `### Finding [0-9]+` in `docs/specs/QA-Edge-Case-
+Findings.md` myself - 183 is still the highest recorded, confirming no new finding had landed from
+either chain since the preceding pass's own writeup. Re-checked all 9 open PRs via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`(not draft)/`#177`(draft)/`#178`/`#179`/
+`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`(both draft) are all still open, same
+set every preceding pass has recorded - nothing merged, closed, or rebased by anyone since.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle, the task brief's own explicit systematic follow-up to Finding 183:
+re-verify EACH of `download_discovered_documents.py`'s own remaining 7 non-SANRAL, non-SARS
+discovery sources' document-link extraction against a FRESH real live fetch today - not assumed
+from each reader's own original commit-time check, the same discipline Finding 183 itself
+applied to SARS.** `etenders_portal.py`, `etenders_national.py` (the module Sarel's own brief
+called `etenders_ocds.py` - confirmed the actual filename in `engine/discovery/`, there is no
+`etenders_ocds.py`; `etenders_national.py`'s own docstring literally opens "pulls open-contracting
+data straight from National Treasury's own public OCDS API"), `eskom_bulletin.py`,
+`transnet_etenders.py`, `capetown_procurement.py`, `cidb_tenders.py`, `dbsa_procurement.py`.
+
+**Method, per source: a real live fetch today (`curl`, through this session's own agent proxy),
+then the module's own real, UNMODIFIED document-extraction function run directly against the real
+bytes/JSON - not a re-read of the file or its fixtures, not "doesn't crash" alone, but real
+non-empty results checked against what a human would actually see.**
+
+- **`etenders_portal.py` - JSON API, structurally immune to an HTML-regex-rot problem; confirmed
+  live, clean.** `documents(row)` never touches HTML at all - it reads `row["supportDocument"]`
+  directly off the portal's own `Home/PaginatedTenderOpportunities` JSON (the same AJAX endpoint
+  its own DataTable calls), builds the download URL from the JSON's own `supportDocumentID`/
+  `extension`/`fileName` fields. Live `curl` (`status=1`, 20 rows, HTTP 200, 47,068 bytes) run
+  through the real `dedupe_rows()`/`normalize()`/`documents()`: **20 of 20 rows returned >=1 real
+  document**, e.g. `GT/GDE/047/2026` -> 3 real documents (`ANNEXURE A GT GDE 047 2026.zip`, two
+  real `.pdf` sections), each with a real, well-formed `Home/Download?blobName=...` URL. No regex
+  anywhere in this function - there is nothing here that could silently stop matching the way
+  SARS's extension-anchored `DOC_LINK` did.
+- **`etenders_national.py` (the OCDS reader) - JSON API, structurally immune; confirmed live,
+  clean.** `normalize()`'s `documents` field is a direct list comprehension over
+  `tender.get("documents", [])` from National Treasury's own OCDS API response - no HTML, no
+  regex. Live `curl` against `https://ocds-api.etenders.gov.za/api/OCDSReleases?dateFrom=2026-10-20
+  &dateTo=2026-11-07&PageNumber=1&PageSize=50` (HTTP 200 after one transient relay retry,
+  88,431 bytes - the agent proxy's own transient `ws_closed_mid_exchange` on the first attempt,
+  not a site problem, confirmed by the second attempt's clean 200): 50 releases, run through the
+  real `normalize()` - **50 of 50 releases returned >=1 documents entry, 86 total document
+  entries, all 86 with a real, non-empty `url`** (e.g. `DRPQ 077/2026`'s real tender pack PDF,
+  a re-advertised RFQ's real price-schedule `.xlsx` + tender PDF).
+- **`eskom_bulletin.py` - JSON API, structurally immune; confirmed live, clean.**
+  `fetch_documents(tender_id)` calls `GetDocs?TENDER_ID=<id>` directly, no HTML, no regex. Live
+  `curl` of `GetTender?TENDER_ID=` (HTTP 200, 306,456 bytes): 331 entries, 191 classified `tender`
+  by the real `classify()`, 188 of those carry the bulletin's own `DOCS` flag. Ran the real
+  `fetch_documents()` against 5 of them live: **5 of 5 returned real, non-empty document lists**
+  (e.g. a regret letter PDF, a 6-document supplier-engagement bundle with both `.pdf` and `.pptx`
+  files) - exactly what a human clicking through the bulletin would see.
+- **`transnet_etenders.py` - HTML-scraped detail pages, but already freshly, thoroughly
+  live-verified by this same review chain two passes ago (`85ffaee`->`878a679`, all 104 live
+  tenders' document lists checked); re-confirmed clean again this pass, not re-assumed.** Its
+  `DOC_LINK` regex (`href=['"](https://publishedetenders\.blob\.core\.windows\.net/[^'"]+)['"]`)
+  does NOT require the href to end in a file extension - the exact shape of SARS's bug - it
+  matches any URL on that one blob subdomain, extension or not, so Finding 183's specific failure
+  mode cannot recur here. Re-fetched `GetAdvertisedTenders` live today (HTTP 200, 109,716 bytes,
+  104 rows) and ran the real `fetch_documents()` against 6 real detail pages: **6 of 6 returned
+  real, non-empty document lists** (1-16 real documents each, e.g. TNPA/2026/06/0004/114472/RFP's
+  12 real annexures) - byte-identical in shape to the preceding pass's own 104-tender sweep.
+- **`capetown_procurement.py` - deliberately extracts NO document links at all, by design;
+  already freshly live-verified by this same review chain (`a3ffb9e`->`99a3fb6`, all 4 of the
+  module's own live URLs re-fetched and re-parsed); re-confirmed again this pass.** Read the file
+  in full: `normalize_rfq()` hardcodes `documents=[]` with its own explanatory comment ("The RFQ's
+  own page is the document: the specification and quote form sit behind it") - there is no
+  document-extraction regex anywhere in this module for `fetch_rfqs()`'s path to rot. Re-fetched
+  the live RFQ page today (HTTP 200, 370,845 bytes) and ran the real `parse_table()`/
+  `normalize_rfq()` against all 241 real rows: **all 241 rows' `documents` is `[]`, exactly as
+  designed** - a confirmed, deliberate design choice, not a silent gap. (`download_discovered_
+  documents.py`'s own docstring claim that this source "gives a direct, unauthenticated link" is
+  therefore vacuous for this source specifically - it never gives ANY link to fetch; worth a
+  precise correction if that docstring is ever revisited, named below, not fixed this pass since
+  it changes no behaviour.)
+- **`cidb_tenders.py` - JSON feed, structurally immune, plus a prior fix (Finding 173, this same
+  day) already closed the one real embedded-HTML-link gap on this source; re-confirmed live,
+  clean.** `documents` is built from `tenders.json`'s own `tender_advert_file`/
+  `tender_briefing_file` fields directly, with `_extract_description_links()` as a supplementary,
+  NOT extension-anchored regex (`<a href=...>`, no file-extension requirement, no length cap on
+  the href) pulling any link embedded in the `description` field. Live `curl` of `tenders.json`
+  (HTTP 200, 47,665 bytes, 25 of 34 reported rows reachable - the feed's own documented pagination
+  gap, unrelated to this check): ran the real `fetch_releases()` against it (monkeypatched
+  `fetch_feed()` for the live bytes) - **the 1 currently-open row (`cidb 010 2526`) returned 2 real
+  documents** (tender advert + briefing doc, both real PDF URLs); the real `normalize()` run
+  against all 25 reachable rows (open and awarded) returned **25 of 25 with >=1 real document**,
+  the `_extract_description_links()` path exercised correctly on rows whose description still
+  embeds a second `<a href>` link (matching Finding 173's own documented base rate).
+- **`dbsa_procurement.py` - HTML-scraped, genuinely checked for the Finding-183 shape, confirmed
+  NOT exhibiting it; confirmed live, clean.** `DOC_LINK` (`<a[^>]+href="([^"]+)"[^>]*>([^<]{1,150})
+  </a>`) matches ANY `<a href=...>` inside the title cell - unlike SARS's pre-fix regex, it does
+  NOT require the href itself to end in a file extension, so an extension-less pretty-permalink
+  document link (SARS's exact failure mode) would still be matched here. The one superficially
+  similar risk checked explicitly and ruled out live: the `{1,150}` cap is on the LINK TEXT, not
+  the href, mirroring SARS's own now-fixed title-length miss - re-ran a deliberately UNCAPPED
+  version of the same anchor-tag regex against today's real live page's title cells and compared:
+  **26 real anchors found, 0 of them with link text over 150 characters** - no silent truncation/
+  drop is happening today, though this is a real, concretely-identified latent risk for whichever
+  DBSA document eventually gets a longer link caption (named below, not fixed, since there is no
+  live instance to regress against and the standing "don't force a fix against undemonstrated
+  risk" discipline applies). Live `curl` of `dbsa.org/procurement` today (HTTP 200, 56,902 bytes):
+  ran the real `parse_table()`/`normalize()` against all 11 real open rows (including the
+  already-fixed `RFP185/2026` reused-ref pair from Finding 154) - **11 of 11 rows returned real,
+  non-empty, multi-document lists** (1-5 real documents each: tender volumes, BOQs, annexures,
+  addenda, a briefing-session advisory PDF), matching exactly what dbsa.org/procurement's own page
+  shows a human today.
+
+**Genuine, full negative result across all 7 sources - no new finding, nothing fixed, reported
+honestly per the standing brief rather than forced.** Three sources (`etenders_portal.py`,
+`etenders_national.py`, `eskom_bulletin.py`) are genuinely structurally immune: their document
+extraction never touches HTML at all, so Finding 183's specific "extension-anchored regex vs. an
+extension-less pretty permalink" failure mode cannot occur in them by construction, not just by
+luck. Two (`transnet_etenders.py`, `dbsa_procurement.py`) DO scrape HTML for document links, but
+each one's own regex was checked, specifically, against the exact shape of SARS's bug (requiring
+the href to end in a file extension) and neither one makes that requirement - both were also
+re-run against today's real live pages with real, non-empty, correct results. One
+(`capetown_procurement.py`) deliberately extracts no document links at all, a design choice
+confirmed again today, not a gap of any kind. One (`cidb_tenders.py`) is a JSON feed with a
+supplementary non-extension-anchored regex, already exercised correctly live today. This closes
+out the task brief's own systematic follow-up: of `download_discovered_documents.py`'s 8 claimed
+"direct, unauthenticated link" non-SANRAL sources, only SARS's was ever actually broken (Finding
+183, already fixed); the other 7 are now each individually, freshly re-verified against today's
+real live site/API, not merely re-assumed from each reader's own original commit-time check.
+
+**Verification.** No code changed this pass (a genuine negative, not a forced fix), so this is a
+regression check, not a red-then-green cycle. `python3 engine/discovery/test_gov_sources.py` - real
+exit code `0` captured directly (no pipe before capture), "ALL PASSED". Full `engine/` sweep, each
+file run individually with its own real exit code: `find engine -name "test_*.py" | wc -l` = `86`;
+looped every one with plain `python3 <file>` - `TOTAL=86 FAILED_FILES_COUNT=0`, matching the
+standing baseline exactly, unchanged. No TypeScript/JS file touched - `typecheck`/`eslint`/
+`vitest`/the node `*.test.ts` loop/`next build` not re-run, per the standing rule's own scope
+(no file changed at all this pass).
+
+**One precise, narrow, NOT-fixed correction worth naming for whoever next touches
+`download_discovered_documents.py`'s own docstring:** its claim that "every other source...gives a
+direct, unauthenticated link" is accurate in spirit for 6 of the 7 sources checked this pass (they
+each really do give a direct link once fetched), but is vacuously/misleadingly worded for
+`capetown_procurement.py` specifically, which gives NO link of any kind by design (`documents=[]`
+always) - not a broken promise, since nothing ever claimed otherwise about this one source's actual
+behaviour, but a future reader could misread the docstring's blanket "every other source" phrasing
+as implying Cape Town's RFQs have downloadable documents this pipeline captures, when they
+genuinely don't (the RFQ's own detail page/quote form is the artefact, not a separate file). Left
+as a documentation-precision note, not a code change, since fixing it is a one-line docstring edit
+with zero behavioural effect - too small to burn this pass's own push on by itself, but worth a
+future pass folding in alongside its own next docstring-touching change.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. The task brief's own systematic follow-up to Finding 183 (re-verify all 7
+remaining non-SANRAL discovery sources' document extraction against a fresh live fetch) is now
+fully closed out - every one individually checked today, not assumed. `randwater.py`'s own
+still-open reused-ref risk (Findings 181/182's own backlog note) remains exactly as those passes
+left it - unverifiable from this sandbox, needing real network access. The one-line
+`download_discovered_documents.py` docstring imprecision about `capetown_procurement.py` named
+above is a new, small, not-yet-fixed candidate for a future pass. A future pass should pick a
+genuinely fresh surface or angle rather than re-running any of this review's now-exhausted
+document-extraction/ref-reuse/discarded-read-error/race-condition sweeps again without new
+evidence - e.g. the GitHub-Actions-dispatched live check of `randwater.py` this backlog has named
+for several passes now, or the still-open PR backlog itself (9 open, oldest since 2026-10-26,
+named but never actioned by a very long run of consecutive passes).
+
+To verify independently: re-run the exact live `curl`s named above against each of the 7 sources'
+real endpoints and compare their real bytes/JSON against each module's own document-extraction
+function. Run `python3 engine/discovery/test_gov_sources.py` and confirm exit `0`/"ALL PASSED".
+Confirm via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` that all 9 PRs are still
+open/unmerged, and that `git log --oneline -1 origin/main` is this pass's own new docs-only commit
+(one ahead of `980bf79`), with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xx, standing solution-architect review): oriented from `19b541c`
 (immediately-preceding pass's own verified HEAD, Finding 182's `lephalale.py` reused-ref fix).
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
