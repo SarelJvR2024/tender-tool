@@ -949,7 +949,7 @@ def _safe_update(write, upload, what):
         write()
     except Exception as e2:
         system_alerts.record("cv_extract", f"Could not {what} for cv_upload {upload['id']}: {type(e2).__name__}: {e2}",
-                             "error", exc=e2, context={"cv_upload_id": upload["id"]})
+                             "error", exc=e2, context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
 
 
 def poll_once(url, key, quiet_when_empty=False, client_factory=default_llm_client):

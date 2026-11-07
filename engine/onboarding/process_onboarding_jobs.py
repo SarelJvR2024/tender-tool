@@ -220,7 +220,8 @@ def _safe_update(write, upload, what):
         write()
     except Exception as e2:
         system_alerts.record("onboarding_scan", f"Could not {what} for onboarding_upload {upload['id']}: "
-                             f"{type(e2).__name__}: {e2}", "error", exc=e2, context={"onboarding_upload_id": upload["id"]})
+                             f"{type(e2).__name__}: {e2}", "error", exc=e2,
+                             context={"onboarding_upload_id": upload["id"], "company_id": upload.get("company_id")})
 
 
 def poll_once(url, key, quiet_when_empty=False, client_factory=cd.default_llm_client):

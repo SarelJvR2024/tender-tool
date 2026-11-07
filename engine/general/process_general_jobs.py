@@ -577,7 +577,8 @@ def _within(item, rule, closing):
         except ValueError:
             system_alerts.record("general", f"Experience item {item.get('id')}'s completion date ('{comp}') is not a "
                                  "valid date - left out of this pack's experience evidence until it's corrected.",
-                                 "warning", context={"experience_item_id": item.get("id"), "completion_date": comp})
+                                 "warning", context={"experience_item_id": item.get("id"),
+                                                      "company_id": item.get("company_id"), "completion_date": comp})
     if rule.get("since_year") and (not comp_day or comp_day.year < int(rule["since_year"])):
         return False
     if rule.get("window_years"):
@@ -851,7 +852,7 @@ def process_job(client, job, work_root, fetch=None):
             client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "failed", "error_message": str(e)[:1000], "completed_at": _now()})
         except Exception as e2:
             system_alerts.record("general", f"Could not mark a failed general job as failed: {type(e2).__name__}: {e2}",
-                                 "error", exc=e2, context={"job_id": job["id"]})
+                                 "error", exc=e2, context={"job_id": job["id"], "company_id": job.get("company_id")})
         print(f"[failed] {job['kind']} {job['id']}: {e}")
     return True
 

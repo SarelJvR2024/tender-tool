@@ -332,7 +332,8 @@ def fail_stale_jobs(url, key, now=None):
         except ValueError:
             system_alerts.record("cv", f"A CV job's claimed_at ({claimed!r}) is not a valid timestamp - "
                                  "its stale-reclaim check was skipped, not treated as stale.",
-                                 "warning", context={"job_id": job["id"], "claimed_at": claimed})
+                                 "warning", context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                                      "claimed_at": claimed})
             continue
         if claimed_dt < cutoff:
             supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.generating", {
@@ -413,7 +414,7 @@ def process_job(url, key, job, out_dir):
             })
         except Exception as e2:
             system_alerts.record("cv", f"Could not mark a failed CV job as failed: {type(e2).__name__}: {e2}",
-                                 "error", exc=e2, context={"job_id": job["id"]})
+                                 "error", exc=e2, context={"job_id": job["id"], "company_id": job.get("company_id")})
         print(f"[failed] {job['id']}: {e}")
     return True
 

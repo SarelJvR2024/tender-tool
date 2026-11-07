@@ -308,6 +308,27 @@ def test_fail_stale_uploads_alerts_carry_company_id():
           by_upload.get("dead", {}).get("company_id") == "c-dead", by_upload.get("dead"))
 
 
+def test_safe_update_alert_carries_company_id():
+    # Finding 188 (2026-11-07): same gap, same fix shape, found independently
+    # in this file's own _safe_update() - identical to extract_cv_fields.py's
+    # sibling helper, fixed the same pass. `upload` is the full row dict
+    # every real caller passes in (release_upload/fail_upload's own
+    # wrapping lambdas), so company_id was always available, just never
+    # included.
+    alerts = []
+    real_record = poj.system_alerts.record
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        poj._safe_update(lambda: (_ for _ in ()).throw(RuntimeError("simulated write failure")),
+                         {"id": "up1", "company_id": "c-safe-update"}, "release back to the queue")
+    finally:
+        poj.system_alerts.record = real_record
+    check("the write failure raised its own alert", len(alerts) == 1, alerts)
+    if alerts:
+        ctx = alerts[0][1].get("context") or {}
+        check("the alert carries the upload's own company_id", ctx.get("company_id") == "c-safe-update", ctx)
+
+
 def test_process_upload_happy_path_writes_classified_with_every_result_field():
     db = FakeDB([{"id": "u1", "company_id": "co-1", "storage_path": "co-1/doc.pdf", "original_filename": "doc.pdf",
                  "status": "classification_requested"}])
@@ -447,6 +468,7 @@ def main():
     test_fail_stale_uploads_marks_old_classifying_rows_failed_and_leaves_fresh_ones_alone()
     test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
     test_fail_stale_uploads_alerts_carry_company_id()
+    test_safe_update_alert_carries_company_id()
     test_process_upload_happy_path_writes_classified_with_every_result_field()
     test_process_upload_setup_error_releases_and_reraises_but_transient_error_releases_quietly()
     test_process_upload_classification_failed_marks_the_row_failed_without_raising()

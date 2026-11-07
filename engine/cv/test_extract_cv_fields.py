@@ -625,6 +625,26 @@ def test_fail_stale_uploads_alerts_carry_company_id():
           f"the genuinely-failed alert carries the upload's own company_id ({by_upload.get('dead')})")
 
 
+def test_safe_update_alert_carries_company_id():
+    print("5d. _safe_update(): its own 'could not {what}' alert carries company_id too")
+    # Finding 188 (2026-11-07): same gap as fail_stale_uploads()'s own 3
+    # alerts (Finding 186) - _safe_update()'s context only ever had
+    # cv_upload_id, even though `upload` is the full row dict passed in by
+    # every real caller (release_upload/fail_upload's own wrapping lambdas).
+    alerts = []
+    real_record = x.system_alerts.record
+    x.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        x._safe_update(lambda: (_ for _ in ()).throw(RuntimeError("simulated write failure")),
+                       {"id": "up1", "company_id": "c-safe-update"}, "release back to the queue")
+    finally:
+        x.system_alerts.record = real_record
+    check(len(alerts) == 1, f"the write failure raised its own alert ({alerts})")
+    if alerts:
+        ctx = alerts[0][1].get("context") or {}
+        check(ctx.get("company_id") == "c-safe-update", f"the alert carries the upload's own company_id ({ctx})")
+
+
 def test_ocr(docx_path, tmp):
     """EXPERIMENTAL OCR path (engine/ocr/scan_ocr.py). Needs tesseract; skipped
     (stated, not silently) where it isn't installed."""
@@ -730,6 +750,7 @@ def main():
         test_queue(docx_path, tmp)
         test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
         test_fail_stale_uploads_alerts_carry_company_id()
+        test_safe_update_alert_carries_company_id()
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
         test_email_verification_survives_line_wrap()

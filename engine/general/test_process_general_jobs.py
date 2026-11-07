@@ -16,6 +16,7 @@ Run: python3 engine/general/test_process_general_jobs.py
 import datetime
 import os
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -148,6 +149,61 @@ def test_within_missing_closing_date_uses_real_sast_today_not_naive_utc():
         pgj.datetime.datetime = real_datetime
 
 
+def test_within_malformed_completion_date_alert_carries_company_id():
+    print("_within(): a malformed completion_date's own alert carries the item's company_id too")
+    # Finding 188 (2026-11-07): client.select()'s own "select=*" means `item`
+    # always carries company_id (confirmed: gather_pack_inputs() filters
+    # experience_items by company_id in the first place) - just never
+    # included in this alert's own context, unlike every genuinely-stale
+    # job alert elsewhere in this file.
+    alerts = []
+    real_record = pgj.system_alerts.record
+    pgj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        result = pgj._within({"id": "exp-1", "company_id": "c-exp", "completion_date": "not-a-real-date"},
+                             {"window_years": 5}, None)
+    finally:
+        pgj.system_alerts.record = real_record
+    check("a malformed completion_date is treated as not-within, not a crash", result is False, result)
+    check("exactly one alert fired", len(alerts) == 1, alerts)
+    if alerts:
+        check("the alert carries the experience item's own company_id",
+              alerts[0][1]["context"].get("company_id") == "c-exp", alerts[0])
+
+
+def test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id():
+    print("fail_stale_jobs(): 'could not mark a failed general job as failed' alert carries company_id too")
+    # Finding 188 (2026-11-07): same shape as process_pack_jobs.py's own
+    # identical nested-except gap, fixed the same pass.
+    rows = [{"id": "job-1", "company_id": "c-nested", "kind": "generate_pack", "status": "requested", "engine": "general"}]
+
+    class RaisingOnSecondUpdate(FakeClient):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.updates = 0
+
+        def update(self, table, filters, body):
+            self.updates += 1
+            if self.updates == 1:
+                return super().update(table, filters, body)
+            raise RuntimeError("simulated transient Supabase failure marking the job failed")
+
+    client = RaisingOnSecondUpdate(rows)
+    alerts = []
+    real_run, real_record = pgj.run_pack, pgj.system_alerts.record
+    pgj.run_pack = lambda client, job, work_root, fetch: (_ for _ in ()).throw(RuntimeError("synthetic crash"))
+    pgj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        pgj.process_job(client, rows[0], tempfile.mkdtemp(), fetch=None)
+    finally:
+        pgj.run_pack = real_run
+        pgj.system_alerts.record = real_record
+    check("both alerts fired (the crash itself, then failing to even mark it failed)", len(alerts) == 2, alerts)
+    nested = next((kw for a, kw in alerts if "Could not mark" in a[1]), None)
+    check("the nested alert carries the job's own company_id",
+          nested is not None and nested["context"].get("company_id") == "c-nested", alerts)
+
+
 def test_gather_pack_inputs_signatory_fallback():
     print("gather_pack_inputs(): signatory falls back to the company's own designated signatory")
     job = {"company_id": "co-a", "tender_id": "t-a"}
@@ -260,6 +316,8 @@ def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
+    test_within_malformed_completion_date_alert_carries_company_id()
+    test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()
     test_gather_pack_inputs_signatory_fallback()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 

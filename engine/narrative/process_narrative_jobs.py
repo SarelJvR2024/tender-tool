@@ -112,7 +112,17 @@ def fail_stale_jobs(url, key, now=None):
     raise straight out of this loop, with no per-row try/except - aborting
     the stale-reclaim sweep for every OTHER genuinely stuck job too (same bug
     class as watch_deadlines.days_until()'s own malformed-date guard).
-    Skip and alert on just the one row, never the whole sweep."""
+    Skip and alert on just the one row, never the whole sweep.
+
+    QA pass, 2026-11-07: this was the ONE process_*_jobs.py bridge whose
+    fail_stale_jobs() never alerted on the real reclaim at all - pack/
+    general's own siblings both raise an "error"-severity alert the moment a
+    row is actually marked failed for staleness (the worker having died
+    mid-job is itself worth Sarel seeing, not just the malformed-date edge
+    case). Added, matching that sibling pattern exactly. Also added
+    company_id to the malformed-date alert's own context, the same gap
+    Finding 186 found in extract_cv_fields.py's sibling and fixed there -
+    never swept into this file."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
     stuck = supabase_request(url, key, "GET", "narrative_documents?status=eq.generating&select=*")
@@ -125,7 +135,8 @@ def fail_stale_jobs(url, key, now=None):
         except ValueError:
             system_alerts.record("narrative", f"A narrative document job's started_at ({started!r}) is not "
                                  "a valid timestamp - its stale-reclaim check was skipped, not treated as stale.",
-                                 "warning", context={"job_id": job["id"], "started_at": started})
+                                 "warning", context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                                      "started_at": started})
             continue
         if started_dt < cutoff:
             supabase_request(
@@ -133,6 +144,12 @@ def fail_stale_jobs(url, key, now=None):
                 {"status": "failed", "error_message": "Worker stopped responding partway through generation - request again.",
                  "completed_at": _now_iso()},
             )
+            print(f"[failed] {job['id']}: stale 'generating' since {started}")
+            system_alerts.record("narrative", f"A narrative document job was stuck in 'generating' for over "
+                                              f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "
+                                              "marked failed", "error",
+                                 context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                          "started_at": started})
 
 
 # ============================================================================

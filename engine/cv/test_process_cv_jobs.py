@@ -73,6 +73,48 @@ def test_crash_sets_completed_at():
               f"body={body}")
 
 
+class RaisingOnSecondPatch:
+    """Claim succeeds; the crash-handling PATCH (marking the job 'failed')
+    itself raises - the one path that reaches the nested except Exception as
+    e2 block ("Could not mark a failed CV job as failed")."""
+    def __init__(self):
+        self.patches = 0
+
+    def __call__(self, url, key, method, path, body=None):
+        if method == "PATCH" and "status=eq.requested" in path:
+            return [{"id": "job-1"}]  # claim succeeds
+        if method == "PATCH":
+            self.patches += 1
+            raise RuntimeError("simulated transient Supabase failure marking the job failed")
+        return []
+
+
+def test_could_not_mark_a_failed_cv_job_as_failed_alert_carries_company_id():
+    # Finding 188 (2026-11-07): this nested alert's own context never
+    # carried company_id at all - unlike the outer "CV generation job
+    # failed" alert raised just above it in the same except block, which
+    # already does. Reachable for real: a transient Supabase blip hitting
+    # exactly the PATCH that marks a crashed job 'failed'.
+    stub = RaisingOnSecondPatch()
+    original_request, original_fetch, original_record = pcj.supabase_request, pcj.fetch_job_context, pcj.system_alerts.record
+    alerts = []
+    pcj.supabase_request = stub
+    pcj.fetch_job_context = lambda url, key, job: (_ for _ in ()).throw(RuntimeError("synthetic crash"))
+    pcj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        pcj.process_job("https://x", "key", {"id": "job-1", "format": "sanral_keyperson", "detail": "full",
+                                              "company_id": "c-nested", "person_id": "p1"}, "/tmp")
+    finally:
+        pcj.supabase_request = original_request
+        pcj.fetch_job_context = original_fetch
+        pcj.system_alerts.record = original_record
+
+    check("both alerts fired (the crash itself, then failing to even mark it failed)", len(alerts) == 2, alerts)
+    nested = next((kw for _, kw in alerts if "Could not mark" in _[1]), None)
+    check("the nested 'could not mark as failed' alert carries the job's own company_id",
+          nested is not None and nested["context"].get("company_id") == "c-nested", alerts)
+
+
 class FakeQueue:
     """Minimal GET/PATCH stand-in scoped to fail_stale_jobs()'s own exact
     call shapes (a plain status=eq.generating GET, a PATCH keyed on
@@ -102,9 +144,9 @@ def test_fail_stale_jobs_survives_a_malformed_claimed_at():
     old = (now - datetime.timedelta(minutes=90)).isoformat()   # past STALE_AFTER_MINUTES=60
     fresh = (now - datetime.timedelta(minutes=5)).isoformat()
     rows = [
-        {"id": "stuck", "status": "generating", "claimed_at": old},
-        {"id": "running", "status": "generating", "claimed_at": fresh},
-        {"id": "corrupt", "status": "generating", "claimed_at": "not-a-real-timestamp"},
+        {"id": "stuck", "company_id": "c-stuck", "status": "generating", "claimed_at": old},
+        {"id": "running", "company_id": "c-running", "status": "generating", "claimed_at": fresh},
+        {"id": "corrupt", "company_id": "c-corrupt", "status": "generating", "claimed_at": "not-a-real-timestamp"},
     ]
     queue = FakeQueue(rows)
     alerts = []
@@ -126,6 +168,15 @@ def test_fail_stale_jobs_survives_a_malformed_claimed_at():
           by_id["corrupt"]["status"] == "generating", by_id["corrupt"])
     check("both the real stale job and the malformed row got their own alert, each correctly severed",
           sorted((a[0][0], a[0][2]) for a in alerts) == [("cv", "error"), ("cv", "warning")], alerts)
+    # Finding 188 (2026-11-07): the malformed-claimed_at alert's own context
+    # never carried company_id, unlike the genuinely-stale one right below it
+    # in the same function - the identical gap Finding 186 found in
+    # extract_cv_fields.py's sibling, never swept into this file either.
+    by_severity = {kw["context"].get("job_id"): kw["context"] for _, kw in alerts}
+    check("the real-stale alert carries the row's own company_id",
+          by_severity.get("stuck", {}).get("company_id") == "c-stuck", by_severity.get("stuck"))
+    check("the malformed-claimed_at alert ALSO carries the row's own company_id",
+          by_severity.get("corrupt", {}).get("company_id") == "c-corrupt", by_severity.get("corrupt"))
 
 
 def test_adapt_person_row_carries_sacpcmp_date_through():
@@ -206,6 +257,7 @@ def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
 
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
+test_could_not_mark_a_failed_cv_job_as_failed_alert_carries_company_id()
 test_adapt_person_row_carries_sacpcmp_date_through()
 test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()
 test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()

@@ -10955,6 +10955,71 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - Finding 192, a sweep across all 6 `process_*_jobs.py` worker bridges found 10 more `system_alerts.record()` calls missing `company_id` in context (Findings 186/188's bug class), plus a separate gap in `narrative/process_narrative_jobs.py`'s `fail_stale_jobs()` which never alerted on a real staleness reclaim at all
+
+Oriented from `e6af613` (own prior pass: Finding 187, daily_digest.py's person_credential filter).
+`git fetch origin main` found 5 new sibling commits (all "standing solution-architect review" track,
+none colliding with this pass's own files): `ddf45bf`/`9053805` (Finding 191, My CV's
+`applyMyCvExtraction()` never queued standard CVs), `2ccb681`/`8bd9fc0` (Finding 190, SANRAL pack
+`field_provenance`), and the `de37b03` genuine-negative pass before them. Re-checked again
+immediately before this pass's own push - still the same tip, no new sibling commit landed in
+between.
+
+**This pass's own task**: worker/job-queue rotation. Two independent prior hits on the identical
+`system_alerts.record()`-missing-`company_id` shape (Finding 186 in `cv/extract_cv_fields.py`,
+Finding 188 in `onboarding/process_onboarding_jobs.py`, found by two different sessions on two
+different passes) is the standing signal to stop treating it as isolated and sweep the whole
+`process_*_jobs.py` sibling family instead of waiting for a third session to re-find it a third
+time - so this pass read every `system_alerts.record(` call site in all 6 bridges
+(`cv/process_cv_jobs.py`, `cv/extract_cv_fields.py`, `pack/process_pack_jobs.py`,
+`general/process_general_jobs.py`, `onboarding/process_onboarding_jobs.py`,
+`narrative/process_narrative_jobs.py`) side by side.
+
+**Found: Finding 192.** 10 more call sites missing `company_id` from `context` even though a
+`company_id`-bearing row was already in scope at that exact call site every time (`client.select()`
+always appends `select=*`, confirmed in `company_profiles.py`'s `RestClient.select()`, so no new
+query was ever needed) - the two nested "could not mark a failed X job as failed" alerts in
+`cv/process_cv_jobs.py` and `pack/process_pack_jobs.py`'s own `process_job()`; the identical nested
+`_safe_update()` alert duplicated in `cv/extract_cv_fields.py` and `onboarding/process_onboarding_jobs.py`;
+`pack/process_pack_jobs.py`'s `sync_tender_requirements()`/`sync_b7_setup()` read-failure alerts;
+`general/process_general_jobs.py`'s `_within()` malformed-`completion_date` alert and its own nested
+"could not mark failed" alert; `narrative/process_narrative_jobs.py`'s malformed-`started_at` alert.
+Separately, and more significantly: comparing `narrative/process_narrative_jobs.py`'s
+`fail_stale_jobs()` structurally against its `pack`/`general` siblings (not just the company_id
+sub-pattern) showed it was the ONE bridge whose real-staleness branch (a worker genuinely died
+mid-job) never raised an alert at all - `pack`/`general` both raise an `"error"`-severity alert the
+moment a row is actually marked failed for staleness; `narrative` only ever alerted on the
+malformed-timestamp case, confirmed via `grep -n "system_alerts" engine/narrative/process_narrative_jobs.py`
+before the fix finding zero hits inside that function.
+
+**Fix**: added `company_id` to all 10 call sites, using whichever row/dict was already in scope
+(`job`, `upload`, `item`, the resolved tender-document row). Added the missing real-staleness
+`"error"` alert to `narrative/process_narrative_jobs.py`'s `fail_stale_jobs()`, matching the
+`pack`/`general` sibling pattern exactly. Deliberately left out of scope: two OCR-crash alerts in
+`extract_cv_fields.py` (~lines 192/224) that only have a bare file path in scope, not a
+company-linked row - fixing those needs a bigger refactor (threading the upload row further down
+the call chain), not forced this pass. Verified red-then-green: saved a single diff of all 6
+production files, `git apply -R`, re-ran all 6 sibling test files - all 6 failed exactly as
+predicted (new/extended company_id assertions failed; `narrative`'s own test crashed with
+`IndexError` reaching for the now-absent second alert); `git apply` to reapply, re-ran - `0
+failure(s)`/`ALL PASSED` across all 6. One test-fixture bug fixed along the way:
+`pack/test_process_pack_jobs.py`'s shared `FakeClient` has no real per-table separation (one flat
+`self.rows` list, matches by field-value equality regardless of the `table` string passed in) -
+adding list-value ("IN"-filter) support for `sync_b7_setup()`'s own lookup caused a spurious
+fixture collision with `sync_tender_requirements()`'s own "have I already written this?" check;
+fixed by overriding `select()` in that test's own local `FakeClient` subclass to special-case the
+colliding table, not by redesigning the shared fixture. `python3 -m py_compile` clean on all 6
+production files and test files. Broader regression check: `engine/worker/test_poll_loop.py` and
+`engine/alerts/test_system_alerts.py` both still pass unchanged. See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 192 for the full write-up and independent-verification
+steps.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - `daily_digest.py`'s own finance/cv_admin role filters checked ONLY the literal string "person_credential", so Finding 139's new `person_credential_before_closing` item type was silently dropped from cv_admin's digest (the one role whose job is to act on it) and silently shown to finance (whose matrix rule explicitly excludes it)
 
 Oriented from `d9e7b4c` (own prior pass: Finding 179, registrations-catalog lapses-before-closing).

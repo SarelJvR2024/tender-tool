@@ -53,7 +53,9 @@ class FakeClient:
         self.upserted = []  # (table, rows, on_conflict) - recorded, not applied to self.rows
 
     def select(self, table, filters=None, order=None):
-        return [r for r in self.rows if all(r.get(k) == v for k, v in (filters or {}).items())]
+        def match(r, k, v):
+            return r.get(k) in v if isinstance(v, (list, tuple)) else r.get(k) == v
+        return [r for r in self.rows if all(match(r, k, v) for k, v in (filters or {}).items())]
 
     def upsert(self, table, rows, on_conflict):
         self.upserted.append((table, rows, on_conflict))
@@ -408,6 +410,92 @@ def test_suggested_person_label_flags_a_real_override_even_when_unresolved():
     check("no suggestion on file at all: stays None", none_case is None, none_case)
 
 
+class RaisingOnSecondUpdate(FakeClient):
+    """Claim succeeds (the first update()); marking the job 'failed' after a
+    crash (the second update()) itself raises - the one path that reaches
+    the nested except Exception as e2 block ("Could not mark a failed pack
+    job as failed")."""
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.updates = 0
+
+    def update(self, table, filters, body):
+        self.updates += 1
+        if self.updates == 1:
+            return super().update(table, filters, body)
+        raise RuntimeError("simulated transient Supabase failure marking the job failed")
+
+
+def test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id():
+    print("Finding 188: the nested 'could not mark a failed pack job as failed' alert "
+          "carries company_id too, same as the outer crash alert right above it")
+    rows = [{"id": "job-1", "status": "requested", "company_id": "c-nested", "tender_id": "t-1"}]
+    client = RaisingOnSecondUpdate(rows)
+    alerts = []
+    real_gather, real_record = ppj.gather, ppj.system_alerts.record
+    ppj.gather = lambda client, job, work: (_ for _ in ()).throw(RuntimeError("synthetic crash"))
+    ppj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        ppj.process_job(client, rows[0], tempfile.mkdtemp())
+    finally:
+        ppj.gather = real_gather
+        ppj.system_alerts.record = real_record
+    check("both alerts fired (the crash itself, then failing to even mark it failed)", len(alerts) == 2, alerts)
+    nested = next((kw for a, kw in alerts if "Could not mark" in a[1]), None)
+    check("the nested alert carries the job's own company_id",
+          nested is not None and nested["context"].get("company_id") == "c-nested", alerts)
+
+
+def test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id():
+    print("Finding 188: sync_tender_requirements()/sync_b7_setup()'s own 'could not read "
+          "SETUP sheet' alerts carry company_id, read straight off the same row they already use")
+
+    class RaisingDownloadClient(FakeClient):
+        def download(self, bucket, path, local):
+            raise RuntimeError("simulated storage download failure")
+
+        def select(self, table, filters=None, order=None):
+            # FakeClient's own select() matches purely by field shape, not by
+            # table name - this fake's single tender_documents row would
+            # otherwise spuriously satisfy sync_tender_requirements()'s own
+            # "already written?" lookup too (both share a "tender_id" field).
+            # Real table separation: tender_requirements starts empty.
+            if table == "tender_requirements":
+                return []
+            return super().select(table, filters, order)
+
+    # sync_tender_requirements(): tender_documents rows feed `d`, which already
+    # carries company_id (used two lines above the real call site for the
+    # [requirements] log line) - just never passed into the alert's context.
+    docs = [{"id": "doc-1", "tender_id": "t-1", "company_id": "c-req", "storage_path": "x/y.xlsm",
+            "doc_type": "technical_xlsm", "downloaded_at": "2026-11-01T00:00:00Z"}]
+    client = RaisingDownloadClient(docs + [{"id": "t-1"}])
+    alerts = []
+    real_record = ppj.system_alerts.record
+    ppj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        ppj.sync_tender_requirements(client, tempfile.mkdtemp())
+    finally:
+        ppj.system_alerts.record = real_record
+    check("sync_tender_requirements() raised its own alert on the download failure", len(alerts) == 1, alerts)
+    if alerts:
+        check("...and it carries the tender_document row's own company_id",
+              alerts[0][1]["context"].get("company_id") == "c-req", alerts[0])
+
+    # sync_b7_setup(): same shape, the `d` (chosen tender_documents row) carries
+    # company_id too - confirmed by the function's own sort key using it already.
+    alerts.clear()
+    ppj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        ppj.sync_b7_setup(client, tempfile.mkdtemp())
+    finally:
+        ppj.system_alerts.record = real_record
+    check("sync_b7_setup() raised its own alert on the download failure", len(alerts) == 1, alerts)
+    if alerts:
+        check("...and it carries the chosen tender_document row's own company_id",
+              alerts[0][1]["context"].get("company_id") == "c-req", alerts[0])
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
@@ -417,6 +505,8 @@ def main():
     test_process_job_writes_field_provenance_to_the_db_on_success()
     test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent()
     test_suggested_person_label_flags_a_real_override_even_when_unresolved()
+    test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id()
+    test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

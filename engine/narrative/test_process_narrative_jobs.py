@@ -129,14 +129,14 @@ def test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_
     old = (now - datetime.timedelta(minutes=45)).isoformat()   # past STALE_AFTER_MINUTES=30
     fresh = (now - datetime.timedelta(minutes=5)).isoformat()  # well within it
     db = FakeDB({"narrative_documents": [
-        {"id": "stuck", "status": "generating", "started_at": old},
-        {"id": "running", "status": "generating", "started_at": fresh},
+        {"id": "stuck", "company_id": "c-stuck", "status": "generating", "started_at": old},
+        {"id": "running", "company_id": "c-running", "status": "generating", "started_at": fresh},
         # QA Finding, 2026-10-29: a malformed started_at used to raise
         # straight out of this function's own for loop, with no per-row
         # guard - one bad value aborted the stale-reclaim sweep for every
         # OTHER genuinely stuck job too (same bug class as watch_deadlines.
         # days_until()'s own malformed-date guard).
-        {"id": "corrupt", "status": "generating", "started_at": "not-a-real-timestamp"},
+        {"id": "corrupt", "company_id": "c-corrupt", "status": "generating", "started_at": "not-a-real-timestamp"},
     ]})
     ALERTS.clear()
     original = pnj.supabase_request
@@ -154,9 +154,21 @@ def test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_
           rows["running"]["status"] == "generating", rows["running"])
     check("a malformed started_at does not crash the sweep and is left generating, not guessed at",
           rows["corrupt"]["status"] == "generating", rows["corrupt"])
-    check("the malformed row got its own warning alert (this function doesn't alert on a normal "
-          "stale-recovery, only on this malformed-timestamp case)",
-          [(a["p_source"], a["p_severity"]) for a in ALERTS] == [("narrative", "warning")], ALERTS)
+    # Finding 188 (2026-11-07): this bridge used to be the ONE process_*_jobs.py
+    # sibling whose fail_stale_jobs() never alerted on the real reclaim at all -
+    # pack/general's own siblings both raise an "error"-severity alert the
+    # moment a row is actually marked failed for staleness. Fixed to match:
+    # the genuinely stuck job now gets its own "error" alert too, alongside
+    # the pre-existing "warning" for the malformed-timestamp row.
+    check("exactly two alerts were recorded: the genuinely stale job (error) and the "
+          "malformed-timestamp row (warning) - the malformed row did not silently cost "
+          "the stuck job its own alert",
+          [(a["p_source"], a["p_severity"]) for a in ALERTS] ==
+          [("narrative", "error"), ("narrative", "warning")], ALERTS)
+    check("the stale-reclaim alert carries the job's own company_id",
+          ALERTS[0]["p_context"].get("company_id") == "c-stuck", ALERTS)
+    check("the malformed-timestamp alert carries the job's own company_id too",
+          ALERTS[1]["p_context"].get("company_id") == "c-corrupt", ALERTS)
 
 
 def test_process_one_happy_path_writes_ready_with_every_generation_field():

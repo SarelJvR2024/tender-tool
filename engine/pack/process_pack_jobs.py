@@ -821,7 +821,7 @@ def process_job(client, job, work_root, keep=False):
                           {"status": "failed", "error_message": msg[:2000], "completed_at": _ts()})
         except Exception as e2:  # the job row couldn't even be marked: it stays 'generating' until fail_stale_jobs
             system_alerts.record("pack", f"Could not mark a failed pack job as failed: {type(e2).__name__}: {e2}",
-                                 "error", exc=e2, context={"job_id": job["id"]})
+                                 "error", exc=e2, context={"job_id": job["id"], "company_id": job.get("company_id")})
         print(f"[failed] {job['id']}: {msg}")
         return None
     finally:
@@ -916,7 +916,8 @@ def sync_tender_requirements(client, work_root):
                   f"SETUP sheet ({type(e).__name__}: {e})")
             system_alerts.record("pack", f"Could not read an uploaded Technical workbook's SETUP sheet "
                                          f"({type(e).__name__}: {e})", "error", exc=e,
-                                 context={"tender_id": d["tender_id"], "storage_path": d.get("storage_path")})
+                                 context={"tender_id": d["tender_id"], "company_id": d.get("company_id"),
+                                          "storage_path": d.get("storage_path")})
         finally:
             shutil.rmtree(os.path.dirname(local), ignore_errors=True)
     return written
@@ -957,7 +958,8 @@ def sync_b7_setup(client, work_root):
         except Exception as e:
             print(f"[b7] tender {tid}: could not read the Technical workbook's SETUP sheet ({type(e).__name__}: {e})")
             system_alerts.record("pack", f"Could not read Form B7 category from an uploaded Technical workbook "
-                                         f"({type(e).__name__}: {e})", "error", exc=e, context={"tender_id": tid})
+                                         f"({type(e).__name__}: {e})", "error", exc=e,
+                                 context={"tender_id": tid, "company_id": d.get("company_id")})
         finally:
             shutil.rmtree(os.path.dirname(local), ignore_errors=True)
     return written
