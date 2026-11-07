@@ -429,7 +429,15 @@ def document_expiry_signals(url, key, seen, today, lead_days):
             # SAGC registration lapsing before their own tender's closing date was
             # only ever caught reactively, when someone happened to open that
             # tender's compliance report page.
-            + watch_deadlines.find_person_credentials_lapsing_before_closing(url, key, seen, today, lead_days))
+            + watch_deadlines.find_person_credentials_lapsing_before_closing(url, key, seen, today, lead_days)
+            # QA pass, 2026-11-07: the identical "lapses before closing" check,
+            # extended to the registrations catalog (0050) for its company-held
+            # rows (PSIRA, SETA accreditation, a waste permit, ...) - wired into
+            # this live channel in the SAME pass that built it, unlike Finding
+            # 132's own documents_before_closing, which went 2 days without
+            # this wiring the first time around.
+            + watch_deadlines.registration_reminders.find_held_registrations_lapsing_before_closing(
+                url, key, seen, today, lead_days))
 
 
 def find_readiness_changes(url, key, seen, today, owners=None):

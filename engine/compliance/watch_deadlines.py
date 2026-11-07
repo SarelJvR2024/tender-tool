@@ -675,6 +675,16 @@ def main():
         # consumer ('watch_deadlines') from daily_digest.py's ('daily_digest'),
         # so the two can never collide or double-report against one seen store.
         person_before_closing = find_person_credentials_lapsing_before_closing(url, key, seen, today, args.doc_lead_days)
+        # The identical "lapses before closing" gap, extended to the
+        # registrations catalog (0050) for its company-held rows (QA pass,
+        # 2026-11-07) - see find_held_registrations_lapsing_before_closing()'s
+        # own docstring for why person/principal-held rows are deliberately
+        # not yet covered. Wired into both the --out report (here) and
+        # daily_digest.py's live mode at the same time, unlike Finding 132's
+        # own documents_before_closing, which went 2 days without the
+        # live-digest wiring the first time around.
+        registrations_before_closing = registration_reminders.find_held_registrations_lapsing_before_closing(
+            url, key, seen, today, args.doc_lead_days)
         written = save_seen_db(client, seen, loaded)
     except Exception as e:
         system_alerts.record("deadlines", f"The deadline-reminder watch failed: {type(e).__name__}: {e}",
@@ -712,6 +722,12 @@ def main():
         print(f"  {p['company_name']!r:<30} {p['person_name']!r:<24} {p['label']:<34} expires {p['expiry_date']} - "
               f"{p['tender_label']} closes {p['closing_date']}")
 
+    print(f"\n{len(registrations_before_closing)} catalog registration(s) that will have lapsed by the closing date "
+          f"of a tender being prepared:")
+    for r in registrations_before_closing:
+        print(f"  {r['company_name']!r:<30} {r['label']:<34} expires {r['expiry_date']} - "
+              f"{r['tender_label']} closes {r['closing_date']}")
+
     print(f"\n{len(tasks_due)} tender task(s) newly due for a reminder "
           f"(within {args.task_lead_days} days or already overdue):")
     for t in tasks_due:
@@ -720,7 +736,7 @@ def main():
 
     report = {"documents": documents_due, "person_credentials": credentials_due, "registrations": registrations_due,
               "documents_before_closing": before_closing, "person_credentials_before_closing": person_before_closing,
-              "tasks": tasks_due}
+              "registrations_before_closing": registrations_before_closing, "tasks": tasks_due}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report, f, indent=2)

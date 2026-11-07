@@ -76,6 +76,8 @@ def fake_request(url, key, path):
             rows = [r for r in rows if str(r.get(col)) != cond[4:]]
         elif cond == "not.is.null":
             rows = [r for r in rows if r.get(col) is not None]
+        elif cond == "is.null":
+            rows = [r for r in rows if r.get(col) is None]
         elif cond.startswith("in.("):
             vals = set(re.findall(r"[^,()]+", cond[3:]))
             rows = [r for r in rows if str(r.get(col)) in vals]

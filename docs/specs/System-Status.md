@@ -8754,6 +8754,70 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - the registrations catalog (0050) never got the "lapses before closing" check Finding 132/139 built twice already, for its COMPANY-held rows specifically; person/principal-held rows and property_documents' own equivalent gap deliberately left open, not forced
+
+Oriented from `18d4f7e` (own prior pass: Finding 170, `classify_tender.py` real-document fix). `git
+fetch origin main` found one more sibling commit (`ac644ec`, `set_opportunity_tag()`'s own lost-update
+race, Finding 178) - unrelated to this pass's own files, `git merge --ff-only` clean, no collision.
+Also confirmed the sibling's own continuation of MY Finding 170 (`297bfc9`/`5d42ab7`/`85ffaee` - a
+third real anchor phrasing, a DATE-before-TIME ordering fix, closing out `find_nra_reference()`'s own
+real-document check) landed cleanly on top, with zero conflicts, by re-running the test suite after
+merging rather than assuming. **Numbering note, again**: re-checked the findings doc's own highest
+number before writing this entry (178, not 170) - this pass's new finding is 179.
+
+**Rotation: compliance/reminders.** Read `registration_reminders.py` end to end - its own docstring
+explicitly frames itself as the GENERALISED replacement for the fixed-column tracking
+(`TRACKED_EXPIRY_FIELDS`/`TRACKED_PERSON_EXPIRY_FIELDS`), but grep confirmed zero references to
+"lapsing_before_closing"/"lapses_before_closing" anywhere in the file - the "fine today, not fine by
+a tender's closing day" check Finding 132 built once (company documents) and Finding 139 extended
+once (key-person credentials) was never extended to the catalog at all, even though its own docstring
+says a new registration type needs no code change to get the SAME-SHAPED due-soon/expired check.
+
+**Scoped deliberately, matching how Finding 132→139 itself progressed**: `held_registrations` rows
+can be company-, person-, or principal-held. This fix covers COMPANY-held rows only (the same scope
+Finding 132 itself started with). A person-held row would need the identical
+`tender_pack_assignments.confirmed_person_id` scoping Finding 139 uses - named as a real, matching
+gap, not implemented here. A principal-held row (a director's own PSIRA) has no "confirmed onto a
+tender" concept at all, since principals aren't assigned to tender positions - stays on reactive
+coverage only. `property_documents`' own equivalent gap is also named, not attempted this pass.
+
+**Fixed**: new `find_held_registrations_lapsing_before_closing()`, mirroring
+`find_documents_lapsing_before_closing()`'s exact SAST closing-day math, scoped to rows with no
+`person_id`/`principal_id`. Wired into BOTH `watch_deadlines.main()`'s `--out` report AND
+`daily_digest.py`'s live mode in the SAME pass that built it - deliberately avoiding the exact mistake
+Finding 132 made the first time (2 days without the live-digest wiring).
+
+**Verified with a real adversarial scenario.** New checks in `test_principals_registrations.py`: a
+company-held registration at 90 days (outside the 60-day window) against an open tender closing at
+100 days - reported, naming the real tender; two SIBLING rows with the IDENTICAL expiring shape but
+person-/director-held - confirmed NOT reported, proving the scope boundary is real. One small,
+additive test-infrastructure gap found along the way: the shared fake PostgREST stand-in
+(`test_watch_deadlines_urgency.fake_request()`) had no `is.null` filter support at all - added,
+purely additive, no existing test's behaviour changed.
+
+**Verified red-then-green.** Reverted all three touched production files via `git apply -R` - failed
+exactly as predicted (`AttributeError`); reapplied - `0 failure(s)`. `py_compile` clean on all five
+touched files. Regression: `test_watch_deadlines_urgency.py`, `test_watch_conditional_registrations.py`,
+`test_digest_live.py`, `test_send_digest_emails.py`, `test_send_pack_ready_email.py` - all
+`0 failure(s)`.
+
+**Backlog: unchanged at 18 items** - this closes a real, already-established gap pattern for one
+scoped holder type, not a new judgment-call item. The person/principal-held and property_documents
+equivalents remain open, explicitly named above for a future pass, not silently dropped.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean,
+wired into both consumers in the same pass):
+- `engine/compliance/registration_reminders.py`
+- `engine/compliance/watch_deadlines.py`
+- `engine/notify/daily_digest.py`
+- `engine/compliance/test_watch_deadlines_urgency.py`
+- `engine/compliance/test_principals_registrations.py`
+
+To verify independently: `cd engine/compliance && python3 test_principals_registrations.py` - expect
+`0 failure(s)`, including the new checks naming "h6"/"h7"/"h8".
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - `classify_tender.py`'s own closing-time and delivery-address readers both returned `None` on a real, live, currently open-for-bidding SANRAL tender, found by fetching the real document rather than relying on this repo's own fixtures
 
 Oriented from `ed08e7c` (own prior pass: Finding 155, `confirm_pack.py` non-string-date guard). `git

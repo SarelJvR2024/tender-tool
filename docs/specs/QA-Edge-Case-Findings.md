@@ -11363,3 +11363,66 @@ Full TS/JS suite re-run after the fix (this migration touches no TypeScript, but
 **Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged (re-checked this pass via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two stale drafts `#164`/`#165`, same `updated_at` timestamps every preceding pass has recorded - note PR #178's number is coincidental and unrelated to this Finding 178, per the standing numbering caveat; PRs #176-#182 remain untouched/unmerged per the standing guardrail regardless). None touched, amended, or merged by this pass. `app/app/discovery/` is now genuinely swept in full - every file and every backing RPC read, one real race-condition fix applied, everything else (the preferences panel's client-held state, `acknowledge_discovery_downgrade`'s already-idempotent `coalesce(...)`-on-live-column pattern, `pursue_discovered_opportunity`'s naturally-idempotent insert-on-conflict shape) confirmed safe with specific reasoning above - a future pass should not re-tread this surface without new evidence. `app/app/onboarding/`, `app/app/dashboard/`'s own write paths beyond Finding 165, and `app/app/admin/` (the taxonomy-suggestion review path) remain the named-but-not-yet-opened candidates for a future pass.
 
 To verify independently: read `app/supabase/migrations/0089_opportunity_tags_interest.sql`'s original `set_opportunity_tag()` body and `app/supabase/migrations/0121_opportunity_tag_add_remove_race.sql`'s replacement, and confirm the only change is `for update` on the initial `select * into opp`. Reproduce the race yourself: `sudo -u postgres psql -c "CREATE DATABASE scratch_x;"`, `PGPASSWORD=postgres bash engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d scratch_x` (apply a password to the postgres role first if needed), seed a `companies`/`company_members`/`discovered_opportunities` row, temporarily add a `pg_sleep(3)` after the function's read (scratch-only), then run two concurrent `psql` sessions each calling `set_opportunity_tag` with a different tag on the same opportunity id - confirm one tag is lost with the pre-0121 body and both survive with the pre-0121 body replaced by 0121's. Drop the scratch database and stop Postgres afterward. Run `npm run typecheck`, `npx eslint .`, `npx next build`, `npx vitest run` (505/505, 66 files), and the `*.test.ts` node loop (28 files, 0 failures) yourself and confirm the same results. Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged, and that `git log --oneline -1 origin/main` is this pass's own new commit, with no further sibling commits having landed in between.
+
+### Finding 179 (CONFIRMED, FIXED, moderate - the registrations catalog (0050) never got the "lapses before closing" check Finding 132/139 built for company-wide vault documents and key-person professional registrations, so a PSIRA/SETA/other held registration fine today but lapsing before an open tender's closing date was never proactively flagged for the company-held case)
+
+**Area:** Compliance / reminders (`engine/compliance/registration_reminders.py`, wired into
+`watch_deadlines.py`'s `main()` and `daily_digest.py`'s live mode).
+
+**Scenario:** `registration_reminders.py`'s own docstring frames itself as the generalised
+replacement for the fixed per-column tracking (`TRACKED_EXPIRY_FIELDS`/`TRACKED_PERSON_EXPIRY_FIELDS`)
+- "one held_registrations row = one tracked expiry, whatever body it is (PSIRA, SETA accreditation,
+a waste permit ...), so a new registration type needs no code change." But the "lapses before
+closing" framing Finding 132 built for `TRACKED_EXPIRY_FIELDS` (`find_documents_lapsing_before_closing()`)
+and Finding 139 extended to `TRACKED_PERSON_EXPIRY_FIELDS` (`find_person_credentials_lapsing_before_closing()`)
+was never extended to this catalog at all - confirmed by grep: zero references to
+"lapsing_before_closing"/"lapses_before_closing" anywhere in `registration_reminders.py` before this
+fix. A held registration fine today under the normal 60-day window, but due to lapse before an open
+tender's closing date, was never proactively flagged - only reactively, same gap shape as the
+original Finding 132.
+
+**Scoped deliberately, not forced to cover every holder type in one pass**: `held_registrations` rows
+can be held by a company, a person, or a company principal (director). This fix covers COMPANY-held
+rows only, mirroring `find_documents_lapsing_before_closing()`'s own company-wide scope - the exact
+scope Finding 132 itself started with before Finding 139 extended it to persons in a later, dedicated
+pass. A PERSON-held row (e.g. a key person's own PSIRA) would need the identical
+`tender_pack_assignments.confirmed_person_id` scoping `find_person_credentials_lapsing_before_closing()`
+uses - a real, matching gap, deliberately left open rather than guessed at. A PRINCIPAL-held row
+(a director's own PSIRA) has no "confirmed onto a tender" concept at all - principals aren't assigned
+to tender positions the way key people are - so it stays on this module's own reactive coverage
+(`app/lib/tenderCompliance.ts`) only. `property_documents`' own equivalent gap is also left open,
+named as a follow-up, not attempted in this same pass.
+
+**Fix:** new function `find_held_registrations_lapsing_before_closing(url, key, seen, today,
+lead_days)` in `registration_reminders.py`, mirroring `find_documents_lapsing_before_closing()`'s
+exact SAST closing-day math and "already inside normal window"/"already expired" guards, scoped to
+rows with no `person_id`/`principal_id` set, crossed against the company's own open `tender_packs`.
+Wired into `watch_deadlines.main()`'s `--out` report AND `daily_digest.py`'s live mode in the SAME
+pass that built it (unlike Finding 132's own `documents_before_closing`, which went 2 days without the
+live-digest wiring the first time around - the exact mistake this fix was careful not to repeat).
+
+**Verified with a real adversarial scenario.** New checks in `test_principals_registrations.py`'s
+`part1()`: a company-held SETA accreditation at 90 days (outside the 60-day window) against a company
+tender_pack closing at 100 days - reported, naming the real tender; two SIBLING rows with the
+IDENTICAL expiring shape but person-held/director-held - confirmed NOT reported by this company-only
+check, proving the scope boundary is real, not accidental; a second same-day run reports nothing new
+(seen-store de-dup). Needed one small, additive fixture-infrastructure fix along the way: the shared
+`test_watch_deadlines_urgency.fake_request()` helper (reused by `test_principals_registrations.py`)
+had no `is.null` filter support at all (only `not.is.null`) - added, since the new function's own
+`person_id=is.null&principal_id=is.null` query needed it; purely additive, no existing test's
+behaviour changed.
+
+**Verified red-then-green.** Reverted all three touched production files via `git apply -R`, re-ran -
+failed exactly as predicted, `AttributeError: module 'registration_reminders' has no attribute
+'find_held_registrations_lapsing_before_closing'`; reapplied - `0 failure(s)`. `py_compile` clean on
+all five touched files. Regression: `test_watch_deadlines_urgency.py`, `test_watch_conditional_registrations.py`,
+`engine/notify/test_digest_live.py`, `test_send_digest_emails.py`, `test_send_pack_ready_email.py` -
+all `0 failure(s)`.
+
+**Regression:** `engine/compliance/registration_reminders.py` (1 new function, ~100 lines including
+docstring/comments, `import datetime` added); `engine/compliance/watch_deadlines.py` (`main()`, 1 new
+call + print block + report key); `engine/notify/daily_digest.py` (`document_expiry_signals()`, 1 new
+OR-term); `engine/compliance/test_watch_deadlines_urgency.py` (1 new `is.null` filter branch in the
+shared fake); `engine/compliance/test_principals_registrations.py` (3 new fixture rows, 1 new
+`tender_packs`/`tenders` pair, 5 new checks). No change to `find_due_registrations()`,
+`find_due_property_documents()`, or any other existing reminder path.

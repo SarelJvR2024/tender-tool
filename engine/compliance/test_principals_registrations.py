@@ -81,6 +81,20 @@ def part1():
              "registration_number": "3456789", "category": "Grade A", "expiry_date": D(45)},
             {"id": "h5", "company_id": "co1", "registration_type_id": "rt-psira", "person_id": None, "principal_id": None,
              "registration_number": "2999111", "category": None, "expiry_date": None},
+            # company-held, outside the normal 60-day window (90 days), but the
+            # company has an open tender_pack closing on day 100 - the "lapses
+            # before closing" shape find_held_registrations_lapsing_before_
+            # closing() exists for.
+            {"id": "h6", "company_id": "co1", "registration_type_id": "rt-seta", "person_id": None, "principal_id": None,
+             "registration_number": "MICT-ACC-9900", "category": None, "expiry_date": D(90)},
+            # person- and director-held rows with the IDENTICAL "lapses before
+            # closing" shape as h6 - must NOT be reported by this company-held-
+            # only check (see its own docstring: person/principal scoping is a
+            # separate, not-yet-implemented gap).
+            {"id": "h7", "company_id": "co1", "registration_type_id": "rt-hpcsa", "person_id": "p1", "principal_id": None,
+             "registration_number": "MP 9900000", "category": None, "expiry_date": D(90)},
+            {"id": "h8", "company_id": "co1", "registration_type_id": "rt-psira", "person_id": None, "principal_id": "dir1",
+             "registration_number": "9900111", "category": None, "expiry_date": D(90)},
         ],
         "company_properties": [{"id": "prop1", "company_id": "co1", "label": "Joubertina Main Rd offices"}],
         "property_documents": [
@@ -89,6 +103,9 @@ def part1():
             {"id": "pd2", "company_id": "co1", "property_id": "prop1", "document_type": "title_deed",
              "reference_number": "T1234/2011", "valid_until": None},
         ],
+        "tender_packs": [{"company_id": "co1", "tender_id": "t1"}],
+        "tenders": [{"id": "t1", "contract_no": "RT-900-2026", "title": "Closes in 100 days", "status": "open",
+                    "closing_date": D(100) + "T10:00:00+00:00"}],
     })
     wd.supabase_request = fixture.fake_request
     seen = {}
@@ -116,6 +133,22 @@ def part1():
     later = rr.find_due_registrations("u", "k", seen, TODAY + datetime.timedelta(days=21), wd.DEFAULT_DOC_LEAD_DAYS)
     check(any(d["held_registration_id"] == "h1" and d["status"] == "expired" for d in later),
           "21 days later the SETA accreditation is reported again as expired (escalation)")
+
+    # Finding 179 (2026-11-07): the identical "lapses before closing" gap
+    # (Finding 132/139), extended to the registrations catalog for its
+    # company-held rows - h6 is outside the normal 60-day window (90 days)
+    # but the company's own open tender_pack (t1) closes on day 100, so it's
+    # already useless for that tender. h7/h8 share the identical shape but
+    # are person-/director-held - must NOT be reported by this company-only
+    # check (see the function's own docstring for why).
+    before_closing = rr.find_held_registrations_lapsing_before_closing("u", "k", seen, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    by_bc = {d["held_registration_id"]: d for d in before_closing}
+    check(by_bc.get("h6", {}).get("tender_label") == "RT-900-2026" and by_bc["h6"]["status"] == "lapses_before_closing",
+          f"company-held SETA accreditation (90 days) lapses before the open tender (100 days) closes, got {before_closing}")
+    check("h7" not in by_bc, "person-held registration with the identical shape is NOT reported by the company-only check")
+    check("h8" not in by_bc, "director-held registration with the identical shape is NOT reported by the company-only check")
+    again_bc = rr.find_held_registrations_lapsing_before_closing("u", "k", seen, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    check(not again_bc, "a second run the same day reports nothing new (seen-store de-dup)")
 
     import daily_digest  # noqa: E402
     signals = {"new_tenders": [], "document_expiry": due + props, "tender_tasks": [], "readiness_changes": [], "submission_due": []}

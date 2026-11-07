@@ -19,6 +19,9 @@ number or any other personal field of a principal (POPIA; 0050 header).
 """
 
 
+import datetime
+
+
 def _wd():
     import watch_deadlines  # lazy: watch_deadlines imports this module
     return watch_deadlines
@@ -84,6 +87,114 @@ def find_due_registrations(url, key, seen, today, lead_days):
         elif r.get("principal_id"):
             item.update(principal_id=r["principal_id"], person_name=holder_name)
         due.append(item)
+    return due
+
+
+def find_held_registrations_lapsing_before_closing(url, key, seen, today, lead_days):
+    """Finding 132/139's own "lapses before closing" gap (watch_deadlines.
+    find_documents_lapsing_before_closing()/find_person_credentials_lapsing_
+    before_closing()), extended to the registrations catalog (0050): a held
+    registration that is fine today - outside the normal reminder window -
+    but will have lapsed by the closing date of an open tender the company
+    has a pack for. Same comparison find_documents_lapsing_before_closing()
+    already makes for the fixed TRACKED_EXPIRY_FIELDS columns, generalised
+    to the catalog the same way find_due_registrations() generalises
+    find_due_documents().
+
+    Deliberately scoped to COMPANY-held rows only (no person_id/principal_id
+    set) - mirrors find_documents_lapsing_before_closing()'s own
+    company-wide scope, not find_person_credentials_lapsing_before_closing()'s
+    per-assignment one. A PERSON-held registration (person_id set, e.g. a
+    key person's own PSIRA) would need the identical "confirmed onto THIS
+    tender" scoping that function uses
+    (tender_pack_assignments.confirmed_person_id) - a real, matching gap,
+    deliberately NOT implemented here rather than guessed at (same honest,
+    scoped-not-forced discipline Finding 132 itself was first built with,
+    before Finding 139 extended it to persons in its own later, dedicated
+    pass). A PRINCIPAL-held registration (principal_id set, e.g. a
+    director's own PSIRA) has no "confirmed onto a tender" concept at all -
+    principals aren't assigned to tender positions the way key people are -
+    so it stays on this module's own reactive coverage
+    (app/lib/tenderCompliance.ts) only, same "ask don't guess" rule."""
+    wd = _wd()
+    rows = wd.supabase_request(
+        url, key,
+        "held_registrations?select=id,company_id,registration_type_id,expiry_date"
+        "&expiry_date=not.is.null&person_id=is.null&principal_id=is.null")
+    if not rows:
+        return []
+    type_ids = {r["registration_type_id"] for r in rows}
+    types = {}
+    if type_ids:
+        for t in wd.supabase_request(url, key, f"registration_types?select=id,slug,label&id=in.({','.join(sorted(type_ids))})"):
+            types[t["id"]] = t
+    companies = _names(url, key, "companies", "legal_name", {r["company_id"] for r in rows})
+    packs = wd.supabase_request(url, key, "tender_packs?select=company_id,tender_id")
+    tender_ids = sorted({p["tender_id"] for p in packs})
+    tenders = {}
+    if tender_ids:
+        trows = wd.supabase_request(url, key, f"tenders?select=id,contract_no,title,closing_date,status&id=in.({','.join(tender_ids)})")
+        tenders = {t["id"]: t for t in trows}
+    rows_by_company = {}
+    for r in rows:
+        rows_by_company.setdefault(r["company_id"], []).append(r)
+
+    due = []
+    for p in packs:
+        company_rows = rows_by_company.get(p["company_id"])
+        if not company_rows:
+            continue
+        tender = tenders.get(p["tender_id"])
+        if not tender or tender.get("status") != "open" or not tender.get("closing_date"):
+            continue
+        # Same SAST closing-day normalisation as
+        # find_documents_lapsing_before_closing() - see that function's own
+        # comment for why a naive +2h shift on an already-SAST-tagged offset
+        # double-counts the offset (Finding 71, 2026-10-24).
+        try:
+            closing_ts = datetime.datetime.fromisoformat(str(tender["closing_date"]).replace("Z", "+00:00"))
+        except ValueError:
+            wd.system_alerts.record(
+                "deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') is not a valid "
+                "date - its held-registration lapsing-before-closing check was skipped.", "warning",
+                context={"tender_id": tender["id"], "closing_date": tender["closing_date"]})
+            continue
+        closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
+                       if closing_ts.tzinfo else closing_ts.date())
+        to_closing = (closing_day - today).days
+        if to_closing < 0:
+            continue
+        for r in company_rows:
+            expiry = r["expiry_date"]
+            left = wd.days_until(expiry, today)  # None (alert recorded) for a malformed date
+            if left is None:
+                continue
+            exp_day = today + datetime.timedelta(days=left)
+            if exp_day >= closing_day or exp_day < today:
+                continue  # covers the closing date / already expired (reported by find_due_registrations)
+            if left <= lead_days:
+                continue  # already inside the normal window - find_due_registrations reports this one
+            seen_key = f"reg_before_closing::{r['id']}::{expiry}::{p['tender_id']}"
+            if seen_key in seen:
+                continue
+            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "held_registration_before_closing",
+                              "company_id": r["company_id"]}
+            t = types.get(r["registration_type_id"], {})
+            due.append({
+                "type": "held_registration_before_closing",
+                "company_id": r["company_id"],
+                "company_name": companies.get(r["company_id"]),
+                "held_registration_id": r["id"],
+                "field": f"held_registrations:{t.get('slug')}",
+                "label": t.get("label") or "Registration",
+                "expiry_date": expiry,
+                "days_left": (exp_day - today).days,
+                "tender_id": p["tender_id"],
+                "tender_label": tender.get("contract_no") or tender.get("title") or p["tender_id"],
+                "closing_date": closing_day.isoformat(),
+                "days_to_closing": to_closing,
+                "status": "lapses_before_closing",
+            })
     return due
 
 
