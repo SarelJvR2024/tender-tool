@@ -2,46 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import { StatCard } from "@/components/tt/stat-card";
-import { computeBidReadiness } from "@/lib/readiness";
-import { daysUntil } from "@/lib/dates";
+import { buildCustomerRow, type CompanyOverviewRow } from "@/lib/customerRowData";
 import CustomerRow, { type Customer, type CustomerMember } from "./CustomerRow";
 import { impersonationConfigured } from "@/lib/impersonation";
 
 // Reads per-request session/DB data (RPCs gated by is_platform_admin, 0064) -
 // same escape hatch as ../page.tsx.
 export const instant = false;
-
-type CompanyOverviewRow = {
-  id: string;
-  legal_name: string;
-  csd_trading_name: string | null;
-  csd_supplier_number: string | null;
-  is_test_company: boolean;
-  created_at: string;
-  member_count: number;
-  people_count: number;
-  tenders_pursued_count: number;
-  active_tenders_count: number;
-  last_activity_at: string | null;
-  plan_tier: string | null;
-  subscription_status: string | null;
-  trial_ends_at: string | null;
-};
-
-type ReadinessDataRow = {
-  legal_name: string | null;
-  csd_supplier_number: string | null;
-  sars_tcs_pin: string | null;
-  sars_tcs_pin_expiry: string | null;
-  bee_level: number | null;
-  bee_proof_expiry: string | null;
-  cidb_grading: string | null;
-  cidb_expiry: string | null;
-  bank_confirmation_letter_valid_until: string | null;
-  principal_count: number;
-  people_with_cv_count: number;
-  experience_project_count: number;
-};
 
 // Super admin portal, part 1 (0064): every company using the tool, who's on
 // it, and how much they've actually done with it - the thing an "Admin"
@@ -68,29 +35,9 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
     Promise.all(rows.map((c) => supabase.rpc("platform_admin_company_readiness_data", { p_company_id: c.id }))),
   ]);
 
-  const customers: Customer[] = rows.map((c, i) => {
-    const members = (memberLists[i].data ?? []) as CustomerMember[];
-    const r = (readinessRows[i].data?.[0] ?? null) as ReadinessDataRow | null;
-    const readiness = r
-      ? computeBidReadiness({
-          legalName: r.legal_name,
-          csdSupplierNumber: r.csd_supplier_number,
-          taxPin: r.sars_tcs_pin,
-          taxPinExpiry: r.sars_tcs_pin_expiry,
-          beeLevel: r.bee_level,
-          beeProofExpiry: r.bee_proof_expiry,
-          cidbGrading: r.cidb_grading,
-          cidbExpiry: r.cidb_expiry,
-          bankConfirmationValidUntil: r.bank_confirmation_letter_valid_until,
-          principalCount: r.principal_count,
-          peopleWithCvCount: r.people_with_cv_count,
-          experienceProjectCount: r.experience_project_count,
-        })
-      : null;
-    const primaryContact = members.find((m) => m.role === "owner")?.email ?? members[0]?.email ?? null;
-    const trialDaysRemaining = c.subscription_status === "trialing" ? daysUntil(c.trial_ends_at) : null;
-    return { ...c, members, readinessPercent: readiness?.percent ?? null, readinessCriteria: readiness?.criteria ?? null, primaryContact, trialDaysRemaining };
-  });
+  const customers: Customer[] = rows.map((c, i) =>
+    buildCustomerRow(c, memberLists[i] as { data: CustomerMember[] | null; error: unknown }, readinessRows[i]),
+  );
 
   const testCount = customers.filter((c) => c.is_test_company).length;
   const trialCount = customers.filter((c) => !c.is_test_company && c.subscription_status === "trialing").length;

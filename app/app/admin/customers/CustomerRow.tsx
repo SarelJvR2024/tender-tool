@@ -24,6 +24,8 @@ export type Customer = {
   subscription_status: string | null;
   trial_ends_at: string | null;
   members: CustomerMember[];
+  /** True when the `platform_admin_company_members` RPC itself failed - `members` is `[]` either way, but this says whether that's a real zero or an unknown. */
+  membersError: boolean;
   /** null when readiness couldn't be computed (no readiness data row, e.g. a company somehow missing). */
   readinessPercent: number | null;
   /** Full per-criterion breakdown behind readinessPercent - same null case. */
@@ -139,7 +141,7 @@ export default function CustomerRow({ customer, defaultOpen = false, impersonati
           <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>Last activity {customer.last_activity_at ? (formatDateTime(customer.last_activity_at) ?? "—") : "none recorded"}</span>
             <span>CSD supplier number: {customer.csd_supplier_number ?? "not on file"}</span>
-            <span>Primary contact: {customer.primaryContact ?? "no members"}</span>
+            <span>Primary contact: {customer.membersError ? "couldn't load" : (customer.primaryContact ?? "no members")}</span>
             <span>{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"} total ({customer.active_tenders_count} active)</span>
           </div>
 
@@ -165,7 +167,10 @@ export default function CustomerRow({ customer, defaultOpen = false, impersonati
           )}
 
           <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
-            {customer.members.length === 0 && <div className="px-3.5 py-2.5 text-xs text-muted-foreground">No members.</div>}
+            {customer.membersError && (
+              <div className="px-3.5 py-2.5 text-xs text-destructive">Couldn&apos;t load members - try refreshing. If it keeps happening, let us know.</div>
+            )}
+            {!customer.membersError && customer.members.length === 0 && <div className="px-3.5 py-2.5 text-xs text-muted-foreground">No members.</div>}
             {customer.members.map((m) => (
               <div key={m.user_id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border px-3.5 py-2 text-xs first:border-t-0">
                 <span className="min-w-0 flex-1 truncate text-foreground">{m.email}</span>
