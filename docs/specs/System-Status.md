@@ -1,5 +1,147 @@
 # System Status
 
+## This pass (2026-11-07p, standing solution-architect review): took the just-closed node/pack-ready-email gap (2026-11-07o, PR #181, Finding 152) as a hypothesis that there could be siblings, and ran the same structural audit against every OTHER subprocess/cross-language call reachable from the real worker image - genuinely exhaustive this time (all 6 registered bridges traced through their full import chains, not just a top-level grep), and came up clean: no second instance of "used-but-not-installed" or "needed-but-excluded-by-`.dockerignore`" anywhere else in `engine/`. Two adjacent angles checked opportunistically while tracing the same subprocess call sites, both also clean. One competitor-feature claim (CIDB "grade check") chased end-to-end and found to be a deliberate, already-documented disclosed design choice, not a silent bug. No code changed this pass - a genuine negative result, not a forced one.
+
+Oriented from `36936cd` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none touched this pass.
+
+**Why this angle.** The standing directive called the pack-ready-email node/`.dockerignore` gap
+(2026-11-07o) "probably the single highest-value angle available right now" and asked explicitly
+to check for siblings: every `subprocess.run`/`Popen` call in `engine/`, cross-checked against
+(a) whether the binary/interpreter it invokes is actually installed in `engine/worker/Dockerfile`,
+and (b) whether the file/`cwd` it references is actually copied into the image, not excluded by
+`.dockerignore`. That bug's own shape (an apt-package/import-chain mismatch invisible from every
+full-checkout test environment, only visible by reading the Dockerfile's real `COPY` lines) is
+exactly the kind of thing that could recur anywhere else a bridge shells out.
+
+**Method - traced every registered bridge's full import chain, not just the top-level grep.**
+`engine/worker/run_bridges.py`'s own `BRIDGES` dict names the only six scripts the built image's
+`CMD` (`run_bridges.py --loop`) actually drives: `cv` (`process_cv_jobs.py`), `cv_extract`
+(`extract_cv_fields.py`), `pack` (`process_pack_jobs.py`), `general` (`process_general_jobs.py`),
+`onboarding` (`process_onboarding_jobs.py`), `narrative` (`process_narrative_jobs.py`). Grepped all
+of `engine/` (non-test files) for `subprocess\.(run|Popen|check_output|check_call|call)\(` first
+(26 files total, most of them test files or dev-only scripts), then read each real hit and walked
+its import chain back to one of the six bridges above, rather than trusting a file-level grep
+alone - a sibling bug could just as easily hide one import deeper (as `send_pack_ready_email.py`
+itself does: neither `process_pack_jobs.py` nor `process_general_jobs.py` shells out to `node`
+directly, they import a function that does).
+
+**What every subprocess call actually resolves to, confirmed against the Dockerfile's real `apt-get`
+line and `COPY` lines:**
+- `tesseract`, `pdftoppm`, `pdfimages`, `pdfinfo`, `pdftotext` (`engine/ocr/scan_ocr.py`,
+  `engine/cv/extract_cv_fields.py`, `engine/general/fill_flat_pdf.py`, `engine/general/requirements.py`,
+  `engine/discovery/assess_tender.py`, `engine/discovery/lephalale.py`,
+  `engine/discovery/key_person_minimums.py`) - all `poppler-utils`/`tesseract-ocr*`, all already
+  apt-installed. `scan_ocr.py` is reached from both the `onboarding` bridge (via
+  `classify_documents.py`) and the `general` bridge (via `fill_flat_pdf.py`/`requirements.py`).
+- `soffice` (`engine/cv/generate_cv.py` - `cv` bridge; `engine/general/requirements.py` - `general`
+  bridge; `engine/print_reports.py`, started via its own `Office()` class and reused by
+  `engine/print_financial.py` rather than starting a second instance - both reached from the `pack`
+  bridge via `assemble_pack.py`) - `libreoffice-writer-nogui`/`libreoffice-calc-nogui`, already
+  apt-installed, plus `python3-uno` for the two modules that drive it over the UNO bridge instead of
+  `--convert-to`.
+- `sys.executable` (Python itself - `engine/worker/run_bridges.py` spawning each bridge script,
+  `engine/discovery/run_discovery.py` spawning `fingerprint.py`) - trivially present, and
+  `fingerprint.py` ships inside the same `COPY engine engine` line as everything else.
+- `node` (`engine/notify/send_pack_ready_email.py`, reached from both the `pack` and `general`
+  bridges) - **the one real gap, already found and already fixed in the still-open PR #181**;
+  re-confirmed here only to establish it's the single hit, not re-litigated.
+- `psql` (`engine/pack/bridge_selftest.py`) - re-confirmed, not re-derived, as the prior pass
+  (2026-11-07n) already established: no importer anywhere in `process_pack_jobs.py`'s or
+  `run_bridges.py`'s own load path, dev/CI-only, never runs inside the built image, needs no
+  Dockerfile entry.
+- `soffice` (`engine/write_admin_harness_results.py`) - checked fresh this pass, not previously
+  named: **not one of the six registered bridges**, and grepped against every `.github/workflows/*.yml`
+  file - zero hits anywhere. It's a standalone admin-console backend a developer runs by hand from a
+  full checkout (its own module docstring: "so Sarel can see harness results... at /admin instead of
+  only in a terminal"); it never runs inside the built worker image or in CI, so the Dockerfile's
+  `COPY`/apt-package set is simply not relevant to it. Not a gap.
+- `pdftotext` (`engine/seed_tender_evaluation_rules.py`) - a one-off seeding CLI (`python3
+  seed_tender_evaluation_rules.py ...`), not imported by any of the six bridges or any workflow -
+  same category as the above, not a gap.
+
+**Clean result, not forced.** Every subprocess call the real worker image's `CMD` can actually reach
+resolves to a binary the Dockerfile installs and a file the Dockerfile's `COPY` lines (post-#181)
+put into the image. No second "used-but-not-installed" or "needed-but-excluded" instance found.
+
+**Two adjacent angles, checked opportunistically while already in this code, both clean - noted
+honestly rather than silently skipped:**
+1. `engine/discovery/assess_tender.py`'s own `pdftotext` call (used by `watch_new_tenders.py`, the
+   actual discovery pipeline) runs on a GitHub Actions `ubuntu-24.04` runner
+   (`.github/workflows/daily-discovery.yml`), not inside the Docker worker image at all - a
+   different host, so out of this pass's own Dockerfile-scoped angle, but worth a real check given
+   the same bug shape. `daily-discovery.yml` installs no `poppler-utils` of its own. Rather than
+   assume the GH-hosted runner image ships it (true, but an assumption), checked the actual run
+   history: `gh api repos/sareljvr2024/tender-tool/actions/workflows/daily-discovery.yml/runs` -
+   the last 5 scheduled runs (2026-11-02 through -06) all `"conclusion":"success"`, i.e. this exact
+   code path (which would hard-fail with `FileNotFoundError`/non-zero exit if `pdftotext` were
+   missing, the same failure shape as the node bug) has been working in production every single day
+   this week. Genuinely confirmed working, not assumed.
+2. `engine/general/build_general_pack.py` has an `import subprocess` at module scope with **zero**
+   actual `subprocess.*` calls anywhere in the file (confirmed by grepping the bare word
+   `subprocess` in the file, not just the call pattern) - a dead/unused import, not a missing-binary
+   risk in either direction. Not worth its own finding (lint-shaped, not a behavior bug;
+   `eslint`/this review's own Python equivalent has never gated unused imports in `engine/`) - noted
+   here rather than silently dropped, in case a future pass wants a one-line cleanup.
+
+**Angle (a) - one Competitor-Feature-Deep-Dive claim chased end-to-end, found to be a disclosed
+design choice, not a bug.** The "South African tender compliance coverage" table's CIDB row says
+the product feature is "Grade check and expiry." The expiry half is real and wired broadly
+(`companies.cidb_grading`/`cidb_expiry`, vault display, readiness scoring). The "grade check" half -
+automatically comparing the company's held CIDB grade against what a specific tender requires - is
+genuinely NOT automatic: `app/app/tenders/[id]/submission-plan-logic.ts`'s own `cidbGradingStep()`
+surfaces the company's grade next to the tender's required grade and tells the user outright,
+in its own UI copy, "confirm this actually meets or exceeds {grading} (Tender Tool doesn't compare
+grading levels for you)." This is not a silently-false-safe state (the dominant bug class this
+review tracks) - it's a disclosed, honest limitation the product tells the user about every time,
+and it's already independently documented in `app/AGENTS.md` (line ~160: "CIDB grade comparison
+exists for general tenders, not SANRAL... SANRAL tenders get no CIDB row at all... rather than a
+wrong one") from an earlier session's own correction - not a new finding, re-confirmed rather than
+re-derived. Separately noticed `app/lib/cidbGrading.ts` (`requiredGradeForValue()`/
+`gradeSufficientForValue()`) already contains the exact comparison function that could close this
+gap, built for a disconnected "/tools/cidb-grade" lead-magnet calculator and, per its own header
+comment, "scattered inline... with no standalone grade-vs-value lookup anywhere" until that tool -
+wiring it into `cidbGradingStep()` would need the tender's own contract value at that point in the
+flow (not confirmed present or absent here) and is a real product decision about whether to
+automate a check the product currently deliberately leaves to the human, not an engineering call
+this pass makes unilaterally. Left as an observation, not a finding or a fix.
+
+**No code changed this pass.** No QA finding logged (Finding 153 not used) - this is a genuinely
+negative result on the pass's own highest-priority angle, confirmed by actually tracing every
+bridge's import chain rather than trusting the top-level grep, plus two adjacent checks and one
+competitor-feature claim, all clean.
+
+**Backlog status.** No change to any standing item. `start_payfast_checkout()`'s revenue-integrity
+gap (2026-11-07e, options A/B/C) remains untouched, per the standing guardrail. The impersonation
+session-refresh gap in `proxy.ts`, `held_registrations`-vs-CV display format, and PR
+#176/#178/#179/#180/#181 (all awaiting Sarel's own merge decision) remain exactly as described - not
+touched. PR #164/#165 (stale drafts) not touched. Migrations `0117`-`0120` still on `main`, still not
+applied to production - untouched this pass, still genuinely unverifiable from inside this
+environment. **New backlog note:** the Dockerfile/subprocess-sibling angle should now be considered
+exhausted for the CURRENT set of bridges and subprocess call sites - a future pass re-running it
+should expect the same clean result unless a new bridge or a new `subprocess.run`/`Popen` call has
+landed since this entry. Whether to wire `cidbGrading.ts`'s own `gradeSufficientForValue()` into
+`cidbGradingStep()` (automating a check the product currently discloses as manual) is a real,
+undecided product question, named here for the first time - not urgent, not a silent-failure bug,
+Sarel's own call whenever it comes up.
+
+To verify independently: `grep -rn "subprocess\.\(run\|Popen\|check_output\|check_call\|call\)(" engine
+--include="*.py"` excluding test files, then for each hit trace its importer chain up to
+`engine/worker/run_bridges.py`'s own `BRIDGES` dict and confirm the invoked binary appears in
+`engine/worker/Dockerfile`'s `apt-get install` line (or is `sys.executable`/already-installed via
+`python3-uno`). Confirm `engine/pack/bridge_selftest.py` and `engine/write_admin_harness_results.py`
+are reached by neither `run_bridges.py` nor any `.github/workflows/*.yml` file. Run `gh api
+repos/sareljvr2024/tender-tool/actions/workflows/daily-discovery.yml/runs --jq
+'.workflow_runs[:5]|.[]|.conclusion'` and confirm recent runs are all `"success"`. Read
+`app/app/tenders/[id]/submission-plan-logic.ts`'s `cidbGradingStep()` and confirm its own note string
+says Tender Tool does not compare grading levels, then read `app/AGENTS.md` around line 160 for the
+prior session's own documentation of the same fact.
+
+---
+
 ## This pass (2026-11-07o, standing solution-architect review): read `engine/worker/Dockerfile` end to end and cross-checked every apt package/shelled-out tool against what `engine/` actually calls - found the one gap that matters: `send_pack_ready_email.py`'s render step shells out to `node`, and the built worker image has never had a `node` binary, nor the `app/` directory the render script lives in (`.dockerignore` excluded it wholesale). This is the direct, structural answer to a backlog item several prior passes (2026-11-05 through -07i) carried forward unresolved ("whether `send_pack_ready_email.py`'s own fix fires clean in its real always-on-worker environment... no visibility into that host's logs from here") - the "Bid Pack Compilation Complete" email has never actually sent in production, for any company, since the feature shipped 2026-10-27. Fixed; opened as **PR #181** (`fix/worker-pack-ready-email-node`), not pushed directly, since it changes what the production worker image installs/copies and a real `docker build` is the only thing that fully confirms it - got exactly that confirmation by manually dispatching this repo's own `bridge-worker-ci.yml` against the fix branch on GitHub Actions, where it ran green end to end (all 3 jobs, including the full engine regression suite).
 
 Oriented from `c2480f3` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
