@@ -1,4 +1,99 @@
-# System Status
+## This pass (2026-11-07xxxix, standing solution-architect review, background worker): Finding 201 - `document-scan/actions.ts`'s `retryOnboardingUpload()` has never actually requeued anything in production, for ANY user, on ANY click (not just under the narrower double-click race the immediately preceding pass, below, concluded) - `onboarding_uploads`' own RLS (0063) grants members SELECT/INSERT only, never UPDATE, so the plain RLS-bound `.update()` this action ran matched zero rows every single time while unconditionally reporting "Queued again" - fixed via a new `security definer` RPC (migration `0124_retry_onboarding_upload_checked.sql`) and a PR opened against `main`, per the RLS-change guardrail; not merged
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `75d0585`
+(the immediately preceding pass's own write-up commit, Finding 199's two leads closed out as
+genuine negatives). Re-checked all 10 open PRs via `gh api repos/sareljvr2024/tender-tool/pulls?
+state=open` at the start: same set as every preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/
+`#179`/`#180`/`#181`/`#182`/`#183`) - none touched, amended, or merged by this pass. Per the
+binding guardrails, `#164`/`#165`/`#183` were not touched (PR #183's branch was read, read-only,
+via `git fetch origin fix/onboarding-document-scan-confirm-race` and `git show FETCH_HEAD:<path>`,
+purely as the reference pattern this task's own brief pointed at for the RPC shape - no write, no
+checkout, no local branch tracking it, nothing pushed to it), and none of `#176`-`#183` was merged.
+`git fetch origin main` again immediately before pushing this pass's own branch found no sibling
+commit had landed in between. Grepped `Finding [0-9]+` in both docs before picking a number -
+`200` (the sibling QA/robustness track's `parse_rand()` fix) was the highest recorded; this pass's
+own finding is `201`.
+
+**This pass's own task: a single, specific, pre-identified bug handed down from the coordinating
+session, not a fresh sibling-comparison sweep** - `document-scan/actions.ts`'s
+`retryOnboardingUpload()` (around line 486), the exact lead the immediately preceding pass
+(2026-11-07xxxviii, directly below) left open as "deliberately not traced to a conclusion... for
+scope reasons" before concluding (wrongly, for this function) that it was a genuine negative.
+
+**Why the preceding pass's own conclusion for this function doesn't hold.** That pass traced only
+the WORKER side - `engine/onboarding/process_onboarding_jobs.py`'s own stale-row reclaim logic
+never touches a `classification_failed` row - and reasoned that the only way this function's
+3-`.eq()` update could match zero rows was two retries racing each other (a double-click, two
+tabs), in which case the document genuinely IS being retried by the other call. That reasoning
+implicitly assumes the update can succeed for at least one of the two racing callers. It never
+checked whether the signed-in user's own RLS-bound client can match the row AT ALL, for anyone,
+under any circumstance. It cannot: `onboarding_uploads`' own RLS (migration `0063_onboarding_
+document_scan.sql`, ~line 146) grants `authenticated` members `SELECT` and `INSERT` only, with its
+own comment saying so outright - "No member update/delete: status is worker-owned... The worker
+writes with the service role (bypasses RLS)". Grepping every migration for `onboarding_uploads`
+confirms the only other hit is `0077`'s RESTRICTIVE "employee has no access" policy, which only
+narrows, never grants. There is no PERMISSIVE UPDATE policy for `authenticated` on this table
+anywhere - the double-click framing was moot, because the SAME-signed-in-user, SAME-request,
+no-concurrency case already fails every time.
+
+**Reproduced directly in a disposable scratch database** (never this app's live DB; dropped and the
+Postgres service stopped immediately after use, same standing guardrail every prior scratch-DB
+finding in this doc follows): 114 migrations replayed via `engine/security/replay_schema.sh`
+(including this pass's own new `0124` migration, confirming it replays clean alongside the other
+113), a real company, a real owner-role member, a real employee-role member, a real non-member
+account, and two `onboarding_uploads` rows seeded (one `classification_failed`, one `classified`).
+**RED**: `set role authenticated; select set_config('test.uid', '<owner uuid>', false);` then the
+EXACT `UPDATE ... WHERE id = ... AND company_id = ... AND status = 'classification_failed'`
+statement from the pre-fix code, verbatim - `UPDATE 0`, no error, the row's `status`/
+`classification_error` left completely unchanged. **GREEN**: same session, same owner, calling
+`select retry_onboarding_upload_checked('<upload id>');` instead - the row genuinely flips to
+`classification_requested` with `classification_error`/`classification_claimed_at`/
+`classification_completed_at` all cleared to `null`. Also confirmed, each as its own case against
+the same scratch database: an employee-role member calling the RPC on a `classification_failed`
+row gets `ERROR: That document wasn't found.` with the row left completely untouched; a non-member
+account gets the identical refusal; and the owner calling the RPC on the OTHER row (status
+`classified`, never `classification_failed`) gets `ERROR: This document isn't waiting on a
+retry.` - a friendly, specific refusal, not a silent no-op and not the generic "not found" message.
+
+**Fix**: migration `0124_retry_onboarding_upload_checked.sql` adds
+`retry_onboarding_upload_checked(p_upload_id uuid)` - `security definer`, `set search_path =
+public, pg_temp`, following this codebase's own established pattern for exactly this shape (0121's
+`set_opportunity_tag()`, 0122's `redeem_company_invite()`, 0123's CV-extraction-apply functions,
+and PR #183's own not-yet-merged `apply_onboarding_*_checked()` siblings, read read-only off
+`fix/onboarding-document-scan-confirm-race` purely as a pattern reference, never touched or built
+on as a dependency). It locks the `onboarding_uploads` row (`for update`), re-checks
+`is_company_member(company_id)` and `not is_employee_in_company(company_id)` explicitly (a
+`security definer` function bypasses RLS entirely rather than inheriting it, so the access rule has
+to be reproduced, not assumed), re-checks `status = 'classification_failed'` under that lock and
+raises a friendly exception if any check fails, then writes. `retryOnboardingUpload()` in
+`actions.ts` now calls `supabase.rpc("retry_onboarding_upload_checked", { p_upload_id: uploadId })`
+and fails closed (the same existing user-facing message) if the RPC raises.
+
+**TypeScript test coverage**: `app/app/company/document-scan/actions.spec.ts` (existing file, the
+same convention PR #183's own branch used for its 4 RPC-based confirm functions, read for the
+mocking pattern only) extended with an `rpc` mock on the shared `makeSupabase()` harness and 2 new
+tests for `retryOnboardingUpload()` - one asserting the redirect carries `?error=` (not
+`?saved=retrying`) and never touches `?saved=retrying` when the RPC raises, one asserting
+`?saved=retrying` and the right `p_upload_id` argument when it succeeds. `npx vitest run
+app/company/document-scan/actions.spec.ts`: **12/12 pass** (10 pre-existing + 2 new).
+
+**Full verification suite, all run myself, real exit codes.** `npm run typecheck` (0 errors).
+`npx eslint .` (0 errors, same 3 pre-existing warnings in unrelated files, unchanged). `npx vitest
+run` (**531/531, 70 files** - up from the 529/70 baseline by exactly this pass's 2 new tests). The
+node `*.test.ts` loop (plain `node <file>`, no flags, looped over all 27 files individually - **27/27
+pass**, no `.test.ts` file touched this pass). `npx next build` (run directly against `main`'s own
+working tree, no worktree needed since no branch checkout was involved until after verification -
+`Compiled successfully`, exit 0, `/company/document-scan` present in the route table unchanged).
+
+**Opened a PR, did not merge it** - per the standing guardrail that anything touching RLS goes
+through a PR and stops there for Sarel's review. See `QA-Edge-Case-Findings.md` Finding 201 for the
+PR URL and the full write-up.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left,
+untouched, per the standing guardrails. All 10 PRs remain open and unmerged, including this pass's
+own new one - re-confirmed via the GitHub REST API immediately before and after opening it. PR
+#183's branch was read but not written to, checked out as a local branch, or merged.
 
 ## This pass (2026-11-07xxxviii, standing solution-architect review, background worker): both of Finding 199's own named leads resolved as genuine negatives - `retryCvExtraction()`/`retryOnboardingUpload()`'s zero-row races have no observable consequence; a from-scratch re-walk of Finding 197's own insert/upsert field-list sibling sweep found one undercounted site (conclusion still holds) and two never-named table families (both already deliberate, in-file-documented splits) - no new bug, nothing pushed to `main`
 
