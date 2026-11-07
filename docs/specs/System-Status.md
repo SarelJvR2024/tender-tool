@@ -1,5 +1,114 @@
 # System Status
 
+## This pass (2026-11-07viii, standing solution-architect review): oriented from `99a3fb6`
+(immediately-preceding pass's own verified HEAD, `capetown_procurement.py`'s live refetch, genuine
+negative). `git fetch origin main` clean, local matched `origin/main` exactly at the start and
+again immediately before this pass's own push - `99a3fb6` throughout before this pass's own commit,
+no sibling commits landed during this pass. Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps
+every preceding pass has recorded (`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180`
+2026-11-06T22:40:26Z, `#179` 2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177`
+2026-11-06T19:08:44Z, `#176` 2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164`
+2026-10-26T20:14:25Z) - nothing merged, closed, or rebased by anyone since. Grepped `Finding
+[0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself - 173 is still the highest recorded,
+confirming no new finding landed from the sibling session either.
+
+**This pass's angle: finished the one remaining concrete lead from this chain's own backlog -
+`engine/intake/classify_tender.py`'s `find_nra_reference()`, checked against only 4 real documents
+total across the 2 preceding passes (the least-tested of the file's 4 extraction functions, per
+Findings 171/172's own backlog notes).**
+
+**Method: read `NRA_RE` itself first** -
+`\bNRA\s*:?\s*(?:No\.?\s*)?(\d{4}\s*/\s*\d{3,5})\b` (`engine/intake/classify_tender.py` line 148) -
+to know exactly what it currently expects (the literal token "NRA", optional ":" and optional
+"No.", then a `YYYY/NNN-NNNNN`-shape number), rather than assuming. Then fetched SANRAL's own
+current open-tenders list, `https://www.nra.co.za/sanral-tenders/list/open-tenders` (10 tenders
+listed today), and checked 6 of them NOT yet checked by Findings 170-172 (which between them had
+only incidentally touched this function while fixing the closing-time/delivery-address regexes),
+deliberately varying region and contract type from what's already been checked:
+- `https://www.nra.co.za/sanral-tenders/detail/n-002-010-2020-1r` (Western Cape, Construction) -
+  "SCM Reference Number: NRA 2026/0385"
+- `https://www.nra.co.za/sanral-tenders/detail/contract-sanral-c-002-056-2024-11` (Gauteng,
+  Consulting - a region not checked by any prior pass) - "SCM Reference Number: NRA: 2026/0641"
+- `https://www.nra.co.za/sanral-tenders/detail/sanral-c-003-081-2023-1` (Eastern Cape,
+  Construction) - "SCM Reference Number: NRA 2026/0460", plus a SECOND, textually distinct real
+  phrasing on the same page's tender-notice heading, "...CONTRACT SANRAL NRA 2026/0460 FOR
+  THE..." (no colon, "NRA" directly followed by a space then the number - already covered by the
+  regex's optional ":" )
+- `https://www.nra.co.za/sanral-tenders/detail/contract-sanral-n-002-267-2024-2r` (KwaZulu-Natal,
+  "Open Projects") - genuinely has NO SCM/NRA reference anywhere on the page at all, the second
+  real no-reference tender confirmed (alongside C.003-092-2024/1F, Finding 172's backlog note) -
+  a real absence, not a regex gap
+- `https://www.nra.co.za/sanral-tenders/detail/n-001-010-2021-1` (Western Cape, Construction) -
+  "SCM Reference Number: NRA 2026/0416"
+- `https://www.nra.co.za/sanral-tenders/detail/c-004-086-2022-1f` (KwaZulu-Natal, Consulting) -
+  "SCM Reference Number: NRA 2025/0420" (the same value Finding 172's backlog note had already
+  spot-checked, now re-confirmed from its own real source page rather than secondhand)
+
+**Checked by running the module's own actual code, not a re-read.** `curl`'d the 6 real pages'
+raw HTML directly into
+`/tmp/claude-0/.../scratchpad/sanral_raw/*.html` (6 files, 136-152KB each), stripped tags and
+unescaped entities the same way the module's own text-extraction pipeline does, then ran the
+REAL, unmodified `find_nra_reference()`/`NRA_RE.finditer()` from `classify_tender.py` against each
+page's real extracted text in a standalone `python3 -I` check (not `python3` plain, and not a
+guess from reading the HTML by eye). Every one of the 5 pages that printed an SCM/NRA reference
+matched correctly, exactly the expected `{"value": "NRA <year>/<number>", "ambiguous": False}`
+each time (`N.002-010-2020/1R` -> `NRA 2026/0385`; `C.002-056-2024/1` -> `NRA 2026/0641`;
+`C.003-081-2023/1` -> `NRA 2026/0460`; `N.001-010-2021/1` -> `NRA 2026/0416`; `C.004-086-2022/1F`
+-> `NRA 2025/0420`), and the one page with no reference printed anywhere correctly returned
+`None` (not a guess, not a crash). Also grepped all 6 raw-text files for every occurrence of the
+word "reference" (case-insensitive) to rule out a second, differently-worded reference phrasing
+hiding elsewhere on any of these pages - found none; "SCM Reference Number: NRA[:] YYYY/NNNN" is
+the only phrasing used across all 9 of the 10 currently-open tenders that print one at all (the
+10th, `N.002-267-2024/2R`, prints none).
+
+**Genuine, conclusive negative result - no new finding, nothing fixed, reported honestly per the
+standing brief rather than forced.** `find_nra_reference()` has now been checked against 10 real,
+live SANRAL documents total across 3 passes (4 before this pass + 6 this pass), spanning Western
+Cape, Gauteng, KwaZulu-Natal, Eastern Cape and Limpopo, and Construction/Consulting/"Open
+Projects" contract types - every one either matched correctly or correctly returned `None` for a
+genuine absence. **This fully closes out `engine/intake/classify_tender.py`'s real-document
+methodology: all 4 of its extraction functions (`find_closing_time()`, `find_delivery_address()`,
+`find_nra_reference()`, and `discrepancies()`'s own comparison logic, exercised incidentally by
+the other three) are now well-tested against real, live, currently-open tender documents, not
+just this repo's own fixtures.** No further open lead remains in this file from this chain's own
+backlog.
+
+**Verification.** `cd engine/intake && python3 test_classify_tender.py` - real exit code `0`
+captured directly (not through a grepped pipe), "0 failure(s)" (no code changed, so this is a
+regression check, not a red-then-green cycle - there was no fix to cycle). Full `engine/` sweep,
+each file run individually with its own real exit code captured before any pipe: `find engine
+-name "test_*.py" | wc -l` = `86`; looped every one with plain `python3 <file>` (not `-I`, same
+false-trail note as the immediately preceding pass applies equally here) - `TOTAL=86
+FAILED_FILES_COUNT=0`, matching the standing baseline exactly, unchanged.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged,
+same set as recorded by every preceding pass - none touched, amended, or merged by this pass.
+Lead (b) (`find_nra_reference()`) is now genuinely closed out, clean, checked against 10 real
+documents across 3 passes - not left open any further, and `engine/intake/classify_tender.py` as
+a whole has no further open real-document lead from this chain's own backlog. The remaining ~215
+lines of `app/app/tenders/[id]/actions.ts` beyond line ~440 and every `.tsx` file under that
+directory remain untouched, as `2026-11-07vi`/`vii` left them, and `engine/discovery/`'s
+`transnet_etenders.py`/`randwater.py`/`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/
+`lephalale.py`/`sars_procurement.py` also remain not re-swept, per Finding 173's own backlog note
+- both genuinely fresh, evidence-backed angles for a future pass to pick up, rather than
+re-treading either of this chain's now two closed-out methodology threads
+(`capetown_procurement.py`, `classify_tender.py`).
+
+To verify independently: read `NRA_RE` in `engine/intake/classify_tender.py` (line 148) yourself,
+then `curl` the 6 real URLs listed above (or any of SANRAL's own currently-open tenders at
+`https://www.nra.co.za/sanral-tenders/list/open-tenders` - the list changes over time) and
+confirm each one's own "SCM Reference Number:" line (or its absence) against what's reported
+here. Run `cd engine/intake && python3 test_classify_tender.py` and confirm exit `0`/"0
+failure(s)". Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged
+at the same `updated_at` timestamps listed above, and that `git log --oneline -1 origin/main` is
+this pass's own new docs-only commit (one ahead of `99a3fb6`), with no further sibling commits
+having landed in between.
+
+---
+
 ## This pass (2026-11-07vii, standing solution-architect review): oriented from `a3ffb9e`
 (immediately-preceding pass's own verified HEAD, the `app/app/tenders/[id]/` Server Action sweep,
 genuine negative). `git fetch origin main` clean, local matched `origin/main` exactly at the start
