@@ -39,6 +39,20 @@ APP_DIR = os.path.normpath(os.path.join(_HERE, "..", "..", "app"))
 RENDER_SCRIPT = os.path.join(APP_DIR, "scripts", "render-pack-ready-email.ts")
 RESEND_URL = "https://api.resend.com/emails"
 
+# Same WAF-block fix as engine/notify/send_digest_emails.py (standing
+# solution-architect review, 2026-11-06) - this module's own
+# urllib.request.Request had no User-Agent header either, so this
+# instant-delivery "pack ready" send is exposed to the identical Resend
+# edge block (confirmed live against the real endpoint: a bare urllib
+# request with no User-Agent gets `HTTP 403 error code: 1010` even with a
+# bogus key, before Resend's own auth layer is ever reached; adding any
+# real User-Agent reaches it). See send_digest_emails.py's own comment for
+# the full reproduction. This path is claimed via a one-time
+# claim_notification() token before sending (see send_pack_ready_email()
+# below), so a blocked send here would have permanently lost that pack's
+# one and only "ready" email, not just delayed it.
+USER_AGENT = "TenderTool-PackReady/1.0 (+https://tenderready.app)"
+
 
 def _render(opts):
     """Invokes scripts/render-pack-ready-email.ts, returns {subject, html, text}. Raises on any failure - callers decide how to handle it."""
@@ -60,7 +74,11 @@ def _send_via_resend(to, subject, html, text):
     reply_to = os.environ.get("RESEND_REPLY_TO") or "support@tenderready.app"
     body = json.dumps({"from": from_addr, "to": [to], "reply_to": reply_to, "subject": subject, "html": html, "text": text}).encode()
     req = urllib.request.Request(RESEND_URL, data=body, method="POST",
-                                  headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"})
+                                  headers={
+                                      "Authorization": f"Bearer {api_key}",
+                                      "Content-Type": "application/json",
+                                      "User-Agent": USER_AGENT,
+                                  })
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read())

@@ -68,6 +68,36 @@ import watch_tender_updates  # noqa: E402
 
 RESEND_ENDPOINT = "https://api.resend.com/emails"
 
+# Finding, 2026-11-06 (standing solution-architect review): this module's
+# own urllib.request.Request carried no User-Agent header at all - unlike
+# every other urllib caller in this codebase (engine/discovery/source_http.py,
+# watch_tender_updates.py, tender_enrichment.py, assess_tender.py,
+# download_discovered_documents.py, process_general_jobs.py, etc., every one
+# of which sets an explicit User-Agent, several of them specifically because
+# a site's WAF blocked the bare urllib default - see
+# engine/discovery/vaal_central_water.py's own "WAF/User-Agent story").
+# Python's unset-header default ("Python-urllib/3.x") is exactly what
+# Resend's own edge WAF blocks - confirmed live, 2026-11-06: a bare POST to
+# RESEND_ENDPOINT with no User-Agent (even with a deliberately bogus API
+# key, to isolate the edge from Resend's own auth layer) came back
+# `HTTPError 403 b'error code: 1010\n'` - byte-for-byte the same failure
+# seen in every daily-digest GitHub Actions run for at least 4 consecutive
+# days (2026-11-03 through 2026-11-06, confirmed via `gh run view --log` on
+# each day's real run) - `digest_send error: 1 of 1 daily digest email(s)
+# failed to send: Resend rejected the send to 'sareljvr101@gmail.com':
+# HTTP 403 error code: 1010`, invisible to `gh run list`/the workflow's own
+# "success" status since this module deliberately never raises past a send
+# failure (see module docstring). Adding ANY real User-Agent header made
+# the identical bogus-key request reach Resend's real auth layer instead
+# (a proper `{"message":"API key is invalid",...}` 401) - confirmed this is
+# an edge-level block on the request shape, not a RESEND_API_KEY validity
+# problem (separately confirmed valid: scripts/send-founder-digest.ts, via
+# the `resend` npm package - which sets its own non-default User-Agent -
+# sends successfully through the exact same key every day). This directly
+# answers the long-standing "is RESEND_API_KEY still valid" backlog
+# question: yes - the key was never the problem, this header was.
+USER_AGENT = "TenderTool-DailyDigest/1.0 (+https://tenderready.app)"
+
 # Same cap and reasoning as engine/discovery/source_http.py's own 429 retry
 # (confirmed live 2026-10-19/20: treating a rate limit identically to a
 # permanent 4xx meant one source/recipient hitting it lost that item for the
@@ -290,7 +320,11 @@ def send_one(api_key, from_addr, digest, dry_run=False):
     payload = json.dumps({"from": from_addr, "to": [email], "subject": subject, "text": body}).encode("utf-8")
     req = urllib.request.Request(
         RESEND_ENDPOINT, data=payload, method="POST",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
     )
     for attempt in range(2):  # the original attempt, plus one retry on a 429 only
         try:
