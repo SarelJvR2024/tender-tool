@@ -1060,6 +1060,117 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_employee_rpc_bypass(db):
+    """Standing review, 2026-11-06 (systematic employee-RLS sweep, following
+    0117/0118's own one-off findings): the mechanical pg_policies check this
+    pass ran found the table-level RLS side genuinely clean (3 candidates,
+    all already covered or correctly left alone), but checking the real
+    app-layer callers for those candidates led to a DIFFERENT, more serious
+    sibling problem - several SECURITY DEFINER RPCs re-implement a read/write
+    0077/0117/0118's own RESTRICTIVE policies already cover on the
+    underlying table, checking only is_company_member(), never role. Because
+    they are SECURITY DEFINER they bypass ALL table RLS, restrictive
+    policies included, the same risk 0117's own header already named for
+    start_payfast_checkout - just never swept for siblings until now. Added
+    0119 as the fix (12 functions, one guard each); this makes all 12
+    permanent and repeatable rather than the one-off manual scratch-DB repro
+    the pass itself used first."""
+    print("\n[20] SECURITY DEFINER RPCs bypassing employee RLS (0119): 12 functions, each individually")
+    i = {k: str(uuid.uuid4()) for k in (
+        "uEmp", "uOwner", "c", "t", "pack", "opp", "watched", "watched2", "manualT", "manualT2")}
+    c, uEmp, uOwner, t, pack, opp, watched, watched2, manualT, manualT2 = (
+        i["c"], i["uEmp"], i["uOwner"], i["t"], i["pack"], i["opp"], i["watched"], i["watched2"],
+        i["manualT"], i["manualT2"])
+    db.one(f"""
+insert into auth.users (id, email) values ('{uEmp}', 'emp20@example.test'), ('{uOwner}', 'owner20@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso20 Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uOwner}', 'owner'), ('{c}', '{uEmp}', 'employee');
+insert into tenders (id, slug, title, closing_date, family, owner_company_id) values
+  ('{t}', 'iso20-{t[:8]}', 'Iso20 tender', now() + interval '30 days', 'Conventional Consultant Tender', '{c}');
+insert into tender_packs (id, company_id, tender_id) values ('{pack}', '{c}', '{t}');
+insert into bank_accounts (company_id, bank_name, account_holder, account_number) values ('{c}', 'ABC Bank', 'Iso20 Co', '123456789');
+insert into tender_documents (tender_id, doc_type, company_id, storage_path) values
+  ('{t}', 'technical_xlsm', '{c}', 'private/{c}/{t}/templates/technical_xlsm/f.xlsm');
+insert into discovered_opportunities (id, company_id, title, verdict, ocid, downgraded_from, downgrade_cause, downgraded_at) values
+  ('{opp}', '{c}', 'Iso20 opportunity', 'strong_fit', 'ocds-iso20-{opp[:8]}', 'strong_fit', 'profile_changed', now());
+insert into tender_watched_documents (id, tender_id, doc_key, source, title, baseline, changes) values
+  ('{watched}', '{t}', 'doc1', 'etenders_ocds', 'Addendum 1', false, '{{"closing_date": {{"date": "2026-12-01"}}}}'::jsonb),
+  ('{watched2}', '{t}', 'doc2', 'etenders_ocds', 'Addendum 2', false, '{{"closing_date": {{"date": "2026-12-02"}}}}'::jsonb);
+select 1;""")
+
+    print("  -- employee: every one of the 12 is refused, none of its company-wide side effects happen --")
+    # request_submission_pack_checked/request_general_job_checked both insert
+    # into pack_generation_jobs, which tender_engine_jobs (the view
+    # pursue_discovered_opportunity/load_manual_tender/add_manual_tender_documents
+    # all write through, per 0077 Part D's own comment) ALSO writes into -
+    # so these two run FIRST, before this trial company's 1-in-flight-job
+    # quota is consumed by anything else below, or a true pre-fix success
+    # would be masked by an unrelated "bid pack limit" business error rather
+    # than genuinely proving no role check exists.
+    bad, _ = refused(db, f"select request_submission_pack_checked('{c}', '{t}', '{pack}', null, null, null, null)", uEmp)
+    check(bad, "employee can't request_submission_pack_checked")
+    bad, _ = refused(db, f"select request_general_job_checked('{c}', '{t}', '{pack}', 'extract_requirements')", uEmp)
+    check(bad, "employee can't request_general_job_checked")
+    bad, _ = refused(db, f"select bank_account_summaries('{c}')", uEmp)
+    check(bad or db.one(f"select count(*) from bank_account_summaries('{c}')", uEmp) == "0",
+          "employee can't read bank_account_summaries")
+    check(db.one("select count(*) from company_member_labels()", uEmp) != "2",
+          "employee can't read every teammate's email via company_member_labels")
+    check(db.one(f"select count(*) from tender_document_uploads('{t}')", uEmp) == "0",
+          "employee can't read tender_document_uploads")
+    bad, _ = refused(db, f"select pursue_discovered_opportunity('{opp}')", uEmp)
+    check(bad, "employee can't pursue_discovered_opportunity")
+    bad, _ = refused(
+        db, f"select load_manual_tender('{c}', '{manualT}', 'Emp tender', 'Buyer', null, null, null, "
+            f"jsonb_build_array(jsonb_build_object('title','s.pdf','storage_path','manual/{c}/{manualT}/s.pdf')))",
+        uEmp)
+    check(bad, "employee can't load_manual_tender")
+    bad, _ = refused(
+        db, f"select add_manual_tender_documents('{manualT}', "
+            f"jsonb_build_array(jsonb_build_object('title','s.pdf','storage_path','manual/{c}/{manualT}/s.pdf')))",
+        uEmp)
+    check(bad, "employee can't add_manual_tender_documents")
+    bad, _ = refused(db, f"select set_opportunity_interest('{opp}', 'interested')", uEmp)
+    check(bad, "employee can't set_opportunity_interest")
+    bad, _ = refused(db, f"select set_opportunity_tag('{opp}', 'emp-tag', 'add')", uEmp)
+    check(bad, "employee can't set_opportunity_tag")
+    bad, _ = refused(db, f"select acknowledge_discovery_downgrade('{opp}')", uEmp)
+    check(bad, "employee can't acknowledge_discovery_downgrade")
+    bad, _ = refused(db, f"select accept_tender_update_date('{watched}', 'closing_date')", uEmp)
+    check(bad, "employee can't accept_tender_update_date")
+
+    print("  -- owner: every one of the 12 still works, completely unaffected --")
+    # Same ordering reason as the employee block above: run the
+    # pack_generation_jobs-quota-sensitive one first, before anything else
+    # below also writes into it via the tender_engine_jobs view.
+    ok, _, err = db.run(f"select request_general_job_checked('{c}', '{t}', '{pack}', 'extract_requirements')", uOwner)
+    check(ok, f"owner can still request_general_job_checked ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select count(*) from bank_account_summaries('{c}')", uOwner) == "1",
+          "owner still reads bank_account_summaries")
+    check(db.one("select count(*) from company_member_labels()", uOwner) == "2",
+          "owner still reads company_member_labels for every teammate")
+    check(db.one(f"select count(*) from tender_document_uploads('{t}')", uOwner) == "1",
+          "owner still reads tender_document_uploads")
+    ok, _, err = db.run(f"select pursue_discovered_opportunity('{opp}')", uOwner)
+    check(ok, f"owner can still pursue_discovered_opportunity ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(
+        f"select load_manual_tender('{c}', '{manualT2}', 'Owner tender', 'Buyer', null, null, null, "
+        f"jsonb_build_array(jsonb_build_object('title','s.pdf','storage_path','manual/{c}/{manualT2}/s.pdf')))",
+        uOwner)
+    check(ok, f"owner can still load_manual_tender ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(
+        f"select add_manual_tender_documents('{manualT2}', "
+        f"jsonb_build_array(jsonb_build_object('title','s2.pdf','storage_path','manual/{c}/{manualT2}/s2.pdf')))",
+        uOwner)
+    check(ok, f"owner can still add_manual_tender_documents ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(f"select set_opportunity_interest('{opp}', 'interested')", uOwner)
+    check(ok, f"owner can still set_opportunity_interest ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(f"select set_opportunity_tag('{opp}', 'owner-tag', 'add')", uOwner)
+    check(ok, f"owner can still set_opportunity_tag ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(f"select accept_tender_update_date('{watched2}', 'closing_date')", uOwner)
+    check(ok, f"owner can still accept_tender_update_date ({err.splitlines()[0] if err else 'ok'})")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1069,6 +1180,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_employee_rpc_bypass(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
