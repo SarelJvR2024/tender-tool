@@ -8278,3 +8278,114 @@ changed/added: `requireCompanyId()`'s return type and body, both callers'
 null-check replaced with an `ok` check); `app/app/tenders/[id]/vault-quick-
 fix-actions.spec.ts` (new, 4 tests). No change to `quick-blocker-drawer.tsx`,
 `lib/companyProfileUpdate.ts`, `lib/vaultDocuments.ts`, or any other file.
+
+### Finding 147 (CONFIRMED, FIXED, low-moderate - `removePrivateTenderDocument()`'s own post-delete `count` read had no `error` captured, and a failed read of it forced the DESTRUCTIVE branch rather than the safe no-op one)
+
+**Area:** Tender Workspace "Your private documents" card on a shared
+tender (`app/app/tenders/[id]/general-actions.ts`'s
+`removePrivateTenderDocument()`, called from `private-documents.tsx`'s
+"Remove" button).
+
+**How this was found.** Picked via the standing review's own "files with no
+recent commits at all" heuristic, not a named backlog item: `private-
+documents.tsx` sat at only 3 mentions in this doc and its own last commit
+was 2026-10-23, so its one Server Action was read in full. Re-read the
+2026-11-06 `091e884`/earlier pass's own write-up at line ~306 of
+System-Status.md first (`general-actions.ts:269 ... not fixed - noted as a
+real but minor candidate`) to avoid re-deriving an already-traced finding -
+but that write-up is specifically about the `pack` read (the SECOND of the
+two unchecked reads feeding this same `if` statement) failing, which really
+is safe (`pack &&` makes a failed `pack` read skip the whole block, leaving
+stale data - exactly as that entry describes). It never separately traced
+what happens when the FIRST read - the `tender_private_documents` `count`
+read right above it - fails instead, while `pack` succeeds. That's a
+materially different, and worse, consequence.
+
+**The bug.** After removing one private document, the function re-counts
+how many the company has left on this tender, with `error` never
+destructured at all:
+```
+const { count } = await supabase
+  .from("tender_private_documents")
+  .select("id", { count: "exact", head: true })
+  .eq("company_id", companyId)
+  .eq("tender_id", tenderId);
+const { data: pack } = await supabase.from("tender_packs")...maybeSingle();
+if (pack && (count ?? 0) === 0) {
+  // wipe tender_packs.document_requirements/intake
+} else if (pack) {
+  // re-queue an extraction job, keeping the existing reading
+}
+```
+On a transient failure of the `count` query, the Supabase client returns
+`count: null` (and `data: null`), and `(count ?? 0) === 0` evaluates to
+`true` - indistinguishable from "this really was the last private document,
+genuinely down to zero now." If `pack`'s own read happens to succeed (the
+common case: it's a separate, independent query, not the one that failed),
+the code takes the "down to zero" branch and calls `supabase.from
+("tender_packs").update({ document_requirements: null, intake: null })` -
+wiping out this pack's already-extracted requirements/intake, discarding a
+real, previously-computed reading, even though the company may still have
+one or more other private documents on file that were never actually
+recounted. The already-reviewed `pack`-read failure (same `if`, second half)
+fails the OTHER way - `pack` falsy skips the whole block - so a prior pass
+reading only that half concluded the failure mode here was "skipped once,
+stale data," which is true for that read but is the exact opposite of what
+actually happens when the `count` read is the one that fails.
+
+**Consequence, traced to its real severity.** No RLS bypass, no cross-
+tenant exposure, no money path - but real, user-visible data loss: a
+transient Supabase blip immediately after a successful document removal can
+silently discard a tender's already-extracted `document_requirements`/
+`intake` (the parsed read of that tender's compliance-document needs) even
+when the company's remaining private document(s) still fully support that
+reading, forcing an unprompted, unexplained re-extraction the next time
+anyone revisits the compliance/general-tender card - and, until something
+re-triggers that re-extraction, a tender workspace that briefly shows "not
+yet read" for a company's own tender despite nothing actually being wrong
+with its documents.
+
+**Fix:** captures `countError` from the count read, logs it
+(`console.error`), and gates BOTH branches of the `if` on `!countError` -
+not just the already-safe `pack &&` check. A failed count read now defers
+the whole decision (same "stale, not falsely destructive" outcome already
+accepted for the `pack`-read-failure case) instead of forcing the
+destructive reset. A genuinely-zero count (no error) still takes the reset
+branch exactly as before; a genuinely-nonzero count still takes the requeue
+branch exactly as before - this only changes what happens when the read
+itself errors.
+
+**Verified myself, genuine red-then-green.** First dedicated test file for
+this module (`general-actions.spec.ts`, 3 tests, vitest convention - this
+file imports the `@/` alias and uses `next/navigation`'s `redirect()`, same
+documented limitation as every other `@/`-importing action file). Ran the
+new "count read fails" test against the pre-fix code first (temporarily
+reverted just this block, kept the test file and the rest of the file as
+they now stand): failed exactly as predicted - the destructive
+`tender_packs.update({ document_requirements: ... })` call fired even
+though the count read had errored (`expected 0 to have length but got 1`).
+Restored the fix; re-ran - all 3 tests passed (the count-fails case takes
+neither branch; a genuine 0 still resets; a genuine >0 still requeues).
+Full regression from `app/`: `npx vitest run` - **469/469 passed, 60/60
+files** (up from 466/59: +1 new file, +3 new tests). The per-file
+`*.test.ts` loop (no `--test` flag) - **27 files, 0 failures**, unchanged
+(the new test file is a `.spec.ts`). `npm run typecheck` - **0 errors**.
+`npx eslint .` - **0 errors**, same 3 pre-existing warnings. `npx next
+build` - **compiled successfully**, same route table, `Proxy (Middleware)`
+present.
+
+**Not independently verified:** against a real live Supabase transient-
+failure scenario (no live Supabase credentials in this environment) - the
+mocked-client test exercises the exact code path (a `count`-read error with
+a successful `pack` read alongside it), not a live network blip. Also not
+measured: how often this specific query pairing actually fails in
+production (no live traffic data in this environment) - this is a
+precautionary correctness fix for a real, reproducible logic error, not a
+response to a confirmed-live incident.
+
+**Regression:** `app/app/tenders/[id]/general-actions.ts`
+(`removePrivateTenderDocument()`: ~10 lines changed - `count` read now
+captures and logs `countError`, both `if`/`else if` branches gated on
+`!countError`); `app/app/tenders/[id]/general-actions.spec.ts` (new, 3
+tests). No change to `private-documents.tsx`, `saveGeneralAnswers()`, or any
+other function in this file.

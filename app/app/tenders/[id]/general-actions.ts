@@ -279,25 +279,34 @@ export async function removePrivateTenderDocument(formData: FormData) {
   }
   await supabase.storage.from("tender-documents").remove([doc.storage_path as string]);
 
-  const { count } = await supabase
+  // Finding 147 (standing review, 2026-11-07i): this `count` read's own
+  // `error` used to be discarded entirely. On a transient failure the
+  // Supabase client returns `count: null` here, and the old
+  // `(count ?? 0) === 0` treated that exactly like "zero private documents
+  // remain" - the OPPOSITE of the already-reviewed pack-read failure just
+  // below (which safely no-ops via `pack &&`). A failed count read with
+  // real private documents still on file would wrongly take the "down to
+  // zero" branch and wipe this pack's `document_requirements`/`intake`,
+  // discarding a real, already-extracted reading instead of re-queuing an
+  // extraction that still has every document it needs. Now gated on
+  // `!countError` so a failed count read defers both branches (the same
+  // "stale, not falsely destructive" outcome already accepted for the
+  // pack-read failure case) instead of forcing the destructive one.
+  const { count, error: countError } = await supabase
     .from("tender_private_documents")
     .select("id", { count: "exact", head: true })
     .eq("company_id", companyId)
     .eq("tender_id", tenderId);
+  if (countError) console.error("tender_private_documents count read failed", countError);
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).eq("company_id", companyId).maybeSingle();
-  if (pack && (count ?? 0) === 0) {
-    // Logging only, no behavioral branch changed - traced and deferred by
-    // name in the immediately-preceding pass's own entry ("general-actions.ts:269
-    // ... not fixed - noted as a real but minor candidate"), picked up again
-    // via the TS-sweep's grep blind spot for a bare unchecked write (standing
-    // review, 2026-11-06). A failed reset here just means a removed
-    // document's old document_requirements/intake is skipped once, leaving
-    // stale (not falsely-fresher) data until the next edit touches the same
-    // pack - logged so a future pass can tell a real failure apart from an
-    // honest no-op.
+  if (pack && !countError && (count ?? 0) === 0) {
+    // Logging only, no behavioral branch changed beyond the countError gate
+    // above - a failed reset here just means a removed document's old
+    // document_requirements/intake is skipped once, leaving stale (not
+    // falsely-fresher) data until the next edit touches the same pack.
     const { error: resetError } = await supabase.from("tender_packs").update({ document_requirements: null, intake: null }).eq("id", pack.id as string);
     if (resetError) console.error("tender_packs document_requirements reset failed", resetError);
-  } else if (pack) {
+  } else if (pack && !countError) {
     // 0115: same atomic checked-insert as requestJob() - extract_requirements
     // has no quota gate either way, but this keeps every real pack_generation_jobs
     // insert behind the one shared path instead of a third hand-rolled copy.
