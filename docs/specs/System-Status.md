@@ -1,5 +1,91 @@
 # System Status
 
+## This pass (2026-11-07xxv, standing solution-architect review): engine-layer sibling-comparison sweep (`pack/`, `notify/`, `compliance/`, `cv/`) - Finding 186 (`extract_cv_fields.fail_stale_uploads()`'s alerts never carried `company_id`, fixed), oriented from `956701f`
+(immediately-preceding pass's own verified HEAD, Finding 185's `confirmIdDocument()` fix). `git
+fetch origin main` at the start found local already matching `origin/main` exactly - `956701f` -
+and again twice more during this pass (once before writing the fix, once just before pushing),
+still `956701f` each time, no sibling commit landed during this pass. Re-checked all 10 open PRs
+via `mcp__github__list_pull_requests`: same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed,
+or rebased by anyone since. Per the binding guardrails, none of #164/#165/#183 was touched, and
+neither Finding 168 nor the `start_payfast_checkout()` revenue-integrity gap was implemented.
+
+**Task: extend Finding 185's own method - reading a file's sibling functions/call-sites side by
+side for an unexplained, undocumented field-dropping inconsistency, not a race - from TypeScript
+Server Actions to the engine/ Python layer (`engine/pack/`, `engine/notify/`, `engine/compliance/`,
+`engine/cv/`).** Read every non-test `.py` file in all 4 directories end to end, specifically
+hunting for families of functions/call-sites that build a similar-shaped row/payload for a shared
+sink (a Supabase write, an RPC, a notification payload, a generated document's metadata) where one
+sibling silently omits a field the others all carry, with no comment.
+
+**Most candidate sibling families turned out already correct, or already explained by an earlier
+pass - checked and ruled out, each for a named reason (full detail in Finding 186's own writeup in
+`QA-Edge-Case-Findings.md`, not repeated here):** `fill_tender.py`'s `tender_check_notes()` vs. its
+absence in `fill_conventional.py` (Finding 115, already a deliberate scope boundary, not an
+oversight); `process_pack_jobs.adapt_person()` vs. `process_cv_jobs.adapt_person_row()`'s extra
+`ecsa_expiry`/`sacpcmp_expiry` (Finding 121's own fix was for a different consumer; the real SANRAL
+workbook filler reads neither field from either adapter); `daily_digest.py`'s local-mode vs.
+live-mode expiry functions (deliberate, documented scaffolding); `build_digest_for_person()`'s
+missing viewer-summary branch for `tender_tasks`/`readiness_changes` (unreachable - viewer's own
+`SECTION_VISIBILITY` never includes either section); `registration_reminders.py`'s
+`_mark_company()` workaround (already commented as deliberate); `generate_cv.py`'s
+`build_sanral_keyperson()` vs. `build_world_bank()` content differences (two genuinely different
+official forms, not one oversight); the two-table "self-heal" pattern (Findings 114/116) correctly
+absent from `process_pack_jobs.fail_stale_jobs()`/`process_cv_jobs`'s own stale sweep, both of
+which write their job's full result in one atomic call, unlike the two-table `cv_uploads`/
+`cv_extraction_results` case that pattern exists for.
+
+**The real finding (Finding 186): `extract_cv_fields.py`'s `fail_stale_uploads()` was the one
+`cv_extract` alert source in this file whose `system_alerts.record()` context never carried
+`company_id`.** Every other `cv_extract` alert in this same file (`process_upload()`'s 3 alerts,
+`poll_once()`'s per-item alert) includes the upload's own `company_id`; the two true cross-file
+siblings this bug class is modelled on (`process_pack_jobs.fail_stale_jobs()`,
+`process_cv_jobs.py`'s own stale sweep) both already include it too. `fail_stale_uploads()`'s own
+`GET` deliberately narrowed its `select=` to `id,extraction_claimed_at` only (a reasonable
+minimal-select instinct on its own), with the unremarked side effect that none of its 3 alerts
+could carry `company_id` even in principle. Real, checked (not assumed) downstream consequence:
+`app/app/admin/page.tsx` resolves `context.company_id` into the admin System Alerts page's own
+`tenant: <company>` badge (`SystemAlertRow.tsx`) - with no `company_id` in context, that badge
+silently never appeared for a stuck/malformed/self-healed CV extraction alert, unlike every other
+stale-job alert in the codebase. **Fixed:** widened the `select=` to include `company_id` (no new
+query) and added it to all 3 alert contexts, matching this file's own convention exactly.
+
+**Verified red-then-green.** New test `test_fail_stale_uploads_alerts_carry_company_id()` (3
+checks) added to `engine/cv/test_extract_cv_fields.py`. Red: run against the unfixed function -
+real exit `1`, all 3 new checks failed exactly as predicted (no `company_id` key in any of the 3
+alert contexts). Green: applied the fix, re-ran - real exit `0`, every check in the file passes,
+including the pre-existing self-heal test (whose own no-`company_id` fixture rows now correctly
+show `"company_id": None`, not a crash). `python3 -m py_compile` clean on both changed files. Full
+`engine/` Python sweep - `find engine -name "test_*.py" | wc -l` = `86`, looped with plain
+`python3 <file>`, real exit codes captured directly (no pipe before `$?`) - **86/86, 0 failures**,
+unchanged count. No TypeScript/schema/other call-site touched (Python-only, narrow, single-file
+fix) - `npm run typecheck`/`npx eslint .`/`npx vitest run`/`npx next build` were not re-run.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 10 PRs remain open and unmerged, same set as every preceding
+pass. This closes out the "apply Finding 185's sibling-comparison method to engine/" task for
+`pack/`/`notify/`/`compliance/`/`cv/` specifically - a genuinely new angle that found one real,
+minor, narrow fix plus a documented set of look-alikes that were each individually checked against
+their real downstream consumer and ruled out, not waved through. `engine/general/`,
+`engine/discovery/`, `engine/intake/`, `engine/onboarding/`, `engine/security/`,
+`engine/pack_generator/`, `engine/narrative/`, `engine/worker/` and the top-level `engine/*.py`
+fillers were NOT covered by this pass's own brief (scoped to exactly the 4 named directories) - a
+natural next angle for a future pass is the identical sibling-comparison method applied to those,
+particularly `engine/general/` (whose `process_general_jobs.py` is process_pack_jobs.py's own named
+"general-family sibling" for the B12 pack-ready email, a strong prior for the same bug class) and
+the top-level SANRAL form fillers (`fill_a_forms.py`, `fill_docx_forms.py`, `fill_financial.py`,
+`fill_authority_letter.py`), none of which this pass opened.
+
+To verify independently: read `engine/cv/extract_cv_fields.py`'s `fail_stale_uploads()` and confirm
+its own `GET` selects `company_id` and all 3 of its `system_alerts.record()` calls include
+`"company_id": up.get("company_id")`. Run `python3 engine/cv/test_extract_cv_fields.py` and confirm
+exit `0` with the new test's 3 checks passing. Re-run the full `engine/` sweep and confirm
+`86/86, 0 failures`. Confirm via `mcp__github__list_pull_requests` that all 10 PRs are still
+open/unmerged, and that `git log --oneline -1 origin/main` is this pass's own new commit (one ahead
+of `956701f`), with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xxiv, standing solution-architect review): `randwater.py` live-reachability closed out for good via GitHub Actions (real, repeatable negative) + Finding 185 (`confirmIdDocument()`'s `reviewed_by = null` quirk, fixed), oriented from `204bb8e`
 (immediately-preceding pass's own verified HEAD, the PR-backlog consolidation pass). `git fetch
 origin main` at the start found local already matching `origin/main` exactly - `204bb8e` - and

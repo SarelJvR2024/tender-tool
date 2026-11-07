@@ -812,7 +812,18 @@ def fail_stale_uploads(url, key, now=None):
     whole sweep."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
-    for up in supabase_request(url, key, "GET", "cv_uploads?status=eq.extracting&select=id,extraction_claimed_at"):
+    # select= also carries company_id (not read by this function's own logic -
+    # only id/extraction_claimed_at are) purely so every alert below can carry
+    # it too, same as every OTHER cv_extract alert in this file that has a
+    # cv_upload row in hand (process_upload()'s own 3 alerts, poll_once()'s own
+    # per-item alert). app/app/admin/page.tsx resolves context.company_id into
+    # the System Alerts page's own "tenant: <company>" badge
+    # (platform_admin_companies()) - with no company_id in context, that badge
+    # silently never appeared for any alert this function raised, unlike every
+    # sibling stale-job alert (process_pack_jobs.fail_stale_jobs,
+    # process_cv_jobs's own stale sweep) which both already include it.
+    # Standing review, 2026-11-07 (engine/ sibling-comparison pass).
+    for up in supabase_request(url, key, "GET", "cv_uploads?status=eq.extracting&select=id,company_id,extraction_claimed_at"):
         claimed = up.get("extraction_claimed_at")
         if not claimed:
             continue
@@ -821,7 +832,8 @@ def fail_stale_uploads(url, key, now=None):
         except ValueError:
             system_alerts.record("cv_extract", f"A CV extraction's extraction_claimed_at ({claimed!r}) is "
                                  "not a valid timestamp - its stale-reclaim check was skipped, not treated "
-                                 "as stale.", "warning", context={"cv_upload_id": up["id"], "claimed_at": claimed})
+                                 "as stale.", "warning", context={"cv_upload_id": up["id"], "claimed_at": claimed,
+                                                                   "company_id": up.get("company_id")})
             continue
         if claimed_dt < cutoff:
             # process_upload() does its real work in two separate REST calls
@@ -851,7 +863,8 @@ def fail_stale_uploads(url, key, now=None):
                 system_alerts.record("cv_extract", f"A CV extraction was stuck 'extracting' for over "
                                                    f"{STALE_AFTER_MINUTES} minutes after the worker died, but its "
                                                    "result had already been written - self-healed to extracted "
-                                                   "rather than wrongly failed", "warning", context={"cv_upload_id": up["id"]})
+                                                   "rather than wrongly failed", "warning",
+                                     context={"cv_upload_id": up["id"], "company_id": up.get("company_id")})
                 continue
             supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
                 "status": "extraction_failed", "extraction_completed_at": _now_iso(),
@@ -860,7 +873,8 @@ def fail_stale_uploads(url, key, now=None):
             print(f"[failed] cv_upload {up['id']}: stale 'extracting' since {claimed}")
             system_alerts.record("cv_extract", f"A CV extraction was stuck in 'extracting' for over "
                                                f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "
-                                               "marked failed", "error", context={"cv_upload_id": up["id"]})
+                                               "marked failed", "error",
+                                 context={"cv_upload_id": up["id"], "company_id": up.get("company_id")})
 
 
 def process_upload(url, key, upload, client_factory=default_llm_client):

@@ -579,6 +579,52 @@ def test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written():
           f"the self-heal is recorded as a warning (recovered), not an error (lost) ({alerts})")
 
 
+def test_fail_stale_uploads_alerts_carry_company_id():
+    print("5c. fail_stale_uploads(): its own 3 system_alerts all carry company_id, like every "
+          "other cv_extract alert in this file")
+    # Every OTHER system_alerts.record("cv_extract", ...) call site in this file that has a
+    # cv_upload row in hand includes "company_id" in its context - process_upload()'s own 3
+    # alerts (context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id"), ...})
+    # and poll_once()'s own per-item alert (context={"cv_upload_id": up.get("id"), "company_id":
+    # up.get("company_id")}) - because app/app/admin/page.tsx resolves context.company_id into
+    # the System Alerts page's own "tenant: <company>" badge (platform_admin_companies()); with
+    # no company_id in context, SystemAlertRow.tsx renders the alert with no tenant badge at all.
+    # fail_stale_uploads() was the one exception: its own GET only ever selected
+    # "id,extraction_claimed_at" - never company_id - so none of its 3 alerts (malformed
+    # extraction_claimed_at, self-healed, genuinely failed) could carry one, with no comment
+    # anywhere explaining the gap (unlike every other deliberate omission in this file).
+    # Standing review, 2026-11-07 (engine/ sibling-comparison pass).
+    db = MemoryDb({})
+    now = datetime.datetime(2026, 11, 7, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=x.STALE_AFTER_MINUTES * 3)).isoformat()
+    db.tables["cv_uploads"] = [
+        {"id": "malformed", "company_id": "c-malformed", "status": "extracting", "extraction_claimed_at": "not-a-real-timestamp"},
+        {"id": "healed", "company_id": "c-healed", "status": "extracting", "extraction_claimed_at": old},
+        {"id": "dead", "company_id": "c-dead", "status": "extracting", "extraction_claimed_at": old},
+    ]
+    db.tables["cv_extraction_results"] = [{"id": "r1", "cv_upload_id": "healed", "review_status": "pending_review"}]
+    alerts = []
+    real_request, real_record = x.supabase_request, x.system_alerts.record
+    x.supabase_request = db.request
+    x.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        x.fail_stale_uploads("u", "k", now=now)
+    finally:
+        x.supabase_request = real_request
+        x.system_alerts.record = real_record
+    check(len(alerts) == 3, f"all 3 cases (malformed/self-healed/genuinely failed) each raised their own alert ({alerts})")
+    by_upload = {}
+    for a, kw in alerts:
+        ctx = kw.get("context") or {}
+        by_upload[ctx.get("cv_upload_id")] = ctx
+    check(by_upload.get("malformed", {}).get("company_id") == "c-malformed",
+          f"the malformed-timestamp alert carries the upload's own company_id ({by_upload.get('malformed')})")
+    check(by_upload.get("healed", {}).get("company_id") == "c-healed",
+          f"the self-healed alert carries the upload's own company_id ({by_upload.get('healed')})")
+    check(by_upload.get("dead", {}).get("company_id") == "c-dead",
+          f"the genuinely-failed alert carries the upload's own company_id ({by_upload.get('dead')})")
+
+
 def test_ocr(docx_path, tmp):
     """EXPERIMENTAL OCR path (engine/ocr/scan_ocr.py). Needs tesseract; skipped
     (stated, not silently) where it isn't installed."""
@@ -683,6 +729,7 @@ def main():
         test_llm_call()
         test_queue(docx_path, tmp)
         test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
+        test_fail_stale_uploads_alerts_carry_company_id()
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
         test_email_verification_survives_line_wrap()
