@@ -1,5 +1,88 @@
 # System Status
 
+## This pass (2026-11-07x, standing solution-architect review): oriented from `878a679`
+(immediately-preceding pass's own verified HEAD, `transnet_etenders.py`'s live sweep, this chain's
+5th consecutive genuine negative). `git fetch origin main` clean, local matched `origin/main`
+exactly at the start and again immediately before this pass's own push - `878a679` throughout
+before this pass's own commit, no sibling commits landed during this pass. Re-checked all 9 open
+PRs via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182`
+and the two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at`
+timestamps every preceding pass has recorded (`#182` 2026-11-07T09:35:52Z, `#181`
+2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179` 2026-11-06T21:17:30Z, `#178`
+2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176` 2026-11-06T11:14:35Z, `#165`
+2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged, closed, or rebased by anyone
+since. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself - 173 was the
+highest recorded at this handoff, confirming no new finding had landed from the sibling session
+either, before this pass's own Finding 174 below.
+
+**Note on the standing backlog, carried over plainly per this pass's own brief: the unreviewed PR
+backlog (9 open PRs, the oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()`
+revenue-integrity gap have now gone unaddressed for a very long stretch of consecutive passes.**
+This pass took no action on either beyond what the standing guardrails already allow (no PR was
+opened, merged, or touched; neither billing item was implemented) - flagged here as this pass's own
+honest observation, not escalated further.
+
+**This pass's angle: the one fully fresh lead never yet opened by this chain - every `.tsx` file
+under `app/app/tenders/[id]/`, plus the remaining ~215 lines of `actions.ts` beyond line ~440.**
+This chain's own earlier Server Actions sweep (`a3ffb9e`, `2026-11-07vii`) covered only the `.ts`
+action files in that directory; the `.tsx` components had never been read by this chain at all -
+client-rendered logic, prop-drilling, and conditional rendering, a genuinely different surface from
+every real-document-parsing methodology this chain's prior 5 negatives closed out.
+
+**Method: read every one of the 39 `.tsx` files under `app/app/tenders/[id]/` in full (confirmed
+via `find app/app/tenders/[id] -name "*.tsx" | sort`, cross-checked against this pass's own list of
+files actually read - none skipped), and finished reading `actions.ts` from line ~430 to its end
+(line 656).** Traced prop flow and conditional-render logic in each rather than skimming, per the
+brief's own steer after 5 consecutive negatives. `actions.ts`'s own remaining tail
+(`setTenderReminder`/`syncWonProjectToTeam`) was already correct - its own in-file comment records
+that `syncWonProjectToTeam`'s `tender_pack_assignments` read (the one that actually gates the
+won-project sync) was already fixed for exactly this bug class on 2026-11-06, so nothing further
+was open there.
+
+**Found and fixed Finding 174: `general-workspace.tsx` and `intake-card.tsx` each discarded their
+own primary `tenders`-select error, the dominant bug class this whole chain keeps finding, on a
+read that gates real, non-cosmetic content** - `GeneralTenderWorkspace()`'s failure silently blanks
+every one of its 5 returned tab sections across the whole non-SANRAL workspace with zero banner
+anywhere (confirmed by reading every `generalSections?.*` call site in `page.tsx`, and confirming
+`page.tsx`'s own `try/catch` around that call - written specifically to convert a thrown error into
+the already-wired `complianceError` banner - could never actually catch this error, since a
+Supabase client returns `{data, error}` rather than throwing); `IntakeCard()`'s failure silently
+blanks "How this tender was read" the same way, but it is mounted via plain JSX rather than one of
+`page.tsx`'s own wrapped calls, so rethrowing there would 500 the whole page rather than degrade -
+confirmed by reading `page.tsx`'s own header comment distinguishing the two calling conventions
+before picking the fix for each. Full write-up, the fix for each file, and the verification run are
+in `docs/specs/QA-Edge-Case-Findings.md`'s own Finding 174 entry - not duplicated here.
+
+**Verification.** `npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, the same 3 pre-existing
+warnings. `npx next build` - compiled successfully, same route table, `/tenders/[id]` still a
+Partial Prerender route. `npx vitest run` - **493/493, 63 files**, unchanged. The `*.test.ts` node
+loop (no `--test` flag, real exit codes) - **28 files, 0 failures**, unchanged. No red/green test
+cycle - honest limitation, same as Findings 144/164/165/166: neither component has extracted
+testable logic or its own test file. `engine/` sweep not re-run - this fix touches no Python.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged,
+same set as recorded by every preceding pass - none touched, amended, or merged by this pass. Every
+`.tsx` file under `app/app/tenders/[id]/` has now been read in full and this chain's own "5
+negatives in a row" streak is broken with one genuine, evidence-backed finding - not forced, the
+one real gap a full, careful read of a genuinely fresh surface turned up.
+`engine/discovery/`'s still-not-re-swept direct-buyer readers
+(`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/`sars_procurement.py`, each
+already carrying 1-3 prior real fixes) and `randwater.py`'s own TLS-blocked live-fetch limitation
+remain live angles for a future pass.
+
+To verify independently: read `app/app/tenders/[id]/general-workspace.tsx`'s and
+`app/app/tenders/[id]/intake-card.tsx`'s own opening `tenders` select and confirm each now captures
+and handles `error` before its `if (!tender) return null;` branch. Confirm `page.tsx`'s own
+`try/catch` around `GeneralTenderWorkspace()` and its rendering of `complianceError` in the Overview
+tab. Run `npm run typecheck`, `npx eslint .`, `npx next build`, and `npx vitest run` yourself and
+confirm the same results. Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still
+open/unmerged at the same `updated_at` timestamps listed above, and that `git log --oneline -1
+origin/main` is this pass's own new commit (one ahead of `878a679`), with no further sibling
+commits having landed in between.
+
+---
+
 ## This pass (2026-11-07ix, standing solution-architect review): oriented from `85ffaee`
 (immediately-preceding pass's own verified HEAD, `classify_tender.py`'s `find_nra_reference()`
 finishing check, genuine negative that closed out that file's whole real-document methodology).

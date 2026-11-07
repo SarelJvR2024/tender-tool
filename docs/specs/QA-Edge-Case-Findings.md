@@ -10849,3 +10849,101 @@ feed is edited live, so if 46 is gone, any row whose `description` contains `<a 
 same gap). Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged, and
 that `git log --oneline -1 origin/main` is this pass's own new commit (one ahead of `297bfc9`), with
 no further sibling commits having landed in between.
+
+---
+
+### Finding 174 (CONFIRMED, FIXED, moderate - `general-workspace.tsx`'s and `intake-card.tsx`'s own primary `tenders` select each discarded its read error, so a transient failure there was indistinguishable from "no such tender"/"nothing to show" and silently blanked real sections with no indication anything went wrong)
+
+**Area:** Tender Workspace `.tsx` components, the one surface this chain's own earlier Server
+Actions sweep (`a3ffb9e`, `2026-11-07vii`) explicitly never touched - every `.tsx` file under
+`app/app/tenders/[id]/` and the remaining ~215 lines of `actions.ts` beyond line ~440, per this
+pass's own handoff.
+
+**Scenario:** read every `.tsx` file under `app/app/tenders/[id]/` in full (39 files) and finished
+`actions.ts` to its end (line 656) - the fresh surface this chain had never opened. Two files repeat
+this chain's dominant bug class (discarded Supabase/fetch errors treated as empty state, Findings
+144/147/164-166) on their own gating read, each with real, non-cosmetic consequences:
+
+- `app/app/tenders/[id]/general-workspace.tsx`'s `GeneralTenderWorkspace()` (the whole non-SANRAL
+  tender-preparation component) opens with `const { data: tender } = await supabase.from("tenders")
+  .select(...).eq("id", tenderId).maybeSingle(); if (!tender) return null;` - no `error` captured.
+  `page.tsx` renders every one of this function's 5 returned sections
+  (`overview`/`documents`/`questions`/`people`/`pack`) via optional chaining
+  (`generalSections?.overview`, etc. - confirmed by reading every one of those 6 call sites in
+  `page.tsx`), so a `null` return (whether from a genuine missing tender or a transient read
+  failure) renders every one of those slots as nothing at all, across every tab, with zero banner
+  anywhere on the page. `page.tsx`'s own header comment on its `try/catch` around this exact call
+  (lines ~508-517) explicitly documents the intended design - "one bad read degrades to a friendly
+  ErrorBanner... instead of throwing and 500-ing the whole tender workspace" - but that `try/catch`
+  only ever catches a *thrown* exception; a Supabase client never throws on a query error, it
+  returns `{data: null, error}`, so the already-wired `complianceError` banner (shown once, in the
+  Overview tab, right where `generalSections?.overview` sits) was never actually reachable for this
+  read's own failures - the one case that comment's own reasoning was written for.
+- `app/app/tenders/[id]/intake-card.tsx`'s `IntakeCard()` ("How this tender was read") has the
+  identical shape on its own first `tenders` select - `if (!tender) return null;`, no `error`
+  captured - silently hiding that whole card (intake routing, fingerprint check, SANRAL templates
+  found, fit-for-company verdict) on a transient failure, with nothing to say so. Unlike
+  `general-workspace.tsx`, `IntakeCard` is mounted via plain JSX (`<IntakeCard tenderId={id} />`,
+  `page.tsx` line 1214) rather than one of `page.tsx`'s own `try/catch`-wrapped direct calls, so
+  rethrowing here would genuinely 500 the whole page instead of degrading - confirmed by reading
+  `page.tsx`'s own header comment distinguishing the two calling conventions before picking a fix.
+
+Both read `tenders` a SECOND time (the outer `page.tsx` has already read the same table
+successfully to get this far) purely for their own component-local fields, so a transient failure
+specific to this second, redundant query is a real, reachable case - RLS/connection-pool hiccups
+affect one query at a time, not the whole request.
+
+**Fixed:** `general-workspace.tsx` now captures `error: tenderError` on that select and rethrows it
+(`if (tenderError) throw tenderError;`) before the existing `if (!tender) return null;` - this is
+exactly the case `page.tsx`'s own `try/catch` around this call was written to catch, so a real read
+failure now surfaces as the same `complianceError` `ErrorBanner` ("Couldn't load the compliance
+check...") in the Overview tab that `ComplianceReport`'s own read failures already use, instead of
+silently bypassing that machinery. `intake-card.tsx` now captures the same error and, since
+rethrowing there would 500 the page instead of degrading (see above), returns an inline destructive
+banner ("Couldn't load how this tender was read - try refreshing.") instead - the same safe,
+component-local pattern `activity-log.tsx`'s own `membershipError` branch already uses elsewhere on
+this exact page. Neither file's "no such tender"/"nothing to show yet" branch changed at all - only
+the previously-undistinguished failure case.
+
+**Verification run myself, real exit codes - no red/green test, honest limitation, same as Findings
+144/164/165/166.** Neither component has extracted testable logic or its own test file (`find
+. -iname "*.test.ts*"` under `app/app/tenders/[id]/` turns up only pure-logic files -
+`general-pack-review-logic.test.ts`, `won-project-sync-logic.test.ts`, `signatory-logic.test.ts`,
+`tender-readiness.test.ts`, `pack-review-logic.test.ts` - none touching either component's own
+Supabase read). Correctness rests on `npm run typecheck` (0 errors), `npx eslint .` (0 errors, the
+same 3 pre-existing warnings), `npx next build` (compiled successfully in the same route table,
+`/tenders/[id]` still a Partial Prerender route), and a plain reading of the diff (each file's
+"tender not found" branch is byte-for-byte unchanged; only a new `tenderError` branch was added
+before it). `npx vitest run` - **493/493, 63 files**, unchanged. The `*.test.ts` node loop (no
+`--test` flag, real exit codes) - **28 files, 0 failures**, unchanged. Full `engine/` sweep not
+re-run - this fix touches no Python.
+
+**Regression:** `app/app/tenders/[id]/general-workspace.tsx` (+7 lines) and
+`app/app/tenders/[id]/intake-card.tsx` (+16 lines) only. No other file touched.
+
+**Pushed directly to `main`** - a read-only display-component fix on a newly-captured, newly-logged
+error flag, no RLS/money/hard-stop/worker-image-install surface touched, same category and
+direct-push precedent Findings 164-166/170-173 all used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched. All 9 PRs remain open and unmerged (re-checked this pass via
+`mcp__github__list_pull_requests`, same set, same `updated_at` timestamps every preceding pass has
+recorded) - none touched, amended, or merged by this pass. Every other `.tsx` file under
+`app/app/tenders/[id]/` was read in full this pass and found clean against this same bug class and
+every other angle in the brief (prop/type mismatches, conditional rendering silently hiding a real
+error or disqualifying state, client-side logic duplicating server-side validation) - this finding
+is the one genuine gap this pass's full read turned up, not a forced read of an otherwise-clean
+surface. `engine/discovery/`'s still-not-re-swept direct-buyer readers
+(`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/`sars_procurement.py`,
+each already carrying 1-3 prior real fixes) remain a live angle for a future pass, as does
+`randwater.py`'s own TLS-blocked live-fetch limitation.
+
+To verify independently: read `general-workspace.tsx`'s and `intake-card.tsx`'s own opening
+`tenders` select and confirm each now captures and handles `error` before the `if (!tender) return
+null;` branch, in the way described above. Confirm `page.tsx`'s own `try/catch` around
+`GeneralTenderWorkspace()` (its header comment, ~line 508) and its rendering of `complianceError`
+in the Overview tab (~line 1211, right before `generalSections?.overview`). Run `npm run typecheck`,
+`npx eslint .`, `npx next build`, and `npx vitest run` yourself and confirm the same results. Confirm
+via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged, and that `git log
+--oneline -1 origin/main` is this pass's own new commit, with no further sibling commits having
+landed in between.

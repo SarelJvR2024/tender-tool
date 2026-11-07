@@ -124,11 +124,23 @@ export type GeneralWorkspaceSections = {
 
 export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tenderId: string; saved?: string | null }): Promise<GeneralWorkspaceSections | null> {
   const supabase = await createClient();
-  const { data: tender } = await supabase
+  const { data: tender, error: tenderError } = await supabase
     .from("tenders")
     .select("id, contract_no, description, buyer, closing_date, document_urls, document_requirements, evaluation_rules, owner_company_id")
     .eq("id", tenderId)
     .maybeSingle();
+  // Finding 174: a failed read here used to be indistinguishable from the
+  // genuine "no such tender" case - both took the `if (!tender) return
+  // null` branch below, which silently blanks every one of this
+  // component's 5 returned sections (overview/documents/questions/
+  // people/pack) across every tab, with nothing on screen to say anything
+  // went wrong. page.tsx's own caller already wraps this whole call in a
+  // try/catch (see that file's header comment on it) that converts a
+  // thrown error into the same ErrorBanner ComplianceReport's own read
+  // failures already use - rethrowing here, rather than silently falling
+  // through to `return null`, is what actually reaches that existing,
+  // already-wired machinery instead of bypassing it.
+  if (tenderError) throw tenderError;
   if (!tender) return null;
   // A shared tender (found by Discovery) can carry this company's own private
   // documents (0032); when it does, this company's reading of the tender is

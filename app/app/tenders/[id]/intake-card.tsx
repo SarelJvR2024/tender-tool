@@ -55,11 +55,29 @@ const OPP_COLUMNS = `id, verdict, reasons, score_outlook, source, ${DOWNGRADE_CO
 
 export async function IntakeCard({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();
-  const { data: tender } = await supabase
+  const { data: tender, error: tenderError } = await supabase
     .from("tenders")
     .select("id, source, ocid, owner_company_id, intake, family")
     .eq("id", tenderId)
     .maybeSingle();
+  // Finding 174: this component is mounted via plain JSX (<IntakeCard .../>
+  // in page.tsx), not through one of page.tsx's own try/catch-wrapped
+  // calls (see that file's header comment on why only "a handful of
+  // larger child components" get that treatment) - so throwing here would
+  // 500 the whole Tender Workspace instead of degrading gracefully. A
+  // failed read used to be indistinguishable from the genuine "no such
+  // tender" case, both silently rendering nothing at all for "How this
+  // tender was read" - reported inline instead, the same safe pattern
+  // activity-log.tsx's own membershipError branch already uses on this
+  // same page.
+  if (tenderError) {
+    console.error("intake-card: tenders select failed", tenderId, tenderError);
+    return (
+      <div id="intake" className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+        Couldn&apos;t load how this tender was read - try refreshing.
+      </div>
+    );
+  }
   if (!tender) return null;
   // With private documents on a shared tender (0032), this company's own
   // intake record (on its tender_packs row) describes what was read.
