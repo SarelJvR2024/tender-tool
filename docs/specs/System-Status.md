@@ -1,5 +1,166 @@
 # System Status
 
+## This pass (2026-11-07xiv, standing solution-architect review): oriented from `096a13f`
+(immediately-preceding pass's own verified HEAD, Finding 177's `app/app/company/` three-part fix).
+`git fetch origin main` clean, local matched `origin/main` exactly at the start and again
+immediately before finishing this pass - `096a13f` throughout, no sibling commits landed during
+this pass. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/
+`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165` (both draft) are all
+still open, same `updated_at` timestamps every preceding pass has recorded (`#182`
+2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md`
+myself - 177 is still the highest recorded, confirming no new finding landed from a sibling session
+either, before this pass's own (negative) work below.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrails already allow (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle: both candidate groups named by the preceding pass's own backlog note - the
+fresh, never-swept `app/app/` surfaces (`experience/`, `sanral-schedules/`, `toolkit/`, plus
+`billing/`'s remaining non-page files) and `engine/discovery/`'s still-not-re-swept direct-buyer
+readers (`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/
+`sars_procurement.py`/`randwater.py`).** Applied the standing methodology explicitly throughout -
+traced every discarded-error read into every shared component/Server Action/write path it also
+feeds, not just its own display use - and, separately, re-ran every live-fetch-capable discovery
+reader against its real source, the methodology Finding 154 and others have repeatedly used.
+
+**`app/app/experience/` (`page.tsx`, `[id]/page.tsx`, `actions.ts`) - read in full, genuinely
+clean.** Every primary/secondary read on both pages already captures and surfaces its own error
+(`loadError`, `filterError`, `membershipError`, `itemError`, `pendingError`; `queuedError` is
+logged-only by design, noted in-file as deliberately low-severity since a failed count read can
+only ever fall back to a safe "0 queued", same direction already judged safe elsewhere in this
+review). One near-miss traced to ground, not stopped at "looks cosmetic": `[id]/page.tsx` line 73's
+`discipline_category_suggestions` read (`suggestionRows`) discards its own `error`, so a failed
+read makes every custom tag's `suggestionFor()` return `null` (lines 77, 309-310, 327) - the UI
+then always offers "Suggest this as a shared category" instead of the real pending/approved/
+rejected state. Traced into its one write path (`suggestSharedCategory`, `app/app/experience/
+actions.ts` lines 242-271): that action does a fresh, explicit `insert` from the submitted form
+fields, never a diff against `suggestionRows`, and the table's own unique constraint (`error.code
+=== "23505"`) already turns a genuine re-suggestion attempt into the friendly "already suggested -
+waiting for review" message with nothing written or deleted - unlike Findings 175/176/177's
+`<select>`-into-whole-row-overwrite shape, there is no write path here that destroys or reassigns
+anything on this read's failure, so this is a real display-only miss, not the dominant bug class.
+Two further, lower-severity discarded reads (`saveExperienceTags` line 170's pre-replace
+`storage_path` lookup, `deleteExperience` line 209's own) are the "storage leak, not data loss"
+direction `uploadVaultDocument()`'s own in-file comment already names for the identical shape
+elsewhere in this codebase: on a failed read the OLD file is simply never removed from storage
+(orphaned, recoverable) rather than ever destroying a still-referenced one - the safe direction,
+not a finding.
+
+**`app/app/sanral-schedules/page.tsx` - read in full, genuinely clean.** Both Supabase calls
+(`tenders`, `pack_generation_jobs`) are wrapped in one `try/catch` whose `catch` sets `loadError`
+and renders `ErrorState` with a retry button; nothing here writes anything - it only links out to
+`/tenders/[id]#submission-pack`, where the real action lives. No discarded error anywhere.
+
+**`app/app/toolkit/` (`page.tsx` + 4 calculator subpages) and `app/app/billing/` (`page.tsx`,
+already fixed by Finding 164, + `loading.tsx`) - read in full, genuinely clean.** Every toolkit
+page is a static nav shell around a client-side calculator component (`B6EstimatorClient`,
+`DeadlineCalculatorClient`, `BeePreferencePointsClient`, `CidbGradeClient`) - confirmed zero
+Supabase calls anywhere under `app/app/toolkit/`. `billing/loading.tsx` is a plain Suspense
+skeleton, no data access. `app/app/billing/` now has no remaining unswept file.
+
+**`engine/discovery/`'s five named readers, each re-run against its REAL live source just now
+(not assumed from a prior pass), per Finding 154's own backlog list.** `dbsa_procurement.py`:
+**10 open rows, 10 distinct ocids** (Finding 154's fix from this same session's history still
+holds). `kouga.py`: **292 open rows across 30 pages, 292 distinct ocids** (`_disambiguate_reused_refs()`
+still holds at real scale). `vaal_central_water.py`: **now reachable from this sandbox** (previously
+HTTP 403, per the file's own header comment - genuinely changed) - **9 rows, 9 distinct ocids**, no
+collision; also checked the apparently-stale closing dates in the raw listing (several in
+2026-06/09/10, before today 2026-11-07) against `source_http.release()`'s own `is_closed =
+is_past(closing_date)` and `gov_sources.py` line 473's `[r for r in res["releases"] if not
+r["is_closed"]]` - confirmed these are filtered out downstream exactly like every other source's
+stale rows, not a bug in this reader. `sars_procurement.py`: **2 open rows today, 2 distinct refs** -
+no live collision reproduced, same as Finding 154's own caveat ("too small a sample to rule the
+risk out"). One sharper backlog note for the next pass with a bigger live sample: `fetch_releases()`'s
+own `seen`/`key = e["ref"] or e["url"]` dedup (meant only to catch one real tender mentioned twice
+in different page sections) would, if SARS ever lists a genuine re-advertisement under the same ref
+as a DIFFERENT url/listing (the exact shape Finding 154 fixed for DBSA and `kouga.py`'s own prior
+fix), silently keep only the FIRST occurrence and drop the second ENTIRELY before `normalize()` ever
+runs - worse than an ocid collision, a real lost listing - but not reproduced live today (2 rows,
+both genuinely distinct), so not fixed speculatively, per Finding 154's own "don't force it against
+code with no demonstrated live collision" rule. `lephalale.py`: **still unreachable**, confirmed via
+two independent signals, not just one retry - the module's own `fetch_releases()` raised
+`RuntimeError: ... Connection reset by peer` AND, separately, `curl -sS
+"$HTTPS_PROXY/__agentproxy/status"` listed 3 fresh `ws_closed_mid_exchange` relay failures for
+`www.lephalale.gov.za:443` in the same window - a site-side TLS/connection reset, not a sandbox-only
+block, same conclusion Finding 154 reached, now re-confirmed rather than assumed stale.
+
+**`randwater.py` - re-tried per this pass's own brief ("it may have changed"); still blocked, but
+the real mechanism is now precisely diagnosed, not just reconfirmed.** `curl`/Python's `urllib`
+both still fail with a certificate-chain error exactly as the module's own docstring already
+recorded. Went one step further: ran `echo | openssl s_client -connect bids.randwater.co.za:443
+-servername bids.randwater.co.za -proxy 127.0.0.1:37741` - confirmed the agent-proxy's own CONNECT
+tunnel does NOT re-terminate TLS for this host (a genuine end-to-end handshake with Rand Water's
+real server, not a sandbox artifact), and that server sends back ONLY its own leaf certificate
+(`CN=*.randwater.co.za`) with **no intermediate certificate in the chain** - the issuer named,
+"Thawte TLS RSA CA G1", is a real, currently-valid DigiCert-issued intermediate (confirmed
+fetchable and well-formed from its own public AIA URL, `cacerts.thawte.com/ThawteTLSRSACAG1.crt`),
+just never sent by Rand Water's own server. This is a genuine server-side TLS misconfiguration
+(an incomplete certificate chain), not a WAF/anti-bot block as the module's own docstring
+speculates ("the same pattern ... found for Engineering News (403) and News24 (Cloudflare
+challenge) - automated-traffic blocking") - a real browser works only because browsers
+independently cache or AIA-fetch missing intermediates; curl, Python's `urllib`/`requests`, and (per
+the same docstring) an earlier research pass's own `WebFetch` tool, none of which do that, all fail
+identically regardless of User-Agent or "automated" signature. **No code changed for this** - a
+real fix would mean this one reader manually trusting a specific third-party intermediate
+certificate, a security-adjacent trust decision outside a "small, safe, cosmetic" fix and outside
+this review's own dominant-bug-class mandate - left as a precisely-diagnosed, concrete option for
+Sarel's own judgment call (get Rand Water's own ops team to fix their load balancer's certificate
+bundle, or explicitly decide to work around it in code) rather than engineered unilaterally.
+
+**Genuine, conclusive negative result across both candidate groups - no bug found, nothing fixed,
+reported honestly rather than forced.** No commit needed beyond this status update (no QA-Edge-
+Case-Findings.md entry added either, matching this chain's own established convention that a pure
+negative pass updates this file alone).
+
+**Verification.** No source file was changed this pass, so there is no red/green cycle and no test
+suite to re-run - confirmed via `git status --short` (clean) immediately before writing this entry.
+The live checks themselves were run for real and their outputs are quoted above, not assumed:
+`python3 dbsa_procurement.py`/`kouga.py`/`vaal_central_water.py`/`sars_procurement.py`'s own
+`fetch_releases()` against the real live sites just now (ocid counts above), `lephalale.py`'s own
+`fetch_releases()` raising the real `RuntimeError` above, and `openssl s_client`/`curl` against
+`bids.randwater.co.za` through this session's own `$HTTPS_PROXY` (output quoted above).
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. `app/app/experience/`, `app/app/sanral-schedules/`, `app/app/toolkit/` and
+the last unswept file of `app/app/billing/` are now genuinely swept clean. All 6 of
+`engine/discovery/`'s named readers have been re-verified against their real live sources this
+pass: `dbsa_procurement.py`/`kouga.py`/`vaal_central_water.py` confirmed clean at real scale;
+`sars_procurement.py` not reproduced live (small sample) but now carries a sharper, more specific
+backlog note (a listing-DROP risk, not just an ocid-collision risk) for whichever future pass can
+catch it with a bigger sample or a synthetic fixture; `lephalale.py` remains genuinely unreachable
+from this sandbox (site-side resets, re-confirmed); `randwater.py`'s own block is now root-caused
+(a missing-intermediate TLS misconfiguration on Rand Water's own server, not an anti-bot block) -
+a concrete, well-evidenced fact for Sarel's own next call, not a code change made unilaterally. A
+genuinely fresh `app/app/` surface for the next pass: this review has now swept `people/`,
+`company/`, `tenders/[id]/`, `pipeline/`, `experience/`, `sanral-schedules/`, `toolkit/` and
+`billing/` in full - `app/app/discovery/`, `app/app/onboarding/`, `app/app/dashboard/`'s own
+Server Actions (if any beyond what Finding 165 already covered), and `app/app/admin/` (the
+taxonomy-suggestion review path `experience/[id]/page.tsx`'s own suggestion flow writes into, per
+this pass's own near-miss above) are candidates not yet named by any prior pass's own write-up.
+
+To verify independently: read `app/app/experience/[id]/page.tsx` lines 73-77/309-310/327 and
+`app/app/experience/actions.ts` lines 242-271 and confirm the write path there is a fresh `insert`,
+never a diff against `suggestionRows`. Re-run `python3 engine/discovery/dbsa_procurement.py`,
+`kouga.py`, `vaal_central_water.py`, `sars_procurement.py` (`--no-documents`/plain, no args needed)
+against the real live sites and confirm the same open-row/distinct-ocid counts (they will drift as
+real tenders open/close - check for a *collision*, i.e. fewer distinct ocids than rows, not the
+exact counts above). Re-run `python3 engine/discovery/lephalale.py` and confirm whether it is still
+unreachable. Run `echo | openssl s_client -connect bids.randwater.co.za:443 -servername
+bids.randwater.co.za -proxy 127.0.0.1:37741` yourself and confirm the certificate chain still shows
+only the leaf certificate with no intermediate. Confirm via `mcp__github__list_pull_requests` that
+all 9 PRs are still open/unmerged at the same `updated_at` timestamps listed above, and that `git
+log --oneline -1 origin/main` is still `096a13f` (this pass made a docs-only commit, so HEAD moves
+by exactly one commit, with no further sibling commits having landed in between).
+
+---
+
 ## This pass (2026-11-07xiii, standing solution-architect review): oriented from `c41b6e7`
 (immediately-preceding pass's own verified HEAD, Finding 176's `person_role_eligibility` fix).
 `git fetch origin main` clean, local matched `origin/main` exactly at the start and again
