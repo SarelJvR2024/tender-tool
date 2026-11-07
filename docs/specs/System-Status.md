@@ -1,5 +1,75 @@
 # System Status
 
+## This pass (2026-11-07xxxi, standing solution-architect review, background worker): Finding 191 - `app/app/my-cv/actions.ts`'s `applyMyCvExtraction()` never called `queueStandardCvs()`, unlike its full-People-page sibling `applyCvExtraction()` - fixed, pushed to `main`, oriented from `2ccb681`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `2ccb681`
+(the immediately preceding pass's own genuine-negative entry below, the second `process_pack_jobs.py`/
+`process_general_jobs.py` re-sweep). Re-checked again immediately before this pass's own push - still
+`2ccb681`, no sibling commit landed in between. Re-checked all 10 open PRs via
+`mcp__github__list_pull_requests` before pushing: same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since; none merged by this session either. Per the binding guardrails, `#164`/`#165`
+were not touched, no PR was opened or merged, and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. No scratch Postgres database
+was needed this pass (no race/lock reproduction - the fix is a missing function call, verified with
+mocked-Supabase Vitest tests). One scratch `git worktree` was created to run `npx next build` with
+`app/node_modules` bind-mounted in (per the guardrails' own instruction for this specific check) -
+removed, and its bind mount unmounted, immediately after the build finished; confirmed via
+`git worktree list` showing only the primary checkout afterward.
+
+**This pass's own task**: extend the sibling-comparison method into `app/app/people/` and
+`app/app/my-cv/`, specifically named by the standing brief as "beyond the `applyCvExtraction()`/
+`applyMyCvExtraction()` races already fixed" (those races - the read-then-write/TOCTOU gate moved into
+`apply_cv_extraction_checked`/`apply_my_cv_extraction_checked`, 0123 - were correctly left alone, not
+re-litigated).
+
+**Found: Finding 191.** Reading the two "confirm this AI-extracted CV" Server Actions side by side -
+not just how each one gets to its own locked rpc call (already fixed, identical shape on both), but
+what each one does AFTER that rpc succeeds - `applyCvExtraction()` (`people/actions.ts`, the full
+People page) calls `queueStandardCvs()` right after; `applyMyCvExtraction()` (`my-cv/actions.ts`, the
+My CV self-service page, 0065's `employee` role) does not call it, or anything equivalent, at all.
+`queueStandardCvs()` was the ONLY writer anywhere in this codebase of a `generated_cvs` row with
+`tender_id` null (confirmed by grep - no second writer exists), and both confirm rpcs require the
+extraction's own `review_status` to still be `'pending_review'`, so a CV confirmed exclusively through
+My CV never got its 4 standard CV formats queued, with literally no way for anyone - including an
+owner/admin on the full People page - to ever trigger it for that same extraction again. Real
+consumers, confirmed by reading each one, not assumed: both the My CV page's and the full People
+page's own "My generated CVs (read-only)" cards (`is("tender_id", null)`) showed "None generated yet."
+permanently; `engine/general/process_general_jobs.py`'s own per-role `generated_cvs` lookup in
+`gather()` (no `tender_id` filter - takes the newest `ready` row for a person, standard or
+tender-specific, as a real fallback CV source for general-tender packs) would show "no CV uploaded or
+generated for this person" for a person whose CV was, in fact, fully confirmed, if no tender-specific
+CV or as-is upload existed for them.
+
+**Fix**: extracted `queueStandardCvs()` out of `people/actions.ts` into a new shared
+`app/lib/standardCvQueue.ts`, and called it from `applyMyCvExtraction()` right after its own rpc
+succeeds - `requireOwnPerson()` already returns `userId`/`companyId` alongside `personId`, so no new
+lookup was needed; a failed queue attempt now fails the request the same way `applyCvExtraction()`'s
+own `queueError` branch already does, rather than silently reporting success. Verified red-then-green
+via `git stash push -u`/`git stash pop` against parent `2ccb681` (two new tests in
+`my-cv/actions.spec.ts` fail exactly as predicted against the unfixed code, pass against the fix; all
+6 pre-existing tests in the file unaffected either way). Full suite all green: `npm run typecheck`,
+`npx eslint .` (0 errors, 3 pre-existing warnings unchanged), `npx vitest run` (506/506, 66 files, +2
+new), the node `*.test.ts` loop (28/28, plain `node <file>`, no flags), `npx next build` in the
+bind-mounted worktree (clean), and the full `engine/` Python sweep as a no-op regression check (86/86,
+unchanged - no Python touched). See `docs/specs/QA-Edge-Case-Findings.md` Finding 191 for the full
+write-up, diff description, and independent-verification steps.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched, per the standing guardrail. All 10 PRs remain open and unmerged - same set
+as every preceding pass, re-confirmed via `mcp__github__list_pull_requests` before this pass's own
+push; nothing merged, closed, or rebased by anyone else. Pushed directly to `main` (small, safe - a
+shared-helper extraction plus one new call site in a Server Action file, no RLS/money-path/hard-stop-
+gate touched, no schema/migration/RPC change, no worker-image surface touched) - `main` is now at
+`9053805`.
+
+To verify independently: see Finding 191's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the file-by-file diff check, the test run, the full
+suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxx, standing solution-architect review, background worker): a second, deliberately-targeted field-by-field/table-by-table re-sweep of `process_pack_jobs.py` (SANRAL) vs. `process_general_jobs.py` (general) `process_job()`/`run_pack()` DB writes - genuine negative, no new finding, no code change, nothing pushed, oriented from `8bd9fc0` (Finding 190's own pass)
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `8bd9fc0`
