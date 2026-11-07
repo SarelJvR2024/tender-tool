@@ -4882,6 +4882,60 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - `sanral_b7.py`'s own `_num()` never got the NaN/Infinity guard `fill_financial_hours.py`'s identical pattern was fixed for on 2026-10-28, so a NaN Targeted Enterprise percentage would have been written into the real SANRAL Form B7 workbook as a literal `<v>nan</v>` numeric cell - low real-world severity (the one real write path already guards it client-side), fixed anyway by the same precedent Finding 138 used
+
+Oriented from `968feaa` (own prior pass: discovery clean sweep). `git fetch origin main` found two
+more rounds of sibling commits (the TS-sweep's grep-blind-spot sweeps continuing, a `computeTenderReadiness()`
+gate-adjacent finding on PR #178, a `searchTenders()` false-all-clear fix, an array/tuple-destructured
+`Promise.all()` sweep) - all unrelated to this pass's own file, `git merge --ff-only` clean, no
+collision (re-checked again immediately before pushing). New PR #180 (`fix: a Pack Review section
+read failure masked as "nothing to fix"`), sibling's own track - left untouched, outside this pass's
+Python-engine rotation.
+
+**Rotation: SANRAL pack.** Read `fill_financial_hours.py` (already hardened with the exact
+`math.isfinite()` guard this finding is about, 2026-10-28) and `sanral_b7.py` (Form B7 subcontracting)
+end to end looking for the same bug class elsewhere in this engine area. Found it: `sanral_b7.py`'s own
+`_num()` - used by `check_plan()` to validate a Targeted Enterprise's
+`pct_of_contract`/`pct_excl_provisional`/`black_ownership_pct` - has the identical bare
+`float(v)`-with-no-`isfinite()`-check shape `fill_financial_hours.py` was fixed for, never swept into
+this file. Confirmed directly: `_num(float("nan"))` returns `nan`, not `None`, and `check_plan()`'s own
+bound checks are all `False` against NaN (NaN compares false to everything) - no error raised - so
+`fill_b7()` would go on to write a literal `<v>nan</v>` into the real workbook. Infinity, by contrast,
+IS already caught (`inf > 100` is `True`), so this is a NaN-specific gap.
+
+**Checked real-world reachability before fixing, not assumed.** The one real write path
+(`app/app/tenders/[id]/b7-actions.ts`'s Server Action) always runs the submitted plan through
+`sanralB7.ts`'s own `parsePlan()` first, whose `num()` helper explicitly does
+`Number.isFinite(n) ? n : null` - so NaN/Infinity can never reach the database via genuine product
+use. Also checked `fill_financial_hours.py`'s own capture table (`financial_captures`) for the
+identical class while in this area: no app write path exists for it at all (confirmed by grep across
+`app/`) - not written up as its own finding, since it needs a direct DB bypass, the same bar this QA
+pass's history already uses for "theoretically constructible but not evidenced" leads.
+
+**Fixed anyway**, by the same precedent `years_experience_at()` used in Finding 138 (fixed by analogy
+to an already-reviewed sibling fix, even where the specific gap's own reachability is narrow): added
+the identical `math.isfinite()` check to `_num()`.
+
+**Verified red-then-green.** New checks in `test_sanral_b7.py` covering NaN on all three percentage
+fields plus `inf`/`-inf` on two (pinning down that infinity was already safe, not assuming it) - both
+`check_plan()` and `fill_b7()` checked for each. Reverted via `git apply -R` - exactly the 6
+NaN-specific checks failed as predicted, the 2 infinity checks still passed; reapplied - `ALL PASSED`.
+`py_compile` clean. Regression: `test_fill_b7_legacy_precedence.py`, `engine/pack/test_assemble_pack.py`
+- both `0 failure(s)`.
+
+**Backlog: unchanged at 18 items** - a defense-in-depth fix for an already-established bug class, not
+a new or existing judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean, no
+schema/migration involved, no change to any passing-case behaviour):
+- `engine/sanral_b7.py`
+- `engine/test_sanral_b7.py`
+
+To verify independently: `cd engine && python3 test_sanral_b7.py` - expect `ALL PASSED`, including the
+new NaN/Infinity checks under section 3.
+
+---
+
 ## This pass (2026-11-06, standing QA/robustness review): clean sweep - discovery rotation (`cidb_tenders.py` live-refetched; `source_http.py`'s shared `parse_rand()`/`parse_sanral_date()`/`norm_ref()`/`iso_sast_closing()` helpers and `assess_tender.py`'s `assess_fit()`/`categorize()` boundary re-read adversarially; `discovery_downgrades.py`'s flag/recovery logic traced end to end), no new reachable bug found
 
 Oriented from `00ce7ec` (own prior pass: Finding 141, `poll_loop.py` injectable clock). `git fetch

@@ -47,6 +47,7 @@ company's size (companies.status) isn't EME/QSE/Generic, the answer is
 "unknown" and B7 is treated as REQUIRED until the company answers: ask,
 don't skip.
 """
+import math
 
 CATEGORY_BANDS = {1: "under R6 million", 2: "R6 million to R25 million", 3: "over R25 million"}
 SIZES = ("EME", "QSE", "GENERIC")
@@ -135,9 +136,24 @@ def _num(v):
     if v is None or v == "":
         return None
     try:
-        return float(v)
+        n = float(v)
     except (TypeError, ValueError):
         return None
+    # math.isfinite() rules out NaN/+-inf too - a plain float() call alone
+    # does not, and a NaN value sails straight past every comparison check
+    # below (NaN compares False to everything: not < 0, not > 0, not > 100,
+    # not == 0), so it was never rejected here. fill_b7() then writes it
+    # straight into the real SANRAL Form B7 workbook as a literal <v>nan</v>
+    # numeric cell value - not valid per that cell's own XML Schema type, the
+    # identical corruption risk fill_financial_hours.py's own 2026-10-28 fix
+    # closed for the Financial Submission workbook's Hours sheets, never
+    # swept into this file. The one real write path (b7-actions.ts's
+    # parsePlan(), the Workspace form's own untrusted-JSON gate) already
+    # guards this with Number.isFinite() before anything reaches the
+    # database, so this is defense-in-depth, not a reachable production
+    # gap - fixed anyway, by the same precedent Finding 138 used for
+    # years_experience_at(). QA pass, 2026-11-07.
+    return n if math.isfinite(n) else None
 
 
 def check_plan(plan, applies=None):

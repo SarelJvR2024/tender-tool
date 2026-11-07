@@ -7971,3 +7971,55 @@ is identical to the old hardcoded call for every real caller.
 from `time.monotonic()` to `now()`, ~15 lines including comments); `engine/worker/test_poll_loop.py`
 (1 new test function, wired into `main()`). No change to `sleep`'s own injection, signal handling,
 `max_cycles`, or any real bridge's call site (none pass `now`).
+
+### Finding 142 (CONFIRMED, FIXED, low real-world severity since the one real write path already guards it client-side - `sanral_b7.py`'s own `_num()` never got the NaN/Infinity guard `fill_financial_hours.py`'s identical pattern was fixed for on 2026-10-28, so a NaN percentage sailed past `check_plan()`'s own validation and `fill_b7()` would have written it into the real SANRAL Form B7 workbook as a literal `<v>nan</v>` numeric cell)
+
+**Area:** SANRAL pack (`engine/sanral_b7.py` - Form B7, "Subcontracting to Targeted Enterprises").
+
+**Scenario:** `fill_financial_hours.py`'s own `fill()` was fixed on 2026-10-28 for a specific, already-
+documented risk: a capture value of `.nan`/`.inf` (valid YAML 1.1 float literals PyYAML's own
+`safe_load` parses without complaint) sails past a naive `hours < 0` guard (NaN compares `False` to
+every comparison) and gets written into a real SANRAL workbook as a literal `<v>nan</v>`/`<v>inf</v>`
+numeric cell - not valid per that cell's own XML Schema type, a real corruption risk. `sanral_b7.py`'s
+own `_num()` helper, used by `check_plan()` to validate every Targeted Enterprise's
+`pct_of_contract`/`pct_excl_provisional`/`black_ownership_pct`, has the IDENTICAL shape (`float(v)` with
+only a bare `try/except (TypeError, ValueError)`, no `math.isfinite()` check) and was never swept for
+this fix.
+
+Confirmed directly: `_num(float("nan"))` returns `nan` (not `None`), and `check_plan()`'s own
+`v is None or v < 0 or v > 100 or (key != "black_ownership_pct" and v == 0)` guard is entirely false for
+NaN (every comparison with NaN is `False`) - so a NaN percentage produces **no error at all**, and
+`fill_b7()` goes on to call `frac(te["pct_of_contract"])` (`round(nan / 100.0, 6)` = `nan`) and write it
+via `wb.set_value()`, which (being a `float`) takes the numeric-cell branch and writes `repr(nan)` =
+`"nan"` as a literal `<v>nan</v>`. Infinity, by contrast, IS already caught here (`inf > 100` is `True`
+in IEEE754), so this is specifically a NaN-shaped gap, not the full class.
+
+**Reachability, checked directly, not assumed:** the one real write path for a Targeted Enterprise's
+percentages is `app/app/tenders/[id]/b7-actions.ts`'s Server Action, which always calls
+`sanralB7.ts`'s `parsePlan(raw)` - "Parse a plan out of untrusted JSON (the Workspace form)" - before
+`checkPlan()`/the `upsert()`. `parsePlan()`'s own `num()` helper explicitly does
+`Number.isFinite(n) ? n : null`, so NaN/Infinity can never reach the database via genuine product use.
+This gap is defense-in-depth, not a currently reachable production path - the same conclusion reached
+for `fill_financial_hours.py`'s own capture table while investigating this area (no app write path
+exists for THAT table at all, confirmed by grep; not written up as a finding since it needs a direct
+DB bypass to trigger, same bar used throughout this QA pass's history for "theoretically constructible
+but not evidenced" leads).
+
+**Fixed anyway, by the same precedent `years_experience_at()` used in Finding 138** (fixed by analogy
+to an accepted, already-reviewed sibling fix, even where the specific gap's own production reachability
+was narrow): added the identical `math.isfinite()` check to `_num()`, so a NaN/Infinity value now
+returns `None` - the same "missing value" path `check_plan()` already turns into an error for every
+other reason (empty, non-numeric, out of range).
+
+**Verified red-then-green.** New checks in `test_sanral_b7.py`: NaN for each of the three percentage
+fields, plus `inf`/`-inf` for two of them (confirming infinity was already caught, to pin that fact
+down rather than assume it) - both `check_plan()` (must list the field as an error) and `fill_b7()`
+(must raise `ValueError`, never reach `wb.set_value()`) checked for each. Reverted `sanral_b7.py` via
+`git apply -R`, re-ran - exactly the 6 NaN-specific checks failed as predicted (the 2 infinity checks
+still passed, confirming they were never part of the gap); reapplied - `ALL PASSED`. `py_compile`
+clean on both touched files. Regression: `test_fill_b7_legacy_precedence.py` and
+`engine/pack/test_assemble_pack.py` - both `0 failure(s)`.
+
+**Regression:** `engine/sanral_b7.py` (`_num()`, `math` import added, ~15 lines including comments);
+`engine/test_sanral_b7.py` (5 new checks appended to the existing `check_plan()`/`fill_b7()` validation
+section). No change to `read_setup()`, `applicability()`, or any passing-case write in `fill_b7()`.

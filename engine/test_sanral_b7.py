@@ -114,5 +114,26 @@ with tempfile.TemporaryDirectory() as tmp:
                                 {"needs_plan": True})
     check(not e and any("below SANRAL's 30% minimum" in x for x in w), "20% total -> below-minimum warning")
 
+    # Finding 142 (2026-11-07): a NaN/Infinity percentage used to sail straight
+    # past check_plan()'s own validation (NaN compares False to every bound
+    # check), then got written into the real workbook as a literal <v>nan</v>
+    # numeric cell - the identical corruption risk fill_financial_hours.py was
+    # fixed for on 2026-10-28, never swept into this file. The real Workspace
+    # form (sanralB7.ts's parsePlan()) already guards this before anything
+    # reaches the database, so this is defense-in-depth - still must refuse,
+    # not silently write, if ever reached some other way (a direct DB write, a
+    # future import path).
+    nan, inf = float("nan"), float("inf")
+    for field, bad in (("pct_of_contract", nan), ("pct_excl_provisional", nan), ("black_ownership_pct", nan),
+                       ("pct_of_contract", inf), ("pct_excl_provisional", -inf)):
+        bad_te = te(**{field: bad})
+        e, _ = sanral_b7.check_plan({"mode": "subcontract", "targeted_enterprises": [bad_te]})
+        check(bool(e), f"a {bad!r} {field} is refused by check_plan(), not silently accepted")
+        try:
+            sanral_b7.fill_b7(Workbook(tpl), {"mode": "subcontract", "targeted_enterprises": [bad_te]})
+            check(False, f"fill_b7() must refuse a {bad!r} {field}, not write it into the real workbook")
+        except ValueError:
+            check(True, f"fill_b7() refuses a {bad!r} {field} rather than writing it")
+
 print("ALL PASSED" if not fails else f"{len(fails)} FAILED")
 sys.exit(1 if fails else 0)
