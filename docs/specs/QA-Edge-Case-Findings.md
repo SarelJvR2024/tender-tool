@@ -8191,3 +8191,90 @@ truncation-warning check, header/`MAX_CANDIDATE_ROWS` comments updated - no chan
 `send-compliance-digest.ts` (that file never had this residual - its own candidates are re-derived
 from live expiry dates every run, not a creation-date window, per the 2026-11-07d entry) or any
 other sender script.
+
+### Finding 146 (CONFIRMED, FIXED, low-moderate - `vault-quick-fix-actions.ts`'s own local `requireCompanyId(companyId)` was the one hyphenated-`*-actions.ts` holdout the 2026-11-06 `requireCompanyId()` sweep (`b002f4e`) never reached, because its signature differs from every other copy's)
+
+**Area:** Tender Workspace "Quick Blocker Resolver" drawer
+(`app/app/tenders/[id]/vault-quick-fix-actions.ts`, called from
+`quick-blocker-drawer.tsx`'s `saveVaultQuickFields()`/`uploadCoidQuickFix()`).
+
+**Scenario:** the standing backlog named the 33-hyphenated-`*-actions.ts`-file
+surface as "flagged as a remaining surface, not yet re-visited" since the
+2026-11-06 passes that (a) swept `requireCompanyId()`'s own `company_members`
+read for a missing `error` capture across 23 Server Action files (`b002f4e`)
+and (b) re-checked the "actions.ts out of scope" exclusion a second time
+(finding `requireCompanyId()` itself was the exact bug, not a different
+class). Checked `git log -1` recency across every currently-existing
+hyphenated `*-actions.ts` file (12 total, not 33 - the number has shrunk as
+earlier sweeps folded some in) rather than trusting the backlog's framing:
+10 of the 12 were last touched in the 2026-11-06 sweeps themselves;
+`update-actions.ts` (2026-10-20, read in full, already captures its one RPC
+call's error correctly - no finding) and `vault-quick-fix-actions.ts`
+(2026-10-24, pre-dating every 2026-11-06 fix) were the two genuinely
+untouched since. `vault-quick-fix-actions.ts`'s own `requireCompanyId()`
+turned out to be a real, if narrow, miss: unlike every one of the 23 swept
+files (`.eq("user_id", user.id).maybeSingle()`, no caller-supplied company
+id), this file's own copy additionally takes a client-passed `companyId`
+argument and cross-checks it (`.eq("user_id", ...).eq("company_id",
+companyId).maybeSingle()`) - a real, correctly-designed tenant-isolation
+check (the drawer is a client component calling a Server Action with a
+`companyId` prop, so this is the actual defense against a mismatched or
+spoofed id, not dead code). That different signature is almost certainly why
+`b002f4e`'s own sweep (grepping for the common single-argument shape) never
+matched it, and it still discarded the read's own `error` entirely.
+
+**Consequence, traced to its real severity rather than assumed:** this does
+NOT fail open - a transient `company_members` read failure still fell
+through to `membership` being `undefined`/falsy, so both callers
+(`saveVaultQuickFields()`, `uploadCoidQuickFix()`) correctly denied the write
+either way. The actual bug is the same "swallowed Supabase error" shape this
+whole review has tracked, just resolving to a misleading DENIAL instead of a
+false grant: a legitimately-signed-in member of the company, hit by a
+transient read failure while using the drawer, was told "Not signed in to
+this company." - the exact same non-actionable, wrong-reason message the
+23-file sweep replaced with "Couldn't verify your company - try again."
+everywhere else in this codebase. No data loss, no cross-tenant write, no
+security gap - a reliability/UX inconsistency, left exactly where the sweep
+that fixed every sibling never looked.
+
+**Fix:** `requireCompanyId()` now captures `membershipError`, logs it
+(`console.error`), and returns a discriminated `{ ok: true; companyId } |
+{ ok: false; error }` result instead of `string | null`, so the two denial
+reasons are distinguishable - genuinely-not-a-member still gets "Not signed
+in to this company.", a real read failure now gets "Couldn't verify your
+company - try again." (matching the sibling convention exactly). Both
+callers updated to read `verified.ok`/`verified.error`/`verified.companyId`
+instead of the old null-check. No change to the write paths themselves, to
+`quick-blocker-drawer.tsx`, or to any other file.
+
+**Verified myself, genuine red-then-green.** First dedicated test file for
+this module (`vault-quick-fix-actions.spec.ts`, 4 tests, vitest convention -
+this file imports the `@/` alias so the plain `node --experimental-strip-types`
+`*.test.ts` convention can't resolve it, same documented limitation as every
+other `@/`-importing action file in this codebase). Ran the new tests
+against the pre-fix file first: 2 of 4 failed exactly as expected (asserting
+the error message was NOT the old "Not signed in to this company." wording,
+which the pre-fix code always returned regardless of cause) - confirmed they
+actually exercise the bug, not a tautology. Applied the fix; re-ran - 4/4
+passed. Full regression from `app/`: `npx vitest run` - **466/466 passed,
+59/59 files** (up from 462/58: +1 new file, +4 new tests). The per-file
+`*.test.ts` loop (no `--test` flag) - **27 files, 0 failures**, unchanged
+(the new test file is a `.spec.ts`, not touched by this loop). `npm run
+typecheck` - **0 errors**. `npx eslint .` - **0 errors**, same 3
+pre-existing warnings. `npx next build` - **compiled successfully**, same
+route table, `Proxy (Middleware)` present.
+
+**Not independently verified:** against a real live Supabase transient-
+failure scenario (no live Supabase credentials in this environment) - the
+mocked-client test above exercises the exact code path, not a live network
+blip. `update-actions.ts` (the other genuinely-untouched-since-2026-10-20
+hyphenated file) was read in full and confirmed already correct (its one
+`accept_tender_update_date` RPC call captures and logs `error` and redirects
+with a real message) - not a new finding, recorded here so the next pass
+doesn't re-spend time on it without reading this note first.
+
+**Regression:** `app/app/tenders/[id]/vault-quick-fix-actions.ts` (~20 lines
+changed/added: `requireCompanyId()`'s return type and body, both callers'
+null-check replaced with an `ok` check); `app/app/tenders/[id]/vault-quick-
+fix-actions.spec.ts` (new, 4 tests). No change to `quick-blocker-drawer.tsx`,
+`lib/companyProfileUpdate.ts`, `lib/vaultDocuments.ts`, or any other file.

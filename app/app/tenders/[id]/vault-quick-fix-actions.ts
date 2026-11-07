@@ -17,12 +17,31 @@ import { buildCompanyUpdate } from "@/lib/companyProfileUpdate";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS } from "@/lib/vaultDocuments";
 import { safeFileName } from "@/lib/safeFileName";
 
-async function requireCompanyId(companyId: string): Promise<string | null> {
+// Unlike every other requireCompanyId() in this codebase (swept for this
+// exact shape in b002f4e, 2026-11-06), this one takes a caller-supplied
+// companyId to cross-check against the signed-in user's real membership -
+// a different enough signature that sweep's grep missed it. It used to
+// discard the company_members read's own `error`, so a transient read
+// failure was indistinguishable from "not actually a member" and surfaced
+// the wrong, non-actionable message. Still fails closed either way (no
+// security gap), but now the two cases are told apart - standing review,
+// 2026-11-07.
+async function requireCompanyId(companyId: string): Promise<{ ok: true; companyId: string } | { ok: false; error: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).eq("company_id", companyId).maybeSingle();
-  return membership ? companyId : null;
+  if (!user) return { ok: false, error: "Not signed in to this company." };
+  const { data: membership, error: membershipError } = await supabase
+    .from("company_members")
+    .select("company_id")
+    .eq("user_id", user.id)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (membershipError) {
+    console.error("company_members read failed (vault quick fix requireCompanyId)", membershipError);
+    return { ok: false, error: "Couldn't verify your company - try again." };
+  }
+  if (!membership) return { ok: false, error: "Not signed in to this company." };
+  return { ok: true, companyId };
 }
 
 /**
@@ -38,8 +57,8 @@ export async function saveVaultQuickFields(
   companyId: string,
   fields: Record<string, string>,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const verifiedCompanyId = await requireCompanyId(companyId);
-  if (!verifiedCompanyId) return { ok: false, error: "Not signed in to this company." };
+  const verified = await requireCompanyId(companyId);
+  if (!verified.ok) return { ok: false, error: verified.error };
 
   const formData = new FormData();
   for (const [key, value] of Object.entries(fields)) formData.set(key, value);
@@ -49,7 +68,7 @@ export async function saveVaultQuickFields(
   if (Object.keys(update).length === 0) return { ok: false, error: "Nothing to save." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("companies").update(update).eq("id", verifiedCompanyId);
+  const { error } = await supabase.from("companies").update(update).eq("id", verified.companyId);
   if (error) {
     console.error("companies update failed (vault quick fix)", error);
     return { ok: false, error: "Could not save - try again. If it keeps happening, let us know." };
@@ -73,12 +92,13 @@ export async function uploadCoidQuickFix(
   companyId: string,
   file: File,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const verifiedCompanyId = await requireCompanyId(companyId);
-  if (!verifiedCompanyId) return { ok: false, error: "Not signed in to this company." };
+  const verified = await requireCompanyId(companyId);
+  if (!verified.ok) return { ok: false, error: verified.error };
   if (!file || file.size === 0) return { ok: false, error: "Choose a file to upload." };
   if (file.size > MAX_UPLOAD_BYTES) {
     return { ok: false, error: "File is larger than 4.4 MB - scan it at a lower resolution or compress the PDF." };
   }
+  const verifiedCompanyId = verified.companyId;
 
   const supabase = await createClient();
   const column = VAULT_DOCUMENTS.coid.column;
