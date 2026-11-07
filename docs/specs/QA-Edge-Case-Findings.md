@@ -9818,3 +9818,94 @@ change what the production worker image installs/copies.
 To verify independently: run `python3 engine/notify/test_send_pack_ready_email.py` and confirm
 `0 failure(s)`. Read `send_pack_ready_email()`'s recipient filter and confirm it checks only
 `r.get("email")`/`"@" in r["email"]`, with no `daily_digest_opt_in` condition.
+
+### Finding 162 (CONFIRMED, FIXED, moderate - `scripts/send-onboarding-nudges.ts`'s own
+`lifecycleRecipients()` and `unsubscribeUrlFor()` both discarded a real RPC error with no logging
+at all, silently indistinguishable from a genuine "nothing to do")
+
+**Area:** `app/scripts/send-onboarding-nudges.ts` (`lifecycleRecipients()`, `unsubscribeUrlFor()`).
+
+**How this was found.** Continuing the notification-engine sweep that found Findings 160/161 in a
+row, checked every other Tier 0-3 sender script in `app/scripts/send-*.ts` and its Python siblings
+in `engine/notify/` for the same two bug shapes named in this pass's own brief (a discarded read
+error treated as "nothing to do"; a recipient/gating flag borrowed from the wrong feature).
+`send-corrigendum-alerts.ts`, `send-returnables-digest.ts`, and `send-test-samples.ts` (all 3
+previously unmentioned anywhere in this doc, confirmed by grep before reading) turned out clean:
+all read errors are either loud (`console.error` + `process.exit(1)` on a total-fetch failure) or
+correctly skip just the one bad item (`continue`), and all three already resolve recipients via
+`lib/notificationRecipients.ts`'s `criticalBidRecipients()` - the already-fixed, correct,
+unfiltered pattern Findings 160/161 reference. `send-onboarding-nudges.ts` (also previously
+unmentioned) was different: its own `lifecycleRecipients()` -
+
+```ts
+async function lifecycleRecipients(supabase, companyId) {
+  const { data, error } = await supabase.rpc("company_notification_recipients", { p_company_id: companyId });
+  if (error || !data) return [];
+  ...
+}
+```
+
+- discards `error` completely, with no `console.error` call, unlike every sibling resolver in the
+codebase that calls this exact same RPC: `lib/notificationRecipients.ts`'s own
+`operationalRecipients()` and `criticalBidRecipients()` both log
+`` `company_notification_recipients rpc failed for company ${companyId}` `` on this identical
+error branch. The sibling helper `unsubscribeUrlFor()` two lines below it has the identical shape
+against `lifecycle_unsubscribe_token_for()`. Confirmed by grep that neither function appears in any
+`.spec.ts` file before this pass - `send-onboarding-nudges.ts` had zero test coverage of its own
+sender-script logic (only the pure candidate-selection functions in `lib/onboardingNudges.ts`/
+`lib/trialLifecycle.ts` were tested), the same "real bug living in the untested half of a sender
+script" shape as Findings 153/160.
+
+**Consequence.** A transient `company_notification_recipients()` RPC failure (network blip,
+timeout, a bad deploy of the function itself) for one company on one run is indistinguishable, in
+the logs, from that company's own members having genuinely all opted out of Tier 0 lifecycle mail
+- `lifecycleRecipients()` returns `[]` either way, and nothing anywhere records which case
+happened. This is worse here than in most senders this review has fixed, because 3 of this
+script's 5 stages are one-shot, non-retried windows, not an ongoing condition that self-heals on
+the next run: `trialDay7Candidates()` (`lib/trialLifecycle.ts`) matches on
+`daysUntil(trial_ends_at) === 7` exactly - a company that hits this failure on its one qualifying
+day gets the `trial_day_7_milestone` nudge silently dropped forever, since the very next day's run
+no longer matches (`daysUntil` is `6`, not `7`). `trial_expiring_48h` and `trial_expired` are
+window/threshold-based and would self-heal on tomorrow's run if the company is still eligible, but
+still with the same missing diagnostic trace of why a given run sent nothing. `unsubscribeUrlFor()`
+failing the same way silently sends a Tier 0 lifecycle email with no one-click unsubscribe link at
+all (a POPIA/CAN-SPAM one-click-unsubscribe gap, not just a missing header) rather than skipping or
+logging - lower severity than the recipients gap, but the identical discarded-error shape, fixed
+alongside it for consistency and because it shares the same function file and review pass.
+
+**Fix.** Added the missing `console.error` call on the real-error branch of both
+`lifecycleRecipients()` (`` `company_notification_recipients rpc failed for company ${companyId}` ``,
+matching the exact wording `lib/notificationRecipients.ts`'s siblings already use for this RPC)
+and `unsubscribeUrlFor()` (`` `lifecycle_unsubscribe_token_for rpc failed for user ${userId}` ``).
+Behaviour on a genuine zero/opted-out/no-token result is unchanged - this is a logging-only fix,
+not a behavioural change to who gets nudged. Exported both functions (previously unexported,
+module-private) so they can be tested directly, same precedent `send-founder-digest.ts` already
+set for its own `count*()` functions.
+
+**Verified genuinely, red then green.** Neither function had any test coverage before this pass.
+Added `app/scripts/send-onboarding-nudges.spec.ts` (5 tests: each function's own real-error path
+logs with the right message, each function's own genuine-empty/opted-out path logs nothing, and
+each function's own success path still works). Ran against the pre-fix source first (`git stash`
+on just the one source file, the new spec kept): **5 of 5 failed** - `TypeError: lifecycleRecipients
+is not a function` / `unsubscribeUrlFor is not a function`, since neither was exported pre-fix,
+confirming the test genuinely exercises the fixed file and not some stale import. Restored the fix
+(`git stash pop`): **5/5 pass**. Full regression suite re-run after: `npm run typecheck` - 0
+errors. `npx eslint .` - 0 errors, the same 3 pre-existing warnings, unchanged. `npx vitest run` -
+**492/492, 63 files** (487 baseline + 5 new tests, 62 + 1 new file). The `*.test.ts` node loop (no
+`--test` flag, real exit codes) - **28 files, 0 failures**, matching the standing baseline exactly.
+Full `engine/` sweep (real exit codes) - **86 files, 0 failures**, unchanged (this fix touches no
+Python).
+
+**Regression:** `app/scripts/send-onboarding-nudges.ts` (2 functions: added error logging +
+`export`, ~12 lines, no behavioural change to recipient selection itself).
+`app/scripts/send-onboarding-nudges.spec.ts` (new file, 5 tests).
+
+**Pushed directly to `main`** - a logging-only fix (plus making two already-private functions
+testable) confined to one already-isolated sender script, does not touch RLS/money paths/hard-stop
+gates, and does not change what the production worker image installs or copies (this script runs
+only via its own GitHub Actions schedule, same as every other Tier 0-3 sender).
+
+To verify independently: run `npx vitest run app/scripts/send-onboarding-nudges.spec.ts` and
+confirm 5/5 pass. Read `lifecycleRecipients()`/`unsubscribeUrlFor()` in
+`app/scripts/send-onboarding-nudges.ts` and confirm each now calls `console.error` on its own real
+`error` branch before returning its empty/undefined fallback.

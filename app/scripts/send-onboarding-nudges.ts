@@ -58,19 +58,33 @@ async function allTenderPackCompanyIds(supabase: SupabaseService): Promise<{ com
 
 type Recipient = { userId: string; email: string };
 
-/** Every member of one company who has NOT opted out of Tier 0 lifecycle mail (company_members.lifecycle_email_opt_out, migration 0093) - via company_notification_recipients() (migration 0094), deliberately not company_member_labels() (0033), which returns zero rows for a service-role caller - see 0094's own header comment. */
-async function lifecycleRecipients(supabase: SupabaseService, companyId: string): Promise<Recipient[]> {
+/**
+ * Every member of one company who has NOT opted out of Tier 0 lifecycle mail (company_members.lifecycle_email_opt_out, migration 0093) - via company_notification_recipients() (migration 0094), deliberately not company_member_labels() (0033), which returns zero rows for a service-role caller - see 0094's own header comment.
+ *
+ * Found 2026-11-07 (standing solution-architect review): this used to discard a real RPC error with no `console.error` at all, silently returning `[]` - a transient read failure for one company was then indistinguishable from "every member opted out", with nothing in the logs to tell the two apart. Every sibling recipient resolver (`operationalRecipients()`/`criticalBidRecipients()`, `lib/notificationRecipients.ts`) already logs this exact RPC's own error; this one didn't. The consequence is worse here than in most senders: `trial_day_7_milestone` (see `trialDay7Candidates()`, `lib/trialLifecycle.ts`) is an exact-day match on `daysUntil(trial_ends_at) === 7`, not a retried window - a company that hits this failure on its one qualifying day never gets a retry, since the very next run no longer matches.
+ */
+export async function lifecycleRecipients(supabase: SupabaseService, companyId: string): Promise<Recipient[]> {
   const { data, error } = await supabase.rpc("company_notification_recipients", { p_company_id: companyId });
-  if (error || !data) return [];
+  if (error || !data) {
+    if (error) console.error(`company_notification_recipients rpc failed for company ${companyId}`, error);
+    return [];
+  }
   return (data as { user_id: string; email: string; lifecycle_email_opt_out: boolean }[])
     .filter((m) => !m.lifecycle_email_opt_out && m.email?.includes("@"))
     .map((m) => ({ userId: m.user_id, email: m.email }));
 }
 
-/** This recipient's one-click unsubscribe URL (RFC 8058) - lazily creates their token via lifecycle_unsubscribe_token_for() (0093), same as every other Tier 0 sender must. */
-async function unsubscribeUrlFor(supabase: SupabaseService, userId: string, appUrl: string): Promise<string | undefined> {
+/**
+ * This recipient's one-click unsubscribe URL (RFC 8058) - lazily creates their token via lifecycle_unsubscribe_token_for() (0093), same as every other Tier 0 sender must.
+ *
+ * Same 2026-11-07 fix as `lifecycleRecipients()` above: a real RPC failure now logs instead of silently falling through to "no unsubscribe link on this email" (a POPIA/CAN-SPAM one-click-unsubscribe gap, not just a missing header) with no trace of why.
+ */
+export async function unsubscribeUrlFor(supabase: SupabaseService, userId: string, appUrl: string): Promise<string | undefined> {
   const { data: token, error } = await supabase.rpc("lifecycle_unsubscribe_token_for", { p_user_id: userId });
-  if (error || !token) return undefined;
+  if (error || !token) {
+    if (error) console.error(`lifecycle_unsubscribe_token_for rpc failed for user ${userId}`, error);
+    return undefined;
+  }
   return `${appUrl}/api/unsubscribe?token=${encodeURIComponent(token as string)}`;
 }
 

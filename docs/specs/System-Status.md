@@ -1,5 +1,77 @@
 # System Status
 
+## This pass (2026-11-07z, standing solution-architect review): continued the notification-engine
+sweep started by Findings 160/161 (`646e40a` through `96f2865`) across the remaining Tier 0-3
+sender scripts, checking each for the same two bug shapes named in the brief - a discarded read
+error treated as "nothing to do"; a recipient/gating flag borrowed from the wrong feature.
+`app/scripts/send-corrigendum-alerts.ts`, `app/scripts/send-returnables-digest.ts`, and
+`app/scripts/send-test-samples.ts` (all previously unmentioned anywhere in
+`docs/specs/QA-Edge-Case-Findings.md`, confirmed by grep before reading) were all read end to end
+and ruled genuinely clean: every real failure path is already loud (`console.error` +
+`process.exit(1)` on a total-fetch failure) or correctly skips just the one bad item (`continue`),
+and all three already resolve recipients via the already-fixed, correct, unfiltered
+`criticalBidRecipients()` (`lib/notificationRecipients.ts`) that Findings 160/161 reference - an
+honest negative result, not forced.
+
+`app/scripts/send-onboarding-nudges.ts` (also previously unmentioned) was not clean: its own
+`lifecycleRecipients()` and `unsubscribeUrlFor()` both discarded a real
+`company_notification_recipients()`/`lifecycle_unsubscribe_token_for()` RPC error with **no
+`console.error` at all** - unlike every sibling resolver in the codebase calling the same RPCs
+(`lib/notificationRecipients.ts`'s `operationalRecipients()`/`criticalBidRecipients()`, which both
+log this exact error). A transient RPC failure for one company was silently indistinguishable from
+"every member genuinely opted out" - this review's own dominant bug-class shape, found this time
+in the recipient resolver itself rather than a discarded tender/document read. Worst case:
+`trialDay7Candidates()` (`lib/trialLifecycle.ts`) matches on `daysUntil(trial_ends_at) === 7`
+exactly, a one-shot window with no retry - a company that hits this failure on its one qualifying
+day never gets the `trial_day_7_milestone` nudge at all, and nothing in the logs would ever show
+why. Finding 162.
+
+Oriented from `96f2865` (immediately-preceding pass's own verified HEAD). `git fetch origin main`
+before starting and again right before writing this entry: clean both times, local matched
+`origin/main` exactly, no sibling commits landed during this pass. PRs re-checked via
+`mcp__github__list_pull_requests`: `#176`/`#178`/`#179`/`#180`/`#181` still open (`draft: false`),
+`#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this pass. No PR was
+touched, amended or merged.
+
+**Fix, verified red then green.** Added the missing `console.error` call on the real-error branch
+of both `lifecycleRecipients()` and `unsubscribeUrlFor()` (logging-only; behaviour on a genuine
+zero/opted-out/no-token result is unchanged), and exported both (previously module-private) so they
+could be tested directly - same precedent `send-founder-digest.ts` already set for its own
+`count*()` functions. Neither had any test coverage before this pass. Added
+`app/scripts/send-onboarding-nudges.spec.ts` (5 tests). Run against the pre-fix source
+(`git stash` on just the one source file): **5 of 5 failed** (`TypeError: ... is not a function`,
+since neither was exported pre-fix). Restored the fix: **5/5 pass**. Full regression suite after:
+`npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, same 3 pre-existing warnings. `npx
+vitest run` - **492/492, 63 files** (487 baseline + 5 new tests, 62 + 1 new file). The `*.test.ts`
+node loop (no `--test` flag, real exit codes) - **28 files, 0 failures**. Full `engine/` sweep
+(real exit codes) - **86 files, 0 failures**, unchanged (this fix touches no Python). Full
+write-up: Finding 162 in `docs/specs/QA-Edge-Case-Findings.md`.
+
+**Pushed directly to `main`** - a logging-only fix (plus making two already-private functions
+testable) confined to a single already-isolated sender script, no RLS/money/hard-stop/worker-image
+surface touched.
+
+**Backlog status.** `app/scripts/send-corrigendum-alerts.ts`, `app/scripts/send-returnables-digest.ts`,
+and `app/scripts/send-test-samples.ts` are now confirmed read and clean for this review's dominant
+bug class - not a live backlog candidate for a future pass without a genuinely new angle on one of
+them. `start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C) remains
+untouched, per the standing guardrail. PR #176/#178/#179/#180/#181 (awaiting Sarel's own merge
+decision) and #164/#165/#177 (stale drafts) remain exactly as described - not touched, not
+amended, not merged. Remaining unchecked Tier 0-3 TypeScript senders for a future pass:
+`send-compliance-digest.ts`, `send-discovered-tenders.ts`, `send-deadline-reminders.ts`,
+`send-operational-alerts.ts` (all already have 1+ prior mentions in the findings doc, so check
+their mention-count history first before assuming they're unexamined) and the Python
+`engine/notify/daily_digest.py`/`send_digest_emails.py`/`record_heartbeat.py` (all heavily mined
+already per their own mention counts - 69/27/12 respectively).
+
+To verify independently: run `npx vitest run app/scripts/send-onboarding-nudges.spec.ts` and
+confirm 5/5 pass. Read `lifecycleRecipients()`/`unsubscribeUrlFor()` in
+`app/scripts/send-onboarding-nudges.ts` and confirm each now calls `console.error` on its own real
+`error` branch. Confirm via `mcp__github__list_pull_requests` that `#176`/`#178`/`#179`/`#180`/`#181`
+are still open and unmerged.
+
+---
+
 ## This pass (2026-11-07y, standing solution-architect review): independently re-verified the
 immediately-preceding pass's `2899410` (Finding 160, founder-digest null-safe metric counts) in
 full - diff read, both new spec files run myself (13/13), a genuine manual red-then-green revert
