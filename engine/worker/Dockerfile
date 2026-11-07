@@ -27,11 +27,24 @@ FROM python:3.13-slim
 # docs/specs/OCR-Evaluation.md. To drop it, delete these three packages; the
 # bridges then refuse scans exactly as before (scan_ocr.available() is False).
 # OCR_DISABLED=1 switches it off without a rebuild.
+#
+# Node.js 22 (matching app-ci.yml's own pin): engine/notify/send_pack_ready_email.py
+# shells out to `node --experimental-strip-types` (needs Node >=22.6, so
+# Debian's own bookworm `nodejs` apt package - 18.x - is too old) to render
+# packReadyEmail() via app/scripts/render-pack-ready-email.ts, the one
+# canonical TS email template, rather than duplicating it as a second HTML
+# string in Python. Found missing entirely (System-Status.md Finding 152) -
+# this image had never had a node binary at all, on top of .dockerignore
+# separately excluding the app/ directory that script lives in (fixed
+# alongside this, see .dockerignore's own comment).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       libreoffice-writer-nogui libreoffice-calc-nogui python3-uno poppler-utils \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd \
       fonts-liberation fonts-crosextra-carlito fonts-dejavu-core \
+      curl ca-certificates \
+ && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
 # python3-uno installs for Debian's own python3; expose it to this image's
 # python3 too. A .pth line is appended to sys.path, so pip's packages still win.
@@ -53,6 +66,15 @@ COPY config/test_companies config/test_companies
 # Discipline taxonomy seed (0040): the offline fallback when the
 # discipline_categories table can't be read (engine/discovery/taxonomy.py).
 COPY config/discipline_taxonomy.json config/discipline_taxonomy.json
+# send_pack_ready_email.py's render bridge (above) needs these two directories
+# at app/lib and app/scripts, its own real cwd - confirmed by reading the
+# render script's full import chain that nothing under app/lib it actually
+# reaches at runtime imports an npm package (every import that does,
+# @supabase/supabase-js via notificationEngine.ts, is type-only and erased
+# by --experimental-strip-types), so no node_modules/package.json/npm install
+# is needed here. Not the whole app/ directory - see .dockerignore.
+COPY app/lib app/lib
+COPY app/scripts app/scripts
 
 # Unbuffered so log lines reach the host's log viewer immediately; a non-root
 # user with a writable HOME, because LibreOffice writes a profile there.
