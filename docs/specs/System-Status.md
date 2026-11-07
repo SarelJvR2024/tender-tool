@@ -1,5 +1,220 @@
 # System Status
 
+## This pass (2026-11-07xxiii, standing solution-architect review): PR-backlog consolidation, oriented from `1a65a86`
+(immediately-preceding pass's own verified HEAD, Finding 184's `applyCvExtraction()` race fix).
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `1a65a86`
+- and again just before writing/pushing this pass's own docs-only commit, still `1a65a86`, no
+sibling commit landed during this pass. **This pass is explicitly NOT another bug search - per the
+task brief, it is a one-time PR-backlog organization pass.** No PR was merged, no PR was opened, no
+PR's own branch/content was pushed to or edited - only this docs-only entry, direct to `main`, per
+the standing guardrail that merging is Sarel's call alone. All 10 currently-open PRs
+(#164/#165/#176/#177/#178/#179/#180/#181/#182/#183 - `#183` is new since the preceding pass's own
+count of 9; it landed at 2026-11-07T15:00Z, naming Finding 184/commit `1a65a86` as its own trigger)
+were read in full (`mcp__github__pull_request_read`) and checked for real mergeability, both against
+current `main` and against every other open PR, via `git merge-tree --write-tree`, not GitHub's own
+`mergeable_state` (which read `unknown` for 7 of the 10 and `clean` for only `#183`, confirming this
+field is not reliable here, as prior passes already found).
+
+**CI: confirmed, by reading every `.github/workflows/*.yml`, that NONE of this repo's 15 workflows
+has a `pull_request:` trigger** (`grep -rn "pull_request" .github/workflows/` - zero matches
+anywhere; the two relevant workflows, `app-ci.yml` and `bridge-worker-ci.yml`, both declare only
+`push: branches: [main]` plus `workflow_dispatch`). So by construction, none of the 10 open PRs has
+an automatic CI signal - each PR's own "Test plan" checklist is the verification record, run locally
+by the session that opened it, not a GitHub check. **One single exception, found and confirmed via
+`mcp__github__actions_list`:** PR #181's author manually `workflow_dispatch`'d `bridge-worker-ci.yml`
+against its own branch (run `42344828824`, `event: workflow_dispatch`, head sha `1e880396...` -
+exactly PR #181's current head commit) - **`conclusion: success`**. That run also carries
+`"pull_requests":[181]` in its own metadata, GitHub's own confirmation that it ran against this PR's
+real head. No other PR, and no `workflow_dispatch` run of `app-ci.yml` at all (checked: 0 runs of
+that workflow with `event: workflow_dispatch`, ever), has any comparable real check-run evidence.
+
+**Mergeability against current `main` (`git fetch origin pull/<N>/head:prN-check` then `git
+merge-tree --write-tree main prN-check`, actual output quoted, not inferred):**
+
+| PR | Base commit (when opened) | vs. `main` today | Conflicting files |
+|---|---|---|---|
+| #176 | `84c5093` | **clean** | - |
+| #177 | `9fddd8f` | **clean** | - |
+| #178 | `12de22a8` | **clean** | - |
+| #180 | `16a34c7f` | **clean** | - |
+| #181 | `c2480f3` | **clean** | - |
+| #182 | `02610a24` | **clean** | - |
+| #183 | `1a65a86` (= current `main` HEAD exactly) | **clean** | - |
+| #179 | `e096b503` | **CONFLICT** | `app/lib/pastSubmissionReuse.ts` |
+| #165 | `3ade4a0c` (2026-10-26) | **CONFLICT** | `app/components/tt/savings-calculator.tsx` |
+| #164 | `edd2156f` (2026-10-26) | **CONFLICT** | `app/app/analytics/page.tsx`, `app/app/dashboard/page.tsx`, `app/components/tt/savings-calculator.tsx`, `app/components/tt/savings-counter-card.tsx`, `app/lib/companyProfileUpdate.ts`, `app/lib/savingsCounterData.ts` |
+
+**#179's conflict with `main` traced to its exact cause, not left as a bare "conflicts":** commit
+`829dbb9` (already on `main`, landed 2026-11-06 22:15Z, the "TS-sweep's 4th grep blind spot" fix)
+edited the *same* `const [{ data: people }, { data: packs }] = await Promise.all([...])`
+destructuring line inside `buildReusePlan()` that PR #179 also edits (to add `pipeline_stage` to the
+`tender_packs` select and introduce `packRows`) - a real textual collision on one shared line, not a
+logical disagreement about behaviour. PR #179 needs a rebase onto current `main` before it can merge
+cleanly; this is a mechanical fix (reapply #179's own `pipeline_stage`/`packRows`/target-stage-check
+addition on top of #829dbb9's error-capture lines), not a sign the fix itself is wrong.
+
+**#164 and #165 are both ~12 days stale (base commits from 2026-10-26, the oldest base of any open
+PR) and conflict with `main` directly, each on files `main` has since moved on substantially.** Both
+remain `draft`.
+
+**Pairwise conflict map, every one of the 45 PR-pairs actually run through `git merge-tree
+--write-tree prA-check prB-check` (not just the pairs a prior pass already flagged) - full real
+output, not inferred:**
+
+- **A critical caveat, checked and confirmed, that changes how every #164/#165 pairwise result
+  below must be read:** for any pair `(#164, X)` or `(#165, X)`, `git merge-base pr164-check
+  prX-check` resolves to **#164's own original base commit** (`edd2156f`) exactly - i.e. the
+  "pairwise" merge-tree against #164 is mathematically identical to #164's own already-reported
+  conflict against `main` (same files, same conflicts, every time), because #164/#165 are so far
+  behind that no other open PR's base post-dates them. **These are not genuine #164-vs-#176-style
+  disagreements between two PRs' own changes - they are #164/#165's own staleness against `main`,
+  reappearing in every pairwise comparison.** Confirmed directly: `git merge-base pr164-check
+  pr176-check` → `edd2156f...` (= #164's own PR base, verified via `git log -1 edd2156f...`). The
+  same mechanical check on `#179` vs `#180`/`#181`/`#182`/`#183` returned `e096b503...` (= #179's own
+  PR base) for all four - confirming those four "conflicts" are like#179's: identical restatements
+  of #179's own already-known conflict with `main` (all four in `app/lib/pastSubmissionReuse.ts`,
+  the one file only #179 touches), not new information about #180/#181/#182/#183 fighting #179.
+- **The one real, genuine cross-PR conflict found in the entire 45-pair sweep, confirmed NOT to be a
+  staleness artifact:** `git merge-base pr178-check pr180-check` → `12de22a8` = **#178's own PR
+  base** - but `git log --oneline 12de22a8..16a34c7f -- 'app/app/tenders/[id]/general-workspace.tsx'
+  'app/app/tenders/[id]/submission-pack.tsx'` returns **empty** (`main` itself touched neither file
+  between #178's base and #180's base), which rules out the staleness explanation and confirms this
+  conflict is a real, direct collision between #178's own diff and #180's own diff on both shared
+  files:
+  ```
+  $ git merge-tree --write-tree pr178-check pr180-check
+  ...
+  CONFLICT (content): Merge conflict in app/app/tenders/[id]/general-workspace.tsx
+  CONFLICT (content): Merge conflict in app/app/tenders/[id]/submission-pack.tsx
+  ```
+  This matches what #180's own PR body already says in plain language: "once #178 merges, it
+  inherits this same blind spot unless this fix (or an equivalent) lands too" - #178 adds a
+  server-side Fix-item gate by calling `computeTenderReadiness()`, and #180 is the fix to that same
+  function's own `hasUnreadSection` blind spot, touching the same two component files to wire it
+  through. They need to be merged together (either order, resolving the 2-file conflict by hand) -
+  merging #178 alone, without #180, would ship the server-side gate with #180's own named blind spot
+  already baked in.
+- Every other pair among #176/#177/#178/#180/#181/#182/#183 (i.e. every pair not involving
+  #164/#165/#179, and not the #178↔#180 pair above) came back **clean** - confirmed by running all
+  45 pairs, not assumed from the 7-clean-vs-main set.
+
+**Thematic (non-file) relationships, read from each PR's own body, that do not show up in any
+`merge-tree` output because they touch no shared file:**
+- **#176 ↔ #182** - same bug class (a `SECURITY DEFINER` RPC bypassing employee RLS), #182's own
+  body says outright its 2 functions "were missed by that sweep" (#176's). No file overlap (176
+  touches migration `0119` + `test_tenant_isolation.py` section `[20]`; 182 touches migration `0121`
+  + the same test file's section `[18]`) - confirmed both additions land in the same file without
+  conflicting. Thematically linked, not technically blocking in either order.
+- **#183** builds directly on migration `0123`, which is already on `main` (part of this pass's own
+  oriented-from commit `1a65a86`) - #183's own base commit **is** `1a65a86` exactly, so it needs no
+  rebase at all.
+
+**One-paragraph, plain-language summary of each PR, for a fast merge/reject/defer call (ordered by
+suggested merge priority, not PR number):**
+
+1. **#176 - "12 backend functions were leaking other companies' bank details, teammate emails and
+   more to a company's own regular *employees* (not owners/admins), who shouldn't see any of it."**
+   A systematic sweep found 12 database functions that check "does this person work here at all"
+   but not "what's their role" - so an employee-level user could read a company's real bank account
+   number, every teammate's email, and could also trigger real paid actions (request a tender pack,
+   consuming quota) on the company's behalf. Fixed by adding the same role check these functions'
+   own sibling tables already have. Clean against `main`, clean against every other open PR. Biggest
+   single PR in the batch (830 lines) but every one of the 12 fixes is the identical one-line-guard
+   pattern, each individually tested both ways (employee blocked, owner/member unaffected).
+2. **#182 - "Two more places with the exact same employee-data-leak bug #176 just found - these two
+   got missed."** Same story as #176, just 2 functions instead of 12 (both about how many tender
+   packs a company has used/can still request). Small, clean, independent of #176 either way.
+3. **#183 - "If someone double-clicks 'Confirm' on an onboarding document (or has the same screen
+   open in two tabs), the same document can get filed twice - duplicating real records."** The
+   direct follow-on to the fix already on `main` (commit `1a65a86`) for the exact same bug on a
+   different screen (CV extraction). This PR covers onboarding's own "confirm this scanned document"
+   screen (company registration doc, ID document, a reference letter, a CV handoff) - 6 different
+   buttons sharing one unguarded check. Clean against everything else. Largest diff after #176 (597
+   lines) because each of the 4 riskiest confirm buttons needs its own small database lock, not one
+   shared fix.
+4. **#181 - "The automatic 'Your tender pack is ready' email has never actually been sent, for
+   any company, since the feature launched on 27 October - found by finding the bug, not by seeing
+   it fail."** The email-sending code needs a tool (`node`) that was simply never installed in the
+   production worker, and the one file it needs was explicitly excluded from what gets shipped to
+   production - so every attempt fails silently and the error gets swallowed into an internal log
+   nobody but a session like this one reads. This PR installs the missing tool and un-excludes the
+   one file genuinely needed (not the whole app). **This is the only one of the 10 PRs with a real,
+   passing CI run on its exact code** (a manually-triggered build-and-test run, green). Isolated to
+   2 files (a Dockerfile and a `.dockerignore`), clean against everything else - but it is a change
+   to what ships inside the production worker's container image, which is why it's worth a human
+   glance even though it's narrow.
+5. **#178 + #180 - merge together, not #178 alone (they conflict with each other and are two
+   halves of one fix).** #178: the "Fix N items before you can submit" rule was only ever enforced
+   by greying out a button in the browser - nothing stopped a direct request from actually building
+   and sending a non-compliant submission pack. This closes that gap on the server, for both tender
+   types. #180: separately, when the system can't tell if everything's actually fixed (a temporary
+   read hiccup), it was wrongly treating "couldn't check" as "all clear" in 3 different places
+   (the Submit button, a pipeline status badge, and the "are you still impersonating someone"
+   warning banner) - this makes all 3 fail safe instead. #180's own description says plainly that if
+   #178 merges without it, #178's new server-side check inherits that exact same "couldn't check =
+   assume it's fine" gap. **They touch the same 2 files in a way Git cannot auto-merge** - whoever
+   merges these should merge #180 first, then manually re-apply #178's own change on top (both diffs
+   are short and readable), rather than trying to merge #178 alone.
+6. **#179 - "Reusing a past submission as a starting point for a new tender never checked whether
+   the tender you're copying it ONTO has already been submitted - only whether the one you're
+   copying FROM was valid."** A stale browser tab or a replayed request could silently overwrite the
+   answers on a tender that's already gone in to the buyer. Real, worth having - but **this PR
+   currently conflicts with `main` itself** (a different, already-merged fix touched the exact same
+   line) and needs a small rebase before it's even mergeable; recommend asking for that rebase
+   before spending a review cycle on it.
+7. **#177 (draft) - "A blip in the login-gate check was wrongly treated as 'this person has no
+   company yet' and bounced them to the signup screen instead of wherever they were actually going."**
+   Runs on every single page load for every signed-in user, so it's the widest-blast-radius fix in
+   the batch, but the change itself can only ever produce *fewer* wrong redirects, never more (by
+   the PR author's own careful reasoning, re-confirmed by reading the diff directly: it only adds an
+   extra "was this actually an error?" condition before redirecting). Small (1 file, 19 lines),
+   clean against everything else. Still marked draft - worth flipping out of draft before/at merge
+   time, no code reason to wait.
+8. **#164 and #165 - oldest two PRs (opened 2026-10-26, ~12 days ago), both still draft, and both
+   now meaningfully stale: each conflicts with current `main` directly** (not just with each other)
+   on files `main` has substantially reworked since. #165 is 4 small, independently-verified
+   production-copy/crash fixes (a WhatsApp link that crashed the homepage, a mismatched calculator
+   label, 2 dead email addresses, a glued-together text bug on the demo page) - cheap to redo fresh
+   rather than rebase, given the drift. #164 is a bigger, deliberate rework of the savings-counter's
+   whole calculation and copy (a feature change, not a bug fix) - given 12 days of drift on exactly
+   the files it touches, this one most needs Sarel's own judgment call: redo it against current
+   `main`, or confirm the underlying feature decision still stands before anyone spends the rebase
+   effort.
+
+**Suggested merge order (accounting for every conflict above), independent/safe items first:**
+`#176` → `#182` → `#183` → `#181` → (`#180` then `#178`, together, resolving their shared-file
+conflict by hand) → `#179` (after a rebase onto `main`) → `#177` (flip out of draft) → `#164`/`#165`
+(Sarel's own call: redo fresh vs. rebase, given ~12 days of drift on both). Items 1-5 have zero
+pairwise conflicts with each other or with `main` and can be merged in any relative order among
+themselves (176/182/183/181 truly don't interact); #178/#180 must go together; #179 needs a rebase
+first; #164/#165 are a separate decision, not a queue position.
+
+**Worth Sarel's own read before approving, specifically (not a blanket "read everything" - the
+batch's safe majority genuinely doesn't need it):** **#181**, because it changes what ships inside
+the production worker's Docker image (a real infra change, even though narrow and CI-green).
+**#178+#180 together**, because the PR authors' own words call this a higher risk tier than the
+batch's usual cosmetic fixes (a hard-stop gate on the core submission pipeline) and because the pair
+needs a manual conflict resolution, not a clean auto-merge. **#164**, because it's a deliberate
+feature/calculation rework (not a bug fix) sitting on 12 days of drift - worth confirming the
+underlying decision before any rebase effort is spent on it.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched - out of scope for this pass. No PR was merged, opened, or edited this
+pass, per the task's own explicit guardrail. This pass's own organization above is new information
+(the full pairwise conflict map, the CI-trigger confirmation, and the root-cause trace of #179's and
+#164/#165's conflicts) that no prior pass had assembled; the next session to touch this backlog
+should start from the table/map above rather than re-deriving it, unless a new PR has landed or an
+existing one has been rebased since.
+
+To verify independently: re-run `git fetch origin pull/<N>/head:prN-check` for each of the 10 PR
+numbers above, then `git merge-tree --write-tree main prN-check` (and the 45 pairwise combinations)
+and confirm the same conflicts/clean results. Confirm via `grep -rn "pull_request" .github/workflows/`
+that the trigger list is still empty. Confirm via `mcp__github__list_pull_requests` (state=open) that
+the same 10 PRs are still open and no new one has landed. Confirm `git log --oneline -1 origin/main`
+is this pass's own new docs-only commit (one ahead of `1a65a86`).
+
+---
+
 ## This pass (2026-11-07xxii, standing solution-architect review): oriented from `9544439`
 (immediately-preceding pass's own verified HEAD, the 7-source document-extraction re-verify).
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
