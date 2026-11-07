@@ -4977,6 +4977,60 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - `assess_tender.CIDB_RE`'s own `"GRADING?"` could only ever match "GRADIN"/"GRADING", never the equally common "CIDB Grade X" phrasing - a tender naming its requirement this way silently read as having no CIDB requirement at all, in both discovery scoring and the non-SANRAL pack's own submission plan
+
+Oriented from `e34d59c` (own prior pass: Finding 142, `sanral_b7.py` NaN guard). `git fetch origin
+main` found one more round of sibling commits (the zero-recipients batched-send resolution, a Resend
+WAF User-Agent sweep across `send_digest_emails.py`/`send_pack_ready_email.py`,
+`etenders_national.py`'s own partial-failure/UA hardening) - all unrelated to this pass's own file,
+`git merge --ff-only` clean, no collision. Confirmed the sibling's own `send_digest_emails.py` change
+didn't clobber this track's own Finding 140 fix (date-duplication) - re-read the merged file directly
+and re-ran its test suite, both confirmed intact.
+
+**Rotation: non-SANRAL pack.** Read `submission_plan.py` end to end (clean - every step's status is
+drawn from a closed, correctly-exhaustive set; cross-checked its own `_form_gap_prefixes` dedup logic
+against `requirements.py`'s real gap-text format, matches exactly) and `requirements.py`'s own CIDB
+grading extraction, which imports `assess_tender.CIDB_RE` - a regex shared with discovery scoring.
+Tested it directly: `CIDB_RE.search("CIDB Grade 6CE")` and `CIDB_RE.search("CIDB grade of 7GB")` both
+return `None`, while `"CIDB Grading of 6CE"` matches correctly. Traced it to `GRADING?`, whose `?`
+only makes the trailing `"G"` optional (`"GRADIN"`/`"GRADING"`) - it structurally cannot match
+`"GRADE"` (diverges at the 5th character). Confirmed via web search that "CIDB Grade X" is standard,
+common South African procurement wording, not a narrow or contrived phrasing - used interchangeably
+with "CIDB Grading of X" by real tender-advice/procurement-guide sources.
+
+**Impact, both real consumers of the shared regex**: in discovery, this phrasing produced no
+`cidb_grading` signal at all - the same lost-compliance-signal shape Finding 135 (Eskom's truncated
+`REFERENCE` field) found for reference matching. In the non-SANRAL pack (this rotation's own area),
+`requirements.py`'s `manifest["cidb"]` was never set, so `submission_plan.py`'s dedicated,
+correctly-cautious "CIDB grading N required - confirm this meets or exceeds" step never appeared -
+only the generic "CIDB registration / grading" returnable showed, silently losing the specific
+grading number and the comparison prompt.
+
+**Fixed**: `GRADING?` replaced with an explicit `(?:GRADING|GRADE)` alternation (longest first).
+Verified directly against 8 real-shaped phrasings - zero regression on any previously-matching case,
+all 4 new "Grade" cases now match.
+
+**Verified red-then-green.** New test in `engine/general/test_requirements.py`, running the real
+`extract_requirements()` pipeline against 4 fixture texts. Reverted via `git apply -R` - the 2
+"Grade" cases failed exactly as predicted, the 2 "Grading" cases stayed green; reapplied -
+`0 failure(s)`. `py_compile` clean. Regression: every direct/indirect consumer of `assess_tender.py`
+or `CIDB_RE` - `test_taxonomy.py`, `test_discovery_fanout.py`, `test_discovery_downgrades.py`,
+`test_boq_extraction.py`, `test_document_reader_fallback.py`, `test_submission_plan.py`,
+`test_build_general_pack.py`, `engine/intake/test_classify_tender.py` - all `0 failure(s)`.
+
+**Backlog: unchanged at 18 items** - a mechanical regex-phrasing gap, not a new or existing
+judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean,
+shared-infra change swept against every real consumer):
+- `engine/discovery/assess_tender.py`
+- `engine/general/test_requirements.py`
+
+To verify independently: `cd engine/general && python3 test_requirements.py` - expect
+`0 failure(s)`, including the new "CIDB requirement detection: 'CIDB Grade X' is caught" section.
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - `sanral_b7.py`'s own `_num()` never got the NaN/Infinity guard `fill_financial_hours.py`'s identical pattern was fixed for on 2026-10-28, so a NaN Targeted Enterprise percentage would have been written into the real SANRAL Form B7 workbook as a literal `<v>nan</v>` numeric cell - low real-world severity (the one real write path already guards it client-side), fixed anyway by the same precedent Finding 138 used
 
 Oriented from `968feaa` (own prior pass: discovery clean sweep). `git fetch origin main` found two

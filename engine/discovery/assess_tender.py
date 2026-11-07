@@ -72,7 +72,17 @@ STRUCTURAL_MARKERS = [
 # before it still match. Before: 66% of live tenders came out
 # "uncategorized"; after: 3%.
 
-CIDB_RE = re.compile(r"CIDB\s*(?:CONTRACTOR\s*)?GRADING?\s*(?:OF\s*)?(?:AT\s*LEAST\s*)?([0-9]+\s*[A-Z]{1,3})", re.IGNORECASE)
+# "GRADING?" (next line, until this fix) only ever made the trailing "G"
+# optional - "GRADIN"/"GRADING" - never matching the equally common "CIDB
+# Grade X" phrasing real buyers use interchangeably with "CIDB Grading of
+# X" (confirmed live, 2026-11-07: "CIDB Grade 6CE" is standard South African
+# procurement wording, as common as "CIDB Grading"). A tender that only ever
+# names its CIDB requirement this way silently read as having none at all -
+# no returnable step raised in requirements.py's own manifest, no scoring
+# signal here. Fixed with an explicit GRADE/GRADING alternation (longest
+# first, so "GRADING" is never partly matched as just "GRADE" then failed
+# and re-tried via backtracking).
+CIDB_RE = re.compile(r"CIDB\s*(?:CONTRACTOR\s*)?(?:GRADING|GRADE)\s*(?:OF\s*)?(?:AT\s*LEAST\s*)?([0-9]+\s*[A-Z]{1,3})", re.IGNORECASE)
 # Known-weak, kept only for output-shape compatibility: on SANRAL's Book 1 it
 # captures "1" from "B-BBEE Level 1", not a points value. Nothing reads it;
 # score_outlook.py's specific_goals is the real (and honest) replacement.

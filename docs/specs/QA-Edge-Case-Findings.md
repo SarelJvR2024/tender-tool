@@ -8023,3 +8023,48 @@ clean on both touched files. Regression: `test_fill_b7_legacy_precedence.py` and
 **Regression:** `engine/sanral_b7.py` (`_num()`, `math` import added, ~15 lines including comments);
 `engine/test_sanral_b7.py` (5 new checks appended to the existing `check_plan()`/`fill_b7()` validation
 section). No change to `read_setup()`, `applicability()`, or any passing-case write in `fill_b7()`.
+
+### Finding 143 (CONFIRMED, FIXED, moderate - `assess_tender.CIDB_RE`'s own `"GRADING?"` could only ever match "GRADIN"/"GRADING", never the equally common "CIDB Grade X" phrasing real South African buyers use interchangeably - a tender naming its requirement this way read as having no CIDB requirement at all, in both discovery scoring and the non-SANRAL pack's own submission plan)
+
+**Area:** Non-SANRAL pack (`engine/general/requirements.py`'s CIDB detection), sharing
+`assess_tender.CIDB_RE` with discovery scoring (`assess_tender.extract_signals()`).
+
+**Scenario:** `CIDB_RE = re.compile(r"CIDB\s*(?:CONTRACTOR\s*)?GRADING?\s*(?:OF\s*)?(?:AT\s*LEAST\s*)?"
+r"([0-9]+\s*[A-Z]{1,3})", re.IGNORECASE)`. The `?` on `GRADING?` only makes the trailing `"G"`
+optional, giving `"GRADIN"` or `"GRADING"` - it structurally can never match `"GRADE"` (diverges at the
+5th character: `"GRADE"` vs `"GRADI"`). Confirmed directly: `CIDB_RE.search("CIDB Grade 6CE")`,
+`CIDB_RE.search("CIDB grade of 7GB")` and `CIDB_RE.search("CIDB Contractor Grade 9CE")` all return
+`None`, while the equivalent `"...Grading..."` phrasing matches correctly. "CIDB Grade X" is standard,
+common South African procurement wording (confirmed via web search of real South African tender-advice
+and procurement-guide sources, which use "CIDB Grade" at least as often as "CIDB Grading") - not a
+narrow or contrived phrasing.
+
+**Impact, both real consumers of this shared regex**: in discovery (`assess_tender.extract_signals()`),
+a tender phrased this way read as having no `cidb_grading` signal at all - the same kind of lost
+compliance signal Finding 135 (Eskom's truncated `REFERENCE` field) found for reference matching.
+In the non-SANRAL pack (`requirements.py:1378`, this rotation's own area), `manifest["cidb"]` was
+never set, so `submission_plan.py`'s dedicated, correctly-cautious "CIDB grading N required - confirm
+this meets or exceeds" step never appeared, and the generic "CIDB registration / grading" returnable
+(matched on the bare `\bCIDB\b` keyword) was the ONLY signal shown - silently losing the specific
+grading number and the comparison prompt that step exists to give.
+
+**Fix:** `GRADING?` replaced with an explicit `(?:GRADING|GRADE)` alternation (longest first, so
+`"GRADING"` is matched whole rather than relying on backtracking after a partial `"GRADE"` match
+fails against the digits that follow). Verified directly against 8 real-shaped phrasings (both
+`"Grading"`/`"Grade"`, with/without `"Contractor"`, with/without `"of"`/`"at least"`) - zero regression
+on any previously-matching case, all 4 new `"Grade"` cases now match.
+
+**Verified red-then-green.** New test `check_cidb_grade_phrasing_is_detected_not_just_grading()` in
+`engine/general/test_requirements.py`, running the real `extract_requirements()` pipeline against 4
+fixture texts (2 "Grading", 2 "Grade", with/without "Contractor"). Reverted `assess_tender.py` via
+`git apply -R`, re-ran - the 2 "Grade" cases failed exactly as predicted (`manifest['cidb']` never
+set), the 2 "Grading" cases stayed green; reapplied - `0 failure(s)`. `py_compile` clean. Regression:
+every other direct/indirect consumer of `assess_tender.py` or `CIDB_RE` -
+`engine/discovery/test_taxonomy.py`, `test_discovery_fanout.py`, `test_discovery_downgrades.py`,
+`test_boq_extraction.py`, `test_document_reader_fallback.py`, `engine/general/test_submission_plan.py`,
+`test_build_general_pack.py`, `engine/intake/test_classify_tender.py` - all `0 failure(s)`.
+
+**Regression:** `engine/discovery/assess_tender.py` (`CIDB_RE`, 1 regex changed, ~10 lines including
+comments); `engine/general/test_requirements.py` (1 new test function, wired into `main()`). No change
+to any other regex in this file, `extract_signals()`'s own dispatch, or `requirements.py`'s own CIDB
+handling logic beyond what the corrected regex now feeds it.

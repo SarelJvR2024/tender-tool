@@ -448,6 +448,32 @@ def check_zip_decompression_bomb_is_capped():
               len(docs3) == 1 and docs3[0]["format"] == "txt" and not docs3[0].get("unreadable"), docs3)
 
 
+def check_cidb_grade_phrasing_is_detected_not_just_grading():
+    """Finding 143 (2026-11-07): assess_tender.CIDB_RE's own "GRADING?" only
+    ever made the trailing "G" optional ("GRADIN"/"GRADING") - it could never
+    match the equally common "CIDB Grade X" phrasing (confirmed live:
+    standard South African procurement wording, used interchangeably with
+    "CIDB Grading of X"). A tender naming its requirement this way read as
+    having none at all - requirements.py's own manifest never set "cidb",
+    so the non-SANRAL pack's submission plan never raised the CIDB
+    returnable step either."""
+    print("\nCIDB requirement detection: 'CIDB Grade X' is caught, not just 'CIDB Grading of X'")
+    for phrasing in ("The bidder must hold a CIDB Grading of at least 6CE for this contract.",
+                     "The bidder must hold a CIDB Grade 6CE for this contract.",
+                     "A CIDB Contractor Grading of 9CE is required.",
+                     "A CIDB Contractor Grade 9CE is required."):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bundle.txt")
+            with open(path, "w") as f:
+                f.write(phrasing)
+            manifest = req.extract_requirements([path], work_dir=tempfile.mkdtemp(prefix="tt_req_test_"))
+        cidb = manifest.get("cidb")
+        check(f"{phrasing!r} -> manifest['cidb'] is set", cidb is not None, manifest.get("cidb"))
+        if cidb:
+            check(f"{phrasing!r} -> the right grading was read",
+                  cidb["grading"] in ("6CE", "9CE"), cidb["grading"])
+
+
 def main():
     print("Finding 29: MBD/SBD suite decided by majority of real mentions, not mere presence")
     check("10 real MBD mentions + 1 stray SBD reference -> MBD (the bug itself: this used to come back SBD)",
@@ -468,6 +494,7 @@ def main():
     check_combined_bulletin_detection()
     check_person_registration_detection()
     check_zip_decompression_bomb_is_capped()
+    check_cidb_grade_phrasing_is_detected_not_just_grading()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
