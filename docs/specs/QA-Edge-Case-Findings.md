@@ -8389,3 +8389,120 @@ captures and logs `countError`, both `if`/`else if` branches gated on
 `!countError`); `app/app/tenders/[id]/general-actions.spec.ts` (new, 3
 tests). No change to `private-documents.tsx`, `saveGeneralAnswers()`, or any
 other function in this file.
+
+### Finding 148 (CONFIRMED, FIXED, moderate - `engine/worker/requirements.txt` pinned `pypdf==6.17.0`/`Pillow==12.3.0`, both with multiple known CVEs directly reachable through attacker-influenced uploads)
+
+**Area:** `engine/worker/requirements.txt` (the bridge worker container's
+pinned Python dependencies, `engine/worker/Dockerfile`) - specifically the
+`pypdf` and `Pillow` pins, used throughout the pack/general/CV/OCR bridges
+to parse real tender PDFs and uploaded vault scans/images.
+
+**How this was found.** Picked as this pass's angle via the standing
+directive's own "dependency/security audit" option: `npm audit --omit=dev`
+on `app/` came back clean (0 vulnerabilities, matching the last time this
+was checked, 2026-10-20), so the audit moved to the Python side, which this
+doc's history shows has never had a dedicated dependency/CVE sweep. Ran
+`pip-audit -r engine/worker/requirements.txt` against the exact pinned
+versions (installed in this environment, confirmed identical to the pins:
+`pypdf 6.17.0`, `Pillow 12.3.0`) - came back with 64 known vulnerabilities
+across exactly those 2 packages (every other pinned/transitive dependency -
+`python-docx`, `PyYAML`, `anthropic`, `pdfplumber`, `lxml`, `cryptography`,
+`pydantic`, and 19 others - 0 vulnerabilities each, confirmed individually).
+
+**The bugs, traced to why they matter here specifically, not just "CVEs
+exist".** This is not a theoretical dependency-hygiene nit: both libraries
+sit directly on attacker-influenced input paths in this codebase.
+- **`pypdf==6.17.0`** - used by `pypdf.PdfReader`/`PdfWriter` in
+  `engine/pack/pdf_merge.py`, `engine/general/fill_flat_pdf.py`,
+  `engine/general/build_general_pack.py`, `engine/pack/assemble_pack.py`
+  and `engine/print_financial.py` - every one of these reads a real tender
+  PDF (a buyer's published document, or a company's own uploaded private
+  document) that was never authored by this codebase. `6.17.0` carries
+  multiple confirmed crafted-PDF denial-of-service advisories (long
+  indirect-object-header parsing with no terminating whitespace
+  (`PYSEC-2026-4153`); unbounded `/ToUnicode` CMap memory consumption during
+  text extraction (`PYSEC-2026-4154`); oversized page-label memory blow-up
+  (`PYSEC-2026-4160`); several more in the `6.18.0`-`6.21.4` range) - a
+  malicious tender PDF (or malicious private document upload) could hang or
+  exhaust memory on the worker that processes it.
+- **`Pillow==12.3.0`** - used by `PIL.Image`/`ImageDraw`/`ImageSequence` in
+  `engine/pack/assemble_pack.py`, `engine/general/build_general_pack.py`,
+  `engine/ocr/scan_ocr.py` and `engine/pack/harness_pack.py` - the vault's
+  own "scans uploaded as images are converted to PDF" path, i.e. a user-
+  controlled image file. `12.3.0` carries multiple confirmed memory-safety
+  advisories with no backported fix (every one fixed only in `13.0.0`):
+  a buffer overread in the `P;2L`/`P;4L` raw decoders from a packed-row-size
+  mismatch (`PYSEC-2026-4327`), a heap use-after-free when `libtiff` rejects
+  a tag while encoding TIFF to an in-memory buffer (`PYSEC-2026-4328`), an
+  out-of-bounds read in the rank-based filters on a zero-size image
+  (`PYSEC-2026-4326`), and ~20 more (full list: `PYSEC-2026-4326` through
+  `4343`, plus `CVE-2026-112390`-`112900`/`96638`/`96640`/`96778`). These are
+  memory-corruption bug classes, not just DoS - worse in kind than the
+  `pypdf` findings, on an equally real attacker-reachable path (any image a
+  company uploads to the vault).
+
+**Consequence, calibrated honestly.** No evidence of live exploitation in
+this environment (no production logs, no incident) - this is the same
+"precautionary hardening against a confirmed, reachable gap" tier this doc
+has already used for other findings (e.g. Finding 37's `fill_a_forms.py`
+control-character crash), not a response to an observed attack. The
+severity rests on the advisories themselves being real, current (confirmed
+against PyPI's actual published version history - `pypdf` through `7.0.0`,
+`Pillow` through `13.0.0`, both consistent with today's date) and on the
+input paths genuinely being attacker-influenced uploads, not synthetic
+local files.
+
+**Fix:** bumped `pypdf` to `6.21.4` (latest release still inside major
+version 6 - deliberately did not jump to the newly-released `7.0.0`, to get
+every known fix without taking on an unverified API-surface change at the
+same time) and `Pillow` to `13.0.0` (every one of its advisories is fixed
+only there, no 12.x backport exists, so there was no way to patch this one
+without crossing the major version). Both are version-pin-only changes;
+zero call sites touched.
+
+**Verified myself, genuine before/after, not just a changelog read.**
+1. Confirmed the "red" state directly: `pip-audit -r engine/worker/
+requirements.txt` against the as-pinned versions - 64 known vulnerabilities,
+2 packages, 0 in anything else.
+2. Established a real baseline first: ran all 6 `engine/**/test_*.py` files
+that actually import `pypdf`/`PIL` (`pack/test_pdf_merge.py`,
+`cv/test_extract_cv_fields.py`, `discovery/test_kouga.py`,
+`general/test_general_bridge.py`, `intake/test_manual_intake.py`,
+`onboarding/test_classify_documents.py`) against the pre-fix, installed
+`pypdf==6.17.0`/`Pillow==12.3.0` - all 6 passed (not assumed clean).
+3. `pip install --upgrade pypdf==6.21.4 Pillow==13.0.0` in this same
+environment (the sandbox had the exact pinned versions installed, so this
+is a genuine upgrade, not a fresh install) - re-ran the same 6 files: all 6
+still passed, including the pypdf-direct `test_pdf_merge.py`'s own stamped-
+page/control-character checks and the Pillow-touching general/onboarding
+bridge tests.
+4. Ran the complete `engine/**/test_*.py` sweep repo-wide under the
+upgraded packages - **84/84 files passed by real exit code** (not string-
+grepped), matching this doc's documented baseline count exactly.
+5. Re-ran the full 84-file sweep a second time with
+`python3 -W error::DeprecationWarning` to surface any silently-changed
+behaviour the exit-code check alone might miss - **zero files raised**,
+across both packages' changed major/minor versions.
+6. Confirmed the "green" state: `pip-audit -r engine/worker/requirements.txt`
+against the now-edited file - **"No known vulnerabilities found"**.
+No `app/` files were touched this pass (this is a pure `engine/worker/`
+dependency-pin change) - `app/`'s own vitest/eslint/typecheck/build baseline
+is therefore unaffected and was not re-run.
+
+**What was and wasn't verified.** Not verified against a real Docker build
+of `engine/worker/Dockerfile` (no Docker daemon in this environment) - the
+upgrade was verified by installing the exact pinned versions directly into
+this sandbox (which already carried the old pins) and running every real
+test file that imports either library, not by rebuilding the actual worker
+image. Not verified against a real malicious PDF/image reproducing any
+specific advisory (these are upstream-confirmed, patched advisories with
+public write-ups, not a locally-rediscovered bug - reproducing a heap UAF
+or a crafted-PDF DoS by hand was judged unnecessary and out of proportion
+for a version-pin fix with a clean upstream patch). Not measured: whether
+either vulnerable code path has ever actually been hit by a real malicious
+upload in production (no incident evidence either way) - this is
+precautionary, not a response to a confirmed-live exploit.
+
+**Regression:** `engine/worker/requirements.txt` only (`pypdf==6.17.0` →
+`6.21.4`, `Pillow==12.3.0` → `13.0.0`, plus an explanatory comment). No
+other file changed.

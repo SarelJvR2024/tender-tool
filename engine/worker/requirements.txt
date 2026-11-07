@@ -1,5 +1,23 @@
 # Python packages the bridge worker container installs (engine/worker/Dockerfile).
-# Versions match what the engine was verified with in this environment (2026-10-16).
+# Versions match what the engine was verified with in this environment (2026-10-16),
+# except pypdf/Pillow - bumped 2026-11-07 (standing review pass) for known CVEs
+# that matter directly here: both libraries parse attacker-influenced input
+# (uploaded tender PDFs via pypdf.PdfReader in pdf_merge.py/fill_flat_pdf.py/
+# build_general_pack.py/assemble_pack.py/print_financial.py; uploaded vault scans
+# as images via Pillow in build_general_pack.py/scan_ocr.py/harness_pack.py/
+# assemble_pack.py). pypdf 6.17.0 had multiple crafted-PDF DoS advisories
+# (long-runtime/large-memory parsing bugs, PYSEC-2026-4153/4154/4155/4156/4157
+# and others) fixed across 6.18.0-6.21.4 - bumped to 6.21.4, the latest 6.x
+# release, staying inside the same major version (7.0.0 exists but wasn't
+# pulled in, to avoid an unverified API-surface change on top of the security
+# fix). Pillow 12.3.0 had multiple memory-safety advisories (buffer overread in
+# the P;2L/P;4L raw decoders, a libtiff-encode use-after-free, a rank-filter
+# out-of-bounds read on a zero-size image, among ~20 others) with no backport -
+# every one is fixed only in 13.0.0, so that's the version pinned here even
+# though it is a major-version bump. Re-verified in this environment: the full
+# engine/**/test_*.py suite (84 files) passes unchanged under both new pins,
+# including the pypdf-direct test_pdf_merge.py and the Pillow-touching
+# test_general_bridge.py/test_classify_documents.py.
 # engine/cv/process_cv_jobs.py -> generate_cv.py (python-docx, which pulls in lxml)
 #   -> pack_generator/suggest_pack.py (PyYAML) -> sanral_fill.py (lxml)
 # engine/pack/process_pack_jobs.py -> pdf_merge.py (pypdf), assemble_pack.py
@@ -7,8 +25,8 @@
 #   print_reports.py's `uno`, which comes from the Dockerfile's python3-uno.
 python-docx==1.2.0
 PyYAML==6.0.1
-pypdf==6.17.0
-Pillow==12.3.0
+pypdf==6.21.4
+Pillow==13.0.0
 # engine/cv/extract_cv_fields.py -> the Claude Messages API (AI field extraction
 #   from uploaded CVs). Text is read with the same pdftotext (poppler-utils, in
 #   the Dockerfile) / python-docx / soffice helpers as engine/general/.
