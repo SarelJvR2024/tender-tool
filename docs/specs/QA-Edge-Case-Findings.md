@@ -10016,3 +10016,78 @@ To verify independently: run `npx vitest run app/scripts/send-compliance-digest.
 confirm its recipient lookup calls `criticalBidRecipients()`, not `operationalRecipients()`. Read
 commit `8623d38`'s own message (`git show -s --format=%B 8623d38`) and confirm `send-compliance-
 digest.ts` is named in neither its "switched" nor its "unchanged, still opt-in gated" list.
+
+### Finding 164 (CONFIRMED, FIXED, minor-but-same-shape - `app/billing/page.tsx`'s own team-count and bid-pack-quota reads discarded their Supabase/RPC `error`, rendering a real failure as a false "0 of X" right next to a sibling row that was already correctly guarded)
+
+**Area:** Billing (`app/app/billing/page.tsx`), the "Current plan" card's "Team: N of X" and "Bid
+packs this period: N of X" rows.
+
+**Scenario:** broadened the search past the now-substantially-exhausted notification-engine sweep,
+per this pass's own brief, into a fresh area (money/billing read paths - read-only, no change to
+`start_payfast_checkout()` or any PayFast code, per the standing guardrail). `fetchCompanySubscription()`
+(`lib/companySubscription.ts`) already distinguishes a genuine "no subscription row" from a real
+read failure via its own `error` flag - a fix from the immediately-preceding 2026-11-06 standing
+review pass, confirmed still in place and still correctly wired through to this page's own
+`subscriptionError` banner. Reading the rest of the same page for the identical shape (not assumed
+clean just because the headline case was already fixed) found two siblings that weren't: the
+`Promise.all` fetching `memberCount` (`company_members` exact count) and `packsThisPeriod`
+(`company_packs_this_period()` RPC, gated to `status === "active"`) destructured only `count`/`data`
+- never `error` - from both calls. The page's own existing comment on the adjacent "Team" row
+explains exactly this bug shape for a DIFFERENT failure point ("`membershipError`: `companyId`
+never resolves, so `memberCount` would otherwise show a false '0 of X'... rather than genuinely
+zero") but that comment, and the `membershipError` flag it reasons about, only covers the earlier,
+separate `company_members.select("company_id")` lookup that resolves `companyId` itself - not
+either of these two later queries' *own* failure. If `companyId` resolved fine but the count query
+or the RPC itself then failed (a transient Supabase error, a timeout, an RPC-level exception), the
+page rendered "couldn't load" nowhere and instead showed "0 of X" for the one it was really hiding
+- a team with real members reads as having none, and (`status === "active"` only) a company that
+has already used some of its monthly bid-pack quota reads as having used none of it. Traced the
+real consequence rather than stopping at "returns a wrong display number": this page is read-only
+display, not the gate - `request_submission_pack_checked()`/`request_general_job_checked()`
+(migrations 0083/0084/0109/0115, independently re-verified by Findings 53/84 and PR #176's own
+sweep) compute and enforce the real quota server-side on every actual request, so a false "0 used"
+here cannot itself let a company over-consume its quota or bypass billing - but it is the exact
+same "discarded read error rendered as a false-safe zero" shape this review's last four passes kept
+finding in the notification engine (Findings 160-163), here on the one other customer-facing page
+that shows a live usage number at all, and it directly misinforms a paying customer about their own
+account state on the one page built specifically to show it to them.
+
+**Fix:** captured `error` from both reads (`memberCountError`, `packsThisPeriodError`), added a
+`console.error` for each (matching the existing `membershipError`/`companyError`/`subscriptionError`
+convention elsewhere on this exact page), and widened both rows' existing "couldn't load" branch to
+also fire on its own query's error, not only on the unrelated, earlier `membershipError`. Updated
+the "Team" row's own comment to name both failure points it now actually covers, and added the same
+style of comment to the "Bid packs this period" row, which had no explanatory comment at all before
+this fix. No change to any Server Action, to the real quota-enforcement RPCs, or to the non-error
+rendering path - only the previously-silent failure is now visible, same scope as Finding 144's
+`document-scan/page.tsx` fix (`bc1e7b5`-era convention) this fix explicitly follows.
+
+**Verification run myself, real exit codes - no red/green test, honest limitation, same as Finding
+144.** This is a React Server Component page with no extracted testable logic and no existing test
+file (`app/billing` has no `*.spec.ts`/`*.test.ts` anywhere - confirmed by `find` before concluding
+this). Correctness rests on `npm run typecheck` (0 errors), `npx eslint .` (0 errors, the same 3
+pre-existing warnings), `npx next build` (compiled successfully, same route table, confirming the
+widened Promise-typed fallbacks - `Promise.resolve({ count: null, error: null })` /
+`Promise.resolve({ data: null, error: null })` - type-check against the real Supabase builder/RPC
+response shapes they stand in for), and a plain reading of the diff and its one traced consumer
+(`request_submission_pack_checked()`'s own independent, already-verified server-side enforcement) -
+not an actual red/green cycle. `npx vitest run` - **493/493, 63 files**, unchanged (no test file
+touched, same baseline as the immediately-preceding Finding 163 fix). The `*.test.ts` node loop (no
+`--test` flag, real exit codes) - **28 files, 0 failures**, unchanged. Full `engine/` sweep (real
+exit codes, not grep) - **86 files, 0 failures**, unchanged (this fix touches no Python).
+
+**Regression:** `app/app/billing/page.tsx` only (~35 lines changed: 2 more destructured `error`
+fields with matching `Promise.resolve` fallback shapes, 2 `console.error` calls, both "couldn't
+load" conditions widened, both rows' comments updated/added). No change to any other file.
+
+**Pushed directly to `main`** - a read-only display page, no RLS/money/hard-stop/worker-image-install
+surface touched: the real quota gate stays exactly where Findings 53/84 and PR #176 already put it
+(server-side, inside the RPCs themselves), and `start_payfast_checkout()` is untouched, per the
+standing guardrail.
+
+To verify independently: read `app/app/billing/page.tsx` and confirm `memberCountError` and
+`packsThisPeriodError` are both destructured from their own queries and both feed the "couldn't
+load" branch of their own row (not only `membershipError`). Confirm `npx next build` still compiles
+with the same route table. Confirm `request_submission_pack_checked()`/`request_general_job_checked()`
+(migration `0083`/`0084`, re-read directly) still compute `company_packs_this_period(p_company_id)`
+independently of anything this page renders - this fix changes no enforcement path.

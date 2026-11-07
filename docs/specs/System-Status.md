@@ -1,5 +1,104 @@
 # System Status
 
+## This pass (2026-11-07bb, standing solution-architect review): the notification-engine sweep
+(Findings 160-163) is now substantially exhausted per the preceding pass's own backlog note, so
+this pass broadened the search per its own brief - checked the heavily-mined Python digest
+siblings the brief named as a lower-priority fallback (`daily_digest.py`/`send_digest_emails.py`/
+`record_heartbeat.py`, 56/27/12 prior mentions respectively), checked whether PR #176's own
+systematic RLS sweep left a gap for any table/RPC created after it, then broadened further into
+money/billing read paths per the brief's own third option - and found one real, same-shape bug
+there: `app/billing/page.tsx`'s own team-count and bid-pack-quota display rows. Finding 164.
+
+**Python digest siblings - genuinely clean, not forced.** `daily_digest.py` (56 mentions): its own
+`operationalRecipients()`-equivalent gate (`filter_opted_in()` on `daily_digest_opt_in`) is the
+ACTUAL digest that opt-in flag was built for (Sarel, 2026-10-20, quoted directly in the module's own
+docstring: "yes let's make this an optional email that the customer can decide if they want to
+receive it") - the same kind of deliberate exception already confirmed for `send-discovered-tenders.ts`
+in the immediately-preceding passes, not a sibling of Findings 161/163's bug. Every other read in
+the file already isolates its own failure (per-roster-entry try/except; tender_updates/reassessed
+reads each wrapped and alerted separately; the `_delivered_tender_updates`/`_delivered_downgrades`
+claim-after-send ordering fix already landed 2026-11-06, read and confirmed, not re-litigated).
+`send_digest_emails.py` (27 mentions): already fixed for the User-Agent/WAF block (2026-11-06,
+read and confirmed), every send failure is per-recipient and logged, `mark_delivered_items()`'s own
+Supabase-credential-missing path degrades to "carry it again tomorrow" with a loud alert, never a
+silent loss. `record_heartbeat.py` (12 mentions): small, diagnostic-only by design, never raises:
+confirmed all 10 real sender workflows (grepped `.github/workflows/*.yml` directly, not assumed
+from the module's own comment) wire BOTH a `start` step and two `finish` steps gated
+`if: success()` / `if: failure() || cancelled()` - a failed or cancelled run always gets its
+`finish --status failed` call, never leaves a heartbeat stuck at "running" forever. The one
+consumer of this table (`lib/workflowRegistry.ts`'s `heartbeatStatusFor()`, read in full) already
+handles its own read failure honestly (`app/admin/notifications/page.tsx`: `console.error` +
+a visible "may wrongly show every workflow as Never run yet" banner, not a silent swallow). No fix
+needed anywhere in this trio - an honest negative result, reported as such, not force-fit.
+
+**RLS sweep (PR #176) - no new gap found, by construction.** PR #176's own migration header
+documents its mechanical check as reproducible directly against `pg_policies`, run against "all 108
+migrations through 0118." Confirmed the two migrations that landed on `main` AFTER that base
+(`0119_notification_claim_functions_anon_revoke.sql`, `0120_security_definer_functions_anon_grant_table_cleanup.sql`
+- both already reviewed and pushed by the immediately-preceding pass, re-read here not re-litigated)
+add zero new tables and zero new function bodies with new membership logic - both are `revoke
+execute ... from anon` statements only, closing an unrelated anon-grant gap on functions that
+already existed before 0118. Also grepped every migration for a `security definer` function
+referencing `company_members` directly (not just by name via `is_company_member()`, in case PR
+#176's own function-name-based check missed an inline membership check) - the full list predates
+0118 except 0120, which (confirmed above) adds no new logic. No newer table or RPC exists for this
+gap to have moved into since PR #176's own sweep; this avenue is exhausted until a genuinely new
+migration lands, not a live finding today.
+
+**Billing page - Finding 164, fixed.** `app/app/billing/page.tsx`'s "Team: N of X" and "Bid packs
+this period: N of X" rows each discarded their own Supabase/RPC `error`, rendering a real read
+failure as a false "0 of X" - the identical shape Findings 160-163 kept finding in the notification
+engine, found here on the one other customer-facing page that shows a live usage number, right next
+to an already-correctly-guarded sibling row (`membershipError`, which covers a DIFFERENT, earlier
+failure point - `companyId` failing to resolve - not either of these two later queries' own
+failure). Not a quota-bypass risk (`request_submission_pack_checked()`/`request_general_job_checked()`
+already enforce the real quota server-side, independently re-verified by Findings 53/84 and PR
+#176's own sweep) - but it directly misinforms a paying customer about their own account state on
+the one page built to show it. Full write-up: Finding 164 in `docs/specs/QA-Edge-Case-Findings.md`.
+
+Oriented from `50277c8` (immediately-preceding pass's own verified HEAD). `git fetch origin main`
+before starting and again right before writing this entry: clean both times, local matched
+`origin/main` exactly (`50277c8` both times), no sibling commits landed during this pass. PRs
+re-checked via `mcp__github__list_pull_requests`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged, closed or
+touched this pass.
+
+**Fix, verified (honest limitation - no red/green test, same as Finding 144's precedent for an
+untestable RSC page).** Captured `error` from both reads (`memberCountError`, `packsThisPeriodError`),
+added a `console.error` for each, and widened both rows' "couldn't load" branch to also fire on its
+own query's error. `npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, same 3 pre-existing
+warnings. `npx next build` - compiled successfully, same route table (confirms the widened
+`Promise.resolve({ count: null, error: null })`/`{ data: null, error: null })` fallback shapes
+type-check against the real Supabase response shapes). `npx vitest run` - **493/493, 63 files**,
+unchanged (no test file exists for this page, confirmed by `find` before concluding that, not
+assumed). The `*.test.ts` node loop - **28 files, 0 failures**, unchanged. Full `engine/` sweep -
+**86 files, 0 failures**, unchanged (this fix touches no Python).
+
+**Pushed directly to `main`** - a read-only display-page fix, no RLS/money/hard-stop/worker-image-
+install surface touched: the real quota gate stays exactly where it already was (server-side,
+inside the RPCs), `start_payfast_checkout()` untouched per the standing guardrail.
+
+**Backlog status.** The notification-engine Tier 0-3 TypeScript sweep remains fully exhausted (no
+new angle found this pass). The Python digest trio (`daily_digest.py`/`send_digest_emails.py`/
+`record_heartbeat.py`) is now also confirmed clean - not a live backlog candidate without a
+genuinely new angle. The RLS-sweep-gap angle (PR #176) is exhausted until a new migration adds a
+table/RPC after 0118 - re-check it then, not before. `start_payfast_checkout()`'s revenue-integrity
+gap (2026-11-07e) remains untouched, per the standing guardrail. PR #176/#178/#179/#180/#181
+(awaiting Sarel's own merge decision) and #164/#165/#177 (stale drafts) remain exactly as
+described - not touched, not amended, not merged. Worth a future pass's attention: this pass only
+checked `app/billing/page.tsx` and `AppShell.tsx`'s own subscription-adjacent reads for this shape;
+other customer-facing pages that render a live Supabase-sourced count (not just a list) were not
+all individually swept for the identical "discarded error -> false zero" pattern - a real, if
+likely low-yield, candidate for whichever pass picks this up next.
+
+To verify independently: read `app/app/billing/page.tsx` and confirm `memberCountError` and
+`packsThisPeriodError` are both destructured and both feed their own row's "couldn't load" branch.
+Run `npx next build` from `app/` and confirm it still compiles with the same route table. Confirm
+via `mcp__github__list_pull_requests` that `#176`/`#178`/`#179`/`#180`/`#181` are still open and
+unmerged.
+
+---
+
 ## This pass (2026-11-07aa, standing solution-architect review): finished the notification-engine
 sweep's remaining Tier 0-3 TypeScript senders named by this pass's own brief -
 `send-compliance-digest.ts`, `send-discovered-tenders.ts`, `send-deadline-reminders.ts`,

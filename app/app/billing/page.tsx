@@ -74,10 +74,28 @@ export default async function BillingPage({
   if (membershipError) console.error("company_members select failed (billing)", membershipError);
   const companyId = membership?.company_id as string | undefined;
 
-  const [{ count: memberCount }, { data: packsThisPeriod }] = await Promise.all([
-    companyId ? supabase.from("company_members").select("id", { count: "exact", head: true }).eq("company_id", companyId) : Promise.resolve({ count: null }),
-    companyId && status === "active" ? supabase.rpc("company_packs_this_period", { p_company_id: companyId }) : Promise.resolve({ data: null }),
+  const [
+    { count: memberCount, error: memberCountError },
+    { data: packsThisPeriod, error: packsThisPeriodError },
+  ] = await Promise.all([
+    companyId
+      ? supabase.from("company_members").select("id", { count: "exact", head: true }).eq("company_id", companyId)
+      : Promise.resolve({ count: null, error: null }),
+    companyId && status === "active"
+      ? supabase.rpc("company_packs_this_period", { p_company_id: companyId })
+      : Promise.resolve({ data: null, error: null }),
   ]);
+  // Standing solution-architect review, 2026-11-07: both of these reads used
+  // to be destructured for `count`/`data` only - a real read failure on
+  // either (a transient Supabase error, not "genuinely zero") was
+  // indistinguishable from "0 members"/"0 packs used this period" below,
+  // the same false-zero shape already fixed for `memberCount` itself
+  // elsewhere in this app (see the comment on the "Team" row) but never
+  // closed for these two specific queries, which this exact page renders
+  // right next to a correctly-guarded sibling (`membershipError`). Logged
+  // and surfaced the same way, not silently left to render a wrong number.
+  if (memberCountError) console.error("company_members count select failed (billing)", memberCountError);
+  if (packsThisPeriodError) console.error("company_packs_this_period rpc failed (billing)", packsThisPeriodError);
 
   return (
     <AppShell>
@@ -137,9 +155,13 @@ export default async function BillingPage({
                 {/* membershipError: companyId never resolves, so memberCount
                     would otherwise show a false "0 of X" (the same
                     false-zero-state shape already fixed elsewhere in this
-                    app, e.g. c871d96) rather than genuinely zero. */}
+                    app, e.g. c871d96) rather than genuinely zero.
+                    memberCountError: companyId DID resolve, but this row's
+                    own count query itself failed - same false "0 of X"
+                    shape, a separate failure point membershipError alone
+                    never covered (Finding, 2026-11-07). */}
                 Team:{" "}
-                {membershipError ? (
+                {membershipError || memberCountError ? (
                   <span className="font-medium text-destructive">couldn&apos;t load</span>
                 ) : (
                   <>
@@ -149,8 +171,15 @@ export default async function BillingPage({
                 )}
               </div>
               <div>
+                {/* packsThisPeriodError: the company_packs_this_period() RPC
+                    itself failed (status === "active" only - otherwise this
+                    was never called and the "—" branch below is correct, not
+                    an error) - same false "0 of X" shape as memberCountError
+                    above, previously invisible: `data` was destructured with
+                    no `error`, so a failed quota read rendered as "0 bid
+                    packs used" instead of "couldn't load" (Finding, 2026-11-07). */}
                 Bid packs this period:{" "}
-                {membershipError ? (
+                {membershipError || packsThisPeriodError ? (
                   <span className="font-medium text-destructive">couldn&apos;t load</span>
                 ) : (
                   <>
