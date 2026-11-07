@@ -135,7 +135,7 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
   const { error: actionError, saved } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: catRows, error: catError }, { data: isAdmin }, { data: sugRows, error: sugError }] = await Promise.all([
+  const [{ data: catRows, error: catError }, { data: isAdmin, error: isAdminError }, { data: sugRows, error: sugError }] = await Promise.all([
     supabase.from("discipline_categories").select(DISCIPLINE_CATEGORY_FULL_COLUMNS).order("sort_order"),
     supabase.rpc("is_platform_admin"),
     supabase
@@ -145,6 +145,19 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
   ]);
   if (catError) console.error("discipline_categories select failed", catError);
   if (sugError) console.error("discipline_category_suggestions select failed", sugError);
+  // Standing review, Finding 196: this RPC's own error was discarded entirely,
+  // unlike its two siblings above - AdminLayout (../../layout.tsx) already
+  // calls this same is_platform_admin() RPC and 404s a genuine non-admin
+  // before this page ever renders, so by the time we're here the signed-in
+  // user has already been confirmed a platform admin moments earlier; this
+  // page's own second, redundant call to the same RPC can still fail
+  // independently (an intermittent Supabase blip, not a real admin-status
+  // change). canEdit's fallback to false on a null/failed read is already the
+  // correct fail-safe direction (never grants edit access on an unknown
+  // result) and is left unchanged - only the explanatory copy below is
+  // corrected, so a real platform admin hitting this transient failure isn't
+  // told the false, specific reason "only a platform admin can change it".
+  if (isAdminError) console.error("is_platform_admin rpc failed (taxonomy)", isAdminError);
 
   const canEdit = isAdmin === true;
   const cats = (catRows ?? []) as DisciplineCategoryFull[];
@@ -163,14 +176,20 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
           Tender Ready&apos;s own, maintained category list: what Discovery sorts tenders into and what companies tag their
           experience with. {groups.length} groups, {cats.length - groups.length} disciplines{retired ? ` (${retired} retired)` : ""}. A change here is used by
           Discovery on its next run - no deploy, no migration.{" "}
-          {canEdit ? "You can edit it." : "Read-only for your account: only a Tender Ready platform admin can change it."}
+          {canEdit
+            ? "You can edit it."
+            : isAdminError
+              ? "Couldn't check whether you can edit this - try refreshing."
+              : "Read-only for your account: only a Tender Ready platform admin can change it."}
         </p>
 
-        {(actionError || catError || sugError) && (
+        {(actionError || catError || sugError || isAdminError) && (
           <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {actionError ?? (catError
               ? "Couldn't load the list - try refreshing. If it keeps happening, let us know."
-              : "Couldn't load suggestions - try refreshing. If it keeps happening, let us know.")}
+              : sugError
+                ? "Couldn't load suggestions - try refreshing. If it keeps happening, let us know."
+                : "Couldn't check whether you can edit this - try refreshing. If it keeps happening, let us know.")}
           </div>
         )}
         {saved && (
