@@ -8506,3 +8506,138 @@ precautionary, not a response to a confirmed-live exploit.
 **Regression:** `engine/worker/requirements.txt` only (`pypdf==6.17.0` →
 `6.21.4`, `Pillow==12.3.0` → `13.0.0`, plus an explanatory comment). No
 other file changed.
+
+### Finding 149 (CONFIRMED, PARTIALLY FIXED, low - `npm audit`'s repeatedly-reconfirmed "0 vulnerabilities" on `app/`'s production dependencies had gone stale since the last time it was actually re-run, 2026-10-20; a fresh run today found 17 (7 production-reachable by `npm audit`'s own count), all transitive, all traced to zero real runtime attacker-reachable path)
+
+**Area:** `app/package.json`/`package-lock.json` - specifically the
+`shadcn` CLI tool (listed under `dependencies`, not `devDependencies`,
+despite being a dev-time-only code generator) and `vitest` (a genuine
+`devDependency`), via their own transitive dependency trees.
+
+**How this was found.** This pass's angle was the standing directive's own
+suggestion (b): re-check `app/package.json` the same way the immediately-
+preceding pass (2026-11-07j) just did for `engine/worker/requirements.txt`
+on the Python side. Every pass since 2026-10-20 has repeated "`npm audit
+--omit=dev` on `app/` came back clean (0 vulnerabilities)" as an
+unquestioned, reused fact (most recently 2026-11-07j, itself timestamped
+today) - rather than trust that framing, re-ran it fresh. First confirmed
+`node_modules` is genuinely in sync with the committed lockfile (`npm ci
+--dry-run` - "up to date", nothing to install), so this is a real read of
+what's actually pinned, not a stale local install: `npm audit --omit=dev`
+returned **7 vulnerabilities (2 low, 4 moderate, 1 high)**, and the full
+`npm audit` (including devDependencies) returned **17 (2 low, 12 moderate,
+1 high, 2 critical)** - not the "0" every prior pass had been repeating.
+
+**Traced to source, not just counted.** `npm ls body-parser`/`express`/
+`@modelcontextprotocol/sdk` showed exactly one path into all of the
+production-side findings: `shadcn@4.22.1` (declared in `dependencies`) →
+`@modelcontextprotocol/sdk@1.32.1` → `express@5.3.0` → `body-parser@2.3.0`
+(the HIGH: `GHSA-27r3-jxmh-p828`, a trailing-bytes-after-compressed-body
+DoS) plus `shadcn` → `deepmerge` (prototype-poisoning gadget,
+`GHSA-gcqx-w48m-w2h4`, moderate) and `shadcn` → `ts-morph` → `minimatch`
+(glob-amplification DoS, `GHSA-g3hv-75wg-m249`, moderate). The 2 critical
+entries (`GHSA-5gmw-xhrv-c9v3`/`GHSA-85c8-ppgw-ccpr`, a prototype-pollution
+gadget in `tinypool`'s worker options leading to RCE) are entirely inside
+`vitest`'s own devDependency tree, never reachable via `--omit=dev`.
+
+**Why this is NOT the same severity tier as Finding 148's pypdf/Pillow
+case, checked rather than assumed.** Grepped the whole of `app/` (`.ts`/
+`.tsx`, excluding `node_modules`) for any import of `shadcn`, `express`,
+`body-parser`, `ts-morph`, `@typescript-eslint`, or `tinypool` - **zero
+hits**. `shadcn` is a CLI invoked by hand (`npx shadcn add ...`, per
+`AGENTS.md`'s own "Design system decisions" section) to generate
+component source files during development; it, `ts-morph` and the
+`@typescript-eslint`/`eslint-config-next` toolchain are never imported by
+any file Next.js actually bundles, and `tinypool` is `vitest`'s own
+internal test-worker pool, invoked only when a developer or CI runs the
+test suite against a static, non-attacker-influenced config. Unlike
+Finding 148's `pypdf`/`Pillow` (real libraries parsing real uploaded
+files at runtime), none of these packages sit on any path a real visitor,
+buyer, or uploaded document ever reaches - this is a real `npm audit`
+finding with a traced, confirmed-absent production attack surface, not a
+"nothing to see here" dismissal.
+
+**Why the "0, unchanged since 2026-10-20" claim went stale - checked, not
+just asserted.** `git log` confirms `package-lock.json` hasn't touched any
+of these packages' versions since before 2026-10-24 (`14d1200`'s own diff
+of that file contains no line for `shadcn`/`@modelcontextprotocol/sdk`/
+`body-parser`/`deepmerge`/`minimatch`/`tinypool`) - the exact same pinned
+versions sat unchanged in the lockfile the whole time. Looked up each
+advisory's real publish date via `api.osv.dev` (a live, independent
+mirror of the GHSA database, not `npm audit`'s own cached feed) rather
+than guessing: `GHSA-27r3-jxmh-p828` (body-parser) published 2026-10-23 -
+after the 2026-10-20 check, genuinely couldn't have been caught then;
+`GHSA-g3hv-75wg-m249` (minimatch) published 2026-10-30 - after 2026-10-20
+AND before 2026-11-07j's own "reconfirmed still 0" claim (today), meaning
+that reconfirmation either wasn't actually re-run against a live feed or
+missed it; `GHSA-gcqx-w48m-w2h4` (deepmerge) published 2026-09-18 - before
+even the original 2026-10-20 check, which this entry cannot explain away
+(either that original check was flawed, or npm's own advisory index
+lagged the independent GHSA feed by over a month). Recording this
+honestly rather than picking the explanation that looks best: this is a
+live, in-the-wild demonstration of exactly the "npm audit's own database
+can lag" risk the standing directive named by hypothesis, not a
+reconstruction of it.
+
+**Fix (partial, deliberately not forced).** `npm audit fix` (no `--force`)
+resolved exactly 1 of the 7 production-reachable findings within the
+semver ranges `package.json` already declares: it drops the vulnerable
+`@modelcontextprotocol/sdk`→`express`→`body-parser` chain entirely
+(`shadcn`'s own dependency resolves through `@shadcn/registry 0.2.0 →
+0.2.1` instead, which no longer pulls it), fixing the one HIGH. Confirmed
+`shadcn` itself still runs afterward (`npx shadcn --version` → `4.23.0`,
+still inside the declared `^4.22.1` range). The other 6 production-
+reachable findings (`deepmerge`, `minimatch` via `ts-morph`) and the 10
+devDependency-only findings (`minimatch` via `@typescript-eslint`/
+`eslint-config-next`, `tinypool` via `vitest`) all require `npm audit fix
+--force`, which `npm`'s own resolver says means: downgrading `shadcn` to
+`1.0.0` (a major, almost-certainly-functionality-breaking downgrade of
+the exact CLI tool `AGENTS.md` documents as pinned to the current "Nova"
+preset), downgrading `eslint-config-next` to `15.5.29` (older than this
+app's own `next@16.4.2`), or upgrading `vitest` to `5.1.0` (the exact
+major version prompt 6's own `AGENTS.md` entry already explains was
+avoided on purpose, because `vitest@5.x`'s peer dependency on `@types/
+node@^22` conflicts with this project's pinned `@types/node@^20`). None
+of these three were applied this pass - each is a real tooling-version
+decision with a documented reason to stay put, not a drive-by call this
+review loop should make unilaterally, and (per the reachability trace
+above) none of the vulnerabilities they'd fix have any live production
+exposure to begin with.
+
+**Verified myself, genuine before/after.** 1) `npm ci --dry-run` first,
+to confirm `node_modules` already matched the committed lockfile (no
+stale local state). 2) `npm audit --omit=dev`/`npm audit` before the fix:
+7/17 as above. 3) `npm audit fix` (no `--force`) - `package.json` itself
+is byte-for-byte unchanged (`git diff package.json` - empty); only
+`package-lock.json` changed (412 insertions, 744 deletions - entirely
+transitive-tree changes, `@modelcontextprotocol/sdk`/`express`/
+`body-parser`/`ajv`/`ejs`-adjacent packages removed, `@shadcn/registry`/
+`typescript-eslint`-family packages bumped within range). 4) `npm audit
+--omit=dev` after: **6 vulnerabilities (2 low, 4 moderate)** - the body-
+parser HIGH gone, nothing else changed in kind. 5) Full regression:
+`npm run typecheck` - 0 errors; `npx eslint .` - 0 errors, same 3 pre-
+existing warnings; `npx vitest run` - **469/469 passed, 60/60 files**
+(unchanged - this pass touched zero test files); the per-file `*.test.ts`
+loop (no `--test` flag) - **27 files, 0 failures** (unchanged); `npx next
+build` - **compiled successfully**, same 62-route table, `Proxy
+(Middleware)` present.
+
+**What was and wasn't verified.** Not independently verified that any of
+the 3 remaining `--force`-only fixes would actually work without breaking
+something - deliberately not attempted, for the tooling-pin reasons
+above. Not verified whether `GHSA-gcqx-w48m-w2h4`'s 2026-09-18 publish
+date genuinely predates when it became visible to `npm audit` specifically
+(as opposed to the independent OSV mirror) - `osv.dev`'s `published` field
+is the advisory's own origin-database publish date, not necessarily the
+date `npm audit`'s specific feed picked it up; this entry reports the gap
+honestly without claiming a single confirmed root cause for that one
+advisory. Not verified against a live production deploy (no deploy
+pipeline access in this environment) - this is a `package-lock.json`-only
+change, and Vercel/the app's own build step installs from that lockfile,
+so the fix should ship on the next deploy same as any other dependency
+change, but that wasn't observed directly.
+
+**Regression:** `app/package-lock.json` only (412 insertions, 744
+deletions, entirely transitive dependency resolution - no direct
+dependency version in `package.json` changed). No `app/` source file
+touched.
