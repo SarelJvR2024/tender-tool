@@ -16,13 +16,35 @@ function section(overrides: Partial<ReviewSection>): ReviewSection {
 
 test("no sections at all is 100% ready, nothing left", () => {
   const r = computeTenderReadiness([]);
-  assert.deepEqual(r, { score: 100, totalCount: 0, confirmedCount: 0, thingsLeft: 0, fix: [], provide: [], verify: [] });
+  assert.deepEqual(r, { score: 100, totalCount: 0, confirmedCount: 0, thingsLeft: 0, fix: [], provide: [], verify: [], hasUnreadSection: false });
 });
 
-test("a section that failed to load contributes nothing to the count", () => {
+test("a section that failed to load contributes nothing to the count, but is flagged via hasUnreadSection", () => {
   const r = computeTenderReadiness([section({ error: "Couldn't load this section: boom", items: [{ key: "x", label: "X", value: null, status: "confirmed", note: null }] })]);
   assert.equal(r.totalCount, 0);
   assert.equal(r.score, 100);
+  // The dangerous part: a read failure looks identical to "0 items, fully
+  // ready" on score/totalCount/fix.length alone - hasUnreadSection is the
+  // ONLY signal a caller has to tell the two apart and fail closed instead.
+  assert.equal(r.hasUnreadSection, true);
+});
+
+test("hasUnreadSection stays false once every section loaded, even with real Fix items present", () => {
+  const r = computeTenderReadiness([
+    section({ items: [{ key: "bbee", label: "B-BBEE certificate", value: null, status: "missing", note: null }] }),
+  ]);
+  assert.equal(r.fix.length, 1);
+  assert.equal(r.hasUnreadSection, false);
+});
+
+test("one failed section among several loaded ones still sets hasUnreadSection, even though the loaded sections have real Fix items of their own", () => {
+  const r = computeTenderReadiness([
+    section({ key: "documents", items: [{ key: "bbee", label: "B-BBEE certificate", value: null, status: "missing", note: null }] }),
+    section({ key: "signature", error: "Couldn't load this section: boom", items: [] }),
+  ]);
+  assert.equal(r.fix.length, 1);
+  assert.equal(r.totalCount, 1);
+  assert.equal(r.hasUnreadSection, true);
 });
 
 test("every item confirmed is a 100% score, nothing left", () => {
