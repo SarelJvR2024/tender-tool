@@ -1,5 +1,87 @@
 # System Status
 
+## This pass (2026-11-07gg, standing solution-architect review): oriented from `02610a2`
+(immediately-preceding pass's own verified HEAD, Finding 168). `git fetch origin main` clean, local
+matched `origin/main` exactly both at the start and immediately before pushing. Re-checked all 8 open
+PRs via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded - nothing merged, closed, or rebased by anyone since the last
+pass's own check, and nothing anywhere retrievable to this session indicates Sarel has acted on
+Finding 168 or the `start_payfast_checkout()` revenue-integrity gap.
+
+**This pass's angle (brief's option c): a fresh RLS angle - checking PR #176's own "12 SECURITY
+DEFINER RPCs bypassed employee RLS" sweep (0119, still open, not merged) for anything it missed.**
+Read PR #176's full diff (`mcp__github__pull_request_read`, `get_files`) to get its exact 12-function
+fixed list AND its own explicitly-excluded list, then cross-checked both against every
+`supabase.rpc("...")` name actually called anywhere in `app/` (`grep -rohE 'rpc\("[a-z_0-9]+"'
+app --include=*.ts --include=*.tsx | sort -u` - 58 distinct names). Two names -
+`company_packs_this_period` and `company_can_request_pack` - are client-callable, `SECURITY DEFINER`,
+read `company_subscriptions`/`pack_generation_jobs` directly, and appear in NEITHER list - a genuine
+gap in an otherwise very thorough sweep. (Also checked, per the brief's other suggestions: `max_users`
+seat-cap enforcement - `create_company_invite_checked()`, 0113 - is not time-windowed at all, so
+there's no analogous period-boundary bug to Finding 168 there; and whether a plan "downgrade" exists
+as a distinct code path that might mis-reset `current_period_start` - it doesn't: the only path that
+ever changes `plan_tier` is `apply_payfast_itn()`/`start_payfast_checkout()`, i.e. a new checkout,
+there is no separate downgrade/cancel action anywhere in `app/` - both genuinely clean negatives, not
+force-fit.)
+
+**Found and fixed Finding 169** - full write-up in `docs/specs/QA-Edge-Case-Findings.md`. One-line
+summary: `company_packs_this_period()`/`company_can_request_pack()` (0115, both SECURITY DEFINER,
+granted to `authenticated`, directly `supabase.rpc()`-callable) checked only `is_company_member()`,
+never `is_employee_in_company()` - so both bypassed 0117's own RESTRICTIVE "employee has no billing
+access" policy on `company_subscriptions` entirely, the exact same bypass class PR #176 found and
+fixed for 12 sibling functions, just missed for these two. Live-reproduced in a disposable scratch
+Postgres (`service postgresql start`; `scratch_billing170`; all 110 migrations replayed clean): as an
+employee, a direct table read of `company_subscriptions` correctly returned 0 (0117's policy working),
+but `company_packs_this_period()` returned the real count (1) and `company_can_request_pack()`
+returned the real answer (true) - handing an employee the company's real billing-quota state despite
+the underlying table being correctly locked down.
+
+**Fixed; opened as PR #182 (`fix/employee-billing-quota-rpc-gap`), NOT pushed directly to `main` and
+NOT merged.** Per the standing guardrail, RLS surface routes to a PR, not a direct commit - this is
+exactly that surface (a `SECURITY DEFINER` function gaining a role check on the billing-quota path),
+the same category PR #176 itself went through, so this pass followed that same path rather than treat
+its own read of "this one's small and additive" as license to push RLS-touching SQL straight to
+`main`. `git fetch origin main`/confirmed-HEAD-match was re-run immediately before pushing the branch,
+and again immediately before this docs-only commit to `main`. Not merged - per the standing
+instruction never to merge any PR without Sarel's own explicit go-ahead typed directly in
+conversation with him, and never to open and merge a PR in the same pass.
+
+The fix itself (`app/supabase/migrations/0121_pack_quota_rpcs_employee_gap.sql`, on PR #182's
+branch): both functions now also return `null` for an employee, extending the EXISTING "null means
+no answer for this caller" contract 0109 already established for a non-member. Re-verified post-fix
+in the same scratch DB: employee now gets `null`/`null`; owner, and a `member` role added for
+completeness, both still get the real `1`/`true` unaffected; a non-member company still correctly
+returns `null`. Added a permanent regression test to `engine/security/test_tenant_isolation.py`'s
+existing `part2_employee_role()` (two new checks in section `[18]`, alongside the sibling
+`company_tender_preferences` check 0118 already added there, plus one new owner-side check) rather
+than a new section. Full suite: `TENANT_PSQL=... python3 engine/security/test_tenant_isolation.py` -
+**ALL PASSED**, 250 checks, 0 failures, real exit code 0 (captured directly after a fresh replay, not
+through a swallowing pipe - the first attempt reused a non-fresh DB and correctly errored on a
+duplicate-key seed collision, exactly the "never reuse a database across runs" warning the harness's
+own module docstring gives, so it was re-run clean). Part1-only (no `TENANT_PSQL`) also exits 0. Full
+`engine/` sweep: `find engine -name "test_*.py" | wc -l` = 86, ran each individually with its own real
+exit code captured (no grepped output) - 0 failures, matching baseline exactly, confirming this
+SQL-only change touched nothing else. Scratch databases dropped and `postgresql` service stopped
+afterward - nothing left running.
+
+**Backlog status.** Finding 168 (yearly billing quota period) and the `start_payfast_checkout()`
+revenue-integrity gap both remain exactly as the prior pass left them - not touched, not implemented,
+per the standing guardrail. PR #182 (this pass's own, open, awaiting Sarel's review) joins
+#176/#178/#179/#180/#181 (also awaiting Sarel's own merge decision) and #164/#165(draft)/#177(draft) -
+all 9 PRs now open, none touched/amended/merged by this pass beyond #182's own creation.
+
+To verify independently: check out PR #182's branch (`fix/employee-billing-quota-rpc-gap`), replay
+all 111 migrations (`engine/security/replay_schema.sh -U postgres -d <db>`, 110 plus its own 0121)
+onto a scratch Postgres, seed a company/owner/employee as Finding 169 describes, and confirm
+`company_packs_this_period()`/`company_can_request_pack()` both return `null` for the employee and
+their real values for the owner. Run `TENANT_PSQL="psql -U postgres -d <db>" python3 engine/security/
+test_tenant_isolation.py` and confirm `ALL PASSED` including the two new `[18]` checks naming these
+functions. Confirm via `mcp__github__list_pull_requests` that PR #182 is open/unmerged alongside the
+other 8.
+
+---
+
 ## This pass (2026-11-07ff, standing solution-architect review): oriented from `0543ac0`
 (immediately-preceding pass's own verified HEAD, Finding 167). `git fetch origin main` clean, local
 matched `origin/main` exactly both at the start and at the end of this pass (`0543ac0` throughout -

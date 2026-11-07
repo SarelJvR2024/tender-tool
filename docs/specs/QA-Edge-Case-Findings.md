@@ -10451,3 +10451,96 @@ the function body. Read `app/lib/payfast.ts`'s `PAYFAST_FREQUENCY` (monthly=3, y
 `app/supabase/migrations/0112_payfast_itn_amount_verification.sql` lines 96-101/121-131 and confirm
 `current_period_start` is set to `now()` only on a successful ITN, which for `yearly` fires roughly
 once a year, not once a month.
+
+### Finding 169 (CONFIRMED, FIXED - open as **PR #182**, not merged this pass -
+`company_packs_this_period()`/`company_can_request_pack()` bypassed PR #176/0117's own "employee
+has no billing access" RESTRICTIVE policy entirely)
+
+**Area:** `company_packs_this_period(p_company_id uuid)` and `company_can_request_pack(p_company_id
+uuid)` (`app/supabase/migrations/0115_pack_quota_regression_and_request_race.sql`, lines 69-120, the
+live definitions prior to this pass's own fix below) - both `SECURITY DEFINER`, both `grant execute
+... to authenticated`, both directly `supabase.rpc()`-callable by any signed-in user, not only
+through `app/app/billing/page.tsx` (the one app page that calls the first of the two).
+
+**This pass's angle:** per the brief's option (c) - a fresh RLS angle, specifically whether any
+SECURITY DEFINER RPC touched by migrations 0093-0120 has an employee-visibility gap the still-open
+PR #176 (its own 0119, "12 SECURITY DEFINER RPCs bypassed employee RLS entirely") didn't catch. Read
+PR #176's own diff in full first (`mcp__github__pull_request_read`, `get_files`) to get its exact
+12-function list and its own explicitly-excluded list (`create_company_invite_checked`,
+`remove_member_checked`, `set_member_role_checked`, `set_my_daily_digest_opt_in`,
+`create_company_and_join`, every `platform_admin_*` function, the `tt_*_check` trigger helpers) -
+then cross-checked that list against every `supabase.rpc("...")` name actually called anywhere in
+`app/` (`grep -rohE 'rpc\("[a-z_0-9]+"' app`). Two names - `company_packs_this_period` and
+`company_can_request_pack` - are client-callable, SECURITY DEFINER, read company-scoped billing data
+company_subscriptions holds, and appear in NEITHER PR #176's fixed-12 list NOR its explicitly-
+excluded list - a genuine gap in an otherwise very thorough sweep, not something PR #176 considered
+and dismissed.
+
+**What was found, reading both functions' own bodies (0115, the live definition before this fix):**
+```sql
+-- company_packs_this_period:
+select case when is_company_member(p_company_id) then (...) else null end;
+-- company_can_request_pack:
+if not is_company_member(p_company_id) then return null; end if;
+```
+Neither checks `is_employee_in_company()` - only `is_company_member()`, which is true for an
+employee too. Migration 0117 (2026-11-06, "billing employee role gap") added a RESTRICTIVE
+`"company_subscriptions: employee has no access" ... for all ... using (not
+is_employee_in_company(company_id))` policy specifically so an employee-role member can never read
+or act on `company_subscriptions`. Both of these functions are SECURITY DEFINER and read
+`company_subscriptions`/`pack_generation_jobs` directly inside their own function body - which runs
+as the function owner and bypasses ALL table RLS, RESTRICTIVE policies included, the exact "a
+RESTRICTIVE select policy on `company_subscriptions` does not, by itself, stop a SECURITY DEFINER
+function ... from [reading] a different table's row by company_id" risk 0117's own header already
+named for `start_payfast_checkout()` - just never swept for these two.
+
+**Live-reproduced in a disposable scratch Postgres** (`service postgresql start` as `postgres`;
+`CREATE DATABASE scratch_billing170`; `engine/security/replay_schema.sh -U postgres -d
+scratch_billing170`, all 110 migrations applied clean). Seeded one company (`professional`/
+`monthly`/`active`, `max_packs_per_month = 15`, one `ready` pack job), one `owner` member, one
+`employee` member. As the employee (`set role authenticated; select set_config('test.uid', ...)`):
+`select count(*) from company_subscriptions where company_id = ...` correctly returned **0** (0117's
+own RESTRICTIVE policy doing its job) - but `select company_packs_this_period(...)` returned **1**
+(the real count, not null) and `select company_can_request_pack(...)` returned **true** (the real
+answer, not null). Both SECURITY DEFINER functions handed the employee the company's real billing-
+quota state despite the underlying table itself being correctly locked down. As the owner, both
+returned the same real values unaffected - confirming the gap was role-specific, not a general
+breakage.
+
+**Live app-layer impact is limited but the RPC-level gap is real:** `/billing`'s own page derives its
+`status` from a direct `company_subscriptions` read (`fetchCompanySubscription()`), which 0117
+already blocks for an employee - so the page's own call to `company_packs_this_period` (gated on
+`status === "active"`) never actually fires for that role in practice. The exposure is a direct
+`supabase.rpc()` call bypassing the page entirely - same shape and same severity class as the 12 PR
+#176 already fixed, which is why this is fixed the same way, not left as display-layer-only.
+
+**Fixed; opened as PR #182 (`fix/employee-billing-quota-rpc-gap`), not pushed directly to `main`** -
+this is RLS/money-adjacent surface (a `SECURITY DEFINER` function gaining a role check, on the
+billing-quota path), the same guardrail category PR #176 itself went through rather than a direct
+commit, so this pass followed the same path rather than treat its own read of "this one's small and
+additive" as license to bypass that guardrail. Not merged by this pass, per the standing instruction
+never to merge a PR without Sarel's own explicit go-ahead.
+
+Migration `0121_pack_quota_rpcs_employee_gap.sql` (on the PR branch): both functions now also
+return `null` for an employee, extending the EXISTING "null means no answer for this caller"
+contract 0109 already established for a non-member, rather than inventing a new raise/error shape
+neither function had before. For owner/admin/member, `is_employee_in_company()` is false, so
+behaviour for every other role is completely unchanged - re-verified, not assumed: re-ran the same
+scratch-DB repro post-fix (employee now gets `null`/`null`; owner, and a plain `member` role added
+for completeness, both still get the real `1`/`true`; a non-existent/non-member company still
+correctly returns `null`). Added a permanent regression test to
+`engine/security/test_tenant_isolation.py`'s existing `part2_employee_role()` (section `[18]`, two
+new checks alongside the sibling `company_tender_preferences` check 0118 already added there) rather
+than a new section, since this is the same employee-role fixture already in place. Full suite
+(`TENANT_PSQL=... python3 engine/security/test_tenant_isolation.py`) - **ALL PASSED**, 250 checks, 0
+failures, real exit code 0 (captured directly, not through a swallowing pipe); part1-only (no
+`TENANT_PSQL`) also exits 0. Full `engine/` sweep (86 `test_*.py` files run individually, real exit
+codes) - 0 failures, matching baseline exactly, confirming this SQL-only change touched nothing else.
+Scratch databases dropped and `postgresql` service stopped afterward.
+
+To verify independently: check out PR #182's branch (`fix/employee-billing-quota-rpc-gap`), replay
+all 111 migrations (110 plus its own 0121) onto a scratch Postgres, seed a company/owner/employee as
+above, and confirm `company_packs_this_period()` and `company_can_request_pack()` both return `null`
+for the employee and their real values for the owner. Run `TENANT_PSQL="psql -U postgres -d <db>"
+python3 engine/security/test_tenant_isolation.py` and confirm `ALL PASSED` including the two new
+`[18]` checks naming these functions by name.
