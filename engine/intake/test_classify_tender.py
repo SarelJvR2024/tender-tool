@@ -432,6 +432,29 @@ def test_find_delivery_address_single_ambiguous_and_stops_correctly():
           result is not None and result["lines"] == ["Reception area", "The Provincial Office",
                                                        "58 Van Eck Place, Mkondeni"], result)
 
+    # Finding 171 (2026-11-07): a THIRD real anchor phrasing, confirmed live
+    # on a real, current SANRAL Book 1 (N.002-078-2023/1C-SL, "SITE
+    # LABORATORY SUB-SERVICES", found via web search on SANRAL's own tenders
+    # site) - "The address for submission of tender documents is:" instead
+    # of either "tender box at/situated at/located at" or
+    # "delivered/deposited/submitted to/at the following address", the only
+    # two anchors DELIVERY_RE recognised before this fix. Confirmed live
+    # before fixing: this real sentence returned None even though the real
+    # 3-line address was right there, one line below the anchor.
+    submission_address = (
+        "The address for submission of tender documents is:\n"
+        "The South African National Roads Agency SOC Ltd\n"
+        "The Provincial Head: Western Cape Province,\n"
+        "1 Havenga Street, Oakdale, Belville, 7530\n"
+        "\n"
+        "Some unrelated SANRAL invitation text about tenders for joint ventures.\n"
+    )
+    result = ct.find_delivery_address(submission_address)
+    check("'the address for submission of tender documents is' is recognised as a delivery-address anchor",
+          result is not None and result["lines"] == ["The South African National Roads Agency SOC Ltd",
+                                                       "The Provincial Head: Western Cape Province,",
+                                                       "1 Havenga Street, Oakdale, Belville, 7530"], result)
+
 
 def test_discrepancies_contract_no_and_closing_date():
     print("discrepancies: contract number normalization, closing date mismatch, matching values, "

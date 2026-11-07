@@ -10600,3 +10600,57 @@ extracted text (`closing_time: 12:00`, the real 4-line Provincial Office address
 lines including comments); `engine/intake/test_classify_tender.py` (3 new checks appended to the
 existing closing-time/delivery-address test functions). No change to `find_nra_reference()`,
 `discrepancies()`, or any other function in this file.
+
+### Finding 171 (CONFIRMED, FIXED, moderate - `classify_tender.py`'s own `DELIVERY_RE` missed a THIRD real SANRAL delivery-address anchor phrasing, a different gap in the same function Finding 170 just fixed two other gaps in)
+
+**Area:** Intake (`engine/intake/classify_tender.py` - `DELIVERY_RE`/`find_delivery_address()`, the
+same function Finding 170 fixed a sub-heading-collection gap in, called from
+`process_general_jobs.py`'s own SANRAL-route branch).
+
+**Scenario:** following Finding 170's own methodology directly - fetching a REAL, live SANRAL
+tender rather than relying only on this repo's own fixtures - searched SANRAL's own tenders site
+(nra.co.za) and read several currently-listed tender notices. Most use the already-handled "Tenders
+must be placed inside the tender box at:" anchor. One - N.002-078-2023/1C-SL, "SITE LABORATORY
+SUB-SERVICES" for N2 Section 7-8 resurfacing (Western Cape) - uses a THIRD, textually distinct real
+anchor sentence: *"The address for submission of tender documents is:"*, followed directly by the
+real 3-line delivery address (The South African National Roads Agency SOC Ltd / The Provincial
+Head: Western Cape Province, / 1 Havenga Street, Oakdale, Belville, 7530).
+
+**Confirmed live, directly against the real sentence** (not a guess): `DELIVERY_RE` before this fix
+had exactly two alternatives - "tender box at/situated at/located at" and
+"delivered/deposited/submitted to/at the following address" - and this real sentence matches
+neither (no "tender box", and "is" rather than "to"/"at" before the address). `find_delivery_address()`
+called on this real sentence plus its real address lines returned `None` entirely, even though the
+real address was right there, one line below the anchor - the same "silently lost real data" impact
+Finding 170 already described for its own two gaps, just a third, independent anchor-phrasing gap in
+the same regex, not a duplicate of either.
+
+**Fixed:** `DELIVERY_RE` widened with a third alternative,
+`address\s+for\s+submission\s+of\s+tender\s+(?:documents|offers)\s+is`, alongside the two existing
+ones. No change to `_address_lines_after()`, `CLOSING_TIME_RE`, `find_nra_reference()`, or
+`discrepancies()`.
+
+**Verified red-then-green, against both the real sentence and a new fixture.** Confirmed directly
+that `find_delivery_address()` on the real sentence plus its real address lines returned `None`
+before the fix. New check appended to `test_find_delivery_address_single_ambiguous_and_stops_correctly()`
+in `test_classify_tender.py` using the real phrasing and real address lines as a fixture. Reverted
+`classify_tender.py` via `git apply -R` on this pass's own diff, re-ran `test_classify_tender.py` -
+exactly the 1 new check failed (`1 failure(s)`, real exit code `1`, captured directly, not through a
+grepped pipe), nothing else; reapplied - `0 failure(s)`, real exit code `0`. `py_compile` clean.
+Regression (the same four files Finding 170 regressed against, plus the full sweep): `python3
+engine/general/test_process_general_jobs.py`, `python3 engine/discovery/test_assess_tender.py`,
+`python3 engine/test_make_envelope_covers.py`, `python3 engine/test_form_field_audit.py` - all
+`0 failure(s)`, real exit codes `0`. Full `engine/` sweep: `find engine -name "test_*.py" | wc -l` =
+86, ran each individually with its own real exit code captured (no grepped output) - `TOTAL=86
+FAILED_FILES=0`, matching baseline exactly.
+
+**Backlog: unchanged** - a mechanical phrasing gap found by testing against real live data, not a
+new or existing judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green against both real and
+fixture data, regression-clean, no RLS/money/hard-stop/worker-image-install surface):
+- `engine/intake/classify_tender.py`
+- `engine/intake/test_classify_tender.py`
+
+To verify independently: `cd engine/intake && python3 test_classify_tender.py` - expect
+`0 failure(s)`, including the new check naming "the address for submission of tender documents is".

@@ -182,8 +182,24 @@ def find_nra_reference(all_text):
 # Gqeberha / 6025"). Form-Field-Audit 2026-10-18: the envelope covers used
 # a fixed SANRAL head-office address and the SETUP-sheet closing date was
 # given a fixed 12:00.
+# A THIRD real anchor phrasing for the delivery address, distinct from both
+# alternatives below - confirmed live, 2026-11-07, on a real, current SANRAL
+# Book 1 (N.002-078-2023/1C-SL, "SITE LABORATORY SUB-SERVICES" for N2
+# Section 7-8 resurfacing, Western Cape, found via web search on SANRAL's
+# own tenders site): "The address for submission of tender documents is:"
+# followed directly by the real 3-line delivery address. Neither existing
+# alternative matches this - it isn't "tender box at/situated at/located
+# at" (no "tender box" at all), and it isn't "delivered/deposited/submitted
+# to/at the following address" (no "following address", and "is" rather
+# than "to"/"at"). Without this, find_delivery_address() returned None on
+# this real, live SANRAL tender even though the real address was right
+# there, one line below the anchor - the exact same failure shape Finding
+# 170 already found and fixed for two sibling gaps in this same
+# function/CLOSING_TIME_RE below, just a third distinct gap, not a
+# duplicate of either.
 DELIVERY_RE = re.compile(
-    r"(?:tender\s+box\s+(?:at|situated\s+at|located\s+at)|(?:delivered|deposited|submitted)\s+(?:to|at)\s+the\s+following\s+address)\s*:?[ \t]*\n",
+    r"(?:tender\s+box\s+(?:at|situated\s+at|located\s+at)|(?:delivered|deposited|submitted)\s+(?:to|at)\s+the\s+following\s+address"
+    r"|address\s+for\s+submission\s+of\s+tender\s+(?:documents|offers)\s+is)\s*:?[ \t]*\n",
     re.IGNORECASE)
 # An optional trailing AM/PM, same shape and same conversion
 # (hh % 12 + (12 if PM else 0)) as source_http.py's own _US_DT/parse_sast()

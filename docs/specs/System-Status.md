@@ -1,5 +1,91 @@
 # System Status
 
+## This pass (2026-11-07ii, standing solution-architect review): oriented from `18d4f7e`
+(immediately-preceding pass's own verified HEAD - NOT this chain's own lineage: it is the sibling
+session's own Finding 170 commit, `session_01UMAzowxArab6cV4KurgXNE`). `git fetch origin main` clean,
+local matched `origin/main` exactly both at the start and immediately before pushing (`18d4f7e`
+throughout - no further sibling commits landed during this pass). Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two
+old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded - nothing merged, closed, or rebased by anyone since.
+
+**This pass's angle: the brief's own named candidate - `engine/intake/` isn't as exhausted as
+assumed, now that the sibling's Finding 170 just landed two fixes there.** Read Finding 170's own
+diff and write-up in full first (`git show 18d4f7e`) to understand exactly what it already fixed -
+`CLOSING_TIME_RE` (a day-of-week name before the time; "for submission of tender offers" as an
+alternate infix) and `_address_lines_after()` (a short sub-heading restating the anchor) - so as not
+to re-cover either. Then followed Finding 170's own methodology directly: fetched REAL, live SANRAL
+tender notices from SANRAL's own tenders site (nra.co.za, via web search + `WebFetch`, not this
+repo's own fixtures) and ran `classify_tender.py`'s extraction functions against several of them.
+
+**Found and fixed Finding 171** - full write-up in `docs/specs/QA-Edge-Case-Findings.md`. One-line
+summary: `DELIVERY_RE` (the SAME function Finding 170 fixed a sub-heading-collection gap in, a
+*different* gap) had exactly two real anchor alternatives for the delivery-address sentence - "tender
+box at/situated at/located at" and "delivered/deposited/submitted to/at the following address" - but
+a real, currently-listed SANRAL tender (N.002-078-2023/1C-SL, "SITE LABORATORY SUB-SERVICES", N2
+Section 7-8 resurfacing, Western Cape) states it with a THIRD, textually distinct real sentence: "The
+address for submission of tender documents is:", immediately followed by the real 3-line address.
+Confirmed directly against the real sentence (fetched via `WebFetch` from the tender's own live
+detail page): `find_delivery_address()` returned `None` on it even with the real address lines
+immediately present - the same "silently lost real data" impact as Finding 170's own two gaps, just a
+third, independent gap in the same anchor regex.
+
+**Checked several OTHER real, live notices too, not just the one that broke** (the same discipline
+Finding 170 itself used, confirmed necessary here: most notices DO use the already-handled "tender
+box at:" anchor - `sanral-x-005-138-2026-1f`, `sanral-n-010-058-2026-1f`, `contract-sanral-x-004-114-
+2024-1f` all matched cleanly, both before and after this fix, confirming the new alternative is
+additive, not a reach that could misfire on the common case). Also tested `find_nra_reference()`
+against a real "SCM Reference Number: NRA 2026/0034" sentence (`contract-sanral-x-004-114-2024-1f`) -
+matched correctly, no gap found there on this round of real samples.
+
+**Fixed:** `DELIVERY_RE` widened with a third alternative, `address\s+for\s+submission\s+of\s+tender\s+
+(?:documents|offers)\s+is`, alongside the two existing ones. No change to `_address_lines_after()`,
+`CLOSING_TIME_RE`, `find_nra_reference()`, or `discrepancies()` - a one-function, one-regex fix.
+
+**Verified red-then-green against both the real sentence and a new fixture.** New check appended to
+the existing `test_find_delivery_address_single_ambiguous_and_stops_correctly()` in
+`test_classify_tender.py`, using the real phrasing and real address lines as the fixture. Reverted
+`classify_tender.py` via `git apply -R` on this pass's own diff (saved to a scratch file first) and
+re-ran `cd engine/intake && python3 test_classify_tender.py` with its real exit code captured directly
+(no grepped pipe) - exactly the 1 new check failed, `1 failure(s)`, exit code `1`; reapplied the same
+diff - `0 failure(s)`, exit code `0`. `py_compile classify_tender.py` clean. Regression, same four
+files Finding 170 itself regressed against, each run directly with its own real exit code: `python3
+engine/general/test_process_general_jobs.py`, `python3 engine/discovery/test_assess_tender.py`,
+`python3 engine/test_make_envelope_covers.py`, `python3 engine/test_form_field_audit.py` - all
+`0 failure(s)`, exit code `0` each. Full `engine/` sweep, run via a loop capturing each file's own
+real exit code (not a single aggregated grep): `find engine -name "test_*.py" | wc -l` = 86, all 86
+ran individually - `TOTAL=86 FAILED_FILES=0`, matching the standing baseline exactly.
+
+**Why pushed directly to `main`, not a PR.** Small (one regex alternative plus one comment block and
+one test check), fully verified red-then-green against both real live data and a new fixture,
+regression-clean across the full 86-file sweep, and touches none of the standing PR-routing surface
+(no RLS, no money/billing, no hard-stop/gate logic, no worker-image install) - the same category and
+same direct-push precedent Finding 170 itself used.
+
+**Backlog status.** Finding 168 (yearly billing quota period) and the `start_payfast_checkout()`
+revenue-integrity gap both remain exactly as left, untouched, per the standing guardrail - not
+re-checked this pass beyond the routine PR/issue re-check (nothing retrievable indicates Sarel has
+acted on either; see the PR re-check above). All 9 PRs remain open and unmerged: #176/#178/#179/#180/
+#181/#182 (awaiting Sarel's own merge decision, #181 still carrying the immediately-preceding pass's
+own review comment on the `bridge-worker-ci.yml` path-filter gap) and #164/#165(draft)/#177(draft) -
+none touched, amended, or merged by this pass. `engine/intake/` is evidently NOT exhausted even after
+Finding 170 AND this pass's own Finding 171 - a THIRD anchor-phrasing gap in the exact same function
+(`find_delivery_address()`/`DELIVERY_RE`) was found on the very next round of real samples checked,
+so a future pass fetching yet more real, live SANRAL notices (or testing `find_nra_reference()`
+against more real cover-page phrasings than this pass's own single confirmed-clean sample) remains a
+live, evidence-backed angle, not a confirmed-exhausted one.
+
+To verify independently: `cd engine/intake && python3 test_classify_tender.py` and confirm
+`0 failure(s)` including the new check naming "the address for submission of tender documents is".
+Independently fetch `https://www.nra.co.za/sanral-tenders/detail/n-002-078-2023-1c-sl` and confirm its
+real notice text states "The address for submission of tender documents is:" followed by the real
+3-line address, matching Finding 171's own write-up. Confirm via `mcp__github__list_pull_requests`
+that all 9 PRs are still open/unmerged with the timestamps recorded above, and that `git log --oneline
+-1 origin/main` is this pass's own new commit (one ahead of `18d4f7e`), with no further sibling
+commits having landed in between.
+
+---
+
 ## This pass (2026-11-07hh, standing solution-architect review): oriented from `4db98ec`
 (immediately-preceding pass's own verified HEAD, Finding 169/PR #182). `git fetch origin main`
 clean, local matched `origin/main` exactly both at the start and at the end of this pass (`4db98ec`
