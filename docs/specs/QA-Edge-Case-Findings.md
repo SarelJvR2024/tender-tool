@@ -8741,3 +8741,106 @@ backlog note, not a call this pass makes unilaterally.
 **Regression:** `.github/workflows/app-ci.yml` (+19 lines, one new step)
 and `.github/workflows/bridge-worker-ci.yml` (+13 lines, one new step).
 No `app/` or `engine/` source file touched.
+
+---
+
+### Finding 151 (CONFIRMED, FIXED, low/moderate - `/admin/notifications`'s own "Schedule & cron
+health" tab, the one screen built specifically to tell Sarel whether the product's 10 critical
+notification crons are actually running, would silently show every single workflow as "Never run
+yet" instead of an error, if the one read that feeds it ever failed)
+
+**Area:** `app/app/admin/notifications/page.tsx`, the `workflow_heartbeats` read that backs
+`ScheduleHealthTable`.
+
+**How this was found.** This pass's angle was (c) from the standing directive: pick a file in
+`app/` or `engine/` never named anywhere in `System-Status.md`'s last ~15 entries, and read it
+cold rather than chasing an already-exhausted named backlog item. Built the real exclusion set
+first rather than guessing (every basename appearing anywhere in `System-Status.md`,
+`QA-Edge-Case-Findings.md` or `app/AGENTS.md`, not just a skim) - every `engine/**/*.py` file
+turned out already mentioned somewhere in this doc (the engine side of this review is now
+genuinely exhaustively covered, not just mostly), but 36 `app/` files were genuinely untouched by
+name, mostly vendored `components/ui/*` shadcn primitives with no logic to find a bug in. The one
+real candidate with actual data-fetching logic: `app/admin/notifications/page.tsx`'s backing files
+(`DispatchLogTab.tsx`, `TemplateGalleryTab.tsx`, `ScheduleHealthTable.tsx`, none individually
+named before). The two client "Tab" components themselves are purely presentational (fed
+already-computed, serializable rows) - the real logic, and the bug, is in the loader, `page.tsx`.
+
+(Separately, this pass also re-checked the standing directive's own angle (b) - "re-read
+`AI-Call-Quality-Standard.md` and spot-check an actual LLM call site... also suggested before,
+not yet done" - against `git log`/this doc's own history before touching any LLM code, per the
+standing instruction to verify a backlog item's "not yet done" framing rather than trust it: the
+2026-11-01 entries (line ~7515, line ~7574) already closed this out across all 5 real LLM call
+sites in the codebase (`scope_llm.py`, `generate_narrative.py`, `extract_cv_fields.py`,
+`classify_documents.py`, `company_documents.py`), each one read against the standard by name, one
+real fix found (`scope_llm.py`'s `verify_evidence_quotes()`) and the other 4 confirmed clean or
+already-flagged-as-acknowledged-follow-up (the single-pass gap `AI-Call-Quality-Standard.md`'s own
+opening paragraph already names as separate, pre-existing scope). Re-deriving that sweep a third
+time would not have been a stronger result than this doc's own existing entries - recorded here
+so a future pass doesn't repeat the same stale "not yet done" framing a fourth time.)
+
+**The bug, traced to its real consequence.** `page.tsx` fetches two independent Supabase reads in
+one `Promise.all` - `notification_logs` (whose `error` is correctly captured, logged, and surfaced
+as a banner) and `workflow_heartbeats` (whose `error` was destructured off entirely:
+`const [{ data: logData, error: logError }, { data: heartbeatData }] = await Promise.all([...])`
+- `heartbeatData`'s own `error` was never even bound to a name, let alone checked). A failed
+`workflow_heartbeats` read left `heartbeatData` `undefined`, so `heartbeatByKey` built from it is
+an empty `Map`, so every one of the 10 entries in `WORKFLOW_REGISTRY` resolves
+`heartbeatStatusFor(entry, null, nowMs)` - confirmed directly against `lib/workflowRegistry.ts`'s
+own code and its own already-passing unit test (`workflowRegistry.spec.ts`, "never_run when no
+heartbeat row exists yet") - which returns `"never_run"` unconditionally whenever `row` is `null`.
+This is the exact "unprotected/discarded Supabase call whose error is silently treated as a
+false-safe 'nothing here' state" shape this whole review track has been naming as its dominant bug
+class, on the one screen whose entire stated purpose (per its own on-page copy) is telling an
+admin "whether it actually ran" for the 10 cron workflows that are this product's whole
+deadline/compliance/discovery notification safety net. A transient read failure (RLS hiccup,
+connection blip) would read, indistinguishably from the genuine case, as "every single one of our
+10 critical crons has never run even once" - the single most alarming possible false reading this
+specific page could show, with nothing on the page (unlike the sibling `notification_logs` read
+two lines above it) to say the read itself had failed.
+
+**Severity, reasoned rather than inflated.** This is an internal `/admin/*` page, already gated by
+`app/app/admin/layout.tsx`'s own `is_platform_admin()` RPC check (confirmed by reading that file -
+no signed-in company account without admin rights can reach this page at all, so there is no
+security/RLS exposure here, only a correctness/visibility one for an actual platform admin). No
+data is lost or corrupted - the underlying `workflow_heartbeats` rows are untouched; this is purely
+a misleading read on one monitoring screen. Not escalated to "critical" because nothing downstream
+of this page's own render ever consults `heartbeatByKey` - no automated alert or gate depends on
+it, only a human looking at the tab.
+
+**Fix:** captured and logged `heartbeatError` the same way `logError` already was, and added a
+second, clearly-worded banner (parallel to the existing `logError` banner, not replacing it) that
+tells the admin specifically that the heartbeat read failed and that the Schedule & cron health tab
+below it may therefore wrongly show every workflow as "Never run yet." Deliberately did not change
+`heartbeatStatusFor()` itself or try to distinguish "never run" from "read failed" inside the table
+component - that would mean inventing a new status value and touching the already-tested,
+already-correct pure function and its own test file, for a presentation-only distinction the new
+banner already covers at the page level. `scheduleRows` still computes exactly as before when the
+read succeeds; only the failure path changed.
+
+**Verified myself.** No red/green test possible for this specific file: it is a Server Component
+page with `next/headers`/Supabase-server imports at module scope (same already-documented
+limitation as every other RSC-page finding in this doc, e.g. Finding 144's `document-scan/page.tsx`
+- no existing test file, and this repo's own `node:test` convention cannot resolve the `@/` alias
+this file needs). The downstream consequence the fix depends on *is* independently, already
+verified: `workflowRegistry.spec.ts`'s existing "never_run when no heartbeat row exists yet" test
+(re-ran directly, passes) confirms `heartbeatStatusFor(entry, null, nowMs)` really does return
+`"never_run"` for a null row, which is exactly the state the discarded error produced - so the bug
+this entry describes is not asserted from reading alone, it's the directly-tested behavior of the
+one function the discarded error flows into. Full regression: `npm run typecheck` - 0 errors;
+`npx eslint .` - 0 errors, same 3 pre-existing warnings; `npx vitest run` - **469/469 passed, 60/60
+files** (unchanged - no test file touched); the per-file `*.test.ts` loop (no `--test` flag) -
+**27 files, 0 failures** (unchanged); `rm -rf .next && npm run build` - compiled successfully, same
+route table, `Proxy (Middleware)` present.
+
+**What was and wasn't verified.** Not independently verified against a real live Supabase
+transient-failure scenario for this specific query (no live Supabase credentials in this
+environment) - the fix's correctness rests on reading the exact code path directly (the discarded
+`error` destructure, confirmed in the pre-fix diff) plus the already-passing, already-existing unit
+test for the one function that consumes the discarded state, not a live reproduction of a
+Postgres/RLS blip. Not measured: how often this specific read has actually failed in production (no
+incident evidence either way) - this is a precautionary correctness/visibility fix for a real,
+traced logic gap, not a response to a confirmed-live incident, same honesty standard this doc uses
+for comparable findings.
+
+**Regression:** `app/app/admin/notifications/page.tsx` only (+8/-1 lines - one destructured
+`error` field, one `console.error` line, one new banner block). No other file touched.

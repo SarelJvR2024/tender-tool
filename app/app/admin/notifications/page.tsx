@@ -80,7 +80,7 @@ export default async function AdminNotificationsPage({ searchParams }: { searchP
   const { error: actionError, sent: sentMessage, tab } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: logData, error: logError }, { data: heartbeatData }] = await Promise.all([
+  const [{ data: logData, error: logError }, { data: heartbeatData, error: heartbeatError }] = await Promise.all([
     supabase
       .from("notification_logs")
       .select("id, notification_type, recipient_email, company_id, tender_id, subject, status, resend_id, error, sent_at, idempotency_key")
@@ -89,6 +89,7 @@ export default async function AdminNotificationsPage({ searchParams }: { searchP
     supabase.from("workflow_heartbeats").select("*"),
   ]);
   if (logError) console.error("notification_logs select failed", logError);
+  if (heartbeatError) console.error("workflow_heartbeats select failed", heartbeatError);
 
   const logRows = (logData ?? []) as NotificationLogRow[];
   const dispatchRows: DispatchLogRow[] = logRows.map((r) => {
@@ -136,6 +137,12 @@ export default async function AdminNotificationsPage({ searchParams }: { searchP
         {logError && (
           <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {"Couldn't load the notification log - try refreshing. If it keeps happening, let us know."}
+          </div>
+        )}
+
+        {heartbeatError && (
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
+            {'Couldn\'t load workflow heartbeat status - the "Schedule & cron health" tab below may wrongly show every workflow as "Never run yet" rather than its real last-run status. Try refreshing. If it keeps happening, let us know.'}
           </div>
         )}
 

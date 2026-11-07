@@ -1,5 +1,112 @@
 # System Status
 
+## This pass (2026-11-07m, standing solution-architect review): took the backlog's own angle (c) - picked a genuinely never-named `app/` file cold rather than re-deriving an already-exhausted angle - and found `/admin/notifications`'s own "Schedule & cron health" tab would silently show all 10 workflows as "Never run yet" instead of surfacing a real read failure
+
+Oriented from `bdca606` (immediately-preceding pass, HEAD at that commit, confirmed matching
+`origin/main` via `git fetch origin main` both before starting and right before pushing - clean
+both times, no sibling commits landed during this pass). PRs re-checked via
+`gh api repos/sareljvr2024/tender-tool/pulls?state=open` right before this entry: `#176`/`#178`/
+`#179`/`#180` still open (`draft: false`), `#177`/`#164`/`#165` still drafts - all 7 unchanged,
+none touched this pass.
+
+**Angle (b) checked first, and found stale.** The orchestrating prompt's own framing named
+"re-read `AI-Call-Quality-Standard.md` and spot-check an actual LLM call site... also suggested
+before, not yet done" as a live candidate. It isn't live - `git log`/this doc's own history shows
+the 2026-11-01 entries (two of them, same day) already read all 5 real LLM call sites
+(`scope_llm.py`, `generate_narrative.py`, `extract_cv_fields.py`, `classify_documents.py`,
+`company_documents.py`) against the standard by name, found and fixed one real gap
+(`scope_llm.py`'s `verify_evidence_quotes()`), and explicitly closed the sweep as exhausted
+("the audit is now exhausted across all 5 sites"). Confirmed this myself by reading those two
+entries in full rather than trusting either this prompt's framing or the doc's own "exhausted"
+claim at face value - it holds up. Recording this here mainly so a future pass (or a future
+orchestrating prompt) doesn't propose this angle a fourth time without first checking whether it's
+actually still open - exactly the "don't trust a backlog item's own framing without verifying"
+discipline this review has already applied to several other angles.
+
+**Angle (c) - picked a genuinely unmentioned file, verified it that way rather than assumed.**
+Built the actual exclusion set (every basename anywhere in `System-Status.md`,
+`QA-Edge-Case-Findings.md`, or `app/AGENTS.md`) instead of eyeballing "files I haven't seen
+mentioned lately": every `engine/**/*.py` file is already named somewhere in this doc's history -
+the engine side of this standing review is now genuinely exhaustively covered by name, not just
+mostly. 36 `app/` files were genuinely unmentioned, almost all vendored `components/ui/*` shadcn
+primitives with no real logic. The one real candidate with actual data-fetching logic:
+`app/app/admin/notifications/page.tsx` and its three backing "Tab" components
+(`DispatchLogTab.tsx`, `TemplateGalleryTab.tsx`, `ScheduleHealthTable.tsx`), none ever named
+before. The two Tab components turned out purely presentational; the bug, and the real logic, is
+in the loader itself.
+
+**The finding.** `page.tsx` runs two Supabase reads in one `Promise.all` - `notification_logs`
+(error correctly captured, logged, and shown as a banner) and `workflow_heartbeats` (error never
+even destructured: `const [{ data: logData, error: logError }, { data: heartbeatData }] = await
+Promise.all([...])`). A failed heartbeat read leaves `heartbeatData` `undefined`, so every one of
+the 10 `WORKFLOW_REGISTRY` entries resolves `heartbeatStatusFor(entry, null, nowMs)` - confirmed
+directly against `lib/workflowRegistry.ts`'s own code and its own already-passing unit test
+(`workflowRegistry.spec.ts`, "never_run when no heartbeat row exists yet") - which returns
+`"never_run"` unconditionally for a null row. This is the exact dominant bug class this whole
+review track tracks (a discarded Supabase error resolving to a false-safe "nothing here" state),
+on the one screen whose entire stated purpose is telling Sarel whether the product's 10 critical
+notification crons (deadline reminders, compliance-expiry digest, discovery digest, etc.) are
+actually running - a transient read failure here would read, indistinguishably from the real
+thing, as "every single one of our 10 critical crons has never run even once," the single most
+alarming false reading this specific page could produce. See Finding 151
+(QA-Edge-Case-Findings.md) for the full write-up.
+
+**Severity, reasoned not inflated.** `/admin/*` is already gated by `app/app/admin/layout.tsx`'s
+own `is_platform_admin()` RPC check (confirmed by reading it) - no RLS/security exposure, no data
+loss, nothing downstream of this page's own render consults `heartbeatByKey` (no automated alert
+or gate depends on it). Low/moderate: a correctness/visibility bug on an internal monitoring
+screen only a platform admin ever sees, not a production-facing or money-path issue.
+
+**Fix.** Captured and logged `heartbeatError` the same way `logError` already was; added a second
+banner (parallel to, not replacing, the existing `logError` one) telling the admin specifically
+that the heartbeat read failed and the Schedule & cron health tab below may therefore wrongly show
+every workflow as "Never run yet." Deliberately did not touch `heartbeatStatusFor()` or invent a
+new status value to distinguish "genuinely never run" from "read failed" inside the table itself -
+that would mean changing an already-correct, already-tested pure function for a distinction the
+new page-level banner already covers. `scheduleRows` computes identically to before whenever the
+read actually succeeds.
+
+**Verified myself.** No red/green test possible for this specific file (Server Component, `next/
+headers`/Supabase-server imports at module scope, same already-documented limitation as every
+other RSC-page finding in this doc, e.g. Finding 144) - but the downstream consequence the fix
+depends on is independently, already verified: re-ran `workflowRegistry.spec.ts`'s existing
+"never_run when no heartbeat row exists yet" test directly - passes, confirming
+`heartbeatStatusFor(entry, null, nowMs)` really does return `"never_run"`, the exact state the
+discarded error produced. Full regression from `app/`: `npm run typecheck` - 0 errors; `npx eslint
+.` - 0 errors, same 3 pre-existing warnings; `npx vitest run` - **469/469 passed, 60/60 files**
+(unchanged, no test file touched); the per-file `*.test.ts` loop (no `--test` flag) - **27 files,
+0 failures** (unchanged); `rm -rf .next && npm run build` - compiled successfully, same route
+table, `Proxy (Middleware)` present.
+
+**What was and wasn't verified.** Not independently verified against a real live Supabase
+transient-failure scenario for this specific query (no live Supabase credentials in this
+environment) - correctness rests on reading the exact discarded-`error` destructure directly plus
+the already-passing unit test for the one function the discarded state flows into, not a live
+reproduction. Not measured: how often this read has actually failed in production (no incident
+evidence either way) - precautionary, not a response to a confirmed-live incident.
+
+**Backlog status.** No change to the standing backlog items - this was angle (c), a genuinely new
+file-level finding, not a resolution of any previously-named open item. `start_payfast_checkout()`'s
+revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched, per the standing guardrail.
+The impersonation session-refresh gap in `proxy.ts`, `held_registrations`-vs-CV display format, and
+PR #176/#178/#179/#180 (all awaiting Sarel's own merge decision) remain exactly as described - not
+touched. PR #164/#165 (stale drafts) not touched. Migrations `0117`-`0120` still on `main`, still
+not applied to production - untouched this pass, still genuinely unverifiable from inside this
+environment. **New backlog note:** the AI-Call-Quality-Standard angle (b) should be considered
+closed/exhausted as of 2026-11-01 unless a genuinely new LLM call site is added later - a future
+pass proposing it again should re-read the 2026-11-01 entries first, not re-run the sweep from
+scratch. The CI dependency-audit angle remains well-covered, not repeated this pass.
+
+To verify independently: read `app/app/admin/notifications/page.tsx`'s diff against `git show
+bdca606:app/app/admin/notifications/page.tsx` - confirm the pre-fix `Promise.all` destructure
+never binds `error` for the `workflow_heartbeats` read, and that the fix adds exactly one bound
+name, one `console.error`, and one new banner block. Run `npx vitest run lib/workflowRegistry.spec.ts`
+from `app/` - the "never_run when no heartbeat row exists yet" case should pass, demonstrating the
+exact state a discarded heartbeat-read error produces. `npm run typecheck && npx eslint . && npx
+vitest run` and the per-file `*.test.ts` loop should all match the baseline this entry states.
+
+---
+
 ## This pass (2026-11-07l, standing solution-architect review): took the backlog's own named angle (b) - confirmed, by actually reading both CI workflow files rather than assuming, that neither `npm audit` nor `pip-audit` was ever wired into CI at all; every dependency-vulnerability finding in this doc so far (148, 149) was found by a human running the command by hand mid-pass, with no guarantee the next pass would re-run it. Wired both in as real CI gates, narrowly scoped so neither one fails on the already-triaged, deliberately-left-open findings the last two passes recorded. Fixed, pushed directly to `main` - two workflow files only, additive-only (new steps, no existing step changed or removed), no RLS/money-path/hard-stop-gate change.
 
 Oriented from `911d5f5` (immediately-preceding pass, HEAD at that commit, confirmed matching `origin/main` via `git fetch origin main` both before starting and right before pushing - clean both times, no sibling commits landed during this pass). PRs re-checked via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` right before this entry: `#176`/`#178`/`#179`/`#180` still open (`draft: false`), `#177`/`#164`/`#165` still drafts - all 7 unchanged, none touched this pass.
