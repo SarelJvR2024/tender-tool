@@ -67,13 +67,30 @@ export async function proxy(request: NextRequest) {
   }
 
   if (user && guarded) {
-    const { data: membership } = await supabase
+    const { data: membership, error: membershipError } = await supabase
       .from("company_members")
       .select("company_id")
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (!membership && !path.startsWith("/onboarding")) {
+    // A transient read failure here (membershipError truthy) must never be
+    // treated the same as a genuine "no company yet" - this read runs on
+    // EVERY request to every guarded route, so without this check a single
+    // Supabase hiccup would force-redirect an already-onboarded user away
+    // from whatever page they actually asked for and onto /onboarding's
+    // own Screen 1 ("create your company"). migration 0116's unique
+    // constraint means actually submitting that screen would just fail
+    // safely with a friendly error rather than create a duplicate company -
+    // but the redirect itself is still the wrong, confusing destination for
+    // a legitimate member hit by nothing more than a blip. On a failed
+    // read, fall through and let the request reach its real destination
+    // unchanged; that page's own reads (or onboarding/page.tsx's own,
+    // separately-guarded read if they land there anyway) decide what to
+    // show, same as this check already leaves every OTHER failure mode to
+    // the destination page.
+    if (membershipError) {
+      console.error("proxy: company_members read failed", membershipError);
+    } else if (!membership && !path.startsWith("/onboarding")) {
       const url = request.nextUrl.clone();
       url.pathname = "/onboarding";
       return NextResponse.redirect(url);
