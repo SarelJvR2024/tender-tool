@@ -1,5 +1,118 @@
 # System Status
 
+## This pass (2026-11-07xxxvii, standing solution-architect review, background worker): Finding 199 - a from-scratch re-grep of every `.update(` site in `app/app` for the "plain update twin" RLS-zero-row shape found 6 more sites across 5 files Finding 197's own 6-file family never named; `held_registrations`'s own two insert sites confirmed genuinely already fixed for the same pattern - fixed, 5 test files extended/added, pushed to `main`, oriented from `523f6e7`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `523f6e7`
+(Finding 198's own write-up commit, the immediately preceding pass). Re-checked again immediately
+before this pass's own push - still `523f6e7`, no sibling commit landed in between. Re-checked all
+10 open PRs via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` twice this pass (start and
+immediately before the push): same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since; none merged by this session either. Per the binding guardrails, `#164`/`#165`
+were not touched, no PR was opened or merged, and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped `Finding [0-9]+` in
+both docs myself before picking a number - `198` was the highest recorded at this handoff,
+confirming no new finding had landed from a sibling session since `523f6e7`, before this pass's own
+Finding 199 below. No scratch Postgres database was needed this pass (the race is reproduced by
+mocking the Supabase-client chain, the same established technique every sibling fix in this family
+already used - no live Supabase/Postgres access required); no `git worktree` was created either -
+nothing to clean up.
+
+**This pass's own task, per the standing brief: continue the re-verification methodology, picking
+up both concrete leads the immediately-preceding pass named.**
+
+**Lead 1 (`held_registrations`'s own two insert sites, re-checked for the RLS-zero-row sibling
+pattern rather than just field-omission) - genuine, independently-verified negative.** Finding 197's
+own write-up named `saveHeldRegistration()` as one of the five already-fixed siblings when closing
+out `officeActions.ts` as the sixth, but never itself re-opened and read that file - carried forward
+as an assumption, exactly what this methodology exists to catch. Read
+`app/app/company/registrations/actions.ts` end to end: `saveHeldRegistration()`'s edit branch
+(`.update(row).eq("id", id).select("id").maybeSingle()`, `if (!data) fail(...)`), its later
+certificate-attach update (same check, own comment explaining the separate timing window), and
+`deleteHeldRegistration()`'s delete (same check) are all genuinely already fixed. Confirmed by
+reading the file, not by trusting the prior pass's list - logged as a closed negative.
+
+**Lead 2 (a from-scratch `.update(` re-grep across the whole `app/app` tree) - found Finding 199, a
+genuine 7th-through-12th-file miss.** `grep -rln "\.update(" app/app --include="*.ts*" | grep -v
+spec` - 21 production files. Read every `.update(` call site in all 21, checked each against: the
+target table's RLS policy shape (confirmed against the actual migration SQL, not assumed), whether a
+`.select("id").maybeSingle()`/`.length` zero-row check already exists, and - if not - whether an
+in-file comment already marks it as a deliberate, previously-reviewed exception (the established
+"logging only, no behavioral branch changed" shape already accepted for inline tap-to-advance writes
+with no success banner depending on them). 15 of 21 files were already fully covered.
+`onboarding/actions.ts`'s own `companies` update matches the shape structurally but was checked and
+ruled out on its own precondition: at that exact point in the flow (right after
+`create_company_and_join()`) the company has exactly one member - this same requester - so there is
+no second admin who could exist yet to run `removeMember()` against them before this write. Not a
+real instance of the bug class.
+
+**Found 6 real, unswept sites across 5 files - a 7th through 12th file for this family, none named
+anywhere in this doc's or `QA-Edge-Case-Findings.md`'s prior "6-file family" list**:
+`tenders/[id]/vault-quick-fix-actions.ts`'s `saveVaultQuickFields()` (silent false-success, no
+destructive consequence) and `uploadCoidQuickFix()` (an unswept **copy** of `company/actions.ts`'s
+own already-fixed `uploadVaultDocument()`, with the identical full destructive consequence: the
+still-referenced previous file gets deleted from storage while the row never actually got
+repointed at the new one); `tenders/[id]/general-actions.ts`'s `saveGeneralAnswers()` (its own
+`companies` update for SBD-1 company-level fields); `tenders/[id]/actions.ts`'s
+`syncWonProjectToTeam()` (its `tender_packs` update for the completed-project sync - two prior
+passes traced this function's value-validation and its `tender_pack_assignments`-read separately,
+neither ever checked this specific write); `tenders/[id]/logistics-actions.ts`'s
+`saveSubmissionLogistics()` (its `tender_packs` update for the Pack Compiler's logistics fields -
+this file's OTHER `tender_packs` update, `advanceDispatchStatus()`, was checked and ruled OUT:
+confirmed via `lib/dispatchTriage.ts`/`lib/printCutoffReminders.ts` that `dispatch_status` is never
+actually consulted by anything time-sensitive, so a stale value there is a stale badge only, the
+same already-accepted tier as `advanceTaskStatus()`); `tenders/[id]/narrative-actions.ts`'s
+`uploadNarrativeFinal()` (its `narrative_documents` update - a silent metadata **mismatch** rather
+than a no-op, since the storage upload above it reuses a fixed, deterministic path). Full
+file-by-file detail, the exact fix for each, the complete 21-file re-derived list with how each was
+checked, and the closed negatives (`onboarding/actions.ts`, `advanceDispatchStatus()`, the two
+display-only `pack-inputs-actions.ts`/`general-actions.ts` flips) are in Finding 199's own write-up
+(`docs/specs/QA-Edge-Case-Findings.md`) - not duplicated here.
+
+**Fixed** by adding `.select("id").maybeSingle()` to each of the 6 update calls, gating on
+`error || !updated`, matching the established fix exactly; `uploadCoidQuickFix()` additionally got
+the new-file storage cleanup on failure `uploadVaultDocument()` already has. **Test coverage**: 3
+existing spec files extended (`vault-quick-fix-actions.spec.ts` +3 tests, `general-actions.spec.ts`
++2, `actions.spec.ts` +1 new plus 2 existing tests' queue entries corrected for the new `.select()`);
+2 new spec files added with no prior coverage (`logistics-actions.spec.ts`, `narrative-actions.spec.ts`,
+2 tests each) - all copying the established mocking harness from `officeActions.spec.ts` and its own
+precedents. **Verified red-then-green myself for all 6**: reverted each of the 5 production files to
+`git show HEAD:<path>` (`HEAD` = `523f6e7`), reran all 5 spec files - every one of the 6 new/extended
+assertions failed exactly as predicted, the 13 pre-existing tests across those files unaffected;
+restored each file from a saved copy, reran - 19/19 pass across the 5 files.
+
+**Verification, full suite, all run myself, real exit codes.** `npm run typecheck` (0 errors),
+`npx eslint .` (0 errors, same 3 pre-existing warnings, unchanged), `npx vitest run` (**529/529,
+70 files** - up from the 519/68 baseline by exactly this pass's 10 new tests across 2 new files),
+the node `*.test.ts` loop (28/28, plain `node <file>`, no flags, unchanged), `npx next build`
+(compiled successfully, same route table, `/tenders/[id]` present, exit 0) - and the full `engine/`
+Python sweep as a no-op regression check (not re-run - no Python touched this pass; prior pass's
+86/86 stands unchanged).
+
+**Is this methodology exhausted?** For the "plain update twin" family: genuinely exhausted for
+`app/app/**/*.ts*` as it stands today - all 21 `.update(`-containing files individually read and
+judged, family now at 12 files total. The METHOD itself is not exhausted - see Finding 199's own
+closing paragraph for the next concrete target: `people/actions.ts`'s `retryCvExtraction()` and its
+structural twin in `document-scan/actions.ts` (both a 3-`.eq()` status-guarded reset with no
+`.select()` at all, deliberately left untraced to a conclusion this pass for scope reasons, not
+checked-and-ruled-out).
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via the GitHub REST API twice this pass; nothing merged, closed, or rebased by anyone
+else. Pushed directly to `main` as one commit - 5 production files (each a one- or two-call
+`.select("id").maybeSingle()` addition) plus 5 extended/new test files, no RLS policy itself touched
+(only the app-side race check, the already-established fix pattern), no schema/migration/RPC change,
+no worker-image surface touched.
+
+To verify independently: see Finding 199's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the exact call sites, the red/green test run, the
+full suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxxvi, standing solution-architect review, background worker): Finding 198 - a NEW re-verification methodology (checking a past "fixed all N files" claim's own full scope, rather than looking for a fresh sibling divergence) found 6 more `system_alerts.record()` sites across 5 files missing `company_id`, in and outside Finding 192's own 6-file scope - fixed, 4 test files extended/added, pushed to `main`, oriented from `396dbbb`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `396dbbb`
