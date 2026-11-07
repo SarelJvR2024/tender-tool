@@ -1,5 +1,141 @@
 # System Status
 
+## This pass (2026-11-07xxviii, standing solution-architect review, background worker): two named sibling-comparison leads swept to completion, BOTH genuine negatives - no new finding, no code change, nothing pushed, oriented from `143e1b1`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `143e1b1`
+(Finding 189's own pass, the immediately preceding entry below). Re-checked again at the end of
+this pass (no code change was made, so no push was attempted) - still `143e1b1`, no sibling commit
+landed during this pass. Re-checked all 10 open PRs via `mcp__github__list_pull_requests`: same set
+as every preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) -
+nothing merged, closed, or rebased by anyone since. Per the binding guardrails, #164/#165 were not
+touched, no PR was opened or merged, and neither Finding 168 nor the `start_payfast_checkout()`
+revenue-integrity gap was implemented. No scratch Postgres database, worktree, or temp branch was
+created this pass (no reproduction was needed for either lead) - nothing to clean up.
+
+**This pass's own two named leads, both read exhaustively and both closed out as genuine
+negatives - full detail below so a future pass doesn't re-walk the same ground.**
+
+**Lead 1 - `engine/notify/daily_digest.py`'s `SECTION_VISIBILITY` and keyword-based routing,
+checked for the SAME bug shape Finding 187 (see below) found and fixed: an older,
+literal-string-equality filter never updated after a sibling item type was added later.** Read the
+whole file (1037 lines) end to end, not just `build_digest_for_person()`. Every `document_expiry`
+item type actually produced anywhere in the codebase was enumerated directly from the real
+producers, not assumed from comments: `watch_deadlines.find_due_documents()`/
+`find_due_person_credentials()` (`"document"`/`"person_credential"`),
+`watch_deadlines.find_documents_lapsing_before_closing()`/
+`find_person_credentials_lapsing_before_closing()` (`"document_before_closing"`/
+`"person_credential_before_closing"`, Finding 132's own additions),
+`registration_reminders.find_due_registrations()` (type picked dynamically per row, either literal),
+`registration_reminders.find_held_registrations_lapsing_before_closing()`
+(`"held_registration_before_closing"`, Finding 179's own addition) - five distinct literal type
+strings in total, confirmed by grep across every producer, not just the ones `daily_digest.py`'s own
+comments mention. Checked each of the five against both of `build_digest_for_person()`'s
+`document_expiry` role filters (finance's `not in PERSON_CREDENTIAL_TYPES`, cv_admin's
+`in PERSON_CREDENTIAL_TYPES`, both already fixed by Finding 187 this same session): `"document"`,
+`"document_before_closing"` and `"held_registration_before_closing"` are all correctly excluded from
+cv_admin and included for finance (none of the three is ever equal to either tuple member); both
+`"person_credential"` variants are correctly included for cv_admin and excluded from finance. **All
+five types are correctly routed - no sixth type exists yet that either filter has missed.** Also
+checked the file's other role-filtering spots for the identical shape (an older check never updated
+for a newer sibling value): `tender_tasks`/`readiness_changes`'s own `CV_KEYWORDS`/`FINANCE_KEYWORDS`
+substring classifiers (noted, not fixed: `CV_KEYWORDS` lists `"ecsa"`/`"sacpcmp"` explicitly but not
+`"sacnasp"`/`"sagc"` - the two newer professional-registration types 0040 added alongside ECSA/
+SACPCMP - though `"people."` is also in the list and would still catch most key-person field_keys;
+ruled OUT as a new finding because (a) the file's own header comment on these two constants already
+says outright they are "Heuristic... approximations, not exact... Deliberately conservative", so this
+is a documented, acknowledged limitation, not an undocumented silent divergence, and (b) there is no
+second, correctly-written keyword list anywhere else in the codebase for this one to have diverged
+FROM - the sibling-comparison method needs a sibling that got it right; here there is only the one
+list, so this is at most a possible future tightening, not a bug this review's own bar catches);
+`listing_change_signals()`'s own sort-priority `order` dict (6 of the 11 real `change_type` values
+`tender_changes.py` can actually emit - confirmed by reading every `_event()` call site plus
+`ESKOM_NOTICE_TYPES` - are missing: `title_changed`, `bidders_list_published`, `validity_extended`,
+`award_published`, `regret_published` all fall through to `order.get(c.get("change_type"), 9)`'s own
+default. Checked carefully whether this is a drop like Finding 187's, and confirmed it is NOT: every
+role still receives the FULL `listing_changes` item list regardless of type - this dict only affects
+DISPLAY ORDER within that list (the 5 missing types just sort last, grouped together), not visibility
+or role routing, so it does not meet the lead's own "silently drops... a real downstream consumer
+would notice the gap" bar; noted as a minor sort-order improvement a future pass could make, not a
+finding). `VALID_ROLES`/`SECTION_VISIBILITY` keys were cross-checked 1:1 (both exactly
+`full_cycle`/`validator`/`cv_admin`/`finance`/`viewer`) - no missing or extra role. **Genuine
+negative: Finding 187 already closed out the one real divergence in this file; nothing further
+qualifies.**
+
+**Lead 2 - the top-level SANRAL form-filler family's field/context-set consistency, extended past
+the already-ruled-out `ProvenanceLog`-presence angle.** Located all 4 files directly under `engine/`
+(not under `engine/pack_generator/` - that directory holds `confirm_pack.py`/`suggest_pack.py`,
+unrelated): `engine/fill_a_forms.py` (569 lines), `engine/fill_docx_forms.py` (343 lines),
+`engine/fill_financial.py` (100 lines), `engine/fill_authority_letter.py` (83 lines), plus their
+shared sink `engine/provenance.py` (`ProvenanceLog`/`merge_and_save`) and orchestrator
+`engine/run_forms_pipeline.py`. Read every line of all 4 fillers end to end, checking every field/
+context value each one passes into its own shared write/render sink for a silent, undocumented
+omission relative to its siblings. Four concrete angles checked, all ruled out, each for a named
+reason:
+
+  - **Control-character sanitisation** (`generate_cv._safe_text`, the "lxml/python-docx raises
+    ValueError on a stray control byte" bug class already fixed 7 times across this codebase,
+    `fill_docx_forms.py` itself (2026-11-06) and `fill_a_forms.py` itself (2026-11-07) among them).
+    Every text-writing call site in both docx fillers was traced individually and confirmed
+    sanitised (directly, or via `set_paragraph_text()`, which sanitises internally). `fill_financial.py`
+    writes two free-text values (`company_name`, a key person's `name`) via
+    `sanral_fill.Workbook.set_value()` with NO sanitisation call of its own - but this is NOT a gap:
+    confirmed directly from `sanral_fill.py` line 326 (`t.text = _safe_text(str(value))`) that
+    `set_value()` sanitises EVERY non-numeric write internally, inside the shared sink itself, unlike
+    python-docx's raw `.text =` setter, which has no such built-in guard and needs every CALLER to
+    sanitise first. Different architecture (sink-side vs. caller-side sanitisation), not a missed call
+    - confirmed by reading `sanral_fill.py`'s own header comment, which documents this exact fix
+      (2026-11-04) explicitly.
+  - **`comp.get("principals")` (company_principals, 0050) vs. the single `director` fallback** in
+    `fill_docx_forms.py`'s own C.1.2.3 directors table. `process_pack_jobs.adapt_company()` itself
+    never sets a `"principals"` key - traced one level further and confirmed `profile["company"]
+    ["principals"] = directors_on_record(client, company["id"])` is set separately, immediately after
+    `adapt_company()` runs (`process_pack_jobs.py` line 623) - so the multi-director register path IS
+    reachable in the real production bridge, not dead code shadowed by a sibling that forgot to wire
+    it up.
+  - **`profile["tender_updates"]`/`profile["pack_notes"]`/`profile["role_people"]`** - the 3 extra
+    profile keys `fill_a_forms.py` (`tender_updates`, Form A16) and `fill_docx_forms.py`
+    (`role_people`) each read beyond the plain company/signatory shape, plus the one
+    `assemble_pack.py` itself forwards into `warnings` (`pack_notes`) - all 3 confirmed actually
+    populated by `process_pack_jobs.py`'s own real Supabase bridge (line 621-622), not silently
+    left as the empty/`None` defaults their own `.get()` calls would otherwise quietly fall back to.
+  - **`fill_authority_letter.py`'s own standalone CLI `main()`** builds a narrower `tender` dict
+    (`{"description": args.rfp_description}` only) than `assemble_pack.py`'s real call site
+    (`contract_no`/`nra_reference`/`description`/`closing_date`, all four) - checked whether this
+    silently loses fields the way Finding 189's `lephalale.py` did, and confirmed it does NOT: this
+    CLI's own `argparse` setup has no `--contract-no`/`--closing-date` flags defined at all (only
+    `--rfp-number`/`--rfp-description`), so this is the module's own documented, limited, manual-
+    testing entry point, never the production path - the real pipeline call in `assemble_pack.py`
+    (the one every live SANRAL pack build actually goes through) already passes the complete set.
+    Not a sibling divergence inside the shared sink; a scope difference between a manual CLI and the
+    real pipeline, same as other single-purpose debug entry points elsewhere in this codebase.
+
+No field-key/reason-shape divergence was found either: `ProvenanceLog.missing()`/`assumed_default()`
+both enforce a non-empty `reason` centrally (raising `ValueError` without one), so no individual
+filler can silently omit one - this is structurally not a per-filler decision at all, unlike the
+company_id-select bug class Findings 186/188 found.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched. All 10 PRs remain open and unmerged, same set as every preceding pass -
+nothing was pushed this pass (no finding to fix) and nothing was merged by anyone else. Both of this
+pass's own named leads are now genuinely closed out as real, checked negatives, not skipped or
+waved through - a future pass should pick a new, as-yet-unswept family rather than re-walking either
+of them. The one noted-but-not-fixed observation left on the table for a future pass's own judgment
+call (NOT a finding, flagged only so it isn't silently lost): `CV_KEYWORDS` in `daily_digest.py`
+could add `"sacnasp"`/`"sagc"` for completeness against 0040's two newer registration types, though
+`"people."` already covers most of the same ground and the file's own comments already flag this
+whole classifier as a deliberately conservative approximation.
+
+To verify independently: read `engine/notify/daily_digest.py`'s `build_digest_for_person()` and
+confirm all five `document_expiry` item types (`document`, `document_before_closing`,
+`person_credential`, `person_credential_before_closing`, `held_registration_before_closing`) are
+correctly routed by the finance/cv_admin filters (unchanged since Finding 187). Read
+`engine/fill_a_forms.py`, `engine/fill_docx_forms.py`, `engine/fill_financial.py`,
+`engine/fill_authority_letter.py` and `engine/provenance.py` and confirm the four ruled-out angles
+above. Confirm via `mcp__github__list_pull_requests` that all 10 PRs are still open/unmerged, and
+that `git log --oneline -1 origin/main` is still `143e1b1` (this pass made no commit).
+
+---
+
 ## This pass (2026-11-07xxvii, standing solution-architect review, background worker): independent scratch-Postgres re-verification of PR #183's `reviewed_by` follow-up fix (PASS, no new work on the PR) + `gov_sources.py` 11-source sibling-comparison lead closed out - Finding 189 (`lephalale.py`'s `normalize()` never took the batch listing's own "Date uploaded" value, so `published_date` was always `None`, fixed), oriented from `6f2d4b6`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `6f2d4b6`
