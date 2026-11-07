@@ -233,22 +233,35 @@ begin
     raise exception 'That person is no longer on your directors/shareholders register - it may have been removed. Refresh and try again.';
   end if;
 
-  -- reviewed_by is left NULL here, matching confirmIdDocument()'s own
-  -- pre-existing call (markApplied(supabase, resultId!, null, ...)) exactly
-  -- - every one of this file's other 3 confirm paths passes the real
-  -- caller, only this one always passed null. Not this finding's bug to
-  -- fix; preserved as-is rather than silently changed by this migration.
+  -- Follow-up (standing review, 2026-11-07, after this PR's own original
+  -- commit): this used to hardcode `reviewed_by = null` here, matching
+  -- confirmIdDocument()'s own pre-existing call
+  -- (markApplied(supabase, resultId!, null, ...)) - this comment used to say
+  -- that was "not this finding's bug to fix; preserved as-is". That was
+  -- written before main's own Finding 185 (956701f) fixed
+  -- confirmIdDocument() to pass the real calling user's id into
+  -- markApplied() instead of null, exactly matching
+  -- confirmVaultDocument()/confirmExperienceReferenceLetter()/
+  -- confirmCvHandoff()'s own pattern. Carrying the null forward into this
+  -- RPC would have silently reintroduced the bug Finding 185 just fixed the
+  -- moment this PR merges. Fixed the same way this file's other 3 sibling
+  -- RPCs already stamp reviewed_by - auth.uid() directly, which still
+  -- resolves to the calling user's id inside a SECURITY DEFINER function
+  -- (it reads the session's request.jwt.claims GUC, not table context) - no
+  -- new parameter needed, and no TypeScript call site change needed either,
+  -- since none of this file's 4 RPCs take reviewed_by as a caller-supplied
+  -- argument.
   update onboarding_document_results set
     review_status = 'applied',
     applied = jsonb_build_object('table', 'company_principals', 'id', p_principal_id, 'column', 'certified_id_path'),
-    reviewed_by = null, reviewed_at = now()
+    reviewed_by = auth.uid(), reviewed_at = now()
   where id = p_result_id;
 end;
 $$;
 revoke all on function apply_onboarding_id_document_checked(uuid, uuid, text, text, date) from public, anon;
 grant execute on function apply_onboarding_id_document_checked(uuid, uuid, text, text, date) to authenticated;
 comment on function apply_onboarding_id_document_checked(uuid, uuid, text, text, date) is
-  'Atomically files one onboarding-scan ID document (0063) onto company_principals (0050): locks the onboarding_document_results row (for update, 2026-11-07), checks company membership/not-employee, that review_status is still pending_review and that the chosen principal still exists in this company, then writes certified_id_path/filename/on and marks the result applied - all in one transaction (Finding 185).';
+  'Atomically files one onboarding-scan ID document (0063) onto company_principals (0050): locks the onboarding_document_results row (for update, 2026-11-07), checks company membership/not-employee, that review_status is still pending_review and that the chosen principal still exists in this company, then writes certified_id_path/filename/on and marks the result applied (reviewed_by = auth.uid(), same as this file''s other 3 sibling RPCs - fixed 2026-11-07 after this PR''s own original commit, so it does not reintroduce the reviewed_by=NULL bug main''s Finding 185 fixed) - all in one transaction (Finding 185).';
 
 create or replace function apply_onboarding_cv_handoff_checked(
   p_result_id uuid, p_person_id uuid, p_storage_path text, p_original_filename text
