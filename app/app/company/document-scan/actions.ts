@@ -475,20 +475,32 @@ export async function discardOnboardingDocument(formData: FormData) {
  * onboarding_document_results row exists for it, no trace anywhere. The
  * file itself is untouched in storage, so there's no need to ask for it
  * again - just move it back where the worker picks it up.
+ *
+ * Standing review, 2026-11-07 (Finding 201): this used to do a plain
+ * RLS-bound `.update()` on onboarding_uploads directly, through the
+ * signed-in user's own client (not service role) - but that table's own
+ * RLS (0063) grants members SELECT/INSERT only, never UPDATE ("status is
+ * worker-owned... the worker writes with the service role", per 0063's own
+ * comment). That update matched ZERO rows for every real user, every
+ * single time (confirmed in a scratch Postgres, not assumed), with
+ * `error: null` either way - this function unconditionally redirected to
+ * the "Queued again" success toast regardless, so Retry has never actually
+ * requeued anything while telling every user it did. Fixed by moving the
+ * write into retry_onboarding_upload_checked() (migration 0124), a
+ * security definer RPC that re-implements the access check itself (RLS is
+ * bypassed, not inherited, inside security definer) and locks+rechecks the
+ * status guard before writing - fails closed with the same user-facing
+ * message as before if the RPC raises (not a member, an employee-role
+ * member, or the row no longer classification_failed).
  */
 export async function retryOnboardingUpload(formData: FormData) {
-  const { supabase, companyId } = await requireCompanyId();
+  const { supabase } = await requireCompanyId();
   const uploadId = str(formData, "upload_id");
   if (!uploadId) fail("Missing document.");
 
-  const { error } = await supabase
-    .from("onboarding_uploads")
-    .update({ status: "classification_requested", classification_error: null, classification_claimed_at: null, classification_completed_at: null })
-    .eq("id", uploadId)
-    .eq("company_id", companyId)
-    .eq("status", "classification_failed");
+  const { error } = await supabase.rpc("retry_onboarding_upload_checked", { p_upload_id: uploadId });
   if (error) {
-    console.error("onboarding_uploads retry update failed", error);
+    console.error("retry_onboarding_upload_checked failed", error);
     fail("Could not retry this document - try again. If it keeps happening, let us know.");
   }
 

@@ -60,11 +60,17 @@ function makeChain(queue: Resp[], updateCalls?: unknown[]) {
   return chain;
 }
 
-function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: string } | null; uploadError?: { message: string } | null }) {
+function makeSupabase(opts: {
+  fromQueues: Resp[][];
+  downloadError?: { message: string } | null;
+  uploadError?: { message: string } | null;
+  rpcResponse?: { error: { message: string } | null };
+}) {
   let fromCallIndex = 0;
   const uploadCalls: string[] = [];
   const removeCalls: string[][] = [];
   const updateCalls: unknown[] = [];
+  const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
   return {
     client: {
       auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
@@ -72,6 +78,10 @@ function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: s
         const queue = opts.fromQueues[fromCallIndex] ?? [];
         fromCallIndex += 1;
         return makeChain(queue, updateCalls);
+      },
+      rpc: async (fn: string, args: Record<string, unknown>) => {
+        rpcCalls.push({ fn, args });
+        return opts.rpcResponse ?? { data: null, error: null };
       },
       storage: {
         from: () => ({
@@ -90,6 +100,7 @@ function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: s
     uploadCalls,
     removeCalls,
     updateCalls,
+    rpcCalls,
   };
 }
 
@@ -464,5 +475,65 @@ describe("skipOnboardingDocument - real update still succeeds", () => {
     const url = await expectRedirect(skipOnboardingDocument(fd));
 
     expect(url).toContain("saved=skipped");
+  });
+});
+
+// retryOnboardingUpload() - standing review, 2026-11-07 (Finding 201).
+// Pre-fix, this did a plain RLS-bound `.update()` directly on
+// onboarding_uploads through the signed-in user's own client - but that
+// table's own RLS (0063) grants members SELECT/INSERT only, never UPDATE
+// ("status is worker-owned... the worker writes with the service role").
+// That update matched ZERO rows for every real user, every time (confirmed
+// in a scratch Postgres), while the function unconditionally redirected to
+// the "Queued again" success toast regardless, checking only `error` (which
+// PostgREST never sets for a zero-row RLS match). Fixed by moving the write
+// into retry_onboarding_upload_checked() (migration 0124), a security
+// definer RPC that re-implements the access check itself, locks the row,
+// and rechecks the status guard before writing - mocked as a black box
+// here (success or a named error), same convention as PR #183's own
+// RPC-based confirm functions in this same file (reference pattern only,
+// that PR's branch itself untouched) - its own real lock-check-write
+// behaviour is verified separately against a real Postgres instance (see
+// this pass's own scratch-DB red/green run, docs/specs/QA-Edge-Case-Findings.md
+// Finding 201).
+describe("retryOnboardingUpload - retry_onboarding_upload_checked() reports not-found/already-moved", () => {
+  it("does not report success when the RPC raises", async () => {
+    const { client, rpcCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      ],
+      rpcResponse: { error: { message: "This document isn't waiting on a retry." } },
+    });
+    supabaseState.current = client;
+
+    const { retryOnboardingUpload } = await import("./actions");
+
+    const fd = formDataWith({ upload_id: "upload-1" });
+    const url = await expectRedirect(retryOnboardingUpload(fd));
+
+    expect(url).not.toContain("saved=retrying");
+    expect(url).toContain("/company/document-scan?error=");
+    expect(rpcCalls[0]?.fn).toBe("retry_onboarding_upload_checked");
+    expect(rpcCalls[0]?.args.p_upload_id).toBe("upload-1");
+  });
+});
+
+describe("retryOnboardingUpload - the locked RPC succeeds", () => {
+  it("reports success when the RPC genuinely re-queues the row", async () => {
+    const { client, rpcCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+      ],
+      rpcResponse: { error: null },
+    });
+    supabaseState.current = client;
+
+    const { retryOnboardingUpload } = await import("./actions");
+
+    const fd = formDataWith({ upload_id: "upload-1" });
+    const url = await expectRedirect(retryOnboardingUpload(fd));
+
+    expect(url).toContain("saved=retrying");
+    expect(rpcCalls[0]?.args.p_upload_id).toBe("upload-1");
   });
 });
