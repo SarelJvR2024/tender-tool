@@ -261,6 +261,53 @@ def test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written():
           any(a[0][0] == "onboarding_scan" and a[0][2] == "warning" and "self-healed" in a[0][1] for a in alerts), alerts)
 
 
+def test_fail_stale_uploads_alerts_carry_company_id():
+    print("fail_stale_uploads(): its own 3 system_alerts all carry company_id, like every other "
+          "onboarding_scan alert in this file")
+    # Finding (standing review, 2026-11-07, engine/onboarding/ sibling-comparison pass): every
+    # OTHER system_alerts.record("onboarding_scan", ...) call site in this file that has an
+    # onboarding_uploads row in hand includes "company_id" in its context - process_upload()'s own
+    # 3 alerts (context={"onboarding_upload_id": upload["id"], "company_id": upload.get("company_id")})
+    # - because app/app/admin/page.tsx resolves context.company_id into the System Alerts page's own
+    # "tenant: <company>" badge (SystemAlertRow.tsx); with no company_id in context, the badge
+    # silently never appears. fail_stale_uploads() was the one exception in this file: its own GET
+    # only ever selected "id,classification_claimed_at" - never company_id - so none of its 3 alerts
+    # (malformed classification_claimed_at, self-healed, genuinely failed) could carry one, with no
+    # comment anywhere explaining the gap. Same bug class, same fix shape, as Finding 186
+    # (engine/cv/extract_cv_fields.py's own fail_stale_uploads(), fixed the same pass) - found
+    # independently in this sibling file, not yet covered by that pass's own scope.
+    import datetime
+    now = datetime.datetime(2026, 11, 7, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=30)).isoformat()
+    db = FakeDB([
+        {"id": "corrupt", "company_id": "c-malformed", "status": "classifying", "classification_claimed_at": "not-a-real-timestamp"},
+        {"id": "raced", "company_id": "c-healed", "status": "classifying", "classification_claimed_at": old},
+        {"id": "dead", "company_id": "c-dead", "status": "classifying", "classification_claimed_at": old},
+    ])
+    db.tables["onboarding_document_results"] = [{"id": "r1", "onboarding_upload_id": "raced", "review_status": "pending_review"}]
+    alerts = []
+    original, original_record = poj.supabase_request, poj.system_alerts.record
+    poj.supabase_request = db
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        poj.fail_stale_uploads("url", "key", now=now)
+    finally:
+        poj.supabase_request = original
+        poj.system_alerts.record = original_record
+    check("all 3 cases (malformed/self-healed/genuinely failed) each raised their own alert",
+          len(alerts) == 3, alerts)
+    by_upload = {}
+    for a, kw in alerts:
+        ctx = kw.get("context") or {}
+        by_upload[ctx.get("onboarding_upload_id")] = ctx
+    check("the malformed-timestamp alert carries the upload's own company_id",
+          by_upload.get("corrupt", {}).get("company_id") == "c-malformed", by_upload.get("corrupt"))
+    check("the self-healed alert carries the upload's own company_id",
+          by_upload.get("raced", {}).get("company_id") == "c-healed", by_upload.get("raced"))
+    check("the genuinely-failed alert carries the upload's own company_id",
+          by_upload.get("dead", {}).get("company_id") == "c-dead", by_upload.get("dead"))
+
+
 def test_process_upload_happy_path_writes_classified_with_every_result_field():
     db = FakeDB([{"id": "u1", "company_id": "co-1", "storage_path": "co-1/doc.pdf", "original_filename": "doc.pdf",
                  "status": "classification_requested"}])
@@ -399,6 +446,7 @@ def main():
     test_claim_upload_is_atomic_a_second_claim_on_the_same_row_fails()
     test_fail_stale_uploads_marks_old_classifying_rows_failed_and_leaves_fresh_ones_alone()
     test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
+    test_fail_stale_uploads_alerts_carry_company_id()
     test_process_upload_happy_path_writes_classified_with_every_result_field()
     test_process_upload_setup_error_releases_and_reraises_but_transient_error_releases_quietly()
     test_process_upload_classification_failed_marks_the_row_failed_without_raising()

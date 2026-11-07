@@ -1,5 +1,138 @@
 # System Status
 
+## This pass (2026-11-07xxvi, standing solution-architect review): PR #183 `reviewed_by` follow-up fix (pushed to its branch, not merged) + engine-layer sibling-comparison sweep extended to `general/`, `discovery/`, `intake/`, `onboarding/`, `security/`, `pack_generator/`, `narrative/`, `worker/` + top-level form fillers - Finding 188 (`process_onboarding_jobs.fail_stale_uploads()`'s alerts never carried `company_id`, the identical bug class as Finding 186 found independently in a true sibling file, fixed), oriented from `e6af613`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `e3be115`
+(Finding 186's own pass). All of this pass's own research, the PR #183 fix, and the Finding 188 fix
++ regression test were done against that base. **The required `git fetch origin main` immediately
+before pushing found a genuine sibling commit had landed**: `e6af613`, the concurrent "QA/robustness
+review" track's own fix (finance/cv_admin digest filters missing `person_credential_before_closing`)
+- a real, expected instance of the exact race this guardrail exists for, not a hypothetical. Checked
+for a true conflict, not just a hash mismatch: `e6af613` touches `engine/notify/daily_digest.py`,
+`engine/compliance/test_watch_person_credentials.py`, and the SAME two shared docs files this pass
+also edited (`docs/specs/System-Status.md`, `docs/specs/QA-Edge-Case-Findings.md`) - but at
+DIFFERENT locations in both (its own pass entries live mid-file, after its own track's prior entry,
+never at the absolute top where this track's own passes go; its own new Finding also landed at the
+same "next number" this pass had independently picked - **187** - a real numbering collision between
+the two concurrently-running tracks, not just a hypothetical the standing guardrail about separate
+PR/Finding numbering sequences anticipates). Resolved by rebasing this pass's own commit onto
+`e6af613` (clean, no content conflict in either file - both insertions sit in disjoint regions) and
+renumbering this pass's own new finding from the collided 187 to **188**, the real next-free number
+once `e6af613`'s own 187 is accounted for. No work from either session was discarded or overwritten.
+Re-checked all 10 open PRs via `mcp__github__list_pull_requests`: same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since. Per the binding guardrails, #164/#165 were not touched, PR #183 was
+updated on its OWN branch only (not merged, not pushed to main), and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented.
+
+**Part 1 - PR #183's own `reviewed_by = null` quirk, this pass's named special task.** PR #183's
+migration `0124_onboarding_document_scan_confirm_race.sql` hardcoded `reviewed_by = null` in
+`apply_onboarding_id_document_checked()`, with a comment reading "not this finding's bug to fix;
+preserved as-is" - written before main's own Finding 185 (`956701f`) existed, which fixed
+`confirmIdDocument()` on main to pass the real calling user's id instead of null. Left unchanged,
+PR #183 would silently reintroduce that exact bug the moment it merges. Read all 4 sibling RPCs in
+that same migration (`apply_onboarding_vault_document_checked()`,
+`apply_onboarding_experience_letter_checked()`, `apply_onboarding_cv_handoff_checked()`,
+`apply_onboarding_id_document_checked()`) directly: the other 3 do NOT take a caller-supplied
+`reviewed_by` parameter at all - they stamp `reviewed_by = auth.uid()` directly in SQL, which still
+resolves to the calling user's id inside a `security definer` function (confirmed from
+`engine/security/scratch_supabase_stub.sql`'s own stub: `auth.uid()` reads the session's
+`request.jwt.claim.sub`/`test.uid` GUC, not table context, so a `security definer` function's
+owner change does not affect it). Fixed `apply_onboarding_id_document_checked()` the same way -
+`reviewed_by = auth.uid()`, no new parameter, no TypeScript call-site change in
+`app/app/company/document-scan/actions.ts` (none of this migration's 4 RPCs take `reviewed_by` as
+a caller-supplied argument).
+
+**Verified in a disposable scratch Postgres database** (via a `git worktree` of PR #183's own
+branch; database dropped and the Postgres service stopped after use, worktree removed after use,
+per the standing guardrail). Red: replayed the UNFIXED migration (`engine/security/
+replay_schema.sh`, 114 migrations), seeded one company/member/principal/pending
+`onboarding_document_results` row, called `apply_onboarding_id_document_checked()` as that
+signed-in member (`set role authenticated` + `test.uid`) - `reviewed_by` landed `NULL` in the
+database despite a real, identifiable caller. Green: same seed and call against the fixed
+migration - `reviewed_by` landed the real calling user's id. Also ran the full TypeScript
+verification suite in the same worktree (a bind-mounted `node_modules`, not a symlink, per the
+established Turbopack-symlink pitfall): `npm run typecheck` (`next typegen && tsc --noEmit`) clean;
+`npm run lint` clean (0 errors, pre-existing warnings only); `npx vitest run` 66/66 files, 503/503
+tests; the full node-test loop with plain `node <file>` (never `--import tsx`/`--test`) across all
+28 `*.test.ts` files, all exit 0; `npx next build` clean. Committed and pushed to
+`fix/onboarding-document-scan-confirm-race` only (`24a0153`, one commit ahead of `0a42286`) -
+**PR #183 was NOT merged**, per the binding guardrail.
+
+**Part 2 - the main engine-layer sibling-comparison sweep, extended into the 8 directories +
+top-level form fillers this pass's own brief named.** Two concrete leads were given to start with,
+both checked and ruled out (full detail in Finding 188's own "Also checked and ruled out" section,
+not repeated here): `process_general_jobs.py` as `process_pack_jobs.py`'s own named B12
+general-family sibling (its malformed-timestamp alert's own missing `company_id` turned out to be
+a trait ALL THREE siblings - pack/general/cv - share uniformly, not a one-diverges-from-the-rest
+case; its `send_pack_ready_email()` call site is functionally identical to pack's own, confirmed
+`send_pack_ready_email()` genuinely never raises); and the form-filler family's shared
+rendering/validation sink (`fill_financial.py`'s own lack of `ProvenanceLog` is `assemble_pack.py`'s
+own documented "mechanical fields only" scope boundary, not a gap - this family has already been
+through an unusually large number of independent prior passes, Findings 1/37/85/130 among them).
+
+**The real finding (Finding 188): `process_onboarding_jobs.py`'s `fail_stale_uploads()` had the
+identical bug Finding 186 had just fixed in `extract_cv_fields.py`, independently, in a true
+sibling file this pass's own brief named but Finding 186's prior pass had explicitly scoped out
+of.** Its own `GET` narrowed its select to `id,classification_claimed_at` only, so none of its 3
+`onboarding_scan` alerts (malformed-timestamp, self-healed, genuinely-failed) could carry
+`company_id`, unlike every other `onboarding_scan` alert in the same file
+(`process_upload()`'s own 3) and unlike all 5 of its true cross-file stale-sweep siblings across
+every job-processor bridge (pack, general, cv, and - as of the immediately preceding pass -
+`extract_cv_fields.py` itself). Same real downstream consequence as Finding 186: `app/app/admin/
+page.tsx` resolves `context.company_id` into the admin System Alerts page's own `tenant: <company>`
+badge; with no `company_id` in context, that badge silently never appeared for a stuck/malformed/
+self-healed onboarding classification alert. **Fixed** the same way Finding 186 was: widened the
+`select=` to include `company_id` (no new query) and added it to all 3 alert contexts.
+
+**Verified red-then-green.** New test `test_fail_stale_uploads_alerts_carry_company_id()` (3 checks)
+added to `engine/onboarding/test_process_onboarding_jobs.py`, wired into `main()`. Red: run against
+the unfixed function - real exit `1`, all 3 new checks failed exactly as predicted (no `company_id`
+key in any of the 3 alert contexts). Green: applied the fix, re-ran - real exit `0`, every check in
+the file passes. `python3 -m py_compile` clean on both changed files. Full `engine/` Python sweep -
+`find engine -name "test_*.py" | wc -l` = `86`, looped with plain `python3 <file>`, real exit codes
+captured directly - **86/86, 0 failures**, unchanged count. No TypeScript/schema/other call-site
+touched (Python-only, narrow, single-file fix, same shape as Finding 186) -
+`npm run typecheck`/`npx eslint .`/`npx vitest run`/`npx next build` were not re-run.
+
+**Genuine negatives, logged so a future pass doesn't re-walk the same ground (full detail in
+Finding 188's own writeup):** `process_general_jobs.fail_stale_jobs()`'s malformed-timestamp alert
+(consistent across all 3 siblings, not a divergence); `fill_financial.py`'s lack of provenance
+logging (documented scope boundary); `process_narrative_jobs.fail_stale_jobs()`'s missing second
+alert (already deliberate, already tested); `engine/pack_generator/` (`confirm_pack.py`/
+`suggest_pack.py`, already internally consistent after Findings 138/155); `engine/worker/`
+(`run_bridges.py`'s `BRIDGES` registry and the Dockerfile's `COPY engine engine` - no missing
+registration, no per-bridge copy list to miss one from); `engine/security/` (no production code of
+its own to sibling-compare) and `engine/intake/classify_tender.py` (a single-consumer module, no
+sibling file it mirrors). `engine/discovery/gov_sources.py`'s 11-source `read_source()`/`merge()`/
+`_fold()` family was read for a sink-field divergence angle but **not claimed exhaustively
+checked** - a natural candidate for a future pass's own closer, field-by-field read (each source's
+own `fetch_releases()` against `source_http.release()`'s full parameter list), distinct from the
+ocid-collision angle this backlog has already covered across 5 prior findings.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 10 PRs remain open and unmerged, same set as every preceding
+pass - PR #183 received its own follow-up commit (`24a0153`) on its own branch, still open and
+unmerged. This pass's own brief (`engine/general/`, `engine/discovery/`, `engine/intake/`,
+`engine/onboarding/`, `engine/security/`, `engine/pack_generator/`, `engine/narrative/`,
+`engine/worker/`, top-level SANRAL form fillers) is now genuinely covered, not exhaustively to the
+same depth as `engine/discovery/`'s own already-5-times-covered ocid-collision angle, but a real
+first sibling-comparison pass over every directory named - one new finding (187), several named
+negatives, one named open angle for a future pass (`gov_sources.py`'s field-by-field sink
+comparison).
+
+To verify independently: read `engine/onboarding/process_onboarding_jobs.py`'s `fail_stale_uploads()`
+and confirm its own `GET` selects `company_id` and all 3 of its `system_alerts.record()` calls
+include `"company_id": up.get("company_id")`. Run `python3 engine/onboarding/
+test_process_onboarding_jobs.py` and confirm exit `0` with the new test's 3 checks passing. Re-run
+the full `engine/` sweep and confirm `86/86, 0 failures`. Confirm via `mcp__github__list_pull_requests`
+that all 10 PRs are still open/unmerged, that PR #183's branch head is `24a0153`, and that
+`git log --oneline -1 origin/main` is this pass's own new commit (one ahead of `e6af613`, the
+concurrent QA/robustness track's own Finding-187 fix, rebased onto cleanly), with no further
+sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xxv, standing solution-architect review): engine-layer sibling-comparison sweep (`pack/`, `notify/`, `compliance/`, `cv/`) - Finding 186 (`extract_cv_fields.fail_stale_uploads()`'s alerts never carried `company_id`, fixed), oriented from `956701f`
 (immediately-preceding pass's own verified HEAD, Finding 185's `confirmIdDocument()` fix). `git
 fetch origin main` at the start found local already matching `origin/main` exactly - `956701f` -

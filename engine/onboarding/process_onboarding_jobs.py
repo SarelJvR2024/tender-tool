@@ -80,10 +80,22 @@ def fail_stale_uploads(url, key, now=None):
     try/except - aborting the stale-reclaim sweep for every OTHER genuinely
     stuck upload too (same bug class as watch_deadlines.days_until()'s own
     malformed-date guard). Skip and alert on just the one row, never the
-    whole sweep."""
+    whole sweep.
+
+    Standing review, 2026-11-07 (engine/onboarding/ sibling-comparison pass):
+    this function's own GET used to select "id,classification_claimed_at"
+    only, so none of its 3 alerts below could carry company_id even in
+    principle - unlike every other onboarding_scan alert in this file
+    (process_upload()'s own 3), which all do. Same bug class, same fix, as
+    Finding 186 (engine/cv/extract_cv_fields.py's own fail_stale_uploads(),
+    an independent instance of the identical gap in a true sibling file).
+    app/app/admin/page.tsx resolves context.company_id into the System
+    Alerts page's own "tenant: <company>" badge - with no company_id in
+    context, that badge silently never appeared for a stuck/malformed/
+    self-healed onboarding classification alert."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
-    for up in supabase_request(url, key, "GET", "onboarding_uploads?status=eq.classifying&select=id,classification_claimed_at"):
+    for up in supabase_request(url, key, "GET", "onboarding_uploads?status=eq.classifying&select=id,company_id,classification_claimed_at"):
         claimed = up.get("classification_claimed_at")
         if not claimed:
             continue
@@ -93,7 +105,8 @@ def fail_stale_uploads(url, key, now=None):
             system_alerts.record("onboarding_scan", f"An onboarding classification's classification_claimed_at "
                                  f"({claimed!r}) is not a valid timestamp - its stale-reclaim check was "
                                  "skipped, not treated as stale.", "warning",
-                                 context={"onboarding_upload_id": up["id"], "claimed_at": claimed})
+                                 context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id"),
+                                          "claimed_at": claimed})
             continue
         if claimed_dt < cutoff:
             # process_upload() does the real work in two separate REST calls
@@ -122,7 +135,8 @@ def fail_stale_uploads(url, key, now=None):
                                                          f"'classifying' for over {STALE_AFTER_MINUTES} minutes "
                                                          "after the worker died, but its result had already been "
                                                          "written - self-healed to classified rather than wrongly "
-                                                         "failed", "warning", context={"onboarding_upload_id": up["id"]})
+                                                         "failed", "warning",
+                                     context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id")})
                 continue
             supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
                 "status": "classification_failed", "classification_completed_at": _now_iso(),
@@ -131,7 +145,8 @@ def fail_stale_uploads(url, key, now=None):
             print(f"[failed] onboarding_upload {up['id']}: stale 'classifying' since {claimed}")
             system_alerts.record("onboarding_scan", f"An onboarding document classification was stuck for over "
                                                      f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and "
-                                                     "was marked failed", "error", context={"onboarding_upload_id": up["id"]})
+                                                     "was marked failed", "error",
+                                 context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id")})
 
 
 def process_upload(url, key, upload, client_factory=cd.default_llm_client):
