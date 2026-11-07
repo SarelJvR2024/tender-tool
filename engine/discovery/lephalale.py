@@ -181,6 +181,57 @@ def parse_batch(text):
     return out
 
 
+def _disambiguate_reused_refs(rels):
+    """Lephalale usually assigns a fresh internal ref to a re-advertisement
+    (confirmed across every batch checked at the time this module's own
+    docstring was written) - but a live re-fetch of the real site,
+    2026-11-07 (the first time this specific reader was ever reachable from
+    this review, after several prior passes recorded it as unreachable -
+    see QA-Edge-Case-Findings.md/System-Status.md's own history), found a
+    real counter-example: the real "October Batch 2026" PDF's own
+    "T42/2025-2026 (Re-Advert)" entry carries internal ref "8/2/817" - a
+    LOWER number than every other batch checked since March 2026 (805, 820,
+    821, 826, 827, 837, 842), meaning it is the SAME internal ref originally
+    assigned to this tender whenever it was first advertised, well before
+    this run's own 45-day fetch window, reused again now for its
+    re-advertisement rather than a freshly issued one.
+
+    Confirmed live, same run: no two batches BOTH inside the current
+    45-day cutoff (`FETCH_CUTOFF_DAYS`) share an internal ref today (the
+    September and October batches opened this run have 3 distinct refs:
+    8/2/837, 8/2/842, 8/2/817) - so this is not yet a live collision. But
+    the underlying mechanism (the SAME internal ref genuinely reused by a
+    real re-advertisement) is now demonstrated, not theoretical, and SA
+    municipalities routinely re-advertise within weeks of a failed closing
+    (the exact Kouga/DBSA/SARS pattern this review's own
+    `_disambiguate_reused_refs()` siblings already guard against) - if a
+    re-advertisement's own batch and its original's own batch are EVER both
+    inside the cutoff window in the same run, two release rows with the
+    IDENTICAL ocid ("lephalale:<ref>") would result, and
+    seed_supabase_opportunities.py's own (company_id, ocid) upsert would let
+    whichever is written second silently overwrite the other.
+
+    Lephalale's own `normalize()` gives every release the SAME
+    `source_url` (the one listing page, `LIST_URL`) - there is no separate
+    per-tender detail URL the way Kouga's own per-card link is - but each
+    release's own single document IS the batch PDF it came from, and every
+    batch has its own distinct URL, so that is used as the disambiguator
+    instead. Only a colliding ref's ocid is touched: every non-colliding
+    tender (every one checked live today) keeps exactly the ocid it always
+    had, so this doesn't re-trigger a "new tender" alert for any tender
+    that was never ambiguous."""
+    by_ref = {}
+    for r in rels:
+        by_ref.setdefault(r["contract_number"], []).append(r)
+    for ref, group in by_ref.items():
+        if len(group) < 2:
+            continue
+        for r in group:
+            batch_url = (r["documents"][0]["url"] if r["documents"] else "") or ""
+            slug = batch_url.rstrip("/").rsplit("/", 1)[-1]
+            r["ocid"] = f"lephalale:{ref}:{slug}"
+
+
 def normalize(internal_ref, tnumber, desc, closing_dt, batch_url, batch_label):
     ref = f"8/2/{internal_ref}" if "/" not in internal_ref else internal_ref
     title = (f"{tnumber}: {desc}" if tnumber else desc) or batch_label
@@ -222,6 +273,7 @@ def fetch_releases(cutoff_days=FETCH_CUTOFF_DAYS, log=print):
             "the batch PDFs' own table structure has likely changed. Fix the parser before "
             "trusting an empty result as 'no open tenders'."
         )
+    _disambiguate_reused_refs(rels)
     log(f"  Lephalale Local Municipality: {len(rels)} tenders from {opened} recent batch document(s)")
     return rels
 

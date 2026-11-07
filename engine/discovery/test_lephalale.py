@@ -188,6 +188,95 @@ try:
 finally:
     lephalale.datetime.datetime, lephalale.datetime.date = _real_datetime, _real_date
 
+# --- _disambiguate_reused_refs(): a re-advertised tender reusing its own --
+# --- original internal ref must not silently collide at the ocid stage ---
+
+# Confirmed live, 2026-11-07 (the first time this specific reader was ever
+# reachable from this review): the real "October Batch 2026" PDF's own
+# "T42/2025-2026 (Re-Advert)" entry carries internal ref "8/2/817" - a
+# LOWER number than every other batch checked since March 2026, meaning
+# it's the SAME internal ref originally assigned whenever this tender was
+# first advertised, reused again now for its re-advertisement. No two
+# batches BOTH inside the real 45-day cutoff shared a ref in that live run
+# (see module's own _disambiguate_reused_refs() docstring) - this fixture
+# reproduces the shape synthetically (two batches, same internal ref,
+# genuinely different closing dates/content, both within cutoff), the same
+# "closed proactively, no live collision yet" discipline Finding 181 used
+# for sars_procurement.py.
+
+_TODAY = datetime.datetime.now(sh.SAST).date()
+_SOON = (_TODAY + datetime.timedelta(days=10)).strftime("%d/%m/%Y")
+_LATER = (_TODAY + datetime.timedelta(days=25)).strftime("%d/%m/%Y")
+_SOON_ISO = (_TODAY + datetime.timedelta(days=10)).isoformat()
+_LATER_ISO = (_TODAY + datetime.timedelta(days=25)).isoformat()
+
+LEPHALALE_REUSED_REF_LISTING = f"""
+<table id='customers'>
+  <tr><th>Description</th><th>Date uploaded</th><th>Closing date</th></tr>
+  <tr><td><a href='../Documents/Batch B.pdf' target='_blank'>Batch B</a></td><td>2026-11-02</td><td>{_LATER_ISO}</td></tr>
+  <tr><td><a href='../Documents/Batch A.pdf' target='_blank'>Batch A</a></td><td>2026-10-29</td><td>{_SOON_ISO}</td></tr>
+</table>
+"""
+
+_BATCH_A_TEXT = (
+    "Ref no:8/2/900       Appointment of a suitably qualified service provider for ABC "
+    f"maintenance. T50/2026-2027 continued enquiry text here. {_SOON}\n"
+)
+_BATCH_B_TEXT = (
+    "Ref no:8/2/900       RE-ADVERTISEMENT: Appointment of a suitably qualified service "
+    f"provider for ABC maintenance. T50/2026-2027(Re-Advert) continued enquiry text here. {_LATER}\n"
+)
+
+
+def test_lephalale_reused_internal_ref_gets_distinct_ocids_not_a_collision():
+    print("lephalale: reused internal ref disambiguation")
+    real_http_get, real_pdf_text = sh.http_get, lephalale._pdf_text
+
+    def fake_http_get(url, timeout=90):
+        if url == lephalale.LIST_URL:
+            return LEPHALALE_REUSED_REF_LISTING.encode("utf-8")
+        if url.endswith("Batch%20B.pdf"):
+            return b"BATCH_B_PDF_BYTES"
+        if url.endswith("Batch%20A.pdf"):
+            return b"BATCH_A_PDF_BYTES"
+        raise AssertionError(f"unexpected URL requested: {url}")
+
+    def fake_pdf_text(data):
+        return {b"BATCH_A_PDF_BYTES": _BATCH_A_TEXT, b"BATCH_B_PDF_BYTES": _BATCH_B_TEXT}[data]
+
+    sh.http_get = fake_http_get
+    lephalale._pdf_text = fake_pdf_text
+    try:
+        rels = lephalale.fetch_releases(cutoff_days=45, log=lambda *a, **k: None)
+    finally:
+        sh.http_get = real_http_get
+        lephalale._pdf_text = real_pdf_text
+
+    same_ref = [r for r in rels if r["contract_number"] == "8/2/900"]
+    check("both the original and its re-advertisement are present (same internal ref, 2 rows)",
+          len(same_ref) == 2, len(same_ref))
+    check("...but they do NOT share an ocid (the collision this fix closes)",
+          len({r["ocid"] for r in same_ref}) == 2, [r["ocid"] for r in same_ref])
+    check("...and each disambiguated ocid still starts with the shared ref, for traceability",
+          all(r["ocid"].startswith("lephalale:8/2/900:") for r in same_ref),
+          [r["ocid"] for r in same_ref])
+    check("...disambiguated with each release's own distinct batch document URL, not a random value",
+          {r["ocid"].rsplit(":", 1)[-1] for r in same_ref} == {"Batch%20A.pdf", "Batch%20B.pdf"},
+          [r["ocid"] for r in same_ref])
+
+    # The existing real fixtures (September/August/March/October, re-run
+    # through the real HTTP entry point once more here) still get plain,
+    # unsuffixed ocids - confirms the fix doesn't touch refs that were never
+    # ambiguous, which would otherwise re-trigger a "new tender" alert for
+    # every Lephalale tender, not just the genuinely reused one.
+    real_rel = lephalale.normalize(*sept_rows[0], "https://example.org/batch.pdf", "September Batch 2026")
+    lephalale._disambiguate_reused_refs([real_rel])
+    check("a non-colliding real release keeps its plain, unsuffixed ocid",
+          real_rel["ocid"] == "lephalale:8/2/837", real_rel["ocid"])
+
+
+test_lephalale_reused_internal_ref_gets_distinct_ocids_not_a_collision()
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)

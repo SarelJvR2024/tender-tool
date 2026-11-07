@@ -1,5 +1,159 @@
 # System Status
 
+## This pass (2026-11-07xix, standing solution-architect review): oriented from `5aeafee`
+(immediately-preceding pass's own verified HEAD, Finding 181's `sars_procurement.py` reused-ref
+fix). `git fetch origin main` at the start found local already matching `origin/main` exactly -
+`5aeafee` - and again immediately before pushing this pass's own fix, still `5aeafee`, no sibling
+commit landed during this pass. Grepped `### Finding [0-9]+` in `docs/specs/QA-Edge-Case-
+Findings.md` myself before picking a number - 181 was the highest recorded, confirming no new
+finding had landed from either chain since the preceding pass's own writeup - this pass's own fix
+below is Finding 182. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`: `#176`/
+`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`(both
+draft) are all still open - nothing merged, closed, or rebased by anyone since (note: these PR
+*numbers* are a completely different sequence from this doc's own `### Finding N` numbers, and the
+same-numbered PRs #181/#182 carry entirely unrelated titles from this pass's own Finding 181/182 -
+confirmed again this pass, the standing numbering-coincidence caveat).
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle, per the task brief's own priority order: the three still-open
+"ref-reuse-ocid-collision" sibling candidates named by the preceding pass's own backlog note -
+`lephalale.py`, `vaal_central_water.py`, `randwater.py` - each checked individually against its
+own real page structure, not a blind copy-paste of `sars_procurement.py`'s fix.**
+
+**`lephalale.py` - fixed, with a real, previously-unseen live confirmation.** This reader has been
+recorded as unreachable from this sandbox by nearly every prior pass that tried it (most recently
+`2026-11-07s`'s own `Connection reset by peer`, independently corroborated by the agent proxy's own
+relay-failure log at the time). This pass's own repeated fetch attempts were themselves mostly
+blocked the same way - `www.lephalale.gov.za:443` failed with `ws_closed_mid_exchange`/`Connection
+reset by peer`/timeouts on the large majority of attempts, confirmed transient and server/relay-
+side (the agent proxy's own `/__agentproxy/status` recorded the identical failure shape against
+`www.kouga.gov.za` and, briefly, `vaalcentralwater.co.za` in the same window) - but ONE real `curl`
+fetch of the live listing page, and one real fetch of the live "OCTOBER BATCH 23102026.pdf", did get
+through cleanly. Read against the real engine code (`lephalale.parse_listing()`/`parse_batch()`):
+the real October batch's own "T42/2025-2026 (Re-Advert)" entry carries internal ref "8/2/817" - a
+LOWER number than every other batch checked since March 2026 (805, 820, 821, 826, 827, 837, 842) -
+meaning this is the SAME internal ref originally assigned to this tender whenever it was first
+advertised, genuinely reused now for its re-advertisement, not a freshly issued one. This is real,
+observed ref reuse on this specific buyer's own site - stronger live evidence than
+`sars_procurement.py`'s own proactive fix had (that one found no live ref reuse at all, only a
+general pattern of re-announcement in a page section it doesn't even parse).
+
+`lephalale.py`'s own `ocid` is `f"lephalale:{ref}"` where `ref` is this internal ref (deliberately
+NOT the T-number, which the module's own docstring already documents as colliding across unrelated
+tenders - e.g. "T46/2025-2026" reused for two different March-batch tenders, 8/2/821 and 8/2/805 -
+precisely why internal ref was chosen as the real identity in the first place). But with no
+disambiguation guard on the internal ref either, two batches BOTH landing inside the reader's own
+45-day `FETCH_CUTOFF_DAYS` window in the SAME run, sharing the SAME internal ref (plausible: SA
+municipalities often re-advertise within weeks of a failed closing - the exact shape already fixed
+for `kouga.py`/`dbsa_procurement.py`/`sars_procurement.py`'s own reused refs) would produce two
+release rows with the IDENTICAL ocid, and `seed_supabase_opportunities.py`'s own `(company_id,
+ocid)` upsert would let whichever is written second silently overwrite the other. **Checked live,
+same run: the two batches actually opened today (September, closing 2026-10-19; October, closing
+2026-11-09/2026-11-23) carry 3 distinct internal refs (8/2/837, 8/2/842, 8/2/817) - no live
+collision exists right now**, the same "real reuse mechanism confirmed, sample too small to show an
+active collision" conclusion `sars_procurement.py`'s own pass reached, not an assumption.
+
+**Fix**, same shape as the three sibling `_disambiguate_reused_refs()` functions, adapted to this
+reader's own structure: Lephalale's `normalize()` gives every release the same `source_url` (the one
+listing page - there is no separate per-tender detail URL the way Kouga's own per-card link is), but
+each release's one document IS the batch PDF it came from, and every batch has its own distinct URL
+- so that URL is used as the disambiguator instead. Groups releases by `contract_number` (the
+internal ref); for any group of 2+, suffixes each one's `ocid` with its own batch-document URL slug.
+Only a colliding ref's ocid is touched - every non-colliding tender (every one checked live today)
+keeps exactly the ocid it always had. Wired into `fetch_releases()`'s own final step, right before
+disambiguation would matter (after the "0 tenders from N batches" safety raise, so that check is
+unaffected).
+
+**Verified red-then-green, real exit codes, no pipe before capture.** New
+`test_lephalale_reused_internal_ref_gets_distinct_ocids_not_a_collision()` in
+`engine/discovery/test_lephalale.py`, with a new synthetic fixture (two batches, same internal ref
+"8/2/900", genuinely different closing dates/content - the same shape as the real live 8/2/817 case,
+reproduced synthetically since the real original batch for 817 falls outside the current 45-day
+cutoff and can't be used directly), run through `fetch_releases()` itself via a monkeypatched
+`sh.http_get`/`lephalale._pdf_text` (the real entry point, not the helper alone). RED (`git show
+HEAD:engine/discovery/lephalale.py` restored, pre-fix body, test file kept): `python3
+test_lephalale.py` - real exit code **1**, exactly the 3 new ocid-collision checks failed plus an
+`AttributeError` on the following non-colliding-release check (no `_disambiguate_reused_refs`
+attribute at all), every one of the file's other 30+ pre-existing checks still passed. GREEN
+(post-fix file restored): exit **0**, ALL PASSED, including the new "non-colliding real release
+keeps its plain ocid" check. Re-ran the fix against the REAL live September+October batch data
+(parsed from the one successful live fetch, via the real `parse_batch()`/`normalize()`/
+`_disambiguate_reused_refs()`): still 3 releases, 3 distinct plain ocids
+(`lephalale:8/2/842`/`lephalale:8/2/817`/`lephalale:8/2/837`) - byte-identical to the pre-fix
+output, confirming the fix changes nothing about today's real data. Full regression: `find engine
+-name "test_*.py" | wc -l` = **86**, looped every one with plain `python3 <file>` (not piped, real
+exit codes) - **86 files, 0 failures**, matching the standing baseline exactly. No TypeScript/JS
+file touched - `typecheck`/`eslint`/`vitest`/the node `*.test.ts` loop/`next build` not re-run, per
+the standing rule's own scope (Python-only change). See Finding 182
+(`QA-Edge-Case-Findings.md`) for the full write-up and the exact fixture.
+
+**`vaal_central_water.py` - re-checked live, genuinely clean, same conclusion every prior pass that
+reached this site has recorded.** Fetched the real live
+`https://vaalcentralwater.co.za/advertised-tenders/` page (reachable this pass, after some of the
+same transient relay failures seen for `lephalale.py`/`kouga.py` in the same window) and ran the
+real, unmodified `parse_tenders()` against it: **9 advertised tenders, 9 distinct refs, 0
+duplicates** - matching the exact count and conclusion `2026-11-07s`'s own live re-check already
+recorded for this page, and every pass before it. No "Re-Advert"/addendum language anywhere on the
+page (unlike Kouga/DBSA/SARS/Lephalale, all four of which had concrete, observed reused-ref
+evidence this review found). Note made for the record, not acted on: several of today's 9 listed
+rows carry closing dates already weeks in the past (e.g. "09 OCTOBER 2026", "06 OCTOBER 2026" -
+today is 2026-11-07) - this page clearly does not get cleaned up promptly after a tender closes, the
+one precondition that WOULD make a same-page ref-reuse collision possible if this buyer ever did
+re-advertise under a kept reference - but with zero live or historical evidence that VCW's own site
+has ever actually done so, adding a speculative disambiguation guard here would be fixing against an
+undemonstrated risk this doc's own standing discipline (and this pass's own `lephalale.py` write-up
+above) explicitly warns against. Left unfixed - a genuine negative, not a gap, re-confirmed rather
+than assumed from a prior pass's writeup.
+
+**`randwater.py` - still blocked, re-confirmed as the same genuine server-side TLS misconfiguration
+every prior pass diagnosed, not a sandbox issue and not attempted.** `curl -v` against
+`https://bids.randwater.co.za/...` this pass: TLS handshake proceeds (`ClientHello` →
+`ServerHello` → `EncryptedExtensions` → `Certificate`) then the SERVER sends its own `unknown CA`
+TLS alert and closes - the identical failure shape `2026-11-07s`'s own double-check already
+recorded (confirmed again this pass that the session's own CA trust store, `/root/.ccr/ca-
+bundle.crt`, is not the problem - the server's own certificate chain is). Per the task's own
+explicit deprioritization and the standing "no speculative fix against undemonstrated risk"
+discipline, not attempted this pass - its own identical reused-ref risk (ocid built from a raw
+`ref` with no disambiguation guard, same as the other three before their own fixes) remains open,
+unverifiable from this sandbox, for whoever next gets real network access to it (a GitHub Actions
+dispatch, matching this project's own existing pattern, per the preceding pass's own suggestion).
+
+**Pushed directly to `main`** - a narrow, two-part addition to a single discovery-reader file (a
+new, purely additive `_disambiguate_reused_refs()` plus one new call site at the end of
+`fetch_releases()`), verified red-then-green against both a synthetic fixture and real live data
+(today's real output byte-identical before and after); touches no RLS policy, no money/Payfast
+path, no production worker-image install/copy surface - same direct-push precedent
+`kouga.py`'s/`dbsa_procurement.py`'s/`sars_procurement.py`'s own sibling fixes used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by every
+preceding pass. The reused-ref-ocid-collision bug class is now closed for `kouga.py`,
+`dbsa_procurement.py`, `sars_procurement.py`, and `lephalale.py`; genuinely re-confirmed clean (not
+assumed) for `vaal_central_water.py`; and remains open, unverifiable from this sandbox, for
+`randwater.py` alone - the one concrete remaining continuation of this specific item, needing real
+network access this environment cannot give it. A future pass should pick a genuinely fresh surface
+or angle instead of re-running this same grep again without new evidence - e.g. a GitHub-Actions-
+dispatched live check of `randwater.py` itself (closing out this entire bug class for good), or
+returning to `sars_procurement.py`'s own separate, still-open "bare addendum announcements outside
+the `<ul>`-wrapped section are never read at all" gap (named by the immediately preceding pass,
+not attempted by this one either - a genuinely different, not-yet-opened angle on the same file).
+
+To verify independently: run `engine/discovery/test_lephalale.py` and confirm
+`test_lephalale_reused_internal_ref_gets_distinct_ocids_not_a_collision` passes. Read
+`lephalale._disambiguate_reused_refs()` and confirm it only touches a colliding `contract_number`'s
+`ocid`, leaving every non-colliding one untouched, and that it's called at the very end of
+`fetch_releases()`. Re-run `python3 -c "import lephalale as m; help(m._disambiguate_reused_refs)"`
+to read its own docstring for the exact live evidence. Confirm via `mcp__github__list_pull_requests`
+that all 9 PRs are still open/unmerged, and that `git log --oneline -1 origin/main` is this pass's
+own new commit, with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xviii, standing solution-architect review): oriented from `3b18576`
 (immediately-preceding pass's own verified HEAD, Finding 180's `redeem_company_invite()` TOCTOU
 fix). `git fetch origin main` at the start found local already matching `origin/main` exactly -
