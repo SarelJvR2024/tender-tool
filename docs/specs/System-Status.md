@@ -1,5 +1,132 @@
 # System Status
 
+## This pass (2026-11-07n, standing solution-architect review): a genuine clean sweep - re-ran the exclusion-set file method, verified a real competitor-feature claim (the SANRAL "pricing guard") against the actual code, checked the one never-mentioned CI workflow, and chased down one promising-looking React-key hypothesis to a disproof - no new code bug found anywhere this pass touched
+
+Oriented from `9d06404` (immediately-preceding pass, HEAD at that commit). `git fetch origin main` both
+before starting and right before writing this entry: clean both times, local matches `origin/main`,
+no sibling commits landed during this pass. PRs re-checked via `gh api repos/sareljvr2024/tender-tool/
+pulls?state=open`: `#176`/`#178`/`#179`/`#180` still open (`draft: false`), `#177`/`#164`/`#165` still
+drafts - all 7 unchanged from the prior pass's own record, none touched this pass.
+
+**Angle 1 - redid the exclusion-set method from scratch rather than trusting the prior pass's own "36
+unmentioned app files, mostly vendored shadcn primitives" count.** Rebuilt the actual exclusion set
+(every basename anywhere in `System-Status.md`, `QA-Edge-Case-Findings.md` or `app/AGENTS.md`) against
+the current `find . -name "*.ts" -o -name "*.tsx" -o -name "*.py"` tree: **45** `app/` files genuinely
+unmentioned (up from 36 - mostly `.spec.ts` test files added since the last count, plus the same
+vendored `components/ui/*` primitives), **zero** `engine/` files unmentioned - re-confirmed, not
+assumed, that the engine side of this review really is exhaustively covered by name now. Of the 45, the
+only ones with real logic rather than being a test file or a presentational shadcn wrapper:
+`RequirementItemRow.tsx`/`RequirementItemTable.tsx` (admin Quality Scout queue),
+`submission-logistics-form.tsx`/`dispatch-status-button.tsx` (Tender Command Center), `data-table.tsx`,
+`next-best-action-card.tsx`, `progress-ring.tsx`, `use-mobile.ts`. Read all of them in full, plus the
+Server Actions they call (`requirement-extractions/actions.ts`, `logistics-actions.ts`):
+
+- `RequirementItemRow.tsx`/`RequirementItemTable.tsx`: both purely presentational (call
+  `submitRequirementReview()`/`reprocessRequirementExtraction()`, both already confirmed thin/correct
+  passthroughs to `SECURITY DEFINER` RPCs at line ~1584 of this doc). One thing worth actually tracing
+  rather than waving at: the table's own React `key={r.itemKey + (r.companyId ?? "")}` looked, on first
+  read, like a collision risk (`itemKey` alone, if it were scoped only within one tender, would repeat
+  identically across every tender's shared manifest - every tender has an "A9"-shaped low-confidence
+  item, for example). Traced this all the way to `0100_quality_scout_triage.sql`'s own RPC definition
+  instead of assuming: `item_key` is actually `md5(tender_id || '|' || item_type || '|' || document || '|'
+  || quote)` - `tender_id` is already baked into the hash, so cross-tender collision is not possible by
+  construction. The only real collision this key format needs to guard against is the SAME tender's
+  shared-manifest row vs. a company's private-document-override row for the same item (identical hash,
+  since `company_id` is deliberately NOT part of it) - which is exactly what appending `companyId` to the
+  React key handles. Not a bug; a hypothesis chased to a disproof with the actual migration, not left as
+  a hunch.
+- `submission-logistics-form.tsx`/`dispatch-status-button.tsx` -> `logistics-actions.ts`:
+  `saveSubmissionLogistics()`'s `requireMember()` already captures `membershipError` correctly (the
+  already-fixed pattern, not a holdout); its own validation-then-`back()`-redirect calls have no
+  explicit `return` after them, which looked suspicious on a first read, but `next/navigation`'s
+  `redirect()` throws (`NEXT_REDIRECT`) rather than returning - confirmed this is exactly why every
+  sibling Server Action in this codebase already omits the `return` too, not an oversight here.
+  `advanceDispatchStatus()` only `console.error`s a failed `dispatch_status` update with no user-facing
+  error surfaced - traced this against its own header comment ("same shape as tender_tasks' own
+  advanceTaskStatus") and read that sibling function directly: `advanceTaskStatus()`/`reassignTenderTask()`
+  in `tenders/[id]/actions.ts` do the identical "logging only, no behavioral branch changed" thing,
+  already named and accepted by this review's own 2026-11-06 entries as the deliberate convention for
+  every tap-to-advance control in this app (the displayed state just stays unchanged on failure, which is
+  correct, not misleading - a UX-feedback gap, not the dominant false-safe-state bug class). Consistent
+  with an established, already-reviewed pattern, not a new deviation worth fixing on its own.
+- `data-table.tsx`, `next-best-action-card.tsx`, `progress-ring.tsx`: all pure presentational
+  components fed already-computed props; `ProgressRing`'s own `value` clamp would render `NaN%` if ever
+  given a non-numeric value, but its only real caller anywhere in the app is `design-showcase.tsx` with
+  3 hardcoded literal values (72/40/95) - dead-code-adjacent, not reachable with real data today.
+
+**Angle 2 - checked the one never-mentioned GitHub Actions workflow.** Of 15 workflow files,
+`test-resend-setup.yml` had 0 mentions anywhere in this doc (every other workflow has been named at
+least once, several dozens of times). Read it in full: a `workflow_dispatch`-only, human-triggered
+one-off that builds a synthetic one-entry digest JSON and sends it through the REAL
+`send_digest_emails.py send_one()` path to prove `RESEND_API_KEY`/`DIGEST_FROM_ADDRESS` actually work,
+independent of whether any real recipient is opted in that day. Checked its synthetic payload shape
+against `send_digest_emails.py`'s own real contract rather than assuming it's right because it looks
+plausible: `{"person": {"name", "email"}, "company_name", "tender_tasks": [{"field": ...}]}` - `person.
+email`/`person.name` match `send_one()`'s own reads exactly, and `tender_tasks` is a real
+`SECTION_LABELS` key, so `has_content()` correctly sees 1 item and does not short-circuit to
+`skipped_empty` before ever reaching Resend. Genuinely correct, not just plausible-looking - no bug.
+
+**Angle 3 - actually exercised a named competitor-feature claim against the real implementation**, per
+this standing directive's own repeated-but-never-done suggestion. Picked the SANRAL "two-envelope
+submissions" section's own "Pricing guard: scan the technical pack and block release if it contains
+pricing" line from `docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md` and checked whether
+`engine/pack/assemble_pack.py` actually does this, rather than trusting the spec's own wording. It does
+NOT implement a content *scan* - there is no "does this PDF contain pricing" check anywhere. What it
+does instead, confirmed by reading `build_submission_pack()` end to end: the guard is structural, not
+detective. `VAULT_ORDER`/`ISO_KEY` (the only free-form vault documents ever routed into Envelope
+1/TECHNICAL) is a hardcoded allowlist of 6 compliance documents (SARS TCS PIN, B-BBEE, PI insurance,
+bank letter, COID, ISO 9001) - none pricing-shaped - and every pricing-bearing artifact (the Financial
+workbook, Form of Offer/C1.1.1, Form C2.4) is hardcoded into Envelope 2/FINANCIAL at the call-site level,
+never assembled dynamically from a pool that could include a pricing document by mistake. This is
+already independently confirmed correct in this doc's own history (line ~4066-4071, the CIDB/vault-
+column cross-check) - re-confirmed myself from the code rather than just citing that entry. A
+by-construction guarantee is arguably stronger than a fallible content scan for this specific risk, and
+matches the two-envelope requirement's real intent; not a gap. Separately checked the same section's
+"Copies: record how many originals and copies each envelope needs" line against `make_envelope_covers.
+py` - genuinely not implemented (no originals/copies count anywhere in the generated cover text), but
+this is an explicitly-known, already-flagged open item in the spec's own "Open issues" list, not a
+newly-discovered gap, and the two-envelope example it's drawn from is SASSA's, not SANRAL's own (the
+spec's own caveat: "the SANRAL part is limited to what the specification and public notices show").
+Not worth a finding - a documented, pre-existing scope gap, not a silent one.
+
+**Angle 4 - re-checked, rather than re-derived, two of the standing judgment-call items** this entry's
+own predecessors have carried forward for several passes, specifically to see whether either had quietly
+become a narrow, non-policy fix rather than a genuine Sarel call (the same check this doc's own
+2026-11-07d entry did for the zero-recipients case before fixing it): `proxy.ts`'s `company_members`
+read with no error capture (confirmed still exactly PR #177's own fix, still a draft, not re-derivable
+as a new finding) and the impersonation session-refresh gap (confirmed still exactly the 2026-11-04
+write-up - the fix needs the refreshed token pair re-persisted into `tt_impersonation` inside `proxy.ts`
+itself, still genuinely unverifiable end-to-end without live Supabase credentials in this environment,
+still real security-sensitive surface). Neither has newly become fixable at the "small/safe, push
+directly" risk tier; both remain exactly as described, not touched.
+
+**No code changed this pass.** QA tooling not re-run (nothing was edited to verify). This is a
+genuinely negative result across four different angles, not a forced one - per the standing directive's
+own "don't force it" instruction (option (c) in its own list): a clean "looked in depth, found nothing
+new" is being recorded as such, not papered over with a cosmetic fix.
+
+**Backlog status.** No change to any standing item. `start_payfast_checkout()`'s revenue-integrity gap
+(2026-11-07e, options A/B/C) remains untouched, per the standing guardrail. The impersonation
+session-refresh gap in `proxy.ts`, `held_registrations`-vs-CV display format, and PR #176/#178/#179/
+#180 (all awaiting Sarel's own merge decision) remain exactly as described - not touched. PR #164/#165
+(stale drafts) not touched. Migrations `0117`-`0120` still on `main`, still not applied to production -
+untouched this pass, still genuinely unverifiable from inside this environment. **New backlog note:**
+the exclusion-set file method (angle 1) is now re-confirmed exhausted on real-logic files for a second
+time - a third pass trying the identical angle should expect the same negative result unless new files
+have landed since; the 9 remaining unmentioned-but-real-logic files named above are all now individually
+checked and closed, not just excluded by category.
+
+To verify independently: re-run the exclusion-set grep yourself (`grep -ohE '[A-Za-z0-9_.\-]+\.(tsx|ts|
+py)' docs/specs/System-Status.md docs/specs/QA-Edge-Case-Findings.md app/AGENTS.md | sort -u` against
+`find app engine -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.py" \) -not -path "*/node_modules/*"
+-not -path "*/.next/*"`) and confirm the same ~45/0 split. Read `0100_quality_scout_triage.sql`'s own
+`item_key` expression and confirm `tender_id` is baked into the `md5(...)` directly, disproving the
+React-key collision hypothesis above. Read `engine/pack/assemble_pack.py`'s `VAULT_ORDER`/`ISO_KEY`
+and every `sec(..., FINANCIAL, ...)` call site and confirm none of the 6 vault keys and none of the
+financial-envelope sections overlap or are chosen dynamically from a shared pool.
+
+---
+
 ## This pass (2026-11-07m, standing solution-architect review): took the backlog's own angle (c) - picked a genuinely never-named `app/` file cold rather than re-deriving an already-exhausted angle - and found `/admin/notifications`'s own "Schedule & cron health" tab would silently show all 10 workflows as "Never run yet" instead of surfacing a real read failure
 
 Oriented from `bdca606` (immediately-preceding pass, HEAD at that commit, confirmed matching
