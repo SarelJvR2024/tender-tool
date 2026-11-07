@@ -1,5 +1,102 @@
 # System Status
 
+## This pass (2026-11-07xvii, standing solution-architect review): oriented from `14a591d`
+(immediately-preceding pass's own verified HEAD, a genuine negative sweeping `app/app/onboarding/`
+and `app/app/admin/`, plus a whole-schema grep for Finding-178-class siblings). `git fetch origin
+main` at the start found local already matching `origin/main` exactly - `14a591d` - and again
+immediately before pushing this pass's own fix, still `14a591d`, no sibling commit landed during
+this pass. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself before picking
+a number - 179 was the highest recorded (the sibling "QA/robustness review" chain's own `d9e7b4c`),
+confirming no new finding had landed from either chain since the preceding pass's own writeup -
+this pass's own fix below is Finding 180. Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165` (both draft) are all still open, same `updated_at` timestamps
+every preceding pass has recorded (`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180`
+2026-11-06T22:40:26Z, `#179` 2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177`
+2026-11-06T19:08:44Z, `#176` 2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164`
+2026-10-26T20:14:25Z) - nothing merged, closed, or rebased by anyone since.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle: the immediately preceding pass's own suggested fresh angle** - re-trace every
+OTHER currently-shipping SECURITY DEFINER function for the exact scalar-read/conditional-raise/
+unconditional-write TOCTOU shape `record_tender_document()` (0043) once had before `0045` closed
+it, rather than re-running the `%rowtype`/lost-update grep that pass had already swept clean.
+Grepped every non-`%rowtype` `select ... into` across `app/supabase/migrations/*.sql` cross-
+referenced against a `raise exception` gate in the same function body. Most hits trace to
+already-fixed instances of the OUTER race this review has already closed (0107/0113/0114/0116's
+own row/subscription/membership locks) or to pure read-only quota gates with no write-back. One
+function's OWN comment named exactly the hazard being hunted for, as something it claimed to
+already be safe against: `redeem_company_invite()` (0077/0107/0116) reads
+`select linked_user_id into v_person_owner from people where id = v_invite.linked_person_id` with
+**no lock**, gates a `raise exception` on it, then does a SEPARATE unconditional
+`update people set linked_user_id = v_uid ...` that never re-verifies the gate still holds - true
+only for the SEQUENTIAL case the comment described, not the genuinely concurrent one, and nothing
+in `create_company_invite_checked()` (0113) or the UI actually stops two invites from pointing at
+the same `linked_person_id` at once.
+
+**Reproduced directly in a disposable scratch Postgres database** (`engine/security/
+replay_schema.sh` against a fresh local Postgres 16, dropped and the service stopped afterward,
+per the standing guardrail) - full detail, exact seed data, `psql` commands and real exit codes,
+in this pass's own `docs/specs/QA-Edge-Case-Findings.md` Finding 180 entry, not duplicated here.
+Two independent RED runs against a `pg_sleep`-widened scratch copy of the real (0116) function
+body: both concurrent redemptions of two different invite tokens for the same roster person
+succeeded with no error on either side, but `people.linked_user_id` silently ended up naming only
+ONE of the two real accounts each time (non-deterministic which) - the losing side's own invite
+record ends up self-contradictory (`accepted_by` names one account, the roster link it claims to
+have made names the other). Two independent GREEN runs after adding `for update` to the `people`
+select: exactly one redemption succeeded in full each time, the other blocked on the lock then
+correctly raised and rolled back atomically (no half-joined state). Also re-ran the full scenario,
+unwidened, against the real as-shipped migration file - same outcome shape, confirming the fix
+holds on the real function, not only the widened scratch copy. Fixed with `for update` on the
+`people` select, matching this exact function's own existing lock pattern (0107/0116) and this
+review's standing precedent (0121). New migration:
+`app/supabase/migrations/0122_redeem_invite_linked_person_race.sql`.
+
+**Verification.** `npm run typecheck` - 0 errors, exit 0. `npx eslint .` - 0 errors, same 3
+pre-existing warnings, exit 0. `npx vitest run` - **505/505 passed, 66 files**, exit 0 (unchanged -
+this fix adds no TS tests; the race itself only reproduces against real Postgres concurrency). The
+`*.test.ts` node loop (plain `node <file>`, no `--import tsx`, no `--test`) - **28 files, 0
+failures**, exit 0 on every file, real exit codes captured with no pipe in between. `next build`
+not run - no RSC/page/TS file touched by this fix. Full migration replay with `0122` included -
+exit 0, "Schema replay complete (112 migrations)".
+
+**Pushed directly to `main`** - a narrow, single-function SQL fix (one `for update` added to an
+existing unlocked read), the single-redemption happy path byte-for-byte unchanged, verified
+end-to-end with a genuine two-round red-then-green cycle against real Postgres concurrency on both
+a widened scratch copy and the real shipped file; touches no RLS policy, no money/Payfast path, no
+production worker-image surface - same direct-push precedent Finding 178 (and 164-166/170-177)
+used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. The preceding pass's own suggested fresh angle (every OTHER
+security-definer function with the scalar-read/conditional-raise/unconditional-write shape) is now
+genuinely swept - this was the one live instance found; everything else matching the initial grep
+was either already-fixed, a pure read-only quota gate with no write-back, or the now-superseded,
+never-shipped `record_tender_document()` shape itself (per the preceding pass's own writeup). A
+future pass should not re-run this exact grep without new evidence. Remaining named-but-not-yet-
+opened candidates for a future pass: `app/app/dashboard/`'s own write paths beyond Finding 165
+(named by three prior passes now, still not itself opened), and `engine/discovery/
+sars_procurement.py`'s "listing-drop on ref reuse" risk (no live reproduction yet, lower priority
+per the task's own brief, untouched this pass too - a genuinely fresh angle on an `app/app/`
+surface, e.g. `app/app/dashboard/`'s write paths, is likely the highest-value next candidate since
+the TOCTOU-gate angle this pass just closed out is now exhausted).
+
+To verify independently: read `app/supabase/migrations/0116_company_members_one_company_per_user.sql`'s
+`redeem_company_invite()` and `app/supabase/migrations/0122_redeem_invite_linked_person_race.sql`'s
+replacement, confirm the only functional change is `for update` on the `people` select. Re-run the
+scratch-DB reproduction per the exact steps in the Finding 180 writeup. Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged at the same timestamps
+listed above, and that `git log --oneline -1 origin/main` is this pass's own new commit, with no
+further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xvi, standing solution-architect review): oriented from `ac644ec`
 (immediately-preceding pass's own verified HEAD, Finding 178's `set_opportunity_tag()` race fix).
 `git fetch origin main` at the start found one sibling commit already landed - `d9e7b4c`, a
