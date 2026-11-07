@@ -1,5 +1,104 @@
 # System Status
 
+## This pass (2026-11-07ee, standing solution-architect review): oriented from `d925926`
+(immediately-preceding pass's own verified HEAD). `git fetch origin main` clean, local matched
+`origin/main` exactly both at the start and immediately before pushing (`d925926`), no sibling
+commits landed during this pass. Re-checked all 8 open PRs via `mcp__github__list_pull_requests`:
+`#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181` and the two old stale drafts `#164`/`#165` are all
+still open, same `updated_at` timestamps as the immediately-preceding pass recorded - nothing
+merged, closed, rebased or touched by anyone since `2026-11-07dd`'s own PR-health check. The #179
+real merge conflict and the #178/#180 mutual file-overlap (both from that pass) are unresolved and
+unchanged - re-confirm only if either branch itself changes, not re-litigated here.
+
+**This pass's angle (per the brief: the "discarded read error" sweep is exhausted - pick a fresh
+one).** Read through the actual pack-ASSEMBLY pipeline for a correctness gap in the deliverable
+itself (a wrong page, a missing attachment, a silently-wrong "ready" pack), not another
+notification-plumbing instance: `engine/pack/assemble_pack.py`, `pdf_merge.py`,
+`process_pack_jobs.py`, `engine/general/build_general_pack.py`, `fill_sbd_docx.py`,
+`engine/sanral_fill.py`, `engine/make_envelope_covers.py`, `engine/ocr/scan_ocr.py`,
+`engine/alerts/check_system_alerts.py`, `engine/intake/scenario_driver.py`. Also checked the
+brief's migration angle: no migration has landed after `0120` (confirmed by listing
+`app/supabase/migrations/`), and `0119`/`0120` are both anon-grant-revoke-only - read both in full,
+neither adds a table, RPC or index - so there is no post-`0120` gap for PR #176's own
+`is_employee_in_company()` guard pattern to close, and no index/performance regression to find on
+either migration (both are pure `revoke`/`comment on function` statements).
+
+**The pack-assembly pipeline itself is genuinely clean on the "wrong page/missing attachment/
+silent-ready" shape asked for - an honest negative result, not force-fit.** `pdf_merge.
+merge_with_contents()`'s own `verify_pack()` read-back check (page count, section-offset coverage,
+page-number stamp, contents-page text, bookmark presence) is unconditionally called and
+unconditionally enforced before either pipeline marks a job `ready`: `process_pack_jobs.py` (SANRAL,
+~line 706-712) and `process_general_jobs.py` (general, ~line 751-752) both `raise RuntimeError` on
+any problem - confirmed by reading both call sites, not assumed from the module's own docstring.
+The SANRAL outer-envelope-cover edge case (the cover itself fails to render) is already guarded at
+both of `assemble_pack.py`'s own call sites (`front_count=1 if sections[0]["pdf"] else 0`). `engine/
+alerts/check_system_alerts.py` is explicitly retired as a live channel (its own header says so) -
+read for completeness, not a live-severity target. `engine/intake/scenario_driver.py` is a dev/
+scenario-test harness, not a production path. `engine/ocr/scan_ocr.py`'s rotation-retry logic has a
+real but minor asymmetry (it only retries a rotated read when the ORIGINAL failed on word-count or
+mean-confidence, never when it only failed on `good_share` - a skewed scan with adequate mean
+confidence but a low share of high-confidence words never gets the rotation retry that might fix
+exactly that) - noted for a future pass if OCR quality ever becomes a live complaint, not fixed here
+(it is a missed-optimization in an experimental, Sarel-is-still-evaluating module, not a silent
+wrong-data bug: a page that fails this gate is correctly marked "illegible" and left out, never
+silently accepted as good).
+
+**Finding 167 - fixed anyway, but explicitly near-zero live severity (said plainly, not inflated to
+match the house style of prior findings).** Full write-up: Finding 167 in `docs/specs/
+QA-Edge-Case-Findings.md`. One-line summary: `process_pack_jobs.py`'s own `gather()` builds
+`pack_selections.yaml`'s `"suggested_person"` field from `index_of`, which only ever holds the
+signatory and each position's CONFIRMED person - never the AI's suggestion when a human picked
+someone else - so the ONE case this field exists to flag (a real override) is exactly the case
+where it silently became `None`, and `confirm_pack.py`'s own override detection could never fire in
+the live pipeline. Traced every consumer of `pack.yaml`'s own `_provenance.overrides` field
+(`grep -rn "_provenance"`/`"\"overrides\""` across `engine/`) and confirmed NOTHING reads it -
+`pack.yaml` itself is a transient work file, deleted after the job (`shutil.rmtree`), never uploaded
+or stored; the actual submitted pack's `pack_people`/`key_persons` are built from `confirmed_person`
+alone, never from `suggested_person`, so the right person's data was always in the right form; and
+the Tender Workspace already shows "AI suggested X, you chose Y" correctly, straight from the same
+DB columns, independent of `pack.yaml`. So this bug's full blast radius was one internal, ephemeral,
+nothing-else-reads-it string. Fixed anyway (cheap, safe, genuinely wrong, fully unit-testable) -
+`_suggested_person_label()` now returns the raw `suggested_person_id` instead of `None` when it
+can't be resolved to a `person_N` index, which still correctly flags the override since
+`confirm_pack.py` only ever compares the string for equality, never looks it up.
+
+**Verification, real exit codes, genuine red-then-green (not an honest-limitation case - this is a
+plain, fully unit-testable Python function).** Added a new test to `engine/pack/
+test_process_pack_jobs.py`. RED (reverted the one-line fix via `Edit`): **1 failure** - the exact
+predicted one, real exit code **1**. Restored, GREEN: **0 failures**, real exit code **0**. Full
+`engine/` sweep (every `test_*.py`, real exit codes) - **86 files, 0 failures**, unchanged. `npm run
+typecheck` - **0 errors**. `npx eslint .` - **0 errors**, same 3 pre-existing warnings. `npx vitest
+run` - **493/493, 63 files**, unchanged (Python-only change). The `*.test.ts` node loop - **28
+files, 0 failures**, unchanged. `npx next build` - compiled successfully, same route table, `Proxy
+(Middleware)` present (run as a final sanity check despite this being a Python-only change).
+`git fetch origin main` immediately before pushing: still `d925926`, no sibling commits.
+
+**Pushed directly to `main`** - a small, fully-unit-tested, well-isolated Python logic fix with zero
+effect on the real pack's filled content and zero RLS/money/hard-stop/worker-image-install surface.
+
+**Backlog status.** The pack-assembly "wrong page/missing attachment/silent-ready" angle this pass
+investigated is now substantially covered for `pdf_merge.py`/`assemble_pack.py`/
+`process_pack_jobs.py`/`process_general_jobs.py`'s own read-back enforcement (clean) and the SANRAL
+front-cover edge case (already guarded) - not force-fit into a finding where none was found.
+`engine/ocr/scan_ocr.py`'s rotation-retry/`good_share` asymmetry (above) is a real, minor, noted-not-
+fixed loose end for a future pass, lower priority than anything in the current PR backlog. CV
+extraction (`engine/cv/`, 165 prior mentions) and `engine/pack/`'s own assemble/merge/process-jobs
+trio (44-66 prior mentions each) were deliberately NOT re-swept this pass per the brief's own "if
+heavily mined already, skip" guidance - `engine/pack_generator/` (28 mentions, where this pass's own
+Finding 167 actually was) and the lightly-mined `engine/alerts/`, `engine/ocr/`, `engine/intake/
+scenario_driver.py` (5-7 mentions each) got the attention instead. `start_payfast_checkout()`'s
+revenue-integrity gap (2026-11-07e) remains untouched, per the standing guardrail. PR #176/#178/
+#179/#180/#181 (awaiting Sarel's own merge decision) and #164/#165(draft)/#177(draft) remain exactly
+as described - not touched, not amended, not merged this pass either.
+
+To verify independently: read `engine/pack/process_pack_jobs.py`'s `_suggested_person_label()` and
+confirm it returns the raw `suggested_person_id` (not `None`) when that id isn't in `index_of`. Run
+`python3 engine/pack/test_process_pack_jobs.py` from `engine/pack/` and confirm `0 failure(s)`, real
+exit code 0. Confirm via `mcp__github__list_pull_requests` that all 8 PRs are still open and
+unmerged, with the same `updated_at` timestamps `2026-11-07dd` recorded.
+
+---
+
 ## This pass (2026-11-07dd, standing solution-architect review): primary job this pass was the
 6-PR health check the brief asked for (#176-#181 against current `main`), not another bug-hunt pass
 - the notification-engine and customer-facing-page sweeps really are exhausted per the last 6

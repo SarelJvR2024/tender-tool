@@ -10233,3 +10233,112 @@ To verify independently: read `app/app/experience/page.tsx`'s `onboarding_upload
 confirm `error` is now destructured as `queuedError` and logged via `console.error` immediately
 after `pendingError`'s own log line. Confirm `npx next build` still compiles with the same route
 table.
+
+---
+
+### Finding 167 (CONFIRMED, FIXED, near-zero live severity - `engine/pack/process_pack_jobs.py`'s own AI-suggestion override detection could never actually fire, in the live pipeline only)
+
+**Area:** `engine/pack/process_pack_jobs.py`'s `gather()` (the SANRAL pack bridge's own
+`pack_selections.yaml` construction, immediately before it calls
+`engine/pack_generator/confirm_pack.py`'s `confirm()` to produce `pack.yaml`).
+
+**This pass's angle:** findings 160-166's "discarded read error" sweep is exhausted (confirmed
+again at the top of this pass, not re-litigated). Per the brief's option (a), read through the
+actual pack-assembly pipeline (`engine/pack/assemble_pack.py`, `pdf_merge.py`,
+`process_pack_jobs.py`, `engine/general/build_general_pack.py`, `fill_sbd_docx.py`,
+`sanral_fill.py`, `make_envelope_covers.py`) for a correctness gap in the DELIVERABLE itself - a
+wrong page, a missing attachment, a silently-wrong "ready" pack - rather than another notification-
+plumbing instance. That specific shape came back clean: `pdf_merge.merge_with_contents()`'s own
+`verify_pack()` read-back check is unconditionally called and unconditionally enforced before a job
+is marked `ready` on BOTH pipelines (`process_pack_jobs.py` lines ~706-712 for SANRAL,
+`process_general_jobs.py` lines ~751-752 for the general pack - both `raise RuntimeError` on any
+problem, neither pipeline can reach "ready" with a page-count/contents-page/bookmark mismatch). The
+SANRAL `front_count` edge case (an outer-envelope cover that itself failed to render) is already
+guarded at the call site (`front_count=1 if sections[0]["pdf"] else 0`, confirmed by reading
+`assemble_pack.py`'s own two call sites). Migration angle (option c) also came back clean: no
+migration has landed after `0120` (confirmed, `ls app/supabase/migrations` - `0120` is still the
+newest), and `0119`/`0120` are both anon-grant-revoke-only (no new table, RPC, or index - read both
+in full), so there is no post-`0120` gap for `is_employee_in_company()` to close.
+
+**What was actually found, while reading `gather()`'s own `pack_selections.yaml` construction
+(line ~613-617 before this fix):**
+```python
+"suggested_person": (f"person_{index_of[by_code[p['code']]['suggested_person_id']]}"
+                     if by_code[p["code"]].get("suggested_person_id") in index_of else None),
+```
+`index_of` (built a few lines above from `person_ids = [signatory["id"]] + [confirmed_person_id for
+each required position]`) holds an index ONLY for the signatory and each position's own CONFIRMED
+person - never for a person the AI suggested but the human did NOT pick. So the one case this field
+exists to flag - `suggested_person_id != confirmed_person_id`, a real override - is exactly the case
+where `suggested_person_id in index_of` is false (that person's row was never fetched into this
+job's own reduced `people`/`index_of` set), so `suggested_person` silently becomes `None`.
+`confirm_pack.confirm()`'s own override detection (`if sel.get("suggested_person") and person_id !=
+sel["suggested_person"]:`) then never fires, because `sel.get("suggested_person")` is falsy -
+`pack.yaml`'s own `_provenance.overrides` note always reads "none - every position was assigned its
+top-suggested candidate", **even on a tender where a human genuinely overrode the AI's
+suggestion for a position.** Confirmed this is a real, reproducible logic gap, not a guess: traced
+`index_of`'s own construction (`person_ids`), confirmed `suggested_person_id` is a real, separately-
+written DB column (`app/app/tenders/[id]/pack-inputs-actions.ts` writes it distinct from
+`confirmed_person_id` when a position is first scored) that a human can and does diverge from when
+confirming a position on the Tender Workspace.
+
+**Why this is a real but near-zero-severity finding, not force-fit as a 160-166-shaped bug:** traced
+every consumer of `pack.yaml`'s own `_provenance` block (`grep -rn "_provenance" engine/`) - only
+`engine/fill_financial_hours.py` reads `_provenance.contract`, and NOTHING reads
+`_provenance.overrides` anywhere in this codebase (confirmed: `grep -rn "\"overrides\"" engine/`
+returns only this file's own writer and the unrelated `pack["tender"].get("overrides")` guard in
+`fill_tender.py`/`fill_conventional.py`, which is a different field entirely - a defence against a
+LEGACY hand-written pack.yaml overriding SANRAL's own pre-filled SETUP cells, not this one). The
+actual submitted pack is unaffected either way: `confirm_pack.py` builds `pack_people`/`key_persons`
+from `confirmed_person` alone, never from `suggested_person` - the right person's CV/project data
+was always going into the right form regardless of this bug. `pack.yaml` itself is a transient
+working file (`work = tempfile.mkdtemp(...)`, `shutil.rmtree(work, ...)` unless `--keep` debugging
+is passed) - never uploaded, never stored, never read back by anything after the job finishes. And
+the one place a human would actually want to see "AI suggested X, you picked Y" - the Tender
+Workspace itself - already shows it correctly, straight from the same `tender_pack_assignments.
+suggested_person_id`/`confirmed_person_id` columns (`app/app/tenders/[id]/compliance-data.ts`,
+`page.tsx`), entirely independent of `pack.yaml`. So this bug's full blast radius is: one internal,
+ephemeral, nothing-else-reads-it string inside a file that gets deleted. Reported and fixed anyway
+(cheap, safe, genuinely wrong), but explicitly NOT claimed as a customer-facing defect.
+
+**Fix:** added `_suggested_person_label(assignment, index_of)` - when `suggested_person_id` resolves
+to an index in `index_of` (always true when it equals `confirmed_person_id`, i.e. no override),
+returns the same `"person_N"` label `confirmed_person` would get; when it does NOT resolve (a real
+override - the person's row was never fetched), returns the raw `suggested_person_id` UUID instead
+of `None`. `confirm_pack.py`'s own override check only ever compares this string for equality and
+then prints/stores both raw strings in the override note - it never looks `suggested_person` up in
+its own `people` map - so a label that doesn't resolve to a `"person_N"` index still correctly flags
+the override (just a less pretty string in an already-internal, already-ephemeral note). Zero
+changes to `pack_people`, `key_persons`, `profile`, or anything the real forms are filled from.
+
+**Verification, real exit codes, red-then-green (not the honest-limitation precedent used for
+untestable RSC pages - this is a plain Python function, fully unit-testable).** Added
+`test_suggested_person_label_flags_a_real_override_even_when_unresolved()` to
+`engine/pack/test_process_pack_jobs.py` (3 cases: no override resolves to the same `person_N` as
+confirmed; a real override still returns a non-`None`, non-matching label; no suggestion on file at
+all stays `None`). RED: reverted `_suggested_person_label()`'s own `else sid` to the old `else None`
+(`Edit` in place) and ran `python3 engine/pack/test_process_pack_jobs.py` - **1 failure**, the
+predicted one and only one (`FAIL real override: still returns a label...`), real exit code **1**.
+Restored the fix, re-ran - **0 failures**, real exit code **0**. Then the full standard: full
+`engine/` sweep (every `test_*.py`, real exit codes, not grepped) - **86 files, 0 failures**. `npm
+run typecheck` - **0 errors**. `npx eslint .` - **0 errors**, same 3 pre-existing warnings. `npx
+vitest run` - **493/493, 63 files**, unchanged (this fix touches no TypeScript). The `*.test.ts`
+node loop (`node --experimental-strip-types <file>` per file, real exit codes) - **28 files, 0
+failures**, unchanged. `npx next build` - compiled successfully, same route table, `Proxy
+(Middleware)` present (unaffected by this Python-only change, run anyway as a final sanity check).
+`git fetch origin main` both before starting this pass and immediately before pushing: HEAD matched
+`origin/main` exactly both times (`d925926`), no sibling commits landed during this pass.
+
+**Regression:** `engine/pack/process_pack_jobs.py` (one new ~25-line helper function,
+`_suggested_person_label()`, plus its one call site changed from an inline conditional to a call to
+it - no other line touched) and `engine/pack/test_process_pack_jobs.py` (one new test function). No
+other file touched.
+
+**Pushed directly to `main`** - a small, fully-unit-tested, well-isolated Python logic fix with zero
+effect on the real pack's filled content and zero RLS/money/hard-stop/worker-image-install surface.
+
+To verify independently: read `engine/pack/process_pack_jobs.py`'s `_suggested_person_label()` and
+confirm it returns the raw `suggested_person_id` (not `None`) when that id isn't in `index_of`. Run
+`python3 engine/pack/test_process_pack_jobs.py` and confirm `0 failure(s)`, real exit code 0. Confirm
+`grep -rn "\"overrides\"" engine/` still shows nothing else reads `pack.yaml`'s own
+`_provenance.overrides`, i.e. this fix's severity really is as low as described above.

@@ -261,12 +261,40 @@ def test_process_job_sends_the_pack_ready_email_on_success():
         check("...with APP_URL", sent_app_url == ppj.APP_URL, sent_app_url)
 
 
+def test_suggested_person_label_flags_a_real_override_even_when_unresolved():
+    print("Finding 167: _suggested_person_label() must still flag a real AI-suggestion "
+          "override even when the suggested person's own row was never fetched into this "
+          "job's reduced index_of (the live-pipeline shape: index_of only ever holds the "
+          "signatory and each position's CONFIRMED person) - the previous `sid in index_of "
+          "else None` silently could not, since a real override is exactly the case where "
+          "the suggested id is NOT in index_of.")
+    index_of = {"confirmed-person-uuid": 0, "signatory-uuid": 1}  # never holds the override
+
+    # No override: suggested == confirmed, so it IS in index_of (confirmed fetched it there).
+    same = ppj._suggested_person_label({"suggested_person_id": "confirmed-person-uuid"}, index_of)
+    check("no override: resolves to the same person_N label as confirmed_person",
+          same == "person_0", same)
+
+    # A real override: suggested != confirmed, so the suggested id was never fetched.
+    overridden = ppj._suggested_person_label({"suggested_person_id": "overridden-ai-suggestion-uuid"}, index_of)
+    check("real override: still returns a label (not None) so confirm_pack.py's own "
+          "`person_id != sel['suggested_person']` check actually fires",
+          overridden == "overridden-ai-suggestion-uuid", overridden)
+    check("...and that label differs from confirmed_person's own 'person_0' label",
+          overridden != "person_0", overridden)
+
+    # No suggestion recorded at all (never scored, or sync_position_suggestions hasn't run yet).
+    none_case = ppj._suggested_person_label({"suggested_person_id": None}, index_of)
+    check("no suggestion on file at all: stays None", none_case is None, none_case)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
     test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response()
     test_process_job_sends_the_pack_ready_email_on_success()
+    test_suggested_person_label_flags_a_real_override_even_when_unresolved()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

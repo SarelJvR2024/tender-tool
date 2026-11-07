@@ -466,6 +466,39 @@ def pack_suggestions_positions(required, by_code, people, index_of):
             for p in required if by_code.get(p["code"], {}).get("confirmed_person_id")}
 
 
+def _suggested_person_label(assignment, index_of):
+    """pack_selections.yaml's own "suggested_person" for one position
+    (confirm_pack.py's own override-detection input: `if sel.get(
+    "suggested_person") and person_id != sel["suggested_person"]`).
+
+    Finding 167, 2026-11-07: this used to be `f"person_{index_of[sid]}"
+    if sid in index_of else None` - but `index_of` is built (below, from
+    `person_ids`) only from the signatory and each position's CONFIRMED
+    person, never from a suggestion the human did NOT accept. So the ONE
+    case this field exists to flag - a real override, where
+    suggested_person_id differs from confirmed_person_id - is exactly the
+    case where `sid in index_of` is usually false (the suggested-but-not-
+    chosen person's row was never fetched into this job's own reduced
+    people/index_of set), silently producing `suggested_person: None` and
+    so a `pack.yaml` `_provenance.overrides` that always read "none - every
+    position was assigned its top-suggested candidate", even when it
+    wasn't. `confirm_pack.confirm()` never looks `suggested_person` up in
+    its own `people` map (profile.json's key_people) - it only compares it
+    to `confirmed_person` for equality and then prints/stores both as raw
+    strings - so a label that doesn't resolve to a real "person_N" index
+    still correctly flags the override; it is just a less pretty string in
+    an already-internal note. Zero effect either way on the generated
+    pack's own content (key_persons/pack_people are built from
+    confirmed_person_id alone - never read this field) or on the Tender
+    Workspace (it already shows "AI suggested X, you chose Y" straight
+    from these same tender_pack_assignments columns) - this only fixes
+    pack.yaml's own ephemeral, nothing-else-reads-it override bookkeeping."""
+    sid = assignment.get("suggested_person_id")
+    if not sid:
+        return None
+    return f"person_{index_of[sid]}" if sid in index_of else sid
+
+
 def gather(client, job, work):
     """Downloads/reads everything for one job into `work`. Returns the kwargs
     for build_submission_pack() plus the path of the confirmed pack.yaml."""
@@ -611,8 +644,7 @@ def gather(client, job, work):
                         f"{tender_pack.get('confirmed_by') or 'not recorded'})",
         "confirmed_date": (tender_pack.get("confirmed_at") or job.get("requested_at") or _ts())[:10],
         "selections": {p["code"]: {
-            "suggested_person": (f"person_{index_of[by_code[p['code']]['suggested_person_id']]}"
-                                 if by_code[p["code"]].get("suggested_person_id") in index_of else None),
+            "suggested_person": _suggested_person_label(by_code[p["code"]], index_of),
             "confirmed_person": f"person_{index_of[by_code[p['code']]['confirmed_person_id']]}"}
             for p in required},
     }, open(sel_path, "w"), sort_keys=False)
