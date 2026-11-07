@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { byBuyer, byCategory, byProvince, loadOutcomesForTenders, ownPosition, tenderFrequencyTrend, type Bidder, type MarketRow, type TenderOutcome } from "./marketPricing";
+import {
+  byBuyer,
+  byCategory,
+  byProvince,
+  loadOutcomesForTenders,
+  loadSegment,
+  ownPosition,
+  tenderFrequencyTrend,
+  type Bidder,
+  type MarketRow,
+  type Segment,
+  type TenderOutcome,
+} from "./marketPricing";
 
 /** A minimal, otherwise-"empty" market row - every field a real
  * public_tender_outcomes row has, defaulted to its own honest "nothing here"
@@ -246,5 +258,41 @@ describe("loadOutcomesForTenders", () => {
     const { byTender, error } = await loadOutcomesForTenders(supabase, ["t1"]);
     expect(error).toBeNull();
     expect(byTender.size).toBe(0);
+  });
+});
+
+// loadSegment() itself had zero test coverage before this pass (confirmed by
+// grep) even though it is now a second real call site of this exact
+// "loadX() must keep returning a real `error`, not swallow it" contract:
+// app/app/discovery/page.tsx's own per-card indicative-pricing badge calls it
+// directly (not through loadOutcomesForTenders) and - unlike every other
+// non-critical Supabase read on that same page - used to drop its error with
+// no `console.error` at all, the exact asymmetry this review tracks (see
+// page.tsx's own fix comment at that call site). This locks in that
+// loadSegment() -> fetchAllRows() genuinely surfaces a real `error` string on
+// a query failure rather than collapsing it to an empty, indistinguishable-
+// from-"no data" result - the data contract that fix's `console.error`
+// branch depends on.
+const SEGMENT: Segment = { key: "all", label: "All buyers", sanralOnly: false, buyer: null, categories: ["roads"] };
+function makeSegmentSupabase(resp: { data: unknown; error: { message: string } | null }) {
+  const chain: Record<string, unknown> = {};
+  for (const m of ["select", "eq", "overlaps", "like", "ilike"]) chain[m] = () => chain;
+  chain.range = () => Promise.resolve(resp);
+  return { from: () => chain } as unknown as Parameters<typeof loadSegment>[0];
+}
+
+describe("loadSegment", () => {
+  it("returns a real error (not a false-empty result) when the public_tender_outcomes query fails", async () => {
+    const supabase = makeSegmentSupabase({ data: null, error: { message: "connection reset" } });
+    const { rows, error } = await loadSegment(supabase, SEGMENT);
+    expect(error).toBe("connection reset");
+    expect(rows).toEqual([]);
+  });
+
+  it("the genuine 'nothing published yet' case still returns error: null with an empty array", async () => {
+    const supabase = makeSegmentSupabase({ data: [], error: null });
+    const { rows, error } = await loadSegment(supabase, SEGMENT);
+    expect(error).toBeNull();
+    expect(rows).toEqual([]);
   });
 });

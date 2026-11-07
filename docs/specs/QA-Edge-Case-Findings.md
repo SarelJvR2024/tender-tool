@@ -9583,3 +9583,69 @@ block). No other file touched - `marketPricing.ts` itself needed no change.
 page, following an already-correct pattern already used elsewhere in the same file), does not touch
 RLS/money paths/hard-stop gates, and does not change what the production worker image installs/
 copies.
+
+---
+
+### Finding 159 (CONFIRMED, FIXED, minor - `app/app/discovery/page.tsx`'s own per-card
+"indicative price range" badge called `loadSegment()` and discarded its `error` with no
+`console.error` at all, unlike every other non-critical Supabase read on the same page)
+
+**Area:** `app/app/discovery/page.tsx` (the pricing-badge `Promise.all` block), `app/lib/marketPricing.ts`
+(`loadSegment()` - already correct, not touched).
+
+**How this was found.** Continuing the standing backlog note the immediately-preceding pass
+(2026-11-07u, Finding 158) left open: that pass found and fixed `/analytics`'s own
+`loadOutcomesForTenders()` call discarding its `error` and rendering a real fetch failure as the
+false "not enough data yet" empty state - and, while tracing every other real call site of
+`marketPricing.ts`'s three Supabase-reading functions, separately noted that `discovery/page.tsx`'s
+own `loadSegment()` call drops its optional per-card pricing badge on a failure with no error
+surfaced anywhere, judged a *different, lower-severity* shape than Finding 158 (nothing on screen
+ever claims "no data" - the badge is additive-only, and a tender with no matching discipline looks
+identical on screen to one whose lookup genuinely failed) and explicitly left open as "a future pass
+could still decide to log it ... if Sarel wants visibility into it."
+
+Picked it up this pass rather than leaving it. Re-read the call site
+(`app/app/discovery/page.tsx`, the `Promise.all` building `pricingByKey`) and confirmed the judgment
+still holds - no UI copy anywhere claims a definite "no pricing data" state for this badge, it is
+simply absent on failure, same as for a genuinely non-matching discipline. But this same page
+(`discovery/page.tsx`) already has a clear, consistently-followed convention for exactly this
+shape: every OTHER non-critical, additive-only Supabase read on the page (`discovered_opportunities`
+select, the open-downgrade banner count, pursued-history, `experience_items` discipline-tagging,
+`company_tender_preferences`, the per-filter-tab count) already calls `console.error(...)` on its
+own failure for operator visibility, even though none of them change what renders either. The
+`loadSegment()` call was the one holdout with zero visibility of its own - the exact asymmetry this
+review tracks, just inside the "additive, no fix needed" severity tier instead of the "false-safe
+empty state" tier Finding 158 was in.
+
+**Fix.** Captured `error: segError` from the same `loadSegment()` call and added
+`if (segError) console.error(...)`, naming the failed segment key, directly below it - no change to
+`pricingFor()`/`pricingByKey`, the badge's own render logic, or any other page behaviour. Purely
+additive visibility, matching the page's own existing `console.error` convention byte-for-byte.
+
+**Verified genuinely.** `loadSegment()` itself had zero test coverage before this pass (confirmed:
+`grep -n "loadSegment" app/lib/marketPricing.spec.ts` - no hits, even though
+`loadOutcomesForTenders()` got 3 new tests only one pass ago for the identical contract). Added two
+tests to `app/lib/marketPricing.spec.ts` (same mocking convention as the `loadOutcomesForTenders`
+tests added for Finding 158): a `public_tender_outcomes` query failure returns a real `error` string
+and an empty `rows` array (never conflated with "nothing published"), and the genuine
+nothing-published case returns `error: null` with an empty array. Confirmed genuinely red-then-green:
+temporarily edited `loadSegment()` to drop its real error (`return { rows, error: null }` after
+`fetchAllRows()`, the same bug shape this finding is about, one level down) and reran - the failure
+test failed exactly as predicted (`expected null to be 'connection reset'`); restored the real
+function and reran - **18/18 pass** in the file (16 pre-existing + 2 new). `page.tsx` itself has no
+render-test infrastructure in this codebase (same documented precedent as Finding 158 and
+`app/AGENTS.md`'s own "prompt 9, part 0" entry), so verified by `npm run typecheck` (clean),
+`npx eslint .` (0 errors, the same 3 pre-existing warnings, unchanged), the full `npx vitest run` -
+**474/474, 60 files** (472 baseline + this pass's 2 new tests), and the complete `*.test.ts` node
+loop (no `--test` flag, real exit codes) - **28 files, 0 failures**, matching the standing baseline.
+
+**Regression:** `app/app/discovery/page.tsx` (+13 lines: captures `segError`, one `console.error`
+call + explanatory comment). `app/lib/marketPricing.spec.ts` (+2 new test cases under a new
+`describe("loadSegment")` block). No other file touched - `marketPricing.ts` itself needed no change
+(the library function was already correct; the gap was purely at the page's own call site, exactly
+the same shape as Finding 158).
+
+**Pushed directly to `main`** - small, narrow (one destructure + one `console.error` call in a
+single page, following an already-correct, already-pervasive pattern used elsewhere in the same
+file), does not touch RLS/money paths/hard-stop gates, and does not change what the production
+worker image installs/copies.

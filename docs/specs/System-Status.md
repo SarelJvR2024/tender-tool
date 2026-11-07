@@ -1,5 +1,100 @@
 # System Status
 
+## This pass (2026-11-07v, standing solution-architect review): closed the 2026-11-07u backlog
+note - `discovery/page.tsx`'s own `loadSegment()`-sourced pricing badge now logs its own failure
+like every other non-critical read on the same page; surveyed a wide slice of `engine/discovery/`
+(document readers, `company_profiles.py`'s shared `RestClient`, `key_person_minimums.py`,
+`scan_ocr.py`, `download_documents.py`) and the dominant bug class this review tracks is genuinely
+exhausted there for now - a real, honest negative result, not forced
+
+Oriented from `21e3c8e` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. No PR was touched or amended. Confirmed `0119_employee_rls_systematic_sweep.sql` and
+`0120_security_definer_functions_anon_grant_table_cleanup.sql` are already committed to `main`
+(`0f6595b`, pre-dating this review loop's own chain) - a separate, already-merged RLS fix, not the
+same work as the still-open PR `#176` ("12 SECURITY DEFINER RPCs bypassed employee RLS entirely"),
+which remains untouched by this pass per the standing guardrail.
+
+**Why this angle.** `2026-11-07u`'s own backlog note named two live options: (a) fix
+`discovery/page.tsx`'s own lower-severity pricing-badge gap it had just found but judged not worth
+fixing that pass, or (b)/(d) a fresh slice of `engine/discovery/` or another subsystem. Tried both,
+in that order, rather than picking only one.
+
+**1. The backlog note itself - Finding 159, fixed.** Re-read `discovery/page.tsx`'s `loadSegment()`
+call site and confirmed the prior pass's own severity judgment still holds (additive-only, no false
+"no data" claim ever rendered) - but this same file already has a clear, consistently-followed
+convention for exactly this shape: every OTHER non-critical Supabase read on the page already calls
+`console.error(...)` on failure (`discovered_opportunities`, the open-downgrade count,
+pursued-history, `experience_items`, `company_tender_preferences`, the per-filter-tab count) -
+`loadSegment()` was the one holdout with zero visibility. Added the same `console.error(...)` call,
+same shape, no render-logic change. See Finding 159 for the full write-up and verification
+(`loadSegment()` had zero test coverage before this pass; added 2 tests to
+`app/lib/marketPricing.spec.ts`, confirmed genuine red-then-green by temporarily reproducing the
+exact bug shape one level down in `loadSegment()` itself, restored, green).
+
+**2. A fresh `engine/discovery/` slice, read for the dominant bug class - came back clean.** Picked
+files by the same "low mention-count in this doc = less-mined" proxy the 2026-11-06-era passes used,
+cross-checked against what this doc's own history already covers, and read each one in full against
+the dominant bug class (a discarded/unprotected Supabase or external-API error read as a false-safe
+"nothing here" state): `opportunity_requirements.py` (the document-understanding classifier for
+discovered-but-not-pursued opportunities) - already correct and already self-documented as fixed by
+a 2026-10-30 QA pass inline (its own `classify_all()` per-release `try/except` + `system_alerts`
+call, its `classify_release()`'s own honest `fetch_errors`-vs-"no classifiable file" distinction);
+`company_profiles.py` (the shared `RestClient` almost every Discovery script's own reads/writes go
+through) - every real method (`select`/`upsert`/`insert`/`update`/`rpc`/`upload`) raises
+`RuntimeError` on an HTTP error, propagating to every caller; its one deliberately-non-raising
+function, `member_labels()`, already logs a `WARNING` and returns `{}` rather than crashing a report
+run, and every real caller already renders `"a team member (no e-mail found)"` rather than a false
+"no members" claim - correct by design, not a gap; `key_person_minimums.py` (the SANRAL
+C3.1.11(d) minimum-requirements table parser) - pure text parsing with no I/O and no failure path of
+its own to alert on, already heavily audited (its own inline 2026-11-01 QA-pass comment); 
+`scan_ocr.py` - re-confirmed already fixed and tested across 3 prior passes (2026-10-25, 2026-10-30,
+2026-11-01), `_alert_failures()` already covers every real "OCR broke" shape distinctly from "a page
+just failed the quality gate" (the expected, user-facing, never-alerted refusal); `download_documents.py`
+- already read in full by name in this doc (2026-11-06), confirmed unchanged, a by-hand operator
+tool (SANRAL's reCAPTCHA v3 wall makes automated download unworkable, documented and accepted) not a
+scheduled job. Also spot-checked every direct-buyer reader's `fetch_releases()` against this doc's
+own extensive "total-fetch-failure swallowed as `[]`" history (`etenders_national.py`'s own fix,
+`5a10912`, and the still-open compound-fallback judgment call, `2026-11-07`/`07b`/`07c`) - that
+angle is already thoroughly tracked pass-by-pass elsewhere in this doc (the "discovery-scraper
+live-test rotation"), not duplicated here.
+
+**Genuinely exhausted for this pass, not forced.** Nothing new found in this `engine/discovery/`
+slice - every file either already has a dedicated fix+test from a prior pass, or was read fresh and
+is correct by construction. Rather than force-fitting a finding, moved the pass's remaining budget to
+Finding 159 above (a small, concrete, already-flagged backlog item) instead of manufacturing a
+speculative fix against undemonstrated risk.
+
+**Backlog status.** Finding 159 closes the 2026-11-07u backlog note in full - no open item remains
+from that pass. `start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C)
+remains untouched, per the standing guardrail. PR #176/#178/#179/#180/#181 (all awaiting Sarel's own
+merge decision) remain exactly as described - not touched, not amended. PR #164/#165 (stale drafts)
+not touched. `app/lib/marketPricing.ts` and its real call sites are now fully read, traced AND
+fixed at every one (`market-context.tsx`, `market-comparison.tsx` already correct;
+`analytics/page.tsx` fixed Finding 158; `discovery/page.tsx` fixed Finding 159) - no further backlog
+item remains there. The `engine/discovery/` document-reader/classification slice named in this doc's
+own standing backlog ((b): "document readers, award-outcome tracking's OTHER files ...
+taxonomy/classification") is now read at the same depth as the rest of `engine/discovery/` - not
+re-opened as a backlog item; a future pass wanting to continue this angle has no more low-hanging,
+unread files left in this directory (the handful of files not individually named above -
+`list_tenders.py`, `source_http.py`, `etenders_portal.py`, `transnet_etenders.py`,
+`eskom_bulletin.py`, `cidb_tenders.py`, `boq_extraction.py`, `tender_enrichment.py`,
+`scope_llm.py`, `taxonomy.py`, `assess_tender.py`, `score_outlook.py` - already have 9+ mentions
+each in this doc's own history, i.e. already individually read by name in a prior pass, confirmed by
+grep count, not assumed).
+
+To verify independently: run `npx vitest run app/lib/marketPricing.spec.ts` from `app/` and confirm
+`loadSegment` has 2 passing tests among the file's total (18). Read
+`app/app/discovery/page.tsx`'s pricing-badge `Promise.all` block and confirm it now captures
+`error: segError` from `loadSegment()` and calls `console.error` when set. Confirm via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open` that `#176`/`#178`/`#179`/`#180`/`#181` are still
+open and unmerged.
+
+---
+
 ## This pass (2026-11-07u, standing solution-architect review): with the discovery-pipeline
 fan-out/scoring slice, the tender-change/update-tracking subsystem and the DBSA-shaped reused-ref
 `ocid` pattern all now closed out by this review's own chain, moved to a genuinely under-covered

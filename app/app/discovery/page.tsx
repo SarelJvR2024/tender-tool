@@ -590,7 +590,20 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
       const segs = segmentsFor({ buyerLabel: "", isSanral: false, categories: expanded, categoryLabel: "" });
       const allBuyersSeg = segs.find((s) => s.key === "all");
       if (!allBuyersSeg) return;
-      const { rows: segRows } = await loadSegment(supabase, allBuyersSeg);
+      const { rows: segRows, error: segError } = await loadSegment(supabase, allBuyersSeg);
+      // Additive-only (an optional per-card pricing badge, no "no data" claim
+      // ever rendered either way) - a real failure here just means the badge
+      // is missing, same as a tender with no matching discipline, so this
+      // doesn't get its own ErrorState the way Finding 158's analytics
+      // section did. But every OTHER non-critical Supabase read on this same
+      // page already logs its own error for operator visibility (see the
+      // `console.error` calls above for discovered_opportunities/
+      // open-downgrade/pursued-history/experience_items/preferences) - this
+      // one silently had none, the exact asymmetry this review tracks, just
+      // inside the "additive, no fix needed" tier instead of the
+      // "false-safe empty state" tier. Logging it costs nothing and closes
+      // that asymmetry (System-Status.md, 2026-11-07u backlog note).
+      if (segError) console.error(`pricing badge: loadSegment failed for segment ${key}`, segError);
       const b = benchmark(segRows);
       if (b.contractSize.n >= MIN_SAMPLE) pricingByKey.set(key, b);
     }),
