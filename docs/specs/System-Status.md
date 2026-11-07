@@ -86,8 +86,9 @@ working tree, no worktree needed since no branch checkout was involved until aft
 `Compiled successfully`, exit 0, `/company/document-scan` present in the route table unchanged).
 
 **Opened a PR, did not merge it** - per the standing guardrail that anything touching RLS goes
-through a PR and stops there for Sarel's review. See `QA-Edge-Case-Findings.md` Finding 201 for the
-PR URL and the full write-up.
+through a PR and stops there for Sarel's review: [PR #184](https://github.com/SarelJvR2024/tender-tool/pull/184)
+(`fix/retry-onboarding-upload-rls-rpc` -> `main`). See `QA-Edge-Case-Findings.md` Finding 201 for
+the full write-up.
 
 **Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
 190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left,
