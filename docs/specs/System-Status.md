@@ -1,5 +1,94 @@
 # System Status
 
+## This pass (2026-11-07xxiii, standing solution-architect review): oriented from `1a65a86`
+(immediately-preceding pass's own verified HEAD, Finding 184's `applyCvExtraction()`/
+`applyMyCvExtraction()` fix). `git fetch origin main` at the start found local already matching
+`origin/main` exactly - `1a65a86` - and again just before pushing, still `1a65a86`, no sibling
+commit landed during this pass (the sibling "QA/robustness review" track confirmed quiet this pass
+too). Grepped `### Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself before picking a
+number - 184 was still the highest recorded; this pass's own fix below is Finding 185. Re-checked
+all 9 open PRs via `gh api repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#177`(draft)/
+`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`(both draft) are all
+still open, same set every preceding pass has recorded - nothing merged, closed, or rebased by
+anyone since.
+
+**This pass's task: Finding 184's own explicitly-named, deliberately-not-yet-fixed candidate -
+`app/app/company/document-scan/actions.ts`'s 5-ish "confirm" paths sharing `loadPendingResult()`'s
+unlocked `review_status` gate.** Read the real file in full rather than trusting the guessed count:
+found **six** functions sharing that gate (not five - Finding 184 never counted
+`skipOnboardingDocument()`/`discardOnboardingDocument()` as part of the same family, since they
+don't call `markApplied()`, but they share the exact same unlocked-gate shape on their own direct
+write to `onboarding_document_results`). Checked each on its own merits rather than assuming
+uniform severity:
+
+- **Real, severe duplicate-row class** (the `projects`-insert shape Finding 184 itself just fixed,
+  just in a different table): `confirmExperienceReferenceLetter()` -> `experience_items` INSERT,
+  `confirmCvHandoff()` -> `cv_uploads` INSERT. Neither table has a unique constraint that would
+  catch a second concurrent confirm's insert; the `cv_uploads` case also queues a second real CV
+  extraction job via `engine/cv/extract_cv_fields.py`'s own pickup query.
+- **Real but lower-severity class** (cannot duplicate a row - both are single-row UPDATEs keyed by
+  a fixed id): `confirmVaultDocument()` -> `companies` UPDATE, `confirmIdDocument()` ->
+  `company_principals` UPDATE. Damage is an orphaned Storage blob (the losing confirm's own
+  freshly-`randomUUID()`-named copy) plus a lost-update on the destination columns.
+- **Cheapest class, no RPC needed**: `skipOnboardingDocument()`/`discardOnboardingDocument()` just
+  needed `.eq("review_status", "pending_review")` added to their own existing single UPDATE
+  statement - a plain UPDATE with the right WHERE predicate is already atomic in Postgres, the same
+  reasoning `discardCvExtraction()`/`discardMyCvExtraction()` already used (standing review,
+  2026-11-06).
+
+**Fix:** new migration `app/supabase/migrations/0124_onboarding_document_scan_confirm_race.sql`
+adds one locked, `security definer` RPC per destination table for the four cross-table writes
+(`apply_onboarding_vault_document_checked()`, `apply_onboarding_experience_letter_checked()`,
+`apply_onboarding_id_document_checked()`, `apply_onboarding_cv_handoff_checked()`), each locking
+the `onboarding_document_results` row (`for update`) before its own first dependent write, not
+just before the final mark-applied write (which alone would not have closed the race). Each new
+function also explicitly re-checks `is_company_member()` AND `not is_employee_in_company()` -
+mirroring `onboarding_document_results`' own real RLS (one permissive policy plus 0077's
+RESTRICTIVE "employee has no access" policy) exactly, since a `security definer` function bypasses
+RLS entirely and has to reproduce the access rule it stands in for itself. Verified directly against
+a real `company_members.role = 'employee'` user in the scratch-DB repro, not assumed safe by
+analogy. `markApplied()` (the TypeScript helper) is removed - superseded by the RPCs' own atomic
+mark-applied write.
+
+**Reproduced both severe races directly in a disposable scratch Postgres** (`engine/security/
+replay_schema.sh` replaying the real `scratch_supabase_stub.sql` stand-in plus all 124 real
+migration files including this pass's own `0124`, so the repro ran against the exact shipped
+schema): RED (a `pg_sleep(1)`-widened copy of the OLD unlocked three-statement shape) showed two
+concurrent calls both succeeding with no error, duplicating the row (`experience_items`: 2 rows for
+one document; `cv_uploads`: 2 rows, two queued extractions). GREEN (the identical two concurrent
+calls against a `pg_sleep(1)`-widened copy of the real new RPCs) showed the second caller
+genuinely blocking on the row lock (confirmed by wall-clock timing, not just the final count - the
+blocked caller's total time was consistent with waiting out the first caller's own sleep before
+seeing `review_status` already `applied`) then raising a clean "already reviewed" error, with
+exactly one row written each time. Scratch DB dropped, Postgres service stopped afterward.
+
+**Full TS/JS verification, all green:** `npm run typecheck` exit 0; `npx eslint .` exit 0 (0 errors,
+3 pre-existing warnings, unchanged); `npx vitest run` exit 0, 503/503 passed, 66 files
+(`app/company/document-scan/actions.spec.ts`'s existing 9 tests updated to mock `supabase.rpc()`
+for the two now-atomic confirm paths it already covered, same convention Finding 184's own
+`people/actions.spec.ts`/`my-cv/actions.spec.ts` updates used); the node `*.test.ts` loop, 28
+files, 0 failures; `npx next build` clean.
+
+**Pushed as PR #183, not directly to main** - per the standing guardrail's own "err toward a PR"
+guidance at this scope: four new RPCs across four different destination tables, one of them
+(`apply_onboarding_vault_document_checked()`) alone touching 26 `companies` columns, a larger
+surface than migration 0123's two RPCs over one shared table group. Left open, unmerged, per the
+standing guardrail that applies to every PR this review opens, not just the nine pre-existing named
+ones - **never merge any PR under any circumstances.**
+
+Full write-up: `docs/specs/QA-Edge-Case-Findings.md` Finding 185.
+
+**Backlog status, carried over plainly:** Finding 168 and the `start_payfast_checkout()`
+revenue-integrity gap both remain exactly as left, untouched. All 9 pre-existing PRs remain open
+and unmerged, same set every preceding pass has recorded. This pass adds a 10th open PR (#183,
+this pass's own fix) to that "never merge" list - the long-unaddressed PR-backlog observation
+several recent passes have carried over applies to it too now. The TypeScript Server Action
+read-then-write/TOCTOU-gate angle Finding 184 opened is now genuinely exhausted for
+`app/app/company/document-scan/actions.ts` specifically; a fresh angle/surface is needed next (see
+Finding 185's own suggestion).
+
+---
+
 ## This pass (2026-11-07xxii, standing solution-architect review): oriented from `9544439`
 (immediately-preceding pass's own verified HEAD, the 7-source document-extraction re-verify).
 `git fetch origin main` at the start found local already matching `origin/main` exactly -

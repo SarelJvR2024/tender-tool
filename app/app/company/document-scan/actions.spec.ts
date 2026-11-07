@@ -13,34 +13,40 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // Both functions share this shape:
 //   1. loadPendingResult() reads the onboarding_document_results row (and its
 //      joined onboarding_uploads.storage_path) early in the request - gated
-//      by that table's own RLS.
+//      by that table's own RLS (an informational pre-check only; see below).
 //   2. copyBetweenBuckets() does a real download-then-upload round trip
 //      (genuine network time, a real race window) to copy the file from the
 //      'onboarding-documents' bucket into the destination bucket.
-//   3. An `update(...).eq("id", ...)` on "companies" (confirmVaultDocument)
-//      or "company_principals" (confirmIdDocument) - gated by
-//      is_company_member(...)-based RLS, USING only, re-evaluated against
-//      the OLD row - checking only `error`.
-//   4. unconditionally remove the ORIGINAL onboarding-bucket source file,
-//      with no gate on step 3 having actually matched a row.
+//   3. (standing review, 2026-11-07, Finding 185) ONE locked RPC call -
+//      apply_onboarding_vault_document_checked() / apply_onboarding_id_document_checked()
+//      (migration 0124) - that re-locks the onboarding_document_results row,
+//      re-checks company membership/not-employee and review_status under
+//      that lock, writes the destination table, and marks the row applied,
+//      all in one transaction. Before this fix, step 3 was an unlocked
+//      `update(...).eq("id", ...)` with no re-check of review_status at all -
+//      the TypeScript analog of the Finding-178/180/184 read-then-write race:
+//      two concurrent confirms of the SAME onboarding document (double-click,
+//      two tabs) both passed loadPendingResult()'s gate and both wrote,
+//      silently re-filing an already-reviewed document with no error to
+//      either caller (and, pre-0124, a membership-revoked-mid-request zero-
+//      row match on that same unlocked update also destroyed the only
+//      remaining copy of the document - the original bug this file's tests
+//      were first written for, 2026-11-06).
+//   4. remove the ORIGINAL onboarding-bucket source file, gated on step 3's
+//      RPC call having actually succeeded.
 //
-// If the signed-in user's own company_members row is deleted between step 1
-// and step 3 - another admin calling removeMember() (remove_member_checked(),
-// 0114) during the real download+upload round trip at step 2 -
-// PostgREST's real behaviour for step 3 is a 2xx with zero rows affected and
-// `error: null`. Pre-fix, the code then: (a) never cleans up the just-copied
-// destination file (orphaned), AND (b) still unconditionally deletes the
-// ORIGINAL onboarding source file at step 4 - and since the same race also
-// blocks markApplied()'s own update, the onboarding_document_results row is
-// left stuck on review_status "pending_review", implying the source file is
-// still there to act on. The document is destroyed outright, not just
-// orphaned, while the UI reports "filed".
+// The RPC is mocked as a black box here (success or a named error) - its own
+// real lock-check-write behaviour is verified against a real Postgres
+// instance separately (see this pass's own scratch-DB reproduction,
+// docs/specs/QA-Edge-Case-Findings.md Finding 185), not re-derived at the
+// mock layer.
 //
 // Mocking technique and chain shape copied from the established convention
 // (app/company/registrations/actions.spec.ts, app/company/actions.spec.ts,
 // app/company/properties/actions.spec.ts), extended with a `download` mock
-// for copyBetweenBuckets()'s own storage read - calls the real, unmodified
-// exported action, not a reimplementation of its logic.
+// for copyBetweenBuckets()'s own storage read and an `rpc` mock for the
+// locked confirm calls - calls the real, unmodified exported action, not a
+// reimplementation of its logic.
 
 type Resp = { data: unknown; error: { message: string } | null };
 
@@ -60,11 +66,17 @@ function makeChain(queue: Resp[], updateCalls?: unknown[]) {
   return chain;
 }
 
-function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: string } | null; uploadError?: { message: string } | null }) {
+function makeSupabase(opts: {
+  fromQueues: Resp[][];
+  downloadError?: { message: string } | null;
+  uploadError?: { message: string } | null;
+  rpcResponse?: { error: { message: string } | null };
+}) {
   let fromCallIndex = 0;
   const uploadCalls: string[] = [];
   const removeCalls: string[][] = [];
   const updateCalls: unknown[] = [];
+  const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
   return {
     client: {
       auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
@@ -72,6 +84,10 @@ function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: s
         const queue = opts.fromQueues[fromCallIndex] ?? [];
         fromCallIndex += 1;
         return makeChain(queue, updateCalls);
+      },
+      rpc: async (fn: string, args: Record<string, unknown>) => {
+        rpcCalls.push({ fn, args });
+        return opts.rpcResponse ?? { data: null, error: null };
       },
       storage: {
         from: () => ({
@@ -90,6 +106,7 @@ function makeSupabase(opts: { fromQueues: Resp[][]; downloadError?: { message: s
     uploadCalls,
     removeCalls,
     updateCalls,
+    rpcCalls,
   };
 }
 
@@ -162,15 +179,14 @@ const pendingVaultResult = {
   error: null,
 };
 
-describe("confirmVaultDocument - membership revoked mid-request (companies update matches zero rows)", () => {
+describe("confirmVaultDocument - apply_onboarding_vault_document_checked() reports already-reviewed/not-found", () => {
   it("does not report success and does not delete the only remaining copy of the document", async () => {
-    const { client, removeCalls } = makeSupabase({
+    const { client, removeCalls, rpcCalls } = makeSupabase({
       fromQueues: [
         [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
         [pendingVaultResult], // loadPendingResult
-        [{ data: null, error: null }], // companies update - membership revoked -> 0 rows
-        [{ data: null, error: null }], // markApplied (unused result)
       ],
+      rpcResponse: { error: { message: "This document was already reviewed." } },
     });
     supabaseState.current = client;
 
@@ -181,6 +197,7 @@ describe("confirmVaultDocument - membership revoked mid-request (companies updat
 
     expect(url).not.toContain("saved=filed");
     expect(url).toContain("/company/document-scan?error=");
+    expect(rpcCalls[0]?.fn).toBe("apply_onboarding_vault_document_checked");
 
     // The onboarding source file - the document's only remaining copy at
     // this point - must NOT have been deleted.
@@ -189,15 +206,14 @@ describe("confirmVaultDocument - membership revoked mid-request (companies updat
   });
 });
 
-describe("confirmVaultDocument - real update still succeeds", () => {
-  it("files the document and removes the onboarding source file when the update genuinely matches the row", async () => {
-    const { client, removeCalls } = makeSupabase({
+describe("confirmVaultDocument - the locked RPC succeeds", () => {
+  it("files the document and removes the onboarding source file when the RPC genuinely applies", async () => {
+    const { client, removeCalls, rpcCalls } = makeSupabase({
       fromQueues: [
         [{ data: { company_id: "company-1" }, error: null }],
         [pendingVaultResult],
-        [{ data: { id: "company-1" }, error: null }], // real match
-        [{ data: null, error: null }],
       ],
+      rpcResponse: { error: null },
     });
     supabaseState.current = client;
 
@@ -207,6 +223,7 @@ describe("confirmVaultDocument - real update still succeeds", () => {
     const url = await expectRedirect(confirmVaultDocument(fd));
 
     expect(url).toContain("saved=filed");
+    expect(rpcCalls[0]?.args.p_result_id).toBe("result-1");
     const removedPaths = removeCalls.flat();
     expect(removedPaths).toContain("company-1/onboarding/raw-iso.pdf");
   });
@@ -225,16 +242,15 @@ const pendingIdResult = {
   error: null,
 };
 
-describe("confirmIdDocument - membership revoked mid-request (company_principals update matches zero rows)", () => {
+describe("confirmIdDocument - apply_onboarding_id_document_checked() reports already-reviewed/not-found", () => {
   it("does not report success and does not delete the only remaining copy of the document", async () => {
-    const { client, removeCalls } = makeSupabase({
+    const { client, removeCalls, rpcCalls } = makeSupabase({
       fromQueues: [
         [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
         [pendingIdResult], // loadPendingResult
-        [{ data: { id: "principal-1" }, error: null }], // company_principals existence check
-        [{ data: null, error: null }], // company_principals update - membership revoked -> 0 rows
-        [{ data: null, error: null }], // markApplied (unused result)
+        [{ data: { id: "principal-1" }, error: null }], // company_principals existence pre-check
       ],
+      rpcResponse: { error: { message: "This document was already reviewed." } },
     });
     supabaseState.current = client;
 
@@ -245,22 +261,22 @@ describe("confirmIdDocument - membership revoked mid-request (company_principals
 
     expect(url).not.toContain("saved=filed");
     expect(url).toContain("/company/document-scan?error=");
+    expect(rpcCalls[0]?.fn).toBe("apply_onboarding_id_document_checked");
 
     const removedPaths = removeCalls.flat();
     expect(removedPaths).not.toContain("company-1/onboarding/raw-id.pdf");
   });
 });
 
-describe("confirmIdDocument - real update still succeeds", () => {
-  it("files the document and removes the onboarding source file when the update genuinely matches the row", async () => {
-    const { client, removeCalls } = makeSupabase({
+describe("confirmIdDocument - the locked RPC succeeds", () => {
+  it("files the document and removes the onboarding source file when the RPC genuinely applies", async () => {
+    const { client, removeCalls, rpcCalls } = makeSupabase({
       fromQueues: [
         [{ data: { company_id: "company-1" }, error: null }],
         [pendingIdResult],
         [{ data: { id: "principal-1" }, error: null }],
-        [{ data: { id: "principal-1" }, error: null }], // real match
-        [{ data: null, error: null }],
       ],
+      rpcResponse: { error: null },
     });
     supabaseState.current = client;
 
@@ -270,6 +286,7 @@ describe("confirmIdDocument - real update still succeeds", () => {
     const url = await expectRedirect(confirmIdDocument(fd));
 
     expect(url).toContain("saved=filed");
+    expect(rpcCalls[0]?.args.p_principal_id).toBe("principal-1");
     const removedPaths = removeCalls.flat();
     expect(removedPaths).toContain("company-1/onboarding/raw-id.pdf");
   });
@@ -277,14 +294,13 @@ describe("confirmIdDocument - real update still succeeds", () => {
 
 describe("confirmIdDocument - certified_id_on is SAST-anchored, not a naive UTC date", () => {
   it("stamps certified_id_on from sastToday(), not new Date().toISOString().slice(0, 10)", async () => {
-    const { client, updateCalls } = makeSupabase({
+    const { client, rpcCalls } = makeSupabase({
       fromQueues: [
         [{ data: { company_id: "company-1" }, error: null }],
         [pendingIdResult],
         [{ data: { id: "principal-1" }, error: null }],
-        [{ data: { id: "principal-1" }, error: null }], // real match
-        [{ data: null, error: null }],
       ],
+      rpcResponse: { error: null },
     });
     supabaseState.current = client;
 
@@ -293,10 +309,7 @@ describe("confirmIdDocument - certified_id_on is SAST-anchored, not a naive UTC 
     const fd = formDataWith({ result_id: "result-2", principal_id: "principal-1" });
     await expectRedirect(confirmIdDocument(fd));
 
-    const principalUpdate = updateCalls.find(
-      (c): c is { certified_id_on: string } => typeof c === "object" && c !== null && "certified_id_on" in c,
-    );
-    expect(principalUpdate?.certified_id_on).toBe("2099-01-01");
+    expect(rpcCalls[0]?.args.p_certified_on).toBe("2099-01-01");
   });
 });
 

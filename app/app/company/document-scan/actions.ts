@@ -146,27 +146,6 @@ async function loadPendingResult(supabase: SupabaseClient, companyId: string, re
   return row as unknown as ResultRow;
 }
 
-async function markApplied(supabase: SupabaseClient, resultId: string, userId: string | null, applied: Record<string, unknown>) {
-  // Logging only, no behavioral branch changed - this runs AFTER the real
-  // write (companies/experience_items/cv_uploads/company_principals, plus
-  // the onboarding source file already being removed in several callers) has
-  // already succeeded, so there is nothing left to roll back if this update
-  // itself fails or matches zero rows. The real consequence is the
-  // onboarding_document_results row staying stuck on "pending_review" even
-  // though the document was actually filed - it stays visible in the "to
-  // review" queue, confusing but not destructive (a re-confirm attempt would
-  // just fail cleanly, since the onboarding source file is already gone by
-  // then). Found via the TS-sweep's own grep blind spot: a bare
-  // `await supabase....update(...)` with no destructuring at all, not even
-  // `error`, never matched the sweep's "const { data" pattern (standing
-  // review, 2026-11-06) - logged here so a future pass can tell a genuine
-  // failure apart from this already-accepted shape.
-  const { error } = await supabase.from("onboarding_document_results").update({
-    review_status: "applied", applied, reviewed_by: userId, reviewed_at: new Date().toISOString(),
-  }).eq("id", resultId);
-  if (error) console.error("onboarding_document_results mark-applied failed", resultId, error);
-}
-
 function ticked(formData: FormData, key: string): boolean {
   return formData.get(`use_${key}`) === "on";
 }
@@ -181,7 +160,7 @@ function ticked(formData: FormData, key: string): boolean {
 // ---------------------------------------------------------------------------
 
 export async function confirmVaultDocument(formData: FormData) {
-  const { supabase, companyId, userId } = await requireCompanyId();
+  const { supabase, companyId } = await requireCompanyId();
   const resultId = str(formData, "result_id");
   if (!resultId) fail("Missing document.");
   const result = await loadPendingResult(supabase, companyId, resultId!);
@@ -211,26 +190,30 @@ export async function confirmVaultDocument(formData: FormData) {
   if (copyErr) fail(copyErr);
   update[docColumn] = destPath;
 
-  // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
-  // `error: null` and zero rows affected when RLS's own "companies: members
-  // can update" (0001, using (is_company_member(id)), re-evaluated against
-  // the OLD row) no longer matches - e.g. another admin's removeMember()
-  // (0114) revoking this user's own company_members row during the real
-  // network round trip copyBetweenBuckets() just made. Without this check,
-  // that race deleted the ONLY remaining copy of the document below (the
-  // onboarding source file) while leaving the onboarding_document_results
-  // row stuck on review_status "pending_review" (markApplied() below hits
-  // the same race) - worse than orphaning a file, it destroys the document
-  // outright. Same shape, same fix, as app/company/actions.ts
-  // uploadVaultDocument().
-  const { data: updatedCompany, error } = await supabase.from("companies").update(update).eq("id", companyId).select("id").maybeSingle();
-  if (error || !updatedCompany) {
-    console.error("companies update failed for onboarding document", error);
+  // Atomic lock-check-write (migration 0124, Finding 185): locks the
+  // onboarding_document_results row, re-checks company membership/not-
+  // employee and review_status = 'pending_review' under that lock, writes
+  // only the ticked companies columns, and marks the row applied - all in
+  // one transaction, so a second concurrent confirm for the SAME result
+  // (double-click, two tabs) blocks on the row lock and then gets a clear
+  // "already reviewed" error instead of silently re-filing. Replaces the
+  // old unlocked companies.update() + markApplied() pair, which shared the
+  // SAME race this file's siblings below fix the same way. The old
+  // "membership revoked mid-request" race this comment used to describe is
+  // now covered by this function's own is_company_member()/
+  // is_employee_in_company() re-check, done fresh under the lock rather
+  // than via PostgREST's RLS re-evaluation.
+  const { error } = await supabase.rpc("apply_onboarding_vault_document_checked", {
+    p_result_id: resultId!,
+    p_updates: update,
+    p_applied_meta: { table: "companies", column: docColumn, fields: appliedFields },
+  });
+  if (error) {
+    console.error("apply_onboarding_vault_document_checked failed", error);
     await supabase.storage.from(VAULT_BUCKET).remove([destPath]);
-    fail("Could not file this document - try again. If it keeps happening, let us know.");
+    fail(error.message || "Could not file this document - try again. If it keeps happening, let us know.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
-  await markApplied(supabase, resultId!, userId, { table: "companies", column: docColumn, fields: appliedFields });
   const back = backTo(formData);
   revalidatePath(back);
   redirect(`${back}?saved=filed`);
@@ -244,7 +227,7 @@ export async function confirmVaultDocument(formData: FormData) {
 // ---------------------------------------------------------------------------
 
 export async function confirmExperienceReferenceLetter(formData: FormData) {
-  const { supabase, companyId, userId } = await requireCompanyId();
+  const { supabase, companyId } = await requireCompanyId();
   const resultId = str(formData, "result_id");
   if (!resultId) fail("Missing document.");
   const result = await loadPendingResult(supabase, companyId, resultId!);
@@ -274,9 +257,7 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
   if (copyErr) fail(copyErr);
 
   const row = {
-    company_id: companyId,
     project_name: projectName,
-    document_type: "reference_letter" as const,
     storage_path: destPath,
     original_filename: upload!.original_filename,
     client_name: clientName,
@@ -286,16 +267,25 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
     reference_contact_name: ticked(formData, "referee_name") ? str(formData, "f_referee_name") : null,
     reference_contact_phone: ticked(formData, "referee_phone") ? str(formData, "f_referee_phone") : null,
     reference_contact_email: ticked(formData, "referee_email") ? str(formData, "f_referee_email") : null,
-    uploaded_by: userId,
   };
-  const { data: inserted, error } = await supabase.from("experience_items").insert(row).select("id").single();
+  // Atomic lock-check-write (migration 0124, Finding 185) - this is the
+  // clearest, highest-severity instance: two concurrent confirms of the
+  // SAME onboarding document used to both pass loadPendingResult()'s gate
+  // and both INSERT, silently duplicating a real experience_items row (no
+  // unique constraint on this table would have caught it). The RPC locks
+  // the onboarding_document_results row, re-checks company membership/not-
+  // employee and review_status under that lock, then performs the ONE
+  // insert and marks the row applied in the same transaction.
+  const { error } = await supabase.rpc("apply_onboarding_experience_letter_checked", {
+    p_result_id: resultId!,
+    p_row: row,
+  });
   if (error) {
-    console.error("experience_items insert failed for onboarding document", error);
+    console.error("apply_onboarding_experience_letter_checked failed", error);
     await supabase.storage.from("experience-documents").remove([destPath]);
-    fail("Could not file this document - try again. If it keeps happening, let us know.");
+    fail(error.message || "Could not file this document - try again. If it keeps happening, let us know.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
-  await markApplied(supabase, resultId!, userId, { table: "experience_items", id: inserted!.id });
   const back = backTo(formData);
   revalidatePath(back);
   redirect(back === BACK ? `${back}?saved=filed#experience-items-note` : `${back}?saved=filed`);
@@ -324,27 +314,34 @@ export async function confirmIdDocument(formData: FormData) {
   const copyErr = await copyBetweenBuckets(supabase, ONBOARDING_BUCKET, upload!.storage_path, VAULT_BUCKET, destPath, "application/octet-stream");
   if (copyErr) fail(copyErr);
 
-  // .select("id").maybeSingle() here matters - same race as
-  // confirmVaultDocument() above, on "company_principals: tenant isolation"
-  // (0050, using (is_company_member(company_id))) instead of "companies:
-  // members can update": without it, a membership-revoked-mid-request zero-
-  // row match still deletes the onboarding source file below with nothing
-  // left referencing it.
   // certified_id_on is a real date column certificationStatus() (lib/principals.ts)
   // measures "days ago" against for a compliance warning - new Date().toISOString()
   // is always UTC, so for the 00:00-01:59 SAST window every day (SAST = UTC+2, no
   // DST) a naive date-only stamp here silently recorded YESTERDAY's date, same
   // established naive-UTC-"today" bug class this codebase already fixed elsewhere
   // (lib/publicHolidays.ts's own sastToday() - standing review, 2026-11-06).
-  const { data: updatedPrincipal, error } = await supabase.from("company_principals").update({
-    certified_id_path: destPath, certified_id_filename: upload!.original_filename, certified_id_on: sastToday(),
-  }).eq("id", principalId).select("id").maybeSingle();
-  if (error || !updatedPrincipal) {
+  //
+  // Atomic lock-check-write (migration 0124, Finding 185): locks the
+  // onboarding_document_results row, re-checks company membership/not-
+  // employee, review_status = 'pending_review' and that this principal still
+  // exists in this company, all under that lock, then writes the three
+  // columns and marks the row applied - all in one transaction. Replaces the
+  // old unlocked company_principals.update() + markApplied() pair (the old
+  // "membership revoked mid-request" race this comment used to describe is
+  // now covered by the RPC's own is_company_member()/is_employee_in_company()
+  // re-check, done fresh under the lock).
+  const { error } = await supabase.rpc("apply_onboarding_id_document_checked", {
+    p_result_id: resultId!,
+    p_principal_id: principalId!,
+    p_dest_path: destPath,
+    p_filename: upload!.original_filename,
+    p_certified_on: sastToday(),
+  });
+  if (error) {
     await supabase.storage.from(VAULT_BUCKET).remove([destPath]);
-    fail(error ? error.message : "That person is no longer on your directors/shareholders register - it may have been removed. Refresh and try again.");
+    fail(error.message || "That person is no longer on your directors/shareholders register - it may have been removed. Refresh and try again.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
-  await markApplied(supabase, resultId!, null, { table: "company_principals", id: principalId, column: "certified_id_path" });
   const back = backTo(formData);
   revalidatePath(back);
   redirect(`${back}?saved=filed`);
@@ -359,7 +356,7 @@ export async function confirmIdDocument(formData: FormData) {
 // ---------------------------------------------------------------------------
 
 export async function confirmCvHandoff(formData: FormData) {
-  const { supabase, companyId, userId } = await requireCompanyId();
+  const { supabase, companyId } = await requireCompanyId();
   const resultId = str(formData, "result_id");
   const personId = str(formData, "person_id");
   if (!resultId) fail("Missing document.");
@@ -375,17 +372,28 @@ export async function confirmCvHandoff(formData: FormData) {
   const copyErr = await copyBetweenBuckets(supabase, ONBOARDING_BUCKET, upload!.storage_path, "cv-documents", destPath, "application/octet-stream");
   if (copyErr) fail(copyErr);
 
-  const { data: cvUpload, error } = await supabase.from("cv_uploads").insert({
-    company_id: companyId, person_id: personId, storage_path: destPath, original_filename: upload!.original_filename,
-    mode: "ai_extract", status: "extraction_requested", uploaded_by: userId,
-  }).select("id").single();
+  // Atomic lock-check-write (migration 0124, Finding 185) - the other real,
+  // severe duplicate-row instance alongside confirmExperienceReferenceLetter()
+  // above: two concurrent confirms of the SAME onboarding document used to
+  // both pass loadPendingResult()'s gate and both INSERT, silently
+  // duplicating a real cv_uploads row (no unique constraint on this table
+  // would have caught it) and queuing a second real CV extraction. The RPC
+  // locks the onboarding_document_results row, re-checks company
+  // membership/not-employee, review_status, and that this person still
+  // exists in this company, then performs the ONE insert and marks the row
+  // applied in the same transaction.
+  const { error } = await supabase.rpc("apply_onboarding_cv_handoff_checked", {
+    p_result_id: resultId!,
+    p_person_id: personId!,
+    p_storage_path: destPath,
+    p_original_filename: upload!.original_filename,
+  });
   if (error) {
-    console.error("cv_uploads insert failed for onboarding document", error);
+    console.error("apply_onboarding_cv_handoff_checked failed", error);
     await supabase.storage.from("cv-documents").remove([destPath]);
-    fail("Could not file this CV - try again. If it keeps happening, let us know.");
+    fail(error.message || "Could not file this CV - try again. If it keeps happening, let us know.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
-  await markApplied(supabase, resultId!, userId, { handed_off_to: "cv_uploads", id: cvUpload!.id });
   const back = backTo(formData);
   revalidatePath(back);
   redirect(back === BACK ? `${back}?saved=handed-off#cv-handoff-note` : `${back}?saved=handed-off`);
@@ -413,15 +421,29 @@ export async function skipOnboardingDocument(formData: FormData) {
   // (no storage file is touched here), but the same dominant shape, found
   // sweeping this file's own siblings for the TS-side unprotected-read sweep
   // (standing review, 2026-11-06).
+  //
+  // .eq("review_status", "pending_review") here matters too (Finding 185,
+  // 2026-11-07): without it, this single UPDATE statement would still match
+  // and succeed even if the row had already moved on (applied, skipped
+  // again, or discarded) by the time this request reaches the database -
+  // e.g. a concurrent Confirm already filed the document and marked it
+  // "applied" a moment ago, and this "Skip" (a double-click, or a second
+  // browser tab left open on this same card) would silently overwrite that
+  // back to "skipped", losing the fact that it was actually filed with no
+  // error to either caller. A plain UPDATE with the right WHERE predicate is
+  // already atomic in Postgres - no RPC/lock needed here, the same reasoning
+  // discardCvExtraction()/discardMyCvExtraction() already used (standing
+  // review, 2026-11-06).
   const { data: updated, error } = await supabase
     .from("onboarding_document_results")
     .update({ review_status: "skipped" })
     .eq("id", result.id)
+    .eq("review_status", "pending_review")
     .select("id")
     .maybeSingle();
   if (error || !updated) {
     console.error("onboarding_document_results skip update failed", error);
-    fail("This document is no longer there - refresh and try again.");
+    fail("This document was already reviewed - refresh and try again.");
   }
   revalidatePath(back);
   redirect(`${back}?saved=skipped`);
@@ -441,10 +463,26 @@ export async function discardOnboardingDocument(formData: FormData) {
   // nothing left to ever review (found re-reading this file end to end for
   // siblings of its own already-fixed functions, standing review,
   // 2026-11-06 - never swept before this pass).
-  const { data: updated, error } = await supabase.from("onboarding_document_results").update({ review_status: "discarded" }).eq("id", result.id).select("id").maybeSingle();
+  //
+  // .eq("review_status", "pending_review") here matters too (Finding 185,
+  // 2026-11-07), same reasoning as skipOnboardingDocument() above: without
+  // it, a concurrent Confirm that already filed this document (and removed
+  // the onboarding source file as part of filing it) racing this Discard
+  // would still match and succeed, overwriting "applied" back to
+  // "discarded" with no error - a confusing, wrong terminal state for a
+  // document that was genuinely filed (the storage removal two lines below
+  // is already a harmless no-op either way, since the source file is gone
+  // once either path wins).
+  const { data: updated, error } = await supabase
+    .from("onboarding_document_results")
+    .update({ review_status: "discarded" })
+    .eq("id", result.id)
+    .eq("review_status", "pending_review")
+    .select("id")
+    .maybeSingle();
   if (error || !updated) {
     console.error("onboarding_document_results discard update failed", error);
-    fail("This document is no longer there - refresh and try again.");
+    fail("This document was already reviewed - refresh and try again.");
   }
   if (upload?.storage_path) await supabase.storage.from(ONBOARDING_BUCKET).remove([upload.storage_path]);
   const back = backTo(formData);
