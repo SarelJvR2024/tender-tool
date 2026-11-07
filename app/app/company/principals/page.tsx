@@ -13,7 +13,7 @@ import {
   maskId,
   needsPersonFallbackOption,
   parseSaId,
-  type OwnershipBreakdown,
+  resolveOwnershipBreakdown,
   type PrincipalRow,
 } from "@/lib/principals";
 import { deletePrincipal, savePrincipal, uploadPrincipalDocument } from "./actions";
@@ -33,11 +33,16 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
   const supabase = await createClient();
 
   const { data: company, error: companyError } = await supabase.from("companies").select("id, legal_name, black_ownership_pct").single();
-  const [{ data: rows, error: rowsError }, { data: breakdownRow }, { data: people, error: peopleError }, { data: banks }] = await Promise.all([
+  const [
+    { data: rows, error: rowsError },
+    { data: breakdownRow, error: breakdownError },
+    { data: people, error: peopleError },
+    { data: banks, error: banksError },
+  ] = await Promise.all([
     supabase.from("company_principals").select(PRINCIPAL_COLUMNS).order("ownership_pct", { ascending: false, nullsFirst: false }).order("full_name"),
     supabase.from("company_ownership_breakdown").select("*").maybeSingle(),
     supabase.from("people").select("id, name").order("name"),
-    company ? supabase.rpc("bank_account_summaries", { p_company: company.id }) : Promise.resolve({ data: [] }),
+    company ? supabase.rpc("bank_account_summaries", { p_company: company.id }) : Promise.resolve({ data: [], error: null }),
   ]);
   if (companyError) console.error("companies select failed on principals page", companyError);
   if (rowsError) console.error("company_principals select failed", rowsError);
@@ -45,8 +50,17 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
   // (Finding 177) already stays safe on a failed read via
   // needsPersonFallbackOption() below, regardless of this error.
   if (peopleError) console.error("people select failed on principals page", peopleError);
+  // Finding 194: this view's own read error used to be discarded entirely -
+  // see resolveOwnershipBreakdown()'s own comment in lib/principals.ts for
+  // the full reasoning and the visible self-contradiction it caused.
+  if (breakdownError) console.error("company_ownership_breakdown select failed", breakdownError);
+  // Logged only: a failed bank_account_summaries() read just omits the
+  // "· bank account ..." clause on PrincipalCard below (bankByPrincipal
+  // stays empty) - a quiet omission, not a false claim, same severity
+  // judgement Finding 193 made for its own readiness-RPC sibling.
+  if (banksError) console.error("bank_account_summaries rpc failed on principals page", banksError);
   const principals = (rows ?? []) as PrincipalRow[];
-  const breakdown = breakdownRow as OwnershipBreakdown | null;
+  const breakdownDisplay = resolveOwnershipBreakdown(breakdownRow, breakdownError);
   const bankByPrincipal = new Map<string, { bank_name: string; last4: string }>();
   for (const b of (banks ?? []) as { principal_id: string | null; bank_name: string; last4: string }[]) {
     if (b.principal_id) bankByPrincipal.set(b.principal_id, b);
@@ -64,7 +78,7 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
   const missingIds = directors.filter((p) => p.holder_type === "natural_person" && !p.certified_id_path).length;
   const missingConsent = principals.filter((p) => p.holder_type === "natural_person" && !p.popia_consent_on).length;
   const stated = company?.black_ownership_pct ?? null;
-  const derivedBlack = breakdown?.black_pct ?? null;
+  const derivedBlack = breakdownDisplay.kind === "ok" ? breakdownDisplay.breakdown.black_pct ?? null : null;
 
   return (
     <SubPage
@@ -87,7 +101,9 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
       )}
 
       <Card title="Ownership, worked out from the register">
-        {!breakdown || !breakdown.shareholders ? (
+        {breakdownDisplay.kind === "error" ? (
+          <div className="text-sm text-muted-foreground">Couldn&apos;t work out the ownership split - try refreshing. If it keeps happening, let us know.</div>
+        ) : breakdownDisplay.kind === "empty" ? (
           <div className="text-sm text-muted-foreground">No shareholdings recorded yet. Add shareholders below to see the split by group.</div>
         ) : (
           <>
@@ -95,15 +111,16 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
               {BREAKDOWN_ROWS.map((r) => (
                 <div key={r.key} className="rounded-lg border border-border px-2.5 py-2">
                   <div className="text-[11px] text-muted-foreground">{r.label}</div>
-                  <div className="text-lg font-bold text-foreground">{Number(breakdown[r.key] ?? 0).toLocaleString("en-ZA", { maximumFractionDigits: 3 })} %</div>
+                  <div className="text-lg font-bold text-foreground">{Number(breakdownDisplay.breakdown[r.key] ?? 0).toLocaleString("en-ZA", { maximumFractionDigits: 3 })} %</div>
                 </div>
               ))}
             </div>
             <div className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
-              {breakdown.shareholders} shareholder{breakdown.shareholders === 1 ? "" : "s"}, {Number(breakdown.total_pct ?? 0)} % of the shares recorded.
-              {Number(breakdown.unclassified_pct ?? 0) > 0 &&
-                ` ${Number(breakdown.unclassified_pct)} % is held by a company/trust or by someone with no race or gender recorded, so it isn't counted in any group.`}
-              {Number(breakdown.total_pct ?? 0) < 100 && " The shares don't add up to 100 % yet."} Youth is 18-35 today.
+              {breakdownDisplay.breakdown.shareholders} shareholder{breakdownDisplay.breakdown.shareholders === 1 ? "" : "s"}, {Number(breakdownDisplay.breakdown.total_pct ?? 0)} % of the
+              shares recorded.
+              {Number(breakdownDisplay.breakdown.unclassified_pct ?? 0) > 0 &&
+                ` ${Number(breakdownDisplay.breakdown.unclassified_pct)} % is held by a company/trust or by someone with no race or gender recorded, so it isn't counted in any group.`}
+              {Number(breakdownDisplay.breakdown.total_pct ?? 0) < 100 && " The shares don't add up to 100 % yet."} Youth is 18-35 today.
             </div>
             {stated !== null && derivedBlack !== null && Math.abs(Number(stated) - Number(derivedBlack)) > 0.01 && (
               <div className="mt-2.5 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">

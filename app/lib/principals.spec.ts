@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { needsPersonFallbackOption } from "./principals";
+import { needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
 
 // Regression coverage for the Directors & shareholders register data-loss
 // bug (QA Finding 177, 2026-11-07): the "Also one of your people (CV)?"
@@ -31,5 +31,48 @@ describe("needsPersonFallbackOption", () => {
 
   it("is true when someone is linked but isn't in an otherwise non-empty list (since removed)", () => {
     expect(needsPersonFallbackOption("p1", [{ id: "p2" }, { id: "p3" }])).toBe(true);
+  });
+});
+
+// Regression coverage for Finding 194 (2026-11-07): `/company/principals/
+// page.tsx` used to discard `company_ownership_breakdown`'s own read error
+// entirely - a sibling in the same Promise.all whose own error WAS captured
+// (`company_principals`), the same single-function error-capture divergence
+// Finding 193 fixed for admin/customers. Because the view is a GROUP BY with
+// no row for a company with zero qualifying shareholders, a genuinely-empty
+// register and a FAILED read both land on `data: null` - indistinguishable
+// without the error, and the page showed the exact same "No shareholdings
+// recorded yet" either way, even directly above a list of principal cards
+// that can themselves show a real non-zero "% of shares" for that company.
+const breakdown: OwnershipBreakdown = {
+  shareholders: 2,
+  total_pct: 100,
+  black_pct: 60,
+  black_women_pct: 30,
+  women_pct: 40,
+  youth_pct: 0,
+  black_youth_pct: 0,
+  disabled_pct: 0,
+  black_disabled_pct: 0,
+  military_veteran_pct: 0,
+  hdi_pct: 60,
+  unclassified_pct: 0,
+};
+
+describe("resolveOwnershipBreakdown", () => {
+  it("returns the row when the read succeeded with real shareholders (the normal, happy path)", () => {
+    expect(resolveOwnershipBreakdown(breakdown, null)).toEqual({ kind: "ok", breakdown });
+  });
+
+  it("returns 'empty' when the read genuinely succeeded with no qualifying shareholders (no row, no error)", () => {
+    expect(resolveOwnershipBreakdown(null, null)).toEqual({ kind: "empty" });
+  });
+
+  it("returns 'error' - not 'empty' - when the read failed, even though both produce the same null row: the discarded-read-error shape this finding fixes", () => {
+    expect(resolveOwnershipBreakdown(null, { message: "connection reset" })).toEqual({ kind: "error" });
+  });
+
+  it("returns 'error' even if a failed read somehow still carried a stale/zero-shareholder row alongside its own error", () => {
+    expect(resolveOwnershipBreakdown({ ...breakdown, shareholders: 0 }, { message: "timeout" })).toEqual({ kind: "error" });
   });
 });

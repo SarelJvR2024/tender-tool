@@ -187,6 +187,25 @@ export function needsPersonFallbackOption(assignedPersonId: string | null, peopl
   return !!assignedPersonId && !people.some((p) => p.id === assignedPersonId);
 }
 
+// Finding 194: `company_ownership_breakdown` (migration 0050) is a GROUP BY
+// view with no row at all for a company with zero qualifying shareholders -
+// so a genuinely-empty register and a FAILED read of this view both land on
+// `.maybeSingle()`'s `data: null`, indistinguishable unless the read's own
+// `error` is kept. `/company/principals/page.tsx` used to discard that
+// error entirely (a sibling in the same `Promise.all` whose own `error` WAS
+// captured, the same single-function divergence shape Finding 193 fixed for
+// admin/customers). Real, visible consequence: on a failed read, the page
+// showed "No shareholdings recorded yet" directly above a list of principal
+// cards that can themselves show a non-zero "% of shares" for the very same
+// company - a direct self-contradiction, not just a quiet wrong number.
+export type OwnershipBreakdownDisplay = { kind: "ok"; breakdown: OwnershipBreakdown } | { kind: "empty" } | { kind: "error" };
+
+export function resolveOwnershipBreakdown(breakdownRow: OwnershipBreakdown | null | undefined, breakdownError: unknown): OwnershipBreakdownDisplay {
+  if (breakdownError) return { kind: "error" };
+  if (!breakdownRow || !breakdownRow.shareholders) return { kind: "empty" };
+  return { kind: "ok", breakdown: breakdownRow };
+}
+
 export const PRINCIPAL_DOCUMENT_KINDS = {
   certified_id: { pathColumn: "certified_id_path", nameColumn: "certified_id_filename", label: "Certified ID copy" },
   disability_proof: { pathColumn: "disability_proof_path", nameColumn: "disability_proof_filename", label: "Disability proof (medical certificate)" },
