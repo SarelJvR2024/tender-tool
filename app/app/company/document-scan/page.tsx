@@ -62,7 +62,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
     { data: pending, error: pendingError },
     { data: principals, error: principalsError },
     { data: people, error: peopleError },
-    { count: queuedCount },
+    { count: queuedCount, error: queuedError },
     { data: company, error: companyError },
     { data: failed, error: failedError },
   ] = await Promise.all([
@@ -113,6 +113,16 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   }
 
   if (pendingError) console.error("onboarding_document_results select failed", pendingError);
+  // Standing review, Finding 195: this count's own error was never captured
+  // at all, the same gap Finding 166 already closed for its sibling in
+  // app/experience/page.tsx. Same safe direction and same severity judgement
+  // as that fix: queuedCount only gates AutoRefresh and the cosmetic "still
+  // being read" banner, never a fact about the customer's own data - a
+  // failed read just means queuedCount falls back to 0 (count ?? 0), the
+  // banner/auto-refresh silently stay off instead of showing a wrong one.
+  // Logged only, not gated, since there is nothing here worth failing closed
+  // over.
+  if (queuedError) console.error("onboarding_uploads count select failed (document-scan queuedCount)", queuedError);
   // A failed principals/people/company read here is indistinguishable from
   // the genuine "haven't added any yet" case below (review.tsx's own
   // `principals.length === 0`/`people.length === 0` empty-state copy) unless
