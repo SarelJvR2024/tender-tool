@@ -145,14 +145,35 @@ def fetch_releases(date_from, date_to, max_pages=MAX_PAGES):
     API itself breaks with HTTP 500 around page 5-6 (roughly 500-600 records in),
     regardless of date range - reproduced on both a recent window and an older
     one (2024 H1), so this is a real upstream limitation, not a transient blip
-    or something caused by this client. Stops cleanly and returns whatever was
-    fetched rather than crashing the whole discovery run over it - a narrower
-    date window (fewer total releases) avoids hitting the wall at all."""
+    or something caused by this client. A page failure AFTER at least one page
+    has already come back (the documented page-5/6 wall) stops cleanly and
+    returns whatever was fetched rather than crashing the whole discovery run
+    over it - a narrower date window (fewer total releases) avoids hitting the
+    wall at all.
+
+    But a page-1 failure (every single page attempt failing, zero releases
+    ever collected) is a different case and is NOT swallowed the same way:
+    that result would otherwise be byte-for-byte identical to a legitimate
+    "no releases in this window" outcome to every caller
+    (gov_sources.fetch_all()'s own etenders_portal-failed fallback branch,
+    which only sees this function's return value, never its own stdout
+    prints) - exactly the dominant silent-failure shape this codebase's
+    review history keeps finding elsewhere (e.g. the Resend User-Agent bug,
+    System-Status.md 0369f50). Raises instead, so fetch_all()'s existing
+    try/except populates errors["etenders_ocds"] and
+    watch_new_tenders.py's own system_alerts.record() gate (already wired to
+    res["errors"]) actually fires. Flagged-but-not-fixed by two prior
+    standing-review passes (2026-11-07/07b); fixed this pass with a genuine
+    red/green test (test_etenders_national.py)."""
     all_releases = []
+    fetch_failed = False
+    last_fetch_error = None
     for page in range(1, max_pages + 1):
         try:
             data = fetch_page(date_from, date_to, page)
         except RuntimeError as e:
+            fetch_failed = True
+            last_fetch_error = e
             print(f"  WARNING: stopped at page {page} ({e}) - "
                   f"keeping the {len(all_releases)} releases already fetched. "
                   f"Try a narrower --days window to get the rest.")
@@ -163,6 +184,13 @@ def fetch_releases(date_from, date_to, max_pages=MAX_PAGES):
         all_releases.extend(releases)
         if not data.get("links", {}).get("next"):
             break
+    if fetch_failed and not all_releases:
+        # Total fetch failure, not a legitimate zero-releases result - see
+        # docstring above. Raise rather than silently returning [].
+        raise RuntimeError(
+            f"OCDS fetch_releases({date_from}..{date_to}) got zero releases and "
+            f"the fetch itself failed ({last_fetch_error}) - this is a total "
+            f"fetch failure, not a genuine zero-releases result for this window.")
     deduped, dupes = dedupe_releases(all_releases)
     if dupes:
         print(f"  removed {dupes} duplicate release(s) (same release id seen twice)")
