@@ -1,5 +1,99 @@
 # System Status
 
+## This pass (2026-11-07x, standing solution-architect review): found and fixed a real instance of
+this review's own dominant bug class one hop further downstream than usual - not a page's empty
+state or a discovery script's silent fallback, but the rendered business number itself, inside the
+founder's own daily digest email. `scripts/send-founder-digest.ts`'s 4 count functions
+(`countNewSignups24h`, `countActiveSubscriptions`, `countClosingWithin48h`, `countScoutBacklog`)
+each caught their own Supabase read error, logged it, and returned a plain `0` anyway - so a
+transient read failure in any of the 4 underlying tables rendered in Sarel's own inbox as a
+genuinely healthy or genuinely quiet day, indistinguishable from the real thing. Worst case:
+`countScoutBacklog()` returning a false `0` on error would tell him "Scout backlog: all clear" on
+exactly the morning the alerting pipeline itself is the thing that's broken. Finding 160.
+
+Oriented from `646e40a` (immediately-preceding pass's own verification entry, HEAD at that commit,
+matching the verified HEAD given for this pass). `git fetch origin main` both before starting and
+right before writing this entry: clean both times, local matched `origin/main` exactly, no sibling
+commits landed during this pass. PRs re-checked via `gh api repos/sareljvr2024/tender-tool/pulls?state=open`:
+`#176`/`#178`/`#179`/`#180`/`#181` still open (`draft: false`), `#164`/`#165`/`#177` still drafts -
+all 8 unchanged, none merged or closed this pass. No PR was touched, amended or merged.
+
+**Why this angle.** The standing backlog's own candidate list (engine/cv/, engine/general/,
+engine/pack_generator/'s non-`confirm_pack.py` files, an app/ area) turned out, on inspection, to
+already be heavily mined: `suggest_pack.py`, every `engine/cv/*.py`, and every `engine/general/*.py`
+file already carries 1-3+ dedicated findings each from prior passes (checked by grepping each
+filename's own mention count in this doc before picking - all in the double digits). Rather than
+force a marginal re-read of already-exhausted files, checked a few lower-mention-count `engine/`
+candidates (`engine/intake/scenario_driver.py` - a local scratch-DB test-harness CLI, not a
+production code path, no finding possible there by construction; `engine/alerts/check_system_alerts.py`
+- already explicitly RETIRED as a live alert channel per its own 2026-10-24 header comment, dead
+code kept only for a manual `--dry-run` look) before landing on the Tier 3 founder-digest/Scout-alert
+surface this doc's own "pagination-cap sweep" (`3007`-`3023`, `1acf0c1`) had read before for a
+*different* bug class (the 1000-row cap) but never for this review's own core pattern.
+
+**What was read and ruled clean first.** `lib/scoutAnomalyAlerts.ts` (2 mentions before this pass) -
+pure, I/O-free candidate-selection functions (`scoutAnomalyCandidates()`, `scoutAnomalyIdempotencyKey()`),
+nothing to discard. `scripts/send-scout-alerts.ts` - every real failure path already correct: a
+`system_alerts` read failure `console.error`s and `process.exit(1)`s (loud, not silent); a single
+`claim_notification` RPC failure for one alert is logged and that one alert is skipped (`continue`),
+never silently dropping the whole batch; a `record_notification_sent` log-write failure is logged
+and deliberately not retried (retrying would double-send, since the alert is already claimed) -
+all 3 of this review's usual failure shapes (total-fetch, per-item, per-log-write) already handled
+correctly here.
+
+**The finding and fix: see Finding 160 for the full write-up.** In short: all 4 of
+`send-founder-digest.ts`'s count functions changed from `Promise<number>` (returning `0` on error)
+to `Promise<number | null>` (returning `null` on error, a real zero still returns `0`).
+`founderDailyDigestEmail()` (`lib/emailTemplatesTier3.ts`) widened its 4 corresponding fields to
+`number | null` and now renders `null` as its own distinct "Couldn't load" value (same wording
+convention `app/AGENTS.md`'s own error-banner entries use elsewhere), with a visible admin-console
+warning line added to the email body whenever any metric failed, and a null-safe fallback for the
+subject line and lead sentence that previously would have interpolated the literal word `null`.
+
+**Verified genuinely, red then green - not asserted.** Neither file had any test coverage before
+this pass. Added `app/scripts/send-founder-digest.spec.ts` (8 tests) and
+`app/lib/emailTemplatesTier3.spec.ts` (5 tests, that template's first-ever test file). Ran both
+against the pre-fix source first (`git stash` on just the 2 source diffs, test files kept): **12 of
+13 failed**, including a literal reproduction of the bug - the pre-fix template rendering the plain
+text `null` into both the HTML and text email bodies. Restored the fix (`git stash pop`): **13/13
+pass**. Full suite re-run after: `npx tsc --noEmit` - 0 errors. `npx eslint .` - 0 errors, the same
+3 pre-existing warnings, unchanged. `npx vitest run` - **487/487, 62 files** (474 baseline + 13 new
+tests, 2 new files). The `*.test.ts` node loop (no `--test` flag, real exit codes) - **28 files, 0
+failures**, matching the standing baseline exactly. Also ran `founderDailyDigestEmail()` manually
+with the original all-numbers call shape (`lib/emailTemplateSamples.ts`'s own sample data) through
+`node --experimental-strip-types` to confirm the normal, all-succeeded path renders identically to
+before - confirmed by `grep` that no other call site in `app/` references any of the 4 functions
+whose signature changed, so nothing else needed updating.
+
+**Pushed directly to `main`** - narrow and self-contained (2 source files + 2 new test files, one
+GitHub-Actions-scheduled sender script and the one email template it feeds), does not touch
+RLS/money paths/hard-stop gates, and does not change what the production worker image installs or
+copies (`send-founder-digest.ts` runs only via `.github/workflows/founder-digest.yml`, never inside
+the worker image).
+
+**Backlog status.** No change to any standing item except this pass's own entry and Finding 160
+above. `start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C) remains
+untouched, per the standing guardrail. PR #176/#178/#179/#180/#181 (all awaiting Sarel's own merge
+decision) remain exactly as described - not touched, not amended. PR #164/#165/#177 (stale drafts)
+not touched. `engine/cv/`, `engine/general/`, and `engine/pack_generator/suggest_pack.py` are now
+confirmed, by this pass's own mention-count check, to be exhaustively mined already - not a live
+backlog candidate for a future pass without a genuinely new angle on one of them.
+`engine/intake/scenario_driver.py` and `engine/alerts/check_system_alerts.py` were read and ruled
+out (test-harness CLI and retired dead code respectively, not production code paths) - noted here so
+a future pass doesn't re-read them expecting a live finding. `lib/scoutAnomalyAlerts.ts` and
+`scripts/send-scout-alerts.ts` are now fully read and confirmed clean for this review's dominant bug
+class - no further backlog item there.
+
+To verify independently: run `npx vitest run app/scripts/send-founder-digest.spec.ts
+app/lib/emailTemplatesTier3.spec.ts` and confirm 13/13 pass. Read `app/scripts/send-founder-digest.ts`'s
+4 `count*()` functions and confirm each returns `null` (not `0`) on its own `if (error)` branch.
+Read `app/lib/emailTemplatesTier3.ts`'s `founderDailyDigestEmail()` and confirm a `null` field
+renders as "Couldn't load", never as "0" or the literal text "null". Confirm via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open` that `#176`/`#178`/`#179`/`#180`/`#181` are still
+open and unmerged.
+
+---
+
 ## This pass (2026-11-07w, standing solution-architect review): independently re-verified the
 sibling track's `0f6595b` ("~46 SECURITY DEFINER functions' revoke-from-public never actually
 removed anon's own execute grant", migration `0120`) against primary sources, not assertion - every

@@ -9649,3 +9649,101 @@ the same shape as Finding 158).
 single page, following an already-correct, already-pervasive pattern used elsewhere in the same
 file), does not touch RLS/money paths/hard-stop gates, and does not change what the production
 worker image installs/copies.
+
+---
+
+### Finding 160 (CONFIRMED, FIXED, moderate - `scripts/send-founder-digest.ts`'s own 4 metric-count
+functions caught their own Supabase read failure and then returned a plain `0` anyway, so the
+daily email Sarel reads every morning could not tell "nothing happened" apart from "the read itself
+broke")
+
+**Area:** `app/scripts/send-founder-digest.ts` (`countNewSignups24h()`, `countActiveSubscriptions()`,
+`countClosingWithin48h()`, `countScoutBacklog()`), `app/lib/emailTemplatesTier3.ts`
+(`founderDailyDigestEmail()`).
+
+**How this was found.** With the pagination-cap/anon-grant/discovery/tender-change angles this
+chain has already closed, picked up the Tier 3 founder-digest/Scout-alert surface
+(`lib/scoutAnomalyAlerts.ts`, `scripts/send-scout-alerts.ts`, `scripts/send-founder-digest.ts`,
+`lib/emailTemplatesTier3.ts`) as a slice this review had read for a *different* bug class before
+(the `countClosingWithin48h()` 1000-row pagination-cap fix, `1acf0c1`) but never for this review's
+own dominant bug class - a discarded Supabase error read as a false-safe "nothing here" state.
+`lib/scoutAnomalyAlerts.ts` (pure candidate-selection, no I/O) and `scripts/send-scout-alerts.ts`
+(every real failure path already `console.error`s and `process.exit(1)`s, or skips just the one
+alert whose own `claim_notification` call failed, never silently zeroing the whole batch) both read
+clean. `scripts/send-founder-digest.ts` did not.
+
+**The bug.** All 4 of its count functions follow the identical shape:
+
+```ts
+async function countScoutBacklog(supabase: SupabaseService): Promise<number> {
+  const { count, error } = await supabase.from("system_alerts").select("id", { count: "exact", head: true }).is("resolved_at", null);
+  if (error) {
+    console.error("founder-digest: could not count the system_alerts backlog", error);
+    return 0;
+  }
+  return count ?? 0;
+}
+```
+
+`console.error()` gives an operator watching the GitHub Actions log something to see - but
+`founderDailyDigestEmail()` (`lib/emailTemplatesTier3.ts`), the one real consumer, only ever
+receives the plain number that function call resolves to. A transient Supabase blip, an RLS/grant
+regression, or a renamed column on any one of the 4 underlying tables (`companies`,
+`company_subscriptions`, `tender_packs`/`tenders`, `system_alerts`) would render as "0 new company
+signups", "0 active paid subscriptions", "0 active bids closing within 48h" or "0 flagged" in
+Sarel's own 07:00 SAST inbox - identical, byte for byte, to the genuinely healthy or genuinely quiet
+day the digest exists to report on. The worst instance is `countScoutBacklog()`: a broken read of
+the alerts table would tell Sarel "Scout backlog: 0 - all clear" on the exact morning the alerting
+pipeline itself needs his attention, the one metric in this email whose entire job is to surface
+that something elsewhere is broken.
+
+**Fix.** All 4 functions now return `number | null` - `null` on a real read failure, never folded
+into `0`. `founderDailyDigestEmail()`'s 4 corresponding fields are now `number | null` too; a `null`
+renders as its own "Couldn't load" value (the same wording convention `app/AGENTS.md`'s own
+error-banner entries already use for this exact page-level distinction), gets the same `warning`
+emphasis a real nonzero count already gets, and - since the subject line and the HTML's lead
+sentence previously interpolated `closingWithin48h`/`scoutBacklogCount` directly as numbers - falls
+back to "Daily digest - some metrics couldn't load" rather than literally printing the word "null".
+A visible line ("One or more counts above couldn't be read this run - check the Admin Console and
+the worker logs rather than trusting 'Couldn't load' as zero.") is added to the email body whenever
+any of the 4 is `null`, and omitted entirely when all 4 succeed - confirmed by test, not by reading
+the template's own prose.
+
+**Verified genuinely, red then green.** Neither `send-founder-digest.ts`'s count functions nor
+`emailTemplatesTier3.ts` had any test coverage before this pass (confirmed: no `*.spec.ts` existed
+for either file - `grep -rn` across `app/` for both filenames outside the scripts/lib themselves
+came back empty). Added `app/scripts/send-founder-digest.spec.ts` (8 tests, exporting and mocking
+the 4 count functions the same chainable-Supabase-stub convention
+`scripts/send-operational-alerts.spec.ts` already established) and `app/lib/emailTemplatesTier3.spec.ts`
+(5 tests, the template's first-ever test file). Ran both against the pre-fix code first (temporarily
+`git stash`-ed the 2 source diffs, test files kept): **12 of 13 failed**, including the template
+literally rendering `null` as the text "null" in both the HTML and plain-text bodies
+(`Scout backlog (flagged items) ... null`) - a real, reproduced pre-fix defect, not a hypothetical
+one. Restored the fix (`git stash pop`): **13/13 pass**. Full regression: `npx tsc --noEmit` - 0
+errors. `npx eslint .` - 0 errors, the same 3 pre-existing warnings, unchanged. `npx vitest run` -
+**487/487, 62 files** (474 baseline + 13 new tests across 2 new files). The `*.test.ts` node loop
+(no `--test` flag, real exit codes) - **28 files, 0 failures**, matching the standing baseline.
+Also manually ran `founderDailyDigestEmail()` with the original literal-number call shape
+(`scripts/render-email-samples.ts`/`lib/emailTemplateSamples.ts`'s own sample data) through
+`node --experimental-strip-types` directly to confirm the normal, all-succeeded path renders
+identically to before (`grep`-confirmed no other call site in `app/` references any of the 4
+renamed-signature functions, so nothing else needed updating).
+
+**Regression:** `app/scripts/send-founder-digest.ts` (4 functions: `Promise<number>` ->
+`Promise<number | null>`, `return 0` -> `return null` on error, all 4 now exported for testing).
+`app/lib/emailTemplatesTier3.ts` (`founderDailyDigestEmail()`'s 4 corresponding fields widened to
+`number | null`, a `metric()` formatter, a conditional admin-console warning line, and a
+null-aware subject/lead-sentence fallback). 2 new spec files (13 tests). No other file touched -
+`lib/scoutAnomalyAlerts.ts` and `scripts/send-scout-alerts.ts` needed no change (already correct, as
+described above).
+
+**Pushed directly to `main`** - narrow, self-contained (2 source files + 2 new test files, one
+sender script and the one template it feeds), does not touch RLS/money paths/hard-stop gates, and
+does not change what the production worker image installs/copies - `send-founder-digest.ts` runs
+only via `.github/workflows/founder-digest.yml` (GitHub Actions, not the worker image).
+
+To verify independently: run `npx vitest run app/scripts/send-founder-digest.spec.ts
+app/lib/emailTemplatesTier3.spec.ts` and confirm 13/13 pass. Read
+`app/lib/emailTemplatesTier3.ts`'s `founderDailyDigestEmail()` and confirm `metric(null)` returns
+`"Couldn't load"`, not `"0"` or `"null"`. Read `app/scripts/send-founder-digest.ts`'s 4 `count*()`
+functions and confirm each `return null;` (not `return 0;`) on its own `if (error)` branch.

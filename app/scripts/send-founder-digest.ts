@@ -54,17 +54,27 @@ const MAX_TENDER_PACK_ROWS = 20_000;
 const ACTIVE_PIPELINE_STAGES = ["found", "assessing", "building", "bidding", "submitted"];
 const CLOSING_WINDOW_HOURS = 48;
 
-async function countNewSignups24h(supabase: SupabaseService, now: Date): Promise<number> {
+// All 4 count*() functions below return `number | null` - `null` means the
+// read itself failed (a real Supabase/RPC error), never silently folded
+// into a plain `0`. Fixed 2026-11-07x (standing review): these used to
+// `console.error` the failure and then `return 0` anyway, so a transient
+// read failure rendered in Sarel's own inbox as "0 new signups"/"0 active
+// subscriptions"/"0 flagged" - indistinguishable from a genuine zero, the
+// exact dominant bug class this review tracks, one hop further downstream
+// than usual (the rendered business number itself, not a page's empty
+// state). `founderDailyDigestEmail()` (lib/emailTemplatesTier3.ts) now
+// renders `null` as its own distinct "Couldn't load" value.
+export async function countNewSignups24h(supabase: SupabaseService, now: Date): Promise<number | null> {
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
   const { count, error } = await supabase.from("companies").select("id", { count: "exact", head: true }).eq("is_test_company", false).gte("created_at", since);
   if (error) {
     console.error("founder-digest: could not count new signups", error);
-    return 0;
+    return null;
   }
   return count ?? 0;
 }
 
-async function countActiveSubscriptions(supabase: SupabaseService): Promise<number> {
+export async function countActiveSubscriptions(supabase: SupabaseService): Promise<number | null> {
   // Filtered in JS, not a PostgREST dot-path filter on the embedded
   // companies resource - same "fetch broad, filter in TypeScript" style
   // scripts/send-operational-alerts.ts already uses throughout, rather than
@@ -72,13 +82,13 @@ async function countActiveSubscriptions(supabase: SupabaseService): Promise<numb
   const { data, error } = await supabase.from("company_subscriptions").select("company_id, status, companies(is_test_company)").eq("status", "active");
   if (error) {
     console.error("founder-digest: could not count active subscriptions", error);
-    return 0;
+    return null;
   }
   const rows = (data ?? []) as unknown as { company_id: string; status: string; companies: { is_test_company: boolean } | null }[];
   return rows.filter((r) => !r.companies?.is_test_company).length;
 }
 
-async function countClosingWithin48h(supabase: SupabaseService, now: Date): Promise<number> {
+export async function countClosingWithin48h(supabase: SupabaseService, now: Date): Promise<number | null> {
   const windowEnd = now.getTime() + CLOSING_WINDOW_HOURS * 60 * 60 * 1000;
   const { rows: data, error } = await fetchAllRows<Record<string, unknown>>(
     (from, to) =>
@@ -91,7 +101,7 @@ async function countClosingWithin48h(supabase: SupabaseService, now: Date): Prom
   );
   if (error) {
     console.error("founder-digest: could not count tenders closing within 48h", error);
-    return 0;
+    return null;
   }
   const rows = data as unknown as { tender_id: string; companies: { is_test_company: boolean } | null; tenders: { closing_date: string | null } | null }[];
   const tenderIds = new Set<string>();
@@ -110,11 +120,11 @@ async function countClosingWithin48h(supabase: SupabaseService, now: Date): Prom
   return tenderIds.size;
 }
 
-async function countScoutBacklog(supabase: SupabaseService): Promise<number> {
+export async function countScoutBacklog(supabase: SupabaseService): Promise<number | null> {
   const { count, error } = await supabase.from("system_alerts").select("id", { count: "exact", head: true }).is("resolved_at", null);
   if (error) {
     console.error("founder-digest: could not count the system_alerts backlog", error);
-    return 0;
+    return null;
   }
   return count ?? 0;
 }

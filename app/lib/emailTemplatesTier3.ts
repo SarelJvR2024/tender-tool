@@ -118,13 +118,33 @@ export function scoutAnomalyBatchEmail(opts: { alerts: ScoutAlertSummary[]; appU
 export function founderDailyDigestEmail(opts: {
   date: string; // ISO date this digest covers
   workerJobSuccessRate: { succeeded: number; total: number } | null;
-  newSignupsLast24h: number;
-  activeSubscriptions: number;
-  closingWithin48h: number;
-  scoutBacklogCount: number;
+  // Each of these 4 is `number | null` - `null` means the sender script's
+  // own read of that count failed (a real Supabase/RPC error), NOT that the
+  // real count is zero. Finding (2026-11-07x, standing review): before this,
+  // scripts/send-founder-digest.ts's 4 count*() functions all caught their
+  // own read error, logged it with console.error, and then returned a plain
+  // `0` anyway - so "0 new signups" / "0 active subscriptions" / "0 flagged"
+  // in Sarel's own daily inbox was indistinguishable from a genuine zero,
+  // the exact dominant bug class this review tracks (a discarded Supabase
+  // error rendered as a false-safe "nothing here" state) - just one hop
+  // further downstream than usual, in the rendered business number itself
+  // rather than the page/caller that fetched it. Rendered as its own
+  // "Couldn't load" value below, same wording convention `app/AGENTS.md`'s
+  // own error-banner entries already use, never silently folded into "0".
+  newSignupsLast24h: number | null;
+  activeSubscriptions: number | null;
+  closingWithin48h: number | null;
+  scoutBacklogCount: number | null;
   appUrl: string;
 }): NotificationEmail {
-  const subject = adminSubject({ summary: `Daily digest - ${opts.closingWithin48h} closing in 48h, ${opts.scoutBacklogCount} flagged` });
+  const metric = (n: number | null) => (n === null ? "Couldn't load" : String(n));
+  const anyMetricFailed = opts.newSignupsLast24h === null || opts.activeSubscriptions === null || opts.closingWithin48h === null || opts.scoutBacklogCount === null;
+  const subject = adminSubject({
+    summary:
+      opts.closingWithin48h === null || opts.scoutBacklogCount === null
+        ? "Daily digest - some metrics couldn't load"
+        : `Daily digest - ${opts.closingWithin48h} closing in 48h, ${opts.scoutBacklogCount} flagged`,
+  });
   const successPct = opts.workerJobSuccessRate && opts.workerJobSuccessRate.total > 0 ? Math.round((opts.workerJobSuccessRate.succeeded / opts.workerJobSuccessRate.total) * 100) : null;
 
   const html = layout(
@@ -133,16 +153,19 @@ export function founderDailyDigestEmail(opts: {
       <p style="margin:0 0 20px;font-size:17px;font-weight:700;">Platform summary - ${escapeHtml(opts.date)}</p>
       ${infoCard([
         { label: "Worker job success (24h)", value: successPct !== null ? `${successPct}% (${opts.workerJobSuccessRate!.succeeded}/${opts.workerJobSuccessRate!.total})` : "No jobs ran" },
-        { label: "New company signups (24h)", value: String(opts.newSignupsLast24h) },
-        { label: "Active paid subscriptions", value: String(opts.activeSubscriptions) },
-        { label: "Active bids closing within 48h", value: String(opts.closingWithin48h), emphasis: opts.closingWithin48h > 0 ? "warning" : undefined },
-        { label: "Scout backlog (flagged items)", value: String(opts.scoutBacklogCount), emphasis: opts.scoutBacklogCount > 0 ? "warning" : undefined },
+        { label: "New company signups (24h)", value: metric(opts.newSignupsLast24h), emphasis: opts.newSignupsLast24h === null ? "warning" : undefined },
+        { label: "Active paid subscriptions", value: metric(opts.activeSubscriptions), emphasis: opts.activeSubscriptions === null ? "warning" : undefined },
+        { label: "Active bids closing within 48h", value: metric(opts.closingWithin48h), emphasis: opts.closingWithin48h === null || opts.closingWithin48h > 0 ? "warning" : undefined },
+        { label: "Scout backlog (flagged items)", value: metric(opts.scoutBacklogCount), emphasis: opts.scoutBacklogCount === null || opts.scoutBacklogCount > 0 ? "warning" : undefined },
       ])}
+      ${anyMetricFailed ? `<p style="margin:0 0 16px;color:#B42318;font-size:12px;">One or more counts above couldn't be read this run - check the Admin Console and the worker logs rather than trusting "Couldn't load" as zero.</p>` : ""}
       ${button(`${opts.appUrl}/admin`, "Open Admin Console")}
     `,
-    `${opts.closingWithin48h} active bids closing within 48h, ${opts.scoutBacklogCount} flagged items.`,
+    anyMetricFailed
+      ? "Some of today's metrics couldn't load - see the digest for which."
+      : `${opts.closingWithin48h} active bids closing within 48h, ${opts.scoutBacklogCount} flagged items.`,
     { appUrl: opts.appUrl }
   );
-  const text = `Daily digest - ${opts.date}\nWorker success: ${successPct !== null ? `${successPct}%` : "no jobs"}\nNew signups (24h): ${opts.newSignupsLast24h}\nActive subscriptions: ${opts.activeSubscriptions}\nClosing within 48h: ${opts.closingWithin48h}\nScout backlog: ${opts.scoutBacklogCount}\n\n${opts.appUrl}/admin`;
+  const text = `Daily digest - ${opts.date}\nWorker success: ${successPct !== null ? `${successPct}%` : "no jobs"}\nNew signups (24h): ${metric(opts.newSignupsLast24h)}\nActive subscriptions: ${metric(opts.activeSubscriptions)}\nClosing within 48h: ${metric(opts.closingWithin48h)}\nScout backlog: ${metric(opts.scoutBacklogCount)}\n\n${opts.appUrl}/admin`;
   return { subject, html, text };
 }
