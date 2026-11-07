@@ -9909,3 +9909,110 @@ To verify independently: run `npx vitest run app/scripts/send-onboarding-nudges.
 confirm 5/5 pass. Read `lifecycleRecipients()`/`unsubscribeUrlFor()` in
 `app/scripts/send-onboarding-nudges.ts` and confirm each now calls `console.error` on its own real
 `error` branch before returning its empty/undefined fallback.
+
+### Finding 163 (CONFIRMED, FIXED, severe - `scripts/send-compliance-digest.ts` gated the SARS Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP expiry digest on the unrelated "new tenders discovered" opt-in, the same bug shape as Finding 161, for a category that can disqualify an active bid outright)
+
+**Area:** `app/scripts/send-compliance-digest.ts` (`processComplianceDigestForCompany()`'s recipient
+lookup).
+
+**How this was found.** Continuing this chain's own notification-engine sweep, per this pass's
+brief: checked each of `send-compliance-digest.ts`/`send-discovered-tenders.ts`/
+`send-deadline-reminders.ts`/`send-operational-alerts.ts` (the 4 remaining Tier 0-3 TypeScript
+senders named explicitly) against its own prior-mention history in this doc first. `send-deadline-
+reminders.ts` and `send-discovered-tenders.ts` read clean (both already resolve recipients via the
+correct function for what they are - `criticalBidRecipients()` and `operationalRecipients()`
+respectively, both deliberately set that way by commit `8623d38`, 2026-10-31). `send-operational-
+alerts.ts` (0 mentions, genuinely unexamined before this pass) also reads clean: its one inline,
+unchecked read (`runClarificationWindow()`'s per-task `tender_packs.pipeline_stage` lookup) fails
+*open*, not closed - a discarded error there defaults `pipelineStageFor()` to `null`, and
+`isClarificationCandidate(null)` is explicitly true (same "don't exclude by accident" rule as a
+genuinely-missing pack row), so a real read failure there still sends the reminder rather than
+silently suppressing it. And `8623d38`'s own commit message explicitly, by name, documents
+`send-operational-alerts.ts` as "unchanged, still opt-in gated" - a deliberate, Sarel-attributed
+product decision from the same commit that split the other 3 scripts onto the unconditional
+resolver, not an oversight; left exactly as-is, not re-litigated.
+
+`send-compliance-digest.ts` was different. It calls `operationalRecipients(supabase, company.id)` -
+the `daily_digest_opt_in`-filtered resolver, migration 0073, default OFF for every member - for the
+exact same reason Finding 161 flagged `engine/notify/send_pack_ready_email.py`: this is identical in
+shape to the pattern `lib/notificationRecipients.ts`'s own header comment and `app/company/
+Notifications.tsx`'s 2026-10-30 fix already named and fixed for 3 other scripts.
+`send-compliance-digest.ts` was never one of them. Checked `8623d38`'s own commit message (the PR
+that created `criticalBidRecipients()` and explicitly enumerated every sender it did and didn't
+switch) line by line: it names exactly 5 scripts total - "switched: send-corrigendum-alerts.ts,
+send-returnables-digest.ts, send-deadline-reminders.ts. Unchanged, still opt-in gated: send-
+discovered-tenders.ts, send-operational-alerts.ts." `send-compliance-digest.ts` appears in neither
+list, even though it already existed 4 days earlier (`dc9eb06`, 2026-10-27) - genuinely missed by
+that review, not a third deliberate "leave gated" decision the commit forgot to mention (unlike
+`send-operational-alerts.ts`, which IS named). Confirmed this isn't a case of "digest-style, so
+opt-in is the right call anyway" by reading `app/company/Notifications.tsx`'s own current UI copy,
+which the 2026-10-30 fix rewrote specifically to describe what IS and ISN'T gated: "Active bid
+alerts (addenda/corrigenda, returnable checklists, and closing deadline reminders for tenders you
+are actively bidding on) are always delivered **to keep your submissions compliant**." That promise
+- "compliant" - is the word, and `send-compliance-digest.ts` is the one sender whose entire purpose
+is submission compliance, yet it was the one left silently contradicting that exact sentence.
+Multiple prior passes read this file closely for other angles (claim-before-recipients ordering,
+`fdeab92`/`f661d26`; pagination, `3007`-`3023`; the creation-date lookback residual, `8119`-`8194`)
+without ever checking this one - each was looking at a different shape of bug, not this one.
+
+**Consequence.** `operationalRecipients()`'s own header comment states the real production number
+this flag starts from: "33 company_members rows ... exactly 1 had ever opted in." For the other 32,
+every SARS Tax Compliance PIN, COID Letter of Good Standing, B-BBEE proof, CIDB registration, and
+per-person ECSA/SACPCMP credential nearing its 30/14/7-day expiry threshold produced zero email,
+silently - no error, no log line distinguishing "nobody opted in" from "nothing is expiring" (the
+`skippedNoRecipients` counter in `main()`'s own summary line folds both into one number either way).
+Unlike a missed corrigendum or a missed deadline reminder (which the bidder would likely also notice
+from the tender detail page itself), a lapsed B-BBEE certificate or CIDB registration is exactly the
+kind of fact a bidding team has no other prompt to re-check until a buyer's own evaluation rejects
+the submission on it - the compliance digest existing at all was meant to be that prompt. Rated
+severe, not moderate (Finding 161's own rating for the same shape), because the consequence here is
+disqualification of a live bid on a technicality, not merely a late pack-ready notification.
+
+**Fix.** Switched `processComplianceDigestForCompany()`'s recipient lookup from
+`operationalRecipients()` to `criticalBidRecipients()` - same unconditional, already-exported
+resolver `send-corrigendum-alerts.ts`/`send-returnables-digest.ts`/`send-deadline-reminders.ts`
+already use, no new migration or RPC needed (both go through the same
+`company_notification_recipients()` call per that resolver's own header comment). Updated the
+file's header comment, the recipients-before-claim inline comment, and every "Skipped (no opted-in
+recipients)"/`"... skipped (no opted-in recipients)."` string (dry-run status + the final `main()`
+summary line) to the already-established "Skipped (no recipients)" / "skipped (no recipients)"
+wording `lib/senderCliArgs.ts`'s own `DryRunRow.status` type and `send-corrigendum-alerts.ts` already
+use for this exact unconditional-resolver case, so the wording itself doesn't keep implying an
+opt-in gate that no longer exists.
+
+**Verified genuinely, red then green.** `scripts/send-compliance-digest.spec.ts` had 4 existing
+tests (the `fdeab92`-era claim-ordering regression suite); none of them exercised the opt-in filter
+itself - 2 even stubbed `daily_digest_opt_in: true` on their one mock recipient, which would have
+masked this exact bug had it been present at the time. Added a 5th test,
+`"sends regardless of daily_digest_opt_in"`, mocking a recipient with `daily_digest_opt_in: false`
+(the real-world default for 32/33 companies) and asserting `skippedNoRecipients: 0`/`claimedCount:
+1` - the opposite of what the pre-fix `operationalRecipients()` filter would produce for that exact
+row. Updated the existing dry-run test's own expected status string to match the wording change.
+Reverted ONLY the 2 functional lines (`operationalRecipients` import + call site) via a scripted
+`python3` string-replace, keeping every test file change in place, and reran:
+**exactly 1 of 5 failed** - the new test, `expected 1 to be +0` on `skippedNoRecipients` - exactly
+the predicted failure, nothing else moved. Restored the fix the same way: **5/5 pass**. Full
+regression after: `npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, the same 3
+pre-existing warnings. `npx vitest run` - **493/493, 63 files** (492 baseline + 1 new test, same 63
+files). The `*.test.ts` node loop (no `--test` flag, real exit codes) - **28 files, 0 failures**,
+unchanged. Full `engine/` sweep (real exit codes, not grep) - **86 files, 0 failures**, unchanged
+(this fix touches no Python).
+
+**Regression:** `app/scripts/send-compliance-digest.ts` (1 import + 1 call site switched to
+`criticalBidRecipients()`; header/inline comments updated; 2 dry-run/log status strings reworded
+from "no opted-in recipients" to "no recipients"). `app/scripts/send-compliance-digest.spec.ts` (1
+existing test's expected string updated, 1 new test added - 4 -> 5 tests). No other file touched -
+`lib/notificationRecipients.ts` itself needed no change (`criticalBidRecipients()` already existed,
+exported, used elsewhere).
+
+**Pushed directly to `main`** - a one-import, one-call-site behavioural switch to an already-
+existing, already-used, already-tested shared resolver, confined to a single already-isolated
+sender script, plus its own test and wording updates. Does not touch RLS, the PayFast/money path,
+any hard-stop gate, or what the production worker image installs/copies (`send-compliance-digest.ts`
+runs only via `.github/workflows/compliance-alerts.yml`, GitHub Actions, not the worker image).
+
+To verify independently: run `npx vitest run app/scripts/send-compliance-digest.spec.ts` and confirm
+5/5 pass. Read `processComplianceDigestForCompany()` in `app/scripts/send-compliance-digest.ts` and
+confirm its recipient lookup calls `criticalBidRecipients()`, not `operationalRecipients()`. Read
+commit `8623d38`'s own message (`git show -s --format=%B 8623d38`) and confirm `send-compliance-
+digest.ts` is named in neither its "switched" nor its "unchanged, still opt-in gated" list.

@@ -18,11 +18,29 @@
 //
 // Run: node --experimental-strip-types scripts/send-compliance-digest.ts
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
+//
+// Recipients: lib/notificationRecipients.ts's criticalBidRecipients() - NOT
+// operationalRecipients() (standing review, 2026-11-07 fix). A lapsing SARS
+// Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP certificate can disqualify an active
+// bid outright, exactly the "critical, bid-protecting" class
+// lib/notificationRecipients.ts's own header comment and
+// app/company/Notifications.tsx's 2026-10-30 fix already carved out of the
+// unrelated "new tenders discovered" daily_digest_opt_in flag for
+// send-corrigendum-alerts.ts/send-returnables-digest.ts/
+// send-deadline-reminders.ts - Notifications.tsx's own UI copy even promises
+// "closing deadline reminders ... are always delivered to keep your
+// submissions compliant", which this script's prior opt-in gate directly
+// contradicted. This file was never switched over in that same pass (it
+// predates it by 4 days and was never named in that commit's own
+// before/after list) and was missed by every later review of this file
+// since - each one was checking a different angle (claim ordering,
+// pagination, the lookback window), not this one. See Finding 163,
+// docs/specs/QA-Edge-Case-Findings.md.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { complianceDigestEmail } from "../lib/emailTemplatesTier2.ts";
 import { resendApiKeyConfigured, sendTransactionalEmail } from "../lib/resendEmail.ts";
-import { operationalRecipients } from "../lib/notificationRecipients.ts";
+import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 import { complianceDigestCandidatesForCompany, complianceDigestIdempotencyKey, type ComplianceDigestCandidate } from "../lib/complianceDigestCandidates.ts";
 import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
 
@@ -48,7 +66,7 @@ export async function processComplianceDigestForCompany(
   opts: { dryRun: boolean; testRecipient: string | null },
 ): Promise<ComplianceDigestCompanyOutcome> {
   const { dryRun, testRecipient } = opts;
-  const recipients = await operationalRecipients(supabase, company.id);
+  const recipients = await criticalBidRecipients(supabase, company.id);
   const companyName = company.legal_name || "your company";
 
   // --dry-run never claims - every candidate is shown as if new.
@@ -70,6 +88,9 @@ export async function processComplianceDigestForCompany(
     // one-shot reminder, even once someone opts in before the document
     // actually expires (the later 14-/7-day thresholds, if any remain,
     // would still fire normally; only the missed one is lost for good).
+    // "Zero recipients" now means zero registered company_members at all
+    // (criticalBidRecipients() is unconditional - see the import's own
+    // header comment, Finding 163), not "zero opted into the daily digest".
     if (recipients.length === 0) {
       return { claimedCount: 0, sent: 0, skippedNoRecipients: 1, dryRunRow: null };
     }
@@ -106,7 +127,7 @@ export async function processComplianceDigestForCompany(
         recipients,
         targetItems: claimedItems.map((c) => c.item.label).join(", "),
         subject,
-        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+        status: recipients.length === 0 ? "Skipped (no recipients)" : "Simulated OK",
       },
     };
   }
@@ -193,7 +214,7 @@ async function main() {
     return;
   }
 
-  console.log(`Compliance digest: ${itemsClaimed} item(s) claimed, ${companiesSent} email send attempt(s), ${skippedNoRecipients} company(ies) skipped (no opted-in recipients).`);
+  console.log(`Compliance digest: ${itemsClaimed} item(s) claimed, ${companiesSent} email send attempt(s), ${skippedNoRecipients} company(ies) skipped (no recipients).`);
 }
 
 // Only runs main() when this file is executed directly, not when a test

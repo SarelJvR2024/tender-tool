@@ -1,5 +1,103 @@
 # System Status
 
+## This pass (2026-11-07aa, standing solution-architect review): finished the notification-engine
+sweep's remaining Tier 0-3 TypeScript senders named by this pass's own brief -
+`send-compliance-digest.ts`, `send-discovered-tenders.ts`, `send-deadline-reminders.ts`,
+`send-operational-alerts.ts` - checking each's own prior-mention history in
+`docs/specs/QA-Edge-Case-Findings.md` first, per the brief's instruction, rather than re-flagging
+something already fixed.
+
+`send-deadline-reminders.ts` and `send-discovered-tenders.ts` read genuinely clean: both already use
+the correct recipient resolver for what they are (`criticalBidRecipients()` and
+`operationalRecipients()` respectively - deliberately set that way by commit `8623d38`, 2026-10-31),
+and every real read failure is already loud. `send-operational-alerts.ts` (0 mentions anywhere in
+the findings doc before this pass - genuinely unexamined) also reads clean: its one unchecked inline
+read (`runClarificationWindow()`'s per-task `tender_packs.pipeline_stage` lookup, no `error`
+destructured at all) fails *open*, not closed - `isClarificationCandidate(null)` is explicitly true,
+so a real read failure there still sends the reminder rather than silently suppressing it, the
+opposite direction from this review's own dominant bug shape. Its own `operationalRecipients()`
+(opt-in-gated) choice for print-cutoff/briefing/clarification-window is NOT an oversight either -
+`8623d38`'s own commit message names it explicitly as "unchanged, still opt-in gated," a deliberate,
+Sarel-attributed product decision from the same commit that unconditionally switched 3 other
+scripts. Left exactly as-is, not re-litigated (the same "needs a product-policy call, not a code
+fix" standing this pass's guardrails already apply to the PayFast revenue-integrity gap - if
+anything it's now worth Sarel's own attention precisely because this pass found a FOURTH script,
+`send-compliance-digest.ts`, that assumed the opposite rule by accident, not a sibling of the
+deliberate operational-alerts choice).
+
+`send-compliance-digest.ts` (3 prior mentions, all for other angles - claim ordering, pagination,
+lookback window - never this one) was not clean: it called `operationalRecipients()` (the
+`daily_digest_opt_in`-filtered resolver, default OFF for 32 of 33 real company_members rows per that
+resolver's own header comment) for the SARS Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP expiry digest -
+the identical bug shape Finding 161 fixed in `send_pack_ready_email.py`, here for a category that
+can disqualify a live bid outright on a technicality, not just delay a pack-ready notification.
+Confirmed this was a genuine miss, not a 3rd deliberate "leave gated" decision: `8623d38`'s own
+commit message names exactly 5 senders across its "switched"/"unchanged, still opt-in gated" lists,
+and `send-compliance-digest.ts` - which already existed 4 days earlier - is in neither, despite
+`app/company/Notifications.tsx`'s own UI copy (rewritten by that same 2026-10-30 fix) explicitly
+promising "closing deadline reminders ... are always delivered **to keep your submissions
+compliant**." Finding 163.
+
+Oriented from `d4a0248` (immediately-preceding pass's own verified HEAD). `git fetch origin main`
+before starting and again right before writing this entry: clean both times, local matched
+`origin/main` exactly (`d4a0248` both times), no sibling commits landed during this pass. PRs
+re-checked via `mcp__github__list_pull_requests`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. No PR was touched, amended or merged.
+
+**Fix, verified red then green.** Switched `processComplianceDigestForCompany()`'s recipient lookup
+to `criticalBidRecipients()` (already-exported, already-used-elsewhere resolver, no new RPC/
+migration needed), updated the file's header/inline comments, and reworded the 2 "no opted-in
+recipients" dry-run/log strings to the already-established "no recipients" wording
+`send-corrigendum-alerts.ts`/`lib/senderCliArgs.ts` already use for this unconditional case. Added
+`"sends regardless of daily_digest_opt_in"` to the existing `send-compliance-digest.spec.ts` (4 ->
+5 tests), mocking a recipient with `daily_digest_opt_in: false` (the real 32/33 default) and
+asserting it's still treated as a valid recipient; updated the 1 existing test whose expected status
+string changed with the wording. Reverted ONLY the 2 functional lines (import + call site, via a
+scripted string-replace, keeping every test-file change in place) and reran: **exactly 1 of 5
+failed** - the new test, `expected 1 to be +0` on `skippedNoRecipients` - exactly the predicted
+failure, nothing else moved. Restored: **5/5 pass**. Full regression after: `npm run typecheck` - 0
+errors. `npx eslint .` - 0 errors, same 3 pre-existing warnings. `npx vitest run` - **493/493, 63
+files** (492 baseline + 1 new test, same file count). The `*.test.ts` node loop (no `--test` flag,
+real exit codes) - **28 files, 0 failures**. Full `engine/` sweep (real exit codes) - **86 files,
+0 failures**, unchanged (this fix touches no Python). Full write-up: Finding 163 in
+`docs/specs/QA-Edge-Case-Findings.md`.
+
+**Pushed directly to `main`** - a one-import, one-call-site switch to an already-existing,
+already-tested shared resolver, confined to a single already-isolated sender script plus its own
+test, no RLS/money/hard-stop/worker-image-install surface touched (`send-compliance-digest.ts` runs
+only via `.github/workflows/compliance-alerts.yml`, GitHub Actions, not the worker image).
+
+**Backlog status.** The Tier 0-3 TypeScript notification-engine sweep named by this pass's brief is
+now complete - all 4 remaining senders checked, 3 confirmed clean (2 genuinely, 1 via a documented
+deliberate decision this pass re-confirmed rather than re-litigated) and 1 fixed (Finding 163). The
+Python siblings this pass's brief also named as a lower-priority fallback
+(`daily_digest.py`/`send_digest_emails.py`/`record_heartbeat.py`, 56/27/12 mentions respectively -
+heavily mined already) were not reached this pass; still a live candidate for whichever pass picks
+this up next, though a genuine negative result there remains likely per the brief's own framing.
+Worth flagging explicitly for Sarel, NOT fixed and NOT added to the numbered backlog as a code
+defect (it's the same "needs a product-policy call" shape as the standing PayFast item, not a bug):
+`send-operational-alerts.ts`'s print-cutoff/briefing/clarification-window alerts are exactly as
+time-critical and per-bid as the corrigenda/returnables/deadline-reminder/pack-ready alerts that
+Finding 161 and this pass's own fix (Finding 163) just finished making unconditional - yet
+`8623d38` deliberately left this one script opt-in-gated, with no stated reasoning beyond listing it
+as "unchanged." Whether that's still the right call, now that 2 more scripts in the same family have
+since been switched the other way for the same underlying reasoning, is Sarel's own judgment call,
+not this review's - flagged here, not touched. `start_payfast_checkout()`'s revenue-integrity gap
+(2026-11-07e, options A/B/C) remains untouched, per the standing guardrail. PR
+#176/#178/#179/#180/#181 (awaiting Sarel's own merge decision) and #164/#165/#177 (stale drafts)
+remain exactly as described - not touched, not amended, not merged.
+
+To verify independently: run `npx vitest run app/scripts/send-compliance-digest.spec.ts` and confirm
+5/5 pass. Read `processComplianceDigestForCompany()` in `app/scripts/send-compliance-digest.ts` and
+confirm its recipient lookup calls `criticalBidRecipients()`, not `operationalRecipients()`. Run
+`git show -s --format=%B 8623d38` and confirm `send-compliance-digest.ts` appears in neither its
+"switched" nor its "unchanged, still opt-in gated" list (while `send-operational-alerts.ts` does, in
+the latter). Confirm via `mcp__github__list_pull_requests` that `#176`/`#178`/`#179`/`#180`/`#181`
+are still open and unmerged.
+
+---
+
 ## This pass (2026-11-07z, standing solution-architect review): continued the notification-engine
 sweep started by Findings 160/161 (`646e40a` through `96f2865`) across the remaining Tier 0-3
 sender scripts, checking each for the same two bug shapes named in the brief - a discarded read
