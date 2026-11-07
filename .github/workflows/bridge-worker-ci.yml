@@ -97,6 +97,19 @@ jobs:
           sudo apt-get install -y --no-install-recommends libreoffice-writer
           pip install -r engine/worker/requirements.txt
 
+      - name: Python dependency audit (pip-audit) - requirements.txt must carry zero known vulnerabilities
+        # Never wired into CI before this pass - every prior finding on this
+        # file (pypdf/Pillow's 64 CVEs, 2026-11-07j) came from a human running
+        # `pip-audit` by hand during a standing review pass, with no guarantee
+        # another pass would ever re-run it. This pins are now clean (fixed in
+        # 2026-11-07j); a future CVE against any pinned/transitive package in
+        # engine/worker/requirements.txt now fails this job directly, instead
+        # of waiting for someone to notice and re-run the command by hand.
+        if: ${{ !cancelled() }}
+        run: |
+          pip install pip-audit
+          pip-audit -r engine/worker/requirements.txt
+
       - name: CV bridge self-test (row adapters -> generate_cv.py)
         if: ${{ !cancelled() }}
         run: python3 engine/cv/process_cv_jobs.py --self-test --out-dir "$RUNNER_TEMP/cv-self-test"

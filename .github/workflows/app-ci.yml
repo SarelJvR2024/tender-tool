@@ -54,6 +54,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Dependency audit (npm) - fails only on an untriaged HIGH/CRITICAL in production dependencies
+        # Neither this nor the Python side (bridge-worker-ci.yml) ran any
+        # dependency-vulnerability check at all before this pass - every prior
+        # finding (2026-10-20, 2026-11-07j, 2026-11-07k) came from a human
+        # running `npm audit`/`pip-audit` by hand during a standing review
+        # pass, sometimes going weeks without being re-run (Finding 149's own
+        # "0, unchanged since 2026-10-20" staleness - 2 of its advisories
+        # predated that "0" check and were still missed). --audit-level=high
+        # so this doesn't fail on the 6 already-triaged, confirmed-production-
+        # unreachable moderate/low findings (shadcn's own deepmerge/minimatch
+        # transitives - System-Status.md 2026-11-07k, Finding 149) - those are
+        # Sarel's own tooling-pin call (downgrading shadcn/eslint-config-next
+        # or upgrading vitest's major version), not something this gate should
+        # block every push on. A future HIGH/CRITICAL in any direct or
+        # transitive production dependency now fails CI the moment it's
+        # introduced or newly disclosed, instead of waiting for the next
+        # standing-review pass to happen to re-run the command.
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Typecheck
         run: npm run typecheck
 

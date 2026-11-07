@@ -8641,3 +8641,103 @@ change, but that wasn't observed directly.
 deletions, entirely transitive dependency resolution - no direct
 dependency version in `package.json` changed). No `app/` source file
 touched.
+
+---
+
+### Finding 150 (CONFIRMED, FIXED, moderate - neither `npm audit` nor `pip-audit` was ever wired into this project's CI; every dependency-vulnerability finding in this doc (Findings 148, 149) was found by a human running the command by hand during a standing review pass, with no guarantee the next pass would ever re-run it)
+
+**Area:** `.github/workflows/app-ci.yml` (Next.js app CI) and
+`.github/workflows/bridge-worker-ci.yml` (engine/worker CI) - the two
+workflows that gate every push to `main`.
+
+**How this was found.** This pass's angle was the standing directive's own
+suggestion (b): check whether the CI workflows actually run `pip-audit`/
+`npm audit` as part of their gate, given that the 2026-11-07j and
+2026-11-07k entries both found real, previously-unnoticed dependency
+vulnerabilities (Findings 148 and 149) purely by a human running the
+command by hand mid-pass. Read both `app-ci.yml` and `bridge-worker-ci.yml`
+in full and grepped both (`grep -n "pip-audit\|npm audit"`) - **zero
+hits in either file.** `app-ci.yml` runs `npm ci`/typecheck/lint/build/
+vitest/the `*.test.ts` loop, and `bridge-worker-ci.yml`'s `smoke-test` job
+installs `engine/worker/requirements.txt` and runs 60+ named test files -
+neither workflow has ever once invoked a dependency-vulnerability scanner,
+confirmed by reading both files start to finish, not by trusting either
+workflow's own header comments (neither claims to run one, so this isn't
+a case of a comment lying - it's a genuine, never-addressed gap).
+
+**Why this matters, traced rather than assumed.** This is exactly the
+failure mode Finding 149 itself lived through: the "`npm audit` --omit=dev
+= 0 vulnerabilities" claim was repeated, unverified, across at least 4
+consecutive standing-review-pass entries (2026-10-20 through 2026-11-07j)
+before anyone actually re-ran the command and found it had gone stale by
+7 production-reachable vulnerabilities, 2 of which (the HIGH `body-parser`
+advisory, the `minimatch` moderate) were published in the gap between
+checks. A CI gate that runs the scanner on every push closes that exact
+gap - it doesn't depend on a human (or an AI review pass) remembering to
+re-run a command that has no fixed cadence and, per this doc's own
+history, can go unverified for weeks at a time.
+
+**Fix.** Added `npm audit --omit=dev --audit-level=high` as a new step in
+`app-ci.yml`, right after `npm ci`. `--audit-level=high` deliberately
+means this does NOT fail on the 6 already-triaged, confirmed-production-
+unreachable moderate/low findings Finding 149 left open on purpose
+(`shadcn`'s own `deepmerge`/`minimatch` transitives - each one's real fix
+is a tooling-version decision for Sarel, not something this review loop
+or a CI gate should force) - it fails only on a genuinely new HIGH/
+CRITICAL in a production dependency, which is the actual thing worth
+blocking a push over. Added `pip-audit -r engine/worker/requirements.txt`
+(installing `pip-audit` first) as a new step in `bridge-worker-ci.yml`'s
+`smoke-test` job, right after the existing `pip install -r
+engine/worker/requirements.txt` step, with no severity floor - the Python
+pins are fully clean today (Finding 148 fixed them, 2026-11-07j), so there
+is no equivalent "already-triaged, left open on purpose" exception to
+carve out yet; a future CVE here should fail the job outright until
+someone looks at it.
+
+**Verified myself, genuine red-then-green.** For the npm step: ran `npm
+audit --omit=dev --audit-level=high` against the current, post-149-fix
+`package-lock.json` first - **exit 0** (the 6 remaining findings are all
+moderate/low, correctly under the `--audit-level=high` floor). Then
+temporarily restored `package-lock.json` to its pre-Finding-149-fix state
+(`git show f60bf0a:app/package-lock.json`, the commit immediately before
+that fix) and re-ran the exact same command - **exit 1**, correctly
+failing on the then-present `body-parser` HIGH (`GHSA-27r3-jxmh-p828`).
+Restored the current lockfile afterward (`git status --short
+package-lock.json` confirmed byte-for-byte identical to HEAD, zero drift
+introduced by the test). For the pip-audit step: ran `pip-audit -r
+engine/worker/requirements.txt` directly against the current,
+post-Finding-148-fix `requirements.txt` - **"No known vulnerabilities
+found"**, exit 0 (not independently re-tested red against the pre-148
+pins in this pass, since Finding 148's own entry already did that exact
+red/green cycle for this file - re-deriving it again here would be
+redundant, not a stronger verification). Both new workflow YAML files
+parsed cleanly (`yaml.safe_load`). Full `app/` regression after the
+change: `npm run typecheck` - 0 errors; `npx eslint .` - 0 errors, same 3
+pre-existing warnings; `npx vitest run` - **469/469 passed, 60/60 files**
+(unchanged); the per-file `*.test.ts` loop (no `--test` flag) - **27
+files, 0 failures** (unchanged); `npx next build` - compiled
+successfully, same route table, `Proxy (Middleware)` present. No
+`engine/` Python file or test was touched, so the 84-file sweep wasn't
+re-run; `pip-audit` itself was verified directly, which is the only thing
+that changed on that side.
+
+**What was and wasn't verified.** Not verified against a real GitHub
+Actions run of either workflow (no Actions runner in this environment) -
+verification is running the exact same commands these new steps invoke,
+locally, against the exact files these workflows would check out, which
+is the same standard this doc already uses for every other
+`*-ci.yml`-adjacent fix. Not verified: whether a future `npm audit fix`
+(or a manual `package.json` bump) could ever silently raise the
+"accepted" moderate/low count past what `--audit-level=high` would still
+let through as a NEW high/critical hiding inside a changed transitive
+tree - this gate catches a new high/critical appearing on `main` as it
+lands, not a slow drift inside a dependency a developer explicitly
+chooses to bump; that's a smaller, longer-tail residual risk than the
+"zero gate, zero cadence" one this fix closes. Not decided: whether
+Sarel ever wants `--audit-level=high` tightened to `moderate` once the
+`shadcn`/`eslint-config-next`/`vitest` version pins move - left as a
+backlog note, not a call this pass makes unilaterally.
+
+**Regression:** `.github/workflows/app-ci.yml` (+19 lines, one new step)
+and `.github/workflows/bridge-worker-ci.yml` (+13 lines, one new step).
+No `app/` or `engine/` source file touched.
