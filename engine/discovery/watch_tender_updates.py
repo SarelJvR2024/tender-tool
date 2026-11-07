@@ -366,6 +366,21 @@ def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None,
         release, day = ocds.find(tender["ocid"], known_day, _discovered_day(client, tender), today)
         if not release:
             new_state["last_error"] = f"OCDS release {tender['ocid']} not found in the windows read"
+            # Same severity and shape as the SANRAL branch's own call just
+            # below - found 2026-11-07s: this branch used to only write
+            # last_error into tender_watch_state (a column nothing else in
+            # the codebase ever reads) and print a log() line, with no
+            # system_alerts.record() call at all. A pursued eTenders tender
+            # whose release drops out of every day-window this watch tries
+            # (the walk-back exhausted, or a re-dating/pagination gap) would
+            # silently stop getting any addendum/closing-date/briefing alert
+            # forever, with zero visibility to Sarel - unlike the identical
+            # consequence for a SANRAL tender one branch below, which has
+            # always alerted.
+            system_alerts.record("tender_updates", f"A pursued eTenders tender's OCDS release could not be found "
+                                 f"in the windows this run checked: {new_state['last_error']}", "error",
+                                 context={"tender_id": tender.get("id"), "contract_no": tender.get("contract_no"),
+                                          "ocid": tender.get("ocid")})
             client.upsert("tender_watch_state", [{**state, **new_state}], "tender_id")
             log(f"  {tender.get('contract_no') or tender['id']}: {new_state['last_error']}")
             return []

@@ -9260,3 +9260,144 @@ Regression: `engine/test_form_field_audit.py`, `engine/pack/test_pack_suggestion
 ~17 lines including comments); `engine/pack_generator/test_confirm_pack.py` (new file, first dedicated
 test coverage for this module). No change to the negative-experience check, the project-dropping
 logic, or any other validation in `confirm()`.
+
+---
+
+### Finding 156 (CONFIRMED, FIXED, moderate - `watch_tender_updates.py`'s own eTenders/OCDS
+failure path had no `system_alerts.record()` call at all, unlike the SANRAL failure path right
+next to it in the same function, so a pursued eTenders tender whose release drops out of every
+day-window this watch tries would silently stop getting ANY addendum/closing-date/briefing alert,
+forever, with zero visibility to Sarel)
+
+**Area:** `engine/discovery/watch_tender_updates.py` (`check_tender()`), the 4th watch of the same
+shape as `watch_new_tenders.py`/`watch_deadlines.py`/the daily digest - reports addenda, closing-
+date changes and briefing-date changes ONLY to companies actively pursuing a tender.
+
+**How this was found.** This pass's own priority was the 4 sibling direct-buyer readers named in
+the immediately-preceding pass (2026-11-07r) as unreachable-or-unverified for the DBSA-shaped
+reused-reference `ocid` collision - see below for that result. With time remaining, continued the
+discovery-pipeline read into a slice not yet covered by any prior pass: the tender-change/update-
+tracking subsystem (`watch_tender_updates.py`, `tender_changes.py`, `tender_updates.py`,
+`detail.py`) - none of which the 2026-11-07r fan-out/scoring slice touched.
+
+Read `check_tender()`'s two source branches side by side - eTenders (`tender.get("ocid")`) and
+SANRAL (`tender.get("source") == "sanral"`) - since they handle the structurally identical case
+(this run's attempt to re-read the tender's real source failed) right next to each other in the
+same function, an obvious place to check they actually behave the same way. They don't:
+
+```python
+if tender.get("ocid"):
+    ...
+    release, day = ocds.find(tender["ocid"], known_day, _discovered_day(client, tender), today)
+    if not release:
+        new_state["last_error"] = f"OCDS release {tender['ocid']} not found in the windows read"
+        client.upsert("tender_watch_state", [{**state, **new_state}], "tender_id")
+        log(f"  {tender.get('contract_no') or tender['id']}: {new_state['last_error']}")
+        return []
+elif tender.get("source") == "sanral" and tender.get("slug"):
+    try:
+        ...
+    except Exception as e:
+        new_state["last_error"] = f"SANRAL page could not be read ({e})"
+        system_alerts.record("tender_updates", f"A pursued SANRAL tender's page could not be read: ...",
+                             "error", exc=e, context={...})
+        ...
+        return []
+```
+
+The SANRAL branch calls `system_alerts.record(..., "error", ...)` on failure - a real alert
+`/admin` shows and Sarel sees (`system_alerts.py`'s own docstring: "Sarel... a fail must be
+emailed to me and flagged for me to review"). The OCDS branch, on the equivalent failure (the
+tender's release can't be found in ANY of the day-windows `OcdsDays.find()` tries - the
+`WALK_BACK_DAYS=21` walk-back exhausted, or the feed's own re-dating/pagination means today's
+windows simply don't carry it), does **not** call `system_alerts.record()` at all - it only writes
+`last_error` into `tender_watch_state`, confirmed by `grep -rn "last_error"` across all of `app/`
+and `engine/` to be a column **nothing else in the codebase ever reads** (no admin page, no
+digest, nothing - the only other `last_error` match anywhere is `app/lib/workflowRegistry.ts`'s
+own unrelated field of the same name for a completely different subsystem).
+
+**The real consequence.** A company actively pursuing an eTenders tender whose release drops out
+of every window this watch tries would silently stop getting ANY addendum/closing-date/briefing
+alert for it, forever - and this never shows up as a "failure" anywhere a human would see: it
+doesn't raise (so it's never in `run()`'s own per-tender `failed` list, which only catches an
+actual exception), it's just a plain `return []` with nothing new to report that run, indistin-
+guishable from a tender that's genuinely had no updates. The identical failure mode for a SANRAL
+tender has always alerted. This is the exact dominant bug class this whole review has tracked
+(an external-read failure silently treated as a false-safe "nothing here" state) - just one level
+removed from the usual shape, since it's not a discarded exception but a discarded **negative
+result** (release not found) from a call that itself didn't fail.
+
+**Zero test coverage, confirmed before writing one.** `ls test_*.py` in `engine/discovery/` - every
+other module in this subsystem with real logic has a test file (`test_tender_changes.py`,
+`test_tender_updates.py`, `test_discovery_downgrades.py`, etc.); `watch_tender_updates.py` (600+
+lines: OCDS day-window search, briefing/closing-date application, per-company notification dedupe)
+had none at all, confirmed by its absence from that listing, not assumed.
+
+**Fix.** Added a `system_alerts.record()` call to the OCDS "release not found" branch, same
+severity ("error") and shape as the SANRAL branch's own call three lines below it - naming the
+tender id, contract number and ocid in `context`. Only this one branch is touched; the SANRAL
+branch, `last_error`'s own write, and everything else in `check_tender()` is unchanged.
+
+**Verified genuinely, red-then-green.** `engine/discovery/watch_tender_updates.py` had no test file
+at all, so a new one was written from scratch (`test_watch_tender_updates.py`) with an in-memory
+`FakeClient` matching `company_profiles.RestClient`'s own `select`/`update`/`upsert`/`insert`/`rpc`
+shape - no real Supabase needed. `test_ocds_release_not_found_is_alerted()`: one pursued tender
+whose `fetch_ocds_day` never returns its ocid in any window; run before the fix: **red** -
+`tender_watch_state.last_error` was set correctly, but zero `system_alerts.record()` calls, so the
+"gets an alert" assertion failed (`ALL PASSED` did not print, exit 1). Applied the fix, re-ran:
+**green** - exactly one alert recorded, severity `error`, naming the tender. A second test,
+`test_sanral_failure_still_alerted_unchanged()`, confirms the SANRAL branch's own pre-existing
+alert still fires exactly once and is untouched by this change - guards against a future "fix" to
+the OCDS side silently breaking the SANRAL side's own alerting. Full regression: the complete
+`engine/` per-file test loop (`find . -maxdepth 2 -name "test_*.py"`, real exit codes, not string-
+grep) - **85 files now** (the standing baseline's 84 plus this new one) - **0 failures**. `ast.parse`
+clean on the edited file.
+
+**Regression:** `engine/discovery/watch_tender_updates.py` (+15 lines, one new `system_alerts.record()`
+call + its own explanatory comment). `engine/discovery/test_watch_tender_updates.py` (+1 new file).
+No other file touched.
+
+**Pushed directly to `main`** - small, narrow (one branch of one function gains the same alerting
+its sibling branch already had), does not touch RLS/money paths/hard-stop gates, and does not
+change what the production worker image installs/copies.
+
+---
+
+### Priority-1 check this pass, no new finding logged for it: the 4 sibling direct-buyer readers
+named unreachable-or-unverified by 2026-11-07r (`sars_procurement.py`, `lephalale.py`,
+`vaal_central_water.py`, `randwater.py`) for the DBSA-shaped reused-reference `ocid` collision -
+checked live again this pass, genuinely, not assumed carried-forward.
+
+- **`sars_procurement.py`: reachable, checked live, clean.** `fetch_releases()` against the real
+  live site: 2 open tenders today (RFP14/2026, RFP18/2026), 2 distinct ocids. Same result as
+  2026-11-07r (still too small a sample to clear the architectural risk either way, but no
+  collision found on the real current data).
+- **`vaal_central_water.py`: reachable THIS pass (it was NOT last pass - 403'd then), checked live,
+  clean.** `fetch_releases()` against the real live site: 9 advertised tenders, 9 distinct ocids -
+  matches the 9 tenders the original SOE-catalog research (2026-10-20) already named on this page.
+  No collision.
+- **`lephalale.py`: still unreachable from this sandbox, confirmed genuinely, not assumed.**
+  `fetch_releases()` raised `GET https://www.lephalale.gov.za/pages/tenders.php failed after 3
+  attempts: <urlopen error [Errno 104] Connection reset by peer>`. Cross-checked against the agent
+  proxy's own status endpoint (`http://127.0.0.1:45339/__agentproxy/status`) rather than assumed a
+  local misconfiguration: `recentRelayFailures` independently shows the SAME host
+  (`www.lephalale.gov.za:443`) failing with `ws_closed_mid_exchange` (tunnel closed code 1006) at
+  several distinct timestamps across this pass - a real connection-level failure reaching the real
+  host, not a proxy/CA issue on this session's end.
+- **`randwater.py`: still unreachable from this sandbox, confirmed genuinely, not assumed.**
+  `fetch_releases()` raised `SSL: CERTIFICATE_VERIFY_FAILED`. Checked directly with `curl --cacert
+  /root/.ccr/ca-bundle.crt` (the proxy's own trusted CA bundle, confirmed correctly configured via
+  `SSL_CERT_FILE`/`PIP_CERT`/etc.) against the real host: `SSL certificate problem: unable to get
+  local issuer certificate` - `TLS handshake... Certificate (11)... TLS alert, unknown CA (560)` -
+  the real server's own certificate chain doesn't validate against a correctly-configured trust
+  store, not a sandbox CA/proxy misconfiguration. Matches this module's own long-standing docstring
+  ("three separate automated fetch attempts... were all refused - a TLS chain error from curl...
+  Whether a scheduled run... can reach this site at all is unconfirmed") - a pre-existing, already-
+  documented site-side issue, re-confirmed rather than newly discovered.
+
+No fix applied to any of the 4 - 2 came back clean on real current data (no collision to fix), 2
+are genuinely unreachable with real evidence gathered this pass (not carried forward on assertion
+alone). The standing directive's own "don't force it" rule applied in both directions: not
+speculatively "fixing" `sars_procurement.py`/`vaal_central_water.py` against code with no
+demonstrated live collision, and not giving up on `lephalale.py`/`randwater.py` without a fresh,
+real attempt and independent proxy-side confirmation this pass.

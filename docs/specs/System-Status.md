@@ -1,5 +1,95 @@
 # System Status
 
+## This pass (2026-11-07s, standing solution-architect review): priority 1 - re-checked all 4
+sibling direct-buyer readers 2026-11-07r left unreachable-or-unverified for the DBSA-shaped
+reused-reference `ocid` collision; 2 were reachable this time (one newly so) and came back clean,
+2 are genuinely unreachable with fresh, independently-confirmed evidence, not carried forward on
+assertion. No collision found, no fix needed there. With budget remaining, read a discovery-
+pipeline slice no prior pass had touched (the tender-change/update-tracking subsystem) and found a
+real one: `watch_tender_updates.py`'s eTenders/OCDS failure path had no `system_alerts.record()`
+call at all, unlike its own sibling SANRAL failure path - fixed, with a brand-new test file (the
+module had none before this pass).
+
+Oriented from `20340b8` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. Neither PR was touched or amended.
+
+**Priority 1 - the 4 sibling readers, checked live again for real.** `sars_procurement.py`:
+reachable, 2 open tenders, 2 distinct ocids - clean (same small sample as last pass, still no
+collision on real current data). `vaal_central_water.py`: reachable THIS pass (it 403'd for
+2026-11-07r) - 9 advertised tenders, 9 distinct ocids, matching the page's own known tender count -
+clean. `lephalale.py`: still unreachable - `Connection reset by peer`, independently corroborated
+by the agent proxy's own `__agentproxy/status` endpoint showing the same host
+(`www.lephalale.gov.za:443`) failing with `ws_closed_mid_exchange` at several distinct timestamps
+this pass - a real connection-level failure at the real host, not a local/proxy issue. `randwater.py`:
+still unreachable - `SSL: CERTIFICATE_VERIFY_FAILED`, double-checked directly with `curl --cacert
+/root/.ccr/ca-bundle.crt` against the real host (confirmed the session's own trust store is correctly
+configured) and got the real server's own broken certificate chain back (`unknown CA` TLS alert) -
+matches this module's own long-standing docstring about exactly this. No fix applied to either
+reachable reader (no collision to fix) or either unreachable one (no speculative fix against
+undemonstrated risk) - a genuine, honestly-reported negative result on 3 of 4, with one real
+reachability change (`vaal_central_water.py`) noted for whoever revisits this backlog item next.
+Full write-up, including the live counts and the proxy-log cross-check: QA-Edge-Case-Findings.md,
+the section right after Finding 156.
+
+**The new finding, from continuing the discovery-pipeline read into an uncovered slice.** With
+priority 1 thoroughly done, read `watch_tender_updates.py`/`tender_changes.py`/`tender_updates.py`/
+`detail.py` - the tender-change/update-tracking subsystem, never touched by 2026-11-07r's own
+fan-out/scoring slice or any prior pass. Reading `check_tender()`'s two source branches (eTenders/
+OCDS vs SANRAL) side by side - a natural place to check for an inconsistency, since they handle the
+structurally identical "this run's re-read of the tender's source failed" case - found the OCDS
+branch's own "release not found in any window" path never calls `system_alerts.record()`, unlike
+the SANRAL branch three lines below it which always has. `last_error` (the only thing the OCDS
+branch writes) is a write-only `tender_watch_state` column - confirmed by `grep -rn "last_error"`
+across all of `app/`+`engine/`: nothing else ever reads it. Consequence: a company actively pursuing
+an eTenders tender whose release drops out of every day-window this watch tries (`WALK_BACK_DAYS=21`
+exhausted, or a feed re-dating/pagination gap) silently stops getting any addendum/closing-date/
+briefing alert for it, forever, with zero visibility to Sarel - and it never even shows up as a
+"failure" (no exception, so never in `run()`'s own per-tender `failed` list - just a plain `return
+[]`, indistinguishable from "genuinely nothing new"). The exact dominant bug class this whole review
+tracks, one level removed from its usual shape: not a discarded exception, a discarded negative
+result from a call that itself didn't fail.
+
+**Fix and verification.** Added the missing `system_alerts.record()` call to the OCDS branch, same
+severity ("error") and shape as the SANRAL branch's own. `watch_tender_updates.py` (600+ lines) had
+NO test file at all before this pass - confirmed by `ls test_*.py`, not assumed - so a new one
+(`test_watch_tender_updates.py`) was written with an in-memory fake Supabase REST client (no real
+DB needed). Red before the fix (alert assertion failed, `last_error` correctly set but zero alerts
+recorded); green after. A second test locks in that the SANRAL branch's own pre-existing alert is
+untouched. Full regression: the complete `engine/` per-file test loop - **85 files now (84 + this
+new one), 0 failures**, real exit codes. See Finding 156 (`QA-Edge-Case-Findings.md`) for the full
+write-up.
+
+**Backlog status.** No change to any standing item except this pass's own entries above.
+`start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched,
+per the standing guardrail. PR #176/#178/#179/#180/#181 (all awaiting Sarel's own merge decision)
+remain exactly as described - not touched, not amended. PR #164/#165 (stale drafts) not touched.
+`bridge-worker-ci.yml`'s own missing `app/lib/**`/`app/scripts/**` path filter (2026-11-07q) remains
+exactly as named - still an action item for whoever merges PR #181. The 2026-11-07r reused-ref
+`ocid` backlog item is now narrowed to 2 genuinely unreachable readers (`lephalale.py`,
+`randwater.py`) - a future pass with real network access to either (or a GitHub Actions dispatch,
+the way this project already names for `randwater.py`'s own reachability) should check them live
+before concluding either way; `sars_procurement.py` and `vaal_central_water.py` are clean on
+today's real data but the architectural risk (an `ocid` built from the raw reference alone) is
+unchanged in their code, so a future pass catching either source mid-collision should still fix it
+the same way DBSA's was. **New backlog note:** the tender-change/update-tracking subsystem
+(`tender_changes.py`, `tender_updates.py`, `detail.py`) was read this pass but not yet exhaustively
+audited line-by-line for siblings of the Finding 156 bug shape (an asymmetric or missing
+`system_alerts.record()` call on a failure path) - a future pass could continue that read rather
+than starting over, since `watch_tender_updates.py` is now covered.
+
+To verify independently: run `engine/discovery/test_watch_tender_updates.py` and confirm
+`ALL PASSED`; read `watch_tender_updates.check_tender()`'s OCDS branch and confirm it now calls
+`system_alerts.record()` on a release-not-found result, matching the SANRAL branch's own call.
+Re-run the 4 sibling readers' own `fetch_releases()` live and compare row/ocid counts against this
+entry's own numbers. Confirm via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` that
+`#176`/`#178`/`#179`/`#180`/`#181` are still open and unmerged.
+
+---
+
 ## This pass (2026-11-07r, standing solution-architect review): read the Discovery fan-out/scoring
 path end to end as one coherent system (never attempted as a single pass before, though repeatedly
 suggested) - that slice itself came up clean, but following up on `kouga.py`'s own very recent
