@@ -1,5 +1,142 @@
 # System Status
 
+## This pass (2026-11-07xxx, standing solution-architect review, background worker): a second, deliberately-targeted field-by-field/table-by-table re-sweep of `process_pack_jobs.py` (SANRAL) vs. `process_general_jobs.py` (general) `process_job()`/`run_pack()` DB writes - genuine negative, no new finding, no code change, nothing pushed, oriented from `8bd9fc0` (Finding 190's own pass)
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `8bd9fc0`
+(Finding 190's own pass, the immediately preceding entry below). Re-checked again at the end of this
+pass (no code change was made, so no push was attempted) - still `8bd9fc0`, no sibling commit landed
+during this pass. Re-checked all 10 open PRs via `mcp__github__list_pull_requests`: same set as every
+preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing
+merged, closed, or rebased by anyone since; none merged by this session either. Per the binding
+guardrails, `#164`/`#165` were not touched, no PR was opened or merged, and neither Finding 168 nor
+the `start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. No scratch Postgres database,
+worktree, or temp branch was created this pass (no reproduction was needed - every candidate below was
+closed by reading code and the RLS/migration/consumer chain, not by running anything live) - nothing to
+clean up.
+
+**This pass's own brief, verbatim**: re-check whether `process_pack_jobs.py`'s `process_job()` and
+`process_general_jobs.py`'s `run_pack()`/`process_job()` have any OTHER DB-write divergence beyond the
+`field_provenance` gap Finding 190 just fixed - field by field, table by table - since a prior pass had
+already (wrongly, it turned out) called this pair "swept" once before Finding 190 was found on a
+second look. Read both files in full again (not re-skimmed from memory) and built an explicit
+table of every table/column either file's `process_job()`/`run_pack()`/`gather_pack_inputs()`/
+`gather()` touches, end to end, both on success and on failure.
+
+**Result: genuinely exhausted this time - no second gap exists in this specific pair's `process_job()`
+write path.** Full comparison table, so a future pass doesn't have to redo it:
+
+| write | SANRAL (`process_pack_jobs.py`) | general (`process_general_jobs.py`) | match? |
+|---|---|---|---|
+| claim | `pack_generation_jobs` status requested->generating, `started_at`, `error_message: None` | `pack_generation_jobs` status requested->generating, `started_at` (no `error_message` reset) | functionally yes - see below |
+| storage upload (pack files) | `submission-packs` bucket, same prefix shape `<company_id>/tenders/<tender_id>/<job_id>/` | `submission-packs` bucket, identical prefix shape | yes |
+| `field_provenance` upsert | `client.upsert("field_provenance", ..., "tender_pack_id,field_key")`, last-write-wins dedup, uploaded via Finding 190's fix | same upsert, same on_conflict key, same last-write-wins dedup (`run_pack()` line ~768) | yes (Finding 190 closed this) |
+| ready update | `status`, `storage_path_pdf`, `output_files`, `page_count`, `manifest` (**full/unfiltered** manifest dict), `completed_at` | `status`, `completed_at`, then spread `**result` = `storage_path_pdf`, `output_files`, `page_count`, `manifest` (**filtered** to `sections`/`omitted`/`by_hand`/`form_results`/`provenance_summary`/`contents_pages`/`checklist`/`checklist_summary`) | same fields written to the same columns; manifest CONTENTS differ (see "checked and ruled out" below) |
+| pack-ready email (B12) | `send_pack_ready_email(client, job, manifest["page_count"], APP_URL)`, best-effort | same call, same best-effort contract | yes (already fixed, standing review 2026-11-06) |
+| failure update | `status: failed`, `error_message: msg[:2000]`, `completed_at`; `system_alerts.record("pack", ..., context={job_id, company_id, tender_id})` | `status: failed`, `error_message: str(e)[:1000]`, `completed_at`; `system_alerts.record("general", ..., context={job_id, kind, company_id, tender_id})` | functionally yes (truncation-length difference only, never user-visible since both messages are already short, hand-written strings, never a raw exception dump that could hit either limit) |
+| failure-of-failure (can't even mark failed) | `system_alerts.record("pack", ..., context={job_id})` | `system_alerts.record("general", ..., context={job_id})` | yes |
+
+**Checked and ruled out, each for a named, verified reason - not assumed:**
+
+- **`error_message: None` reset on claim (SANRAL has it, general doesn't).** Looked like a real
+  divergence at first - a job row re-claimed from a previous failure could in principle carry a stale
+  `error_message` into a fresh `ready` state for general but not SANRAL. Traced the only two real
+  write paths that ever set `pack_generation_jobs.status = 'requested'`:
+  `request_submission_pack_checked()` (SANRAL) and `request_general_job_checked()` (general), both in
+  migration `0115_pack_quota_regression_and_request_race.sql` - read both in full. **Both only ever
+  `insert` a brand-new row** (`insert into pack_generation_jobs (...) values (...) returning id`); the
+  general one additionally has `on conflict do nothing` (mirroring the existing "already queued, that's
+  fine" unique-index semantics the calling TypeScript already treats as a non-error), but that still
+  never *re-uses* an existing failed row - it just returns no new id when one is already open. Grepped
+  the whole app for ANY other write that flips an existing row's `status` back to `'requested'`
+  (`grep -rn "status.*requested" app/supabase/migrations app/app` plus a manual read of
+  `general-actions.ts`/`actions.ts`'s own request functions) - none exists. Every `pack_generation_jobs`
+  row is `error_message: null` by construction from the moment it's inserted, on both engines, so
+  general's missing reset can never actually observe a stale value. Genuine negative, not a gap with a
+  reachable consequence.
+- **SANRAL's `ready` update writes the FULL, unfiltered `assemble_pack.build_submission_pack()`
+  manifest dict to the `manifest` column; general's explicitly filters to 8 named keys before writing
+  it** (`{k: pm[k] for k in (...)}` in `run_pack()`). Read `assemble_pack.py`'s manifest assembly in
+  full to see what the unfiltered SANRAL version actually contains that general's filter would have
+  dropped: `family`, `contract_no`, `warnings`, `financial` (its own full sub-manifest), `form_b7`,
+  **`company_documents: {"authority_to_sign": {"status", "method", "path", "reason"}}** - and that
+  `"path"` is a local, server-side temp-directory filesystem path (`company_documents.produce()`'s own
+  `out_dir` path, under `work_dir`, which is itself `tempfile.mkdtemp(prefix=f"pack_{job_id[:8]}_",
+  dir=work_root)`) - the one real candidate for "SANRAL stores something general deliberately doesn't."
+  Checked whether this path ever actually reaches a browser, the way the methodology's own "real
+  downstream consumer" bar requires, rather than stopping at "it's in the JSONB column": (1)
+  `pack_generation_jobs` has RLS ("tenant isolation", migration `0017`) that lets a company's own
+  members `select` their own rows directly - so in principle a signed-in company member's browser
+  session COULD query this column directly via `supabase-js`, bypassing the Next.js server rendering
+  entirely; (2) grepped every real `.from("pack_generation_jobs")` call site in `app/app`
+  (`actions.ts`, `activity-log.tsx`, `submission-pack.tsx`, `sanral-schedules/page.tsx`) and read each:
+  only `submission-pack.tsx` selects the `manifest` column at all, and its own `PackJob["manifest"]`
+  TypeScript type (correctly) only names the safe fields (`omitted`/`warnings`/`checklist`/`sections`/
+  `financial`) - but a TS type annotation doesn't strip extra runtime keys, so this alone doesn't prove
+  anything; (3) traced where that fetched row data actually goes: `j.manifest.warnings`,
+  `checklistOf(j.manifest)` (-> `j.manifest.checklist`/`.sections`/`.omitted` only, confirmed by reading
+  `checklistOf()` in `pack-checklist.tsx`) - `PackChecklist` (the only component these feed) is **not**
+  a `"use client"` component, so it is server-rendered to HTML, never serialized as a client-component
+  prop; `DownloadAllButton` (the one real `"use client"` component on this page) receives only
+  `urls: string[]` (pre-computed signed URLs), never `j.manifest` itself. **The raw `manifest` object,
+  local path included, is fetched server-side but never serialized into the page's client bundle or RSC
+  payload anywhere in this codebase** - confirmed by reading every consumer, not assumed from the type
+  annotation. `general-workspace.tsx`'s own `j.manifest.by_hand`/`checklistOf(j.manifest)` usage is the
+  identical shape. **Conclusion: a real inconsistency (general was deliberately narrowed to 8 keys at
+  some point; SANRAL's `process_job()` never got the same treatment and still writes the entire
+  dict), but not a finding under this methodology's own bar** - it is the *opposite* shape from Finding
+  190 (SANRAL writes MORE than its sibling, not less), nothing downstream actually reads or exposes the
+  extra data, and the one semi-sensitive value in it (a worker-local temp-directory path, not
+  cross-tenant, not a secret, not PII - just internal server layout) is visible, at most, only to the
+  owning company's own already-authenticated members via a direct RLS-permitted query they'd have to
+  construct by hand. Noted here as a real future-pass candidate for a small, no-behavior-change
+  tidy-up (have SANRAL's `process_job()` also filter its manifest write to the same safe-key shape, or
+  at minimum strip `company_documents.authority_to_sign.path` before the `client.update()` call) -
+  genuinely a cleanliness/defense-in-depth improvement, not a bug with a real downstream consumer
+  noticing a gap, so not written up as a numbered Finding.
+- **`process_cv_jobs.py` and `process_narrative_jobs.py`, named in this pass's own brief as further
+  siblings to re-check.** Read both in full again. Neither has, or should have, a `field_provenance`-
+  shaped write (CVs and narrative documents carry no "assumed default" provenance concept the way a
+  multi-form SANRAL/general pack does) or a pack-ready-email-shaped write (there is exactly one
+  "job ready" notification function in `engine/notify/` - `send_pack_ready_email()` - and it already
+  has exactly its two legitimate callers; CV/narrative "ready" states have never had an email-
+  notification concept to be missing a call to, confirmed by this doc's own 2026-11-05 pass, not
+  re-litigated from scratch). Both already carry `company_id` on every `system_alerts.record()` call
+  (confirmed by direct read) - the one write-consistency bug class that WAS real for this family
+  (Finding 186's class) is already closed on both. No second gap found on this re-read.
+- **A fresh sibling-pair check outside `engine/`, per this pass's own "or move to a genuinely-unswept
+  family" instruction**: `actions.ts` (SANRAL `requestSubmissionPack`) vs. `general-actions.ts`
+  (general `requestJob`/`generate_pack`) - both call `advanceFoundToAssessing(supabase, pack.id)` +
+  `revalidatePath("/pipeline")` identically when a pack is requested (confirmed by reading both call
+  sites directly). No divergence.
+
+**Why `app/app/billing/` and `app/app/analytics/` were NOT picked as the fallback family this pass**:
+grepped both paths against this doc's own history first (`grep -n "app/billing\|app/analytics"
+docs/specs/System-Status.md`) - both have had multiple dedicated passes each (the `fetchCompanySubscription()`/
+membership-error pass, the savings-counter rework, the "Briefing attendance" silent-empty-state fix, the
+`company_packs_this_period()`/`company_can_request_pack()` employee-RLS fix now PR #182, the
+`ACTIVE`-pipeline-stage/`closing_date` drift fixes) - picking either without a fresh, narrower angle
+than "re-read the whole directory" risked re-finding what's already fixed or already-ruled-out rather
+than genuinely new ground, which this pass's remaining time was better spent avoiding.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill question all remain exactly as left,
+untouched, per the standing guardrails. All 10 PRs remain open and unmerged - same set as every
+preceding pass, re-confirmed via `mcp__github__list_pull_requests` at the start and end of this pass;
+nothing merged, closed, or rebased by anyone else. No code was changed this pass, so no verification
+suite was run and nothing was pushed - `main` is unchanged at `8bd9fc0`.
+
+To verify independently: re-read `engine/pack/process_pack_jobs.py`'s `process_job()` (lines ~736-830)
+against `engine/general/process_general_jobs.py`'s `run_pack()`/`process_job()` (lines ~717-856) and
+confirm the table above against the real current code. To see the one real (non-finding) asymmetry
+for yourself: `grep -n "manifest.update" engine/pack/assemble_pack.py` then compare against
+`engine/general/process_general_jobs.py`'s own `{k: pm[k] for k in (...)}` filter in `run_pack()` -
+confirm SANRAL's `client.update(..., {"manifest": manifest, ...})` call has no equivalent filter.
+Confirm `git log --oneline -1 origin/main` is still `8bd9fc0`, with no sibling commit having landed
+since Finding 190's own pass.
+
+---
+
 ## This pass (2026-11-07xxix, standing solution-architect review, background worker): Finding 190 - `process_pack_jobs.py` (SANRAL) has never written a `field_provenance` DB row, unlike its general-family sibling - fixed, pushed to `main`; `own_path()`/authority-letter-template sibling leads closed out as genuine negatives, oriented from `de37b03`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
