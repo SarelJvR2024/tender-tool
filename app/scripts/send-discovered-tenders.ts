@@ -23,15 +23,16 @@
 // that company's send later fails - just scoped to one company's own
 // batch, and only once that company is known to have somewhere to send it.
 //
-// Residual, honestly flagged, not fully closed by this fix: the read below
-// is bounded to the last 2 days (sinceIso) on the assumption every row gets
-// claimed-or-skipped daily. A company with zero recipients for MORE than 2
-// consecutive days will still lose whichever of its opportunities aged out
-// of that window in the meantime (they fall out of the query entirely,
-// never claimed, never retried) - a real improvement over the old "always
-// lost immediately", but not a full close of the underlying gap. Widening
-// the window, or querying for genuinely-unclaimed rows directly instead of
-// a fixed lookback, would close that residual edge; left for a future pass.
+// The candidate read below is bounded by closing_date, not by a fixed
+// lookback window on created_at (standing review, 2026-11-07, second fix
+// this file got that day - see lib/discoveredTendersDigest.ts's
+// openDiscoveredOpportunityWindow() for the full writeup of why: the
+// original 2-day created_at window silently and permanently lost whichever
+// opportunities aged out of it before a zero-recipient company ever got a
+// recipient; closing_date-bounding closes that gap outright rather than
+// just widening it, since a tender that already closed is never worth
+// this email regardless of when it was discovered or how long the company
+// went without a recipient).
 //
 // Run: node --experimental-strip-types scripts/send-discovered-tenders.ts
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
@@ -40,7 +41,7 @@ import { createClient } from "@supabase/supabase-js";
 import { discoveredTendersDigestEmail } from "../lib/emailTemplatesTier1.ts";
 import { resendApiKeyConfigured, sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { operationalRecipients } from "../lib/notificationRecipients.ts";
-import { discoveredTenderIdempotencyKey, toDiscoveredTenderCard, type DiscoveredOpportunityRow } from "../lib/discoveredTendersDigest.ts";
+import { discoveredTenderIdempotencyKey, openDiscoveredOpportunityWindow, toDiscoveredTenderCard, type DiscoveredOpportunityRow } from "../lib/discoveredTendersDigest.ts";
 import { fetchAllRows } from "../lib/supabasePaging.ts";
 import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
 
@@ -50,7 +51,14 @@ import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRo
 // .limit() (lib/supabasePaging.ts's own header), so an unpaginated query
 // here would silently drop everything past the first 1,000 candidates,
 // not error. 20,000 is a generous ceiling, not a measured one - well above
-// any observed single-day batch so far.
+// any observed single-day batch so far. Now that the candidate query is
+// bounded by closing_date rather than a 2-day created_at window (standing
+// review, 2026-11-07), this is a running total across every currently-open
+// tender any company has ever been matched against, not a single day's
+// seeding - still expected to stay well under this ceiling in practice
+// (bounded by how many tenders are open at once, not by this table's own
+// ever-growing full history), but not measured against real production
+// volume at that new scope. Checked after fetching below, not assumed.
 const MAX_CANDIDATE_ROWS = 20_000;
 
 type CompanyDigestOutcome = {
@@ -179,19 +187,18 @@ async function main() {
   }
   const appUrl = process.env.APP_URL || "https://tender-ready.vercel.app";
 
-  // Bounded to the last 2 days, not the whole table: this script runs daily
-  // right after the seeding step, so anything older has already been
-  // through every prior run's claim attempt - same reasoning
-  // send-corrigendum-alerts.ts's own 14-day window gives for its table.
-  const sinceIso = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  // Bounded by closing_date (still open, or not known to have closed), not
+  // by a fixed created_at lookback - see openDiscoveredOpportunityWindow()
+  // and this file's own header comment for why.
+  const { verdicts, closingDateOrFilter } = openDiscoveredOpportunityWindow();
   const supabase = createClient(url, serviceKey);
   const { rows, error } = await fetchAllRows<DiscoveredOpportunityRow>(
     (from, to) => {
       let q = supabase
         .from("discovered_opportunities")
         .select("id, company_id, contract_number, buyer, title, description, etenders_category, categories, closing_date, verdict, created_at")
-        .gte("created_at", sinceIso)
-        .in("verdict", ["strong_fit", "possible", "needs_review"]);
+        .in("verdict", verdicts as string[])
+        .or(closingDateOrFilter);
       // --company-id scopes the query itself, as early as possible - another
       // tenant's data is never even read, let alone claimed or sent to.
       if (scopeCompanyId) q = q.eq("company_id", scopeCompanyId);
@@ -204,8 +211,20 @@ async function main() {
     process.exit(1);
   }
   const allRows = rows;
+  // fetchAllRows() stops silently at MAX_CANDIDATE_ROWS with no error and no
+  // sign it was cut off, the same shape this standing review's own
+  // dominant bug class tracks elsewhere (a truncated success reads
+  // identical to a genuinely-complete one) - now that the query is no
+  // longer bounded by a 2-day window (see MAX_CANDIDATE_ROWS's own comment
+  // above), this is worth a loud warning if it's ever actually hit, rather
+  // than risking the exact same shape here.
+  if (allRows.length >= MAX_CANDIDATE_ROWS) {
+    console.error(
+      `discovered_opportunities candidate read hit its ${MAX_CANDIDATE_ROWS}-row ceiling - there may be more still-open candidates than this run saw. Raise MAX_CANDIDATE_ROWS or investigate.`,
+    );
+  }
   if (allRows.length === 0) {
-    console.log("No newly discovered tenders in the last 2 days.");
+    console.log("No newly discovered, still-open tenders found.");
     return;
   }
 
