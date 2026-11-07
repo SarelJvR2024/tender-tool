@@ -1,5 +1,95 @@
 # System Status
 
+## This pass (2026-11-07xxxiii, standing solution-architect review, background worker): Finding 194 - `app/app/company/principals/page.tsx`'s `company_ownership_breakdown` view read never captured its own error, unlike its `company_principals`/`people` siblings in the exact same `Promise.all` - fixed, pushed to `main`, oriented from `2cff019`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `2cff019`
+(Finding 193's own write-up commit, the immediately preceding pass). Re-checked again immediately
+before this pass's own push - still `2cff019`, no sibling commit landed in between. Re-checked all
+10 open PRs via `gh api repos/SarelJvR2024/tender-tool/pulls?state=open` before and after this
+pass's own push: same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since; none merged by this session either. Per the binding guardrails, `#164`/`#165`
+were not touched, no PR was opened or merged, and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped `Finding [0-9]+` in
+`docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - `193` was the highest recorded
+at this handoff, confirming no new finding had landed from a sibling session since `2cff019`, before
+this pass's own Finding 194 below. No scratch Postgres database was needed this pass (no race/lock
+reproduction - the fix is a missing error-capture on an already-successful set of reads, verified
+with plain Vitest unit tests against hand-built fixtures, no live Supabase/Postgres access
+required); no `git worktree` was created either (`app/node_modules` in the primary checkout is a
+real directory, not a symlink, so the usual bind-mounted-worktree step for `npx next build` does not
+apply, same as Finding 193's own precedent) - nothing to clean up.
+
+**This pass's own task, per the standing brief.** Re-checked the brief's own named candidates
+against this doc's history first, as instructed, rather than assuming any was fresh:
+`app/app/billing/`'s Server Actions and `app/app/analytics/`/`app/app/market-intelligence/` have
+each had multiple dedicated passes (confirmed via `grep -c` mention counts and reading the relevant
+prior entries). `engine/notify/` beyond `daily_digest.py`/`send_pack_ready_email.py` is just
+`record_heartbeat.py` and `send_digest_emails.py` plus their own tests -  `send_digest_emails.py` is
+itself heavily mined already (Finding 133 and others). Took the brief's own named concrete next
+step instead: grepped `Promise.all` across `app/app/**/*.ts*` (61 files) for a React Server
+Component reading 2+ RPCs/queries in parallel where one sibling's `error` is captured and another's
+isn't - the exact shape that found Finding 193. Finding 193's own write-up explicitly covers every
+OTHER `admin/*` page but says nothing about `app/app/company/*` or `app/app/people/*`'s own READ
+paths - the 2026-11-07xiii sweep of this area was for the TOCTOU/lost-update bug class on WRITES
+(`actions.ts` files), never for a discarded-read-error on a page's own `Promise.all`. Read
+`app/app/company/bank-accounts/page.tsx`, `app/app/company/registrations/page.tsx` and
+`app/app/company/principals/page.tsx` end to end with this lens.
+
+**Found: Finding 194.** `app/app/company/principals/page.tsx`'s `PrincipalsPage()` fires a
+`Promise.all` of four reads: `company_principals` (error captured, shown in a banner), `people`
+(error captured, logged with an explicit comment), `company_ownership_breakdown` (no error
+destructured at all), and the `bank_account_summaries` RPC (same). `company_ownership_breakdown`
+(migration `0050`) is a `group by company_id` view with no row at all for a company with zero
+qualifying shareholders, so a genuinely-empty register and a FAILED read both land on
+`.maybeSingle()`'s `data: null`, indistinguishable without the error - pre-fix, both rendered the
+identical "No shareholdings recorded yet", including directly above principal cards that can
+themselves show a real non-zero "% of shares" for the same company. A real, visible
+self-contradiction, the same shape as Finding 193. `bank_account_summaries`'s own discarded error
+was checked and judged materially less severe (a quiet omission of an optional clause, not a false
+claim) - logged only, no UI change, same severity judgement Finding 193 made for its own
+readiness-RPC sibling.
+
+**Fix**: added `resolveOwnershipBreakdown()` to `app/lib/principals.ts` - a pure, testable function
+returning a tagged union (`ok`/`empty`/`error`) that makes the two previously-indistinguishable
+null-row cases inspectable. The page now captures both errors; the breakdown card shows a distinct
+"Couldn't work out the ownership split" message on a genuine read failure instead of the false "No
+shareholdings recorded yet", and the stated-vs-derived mismatch warning is now correctly suppressed
+for the right reason. Verified red-then-green: `git stash push -u` on the 2 fix files with the new
+test cases left in place - real exit `1` (`resolveOwnershipBreakdown is not a function` on exactly
+the 4 new tests); restored - real exit `0`, 8/8 tests pass. Full suite all green: `npm run typecheck`
+(0 errors), `npx eslint .` (0 errors, same 3 pre-existing warnings, unchanged), `npx vitest run`
+(516/516, 67 files, +4 tests over the 512/512/67-file baseline), the node `*.test.ts` loop (28/28,
+plain `node <file>`, no flags), `npx next build` (clean, `/company/principals` compiles, same route
+table) - run directly in the primary checkout per the same node_modules-is-a-real-directory
+reasoning as Finding 193; and the full `engine/` Python sweep as a no-op regression check (86/86,
+unchanged - no Python touched). See `docs/specs/QA-Edge-Case-Findings.md` Finding 194 for the full
+write-up, diff description, and independent-verification steps.
+
+**Genuinely-checked-and-ruled-out siblings, so a future pass doesn't re-walk this exact ground**:
+`app/app/company/bank-accounts/page.tsx` and `app/app/company/registrations/page.tsx` were read end
+to end with this exact lens and both already capture every sibling read's own error (including
+explicit log-only comments citing Finding 177) - no new finding in either. `app/app/company/team/
+page.tsx`, `app/app/company/properties/page.tsx`, `app/app/company/document-scan/page.tsx` and
+`app/app/company/page.tsx` were NOT read with this lens this pass (only their `actions.ts` siblings
+were swept before, for the TOCTOU bug class) - genuinely open ground for a future pass, not claimed
+clean here.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via the GitHub REST API before this pass's own push; nothing merged, closed, or rebased
+by anyone else. Pushed directly to `main` (small, safe - a display-only company-page fix plus a small
+pure-function extraction and its own new test cases, no RLS/money-path/hard-stop-gate touched, no
+schema/migration/RPC change, no worker-image surface touched) - `main` is now at `06699f5`.
+
+To verify independently: see Finding 194's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the file-by-file diff check, the test run, the full
+suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxxii, standing solution-architect review, background worker): Finding 193 - `app/app/admin/customers/page.tsx`'s per-company `platform_admin_company_members()` RPC never captured its own error, unlike its sibling `platform_admin_companies()` read in the exact same function - fixed, pushed to `main`, oriented from `c8eb357`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
