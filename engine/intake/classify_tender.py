@@ -227,10 +227,37 @@ DELIVERY_RE = re.compile(
 #      accepted "for (the) receipt of tenders", the ONE other phrasing this
 #      module's own docstring had confirmed (R.396 Book 1 T-6); this is a
 #      second, equally real SANRAL phrasing for the identical clause.
+#
+# A THIRD real gap, in the same function, confirmed live 2026-11-07 against
+# 4 of the 8 real, currently-open tenders listed on SANRAL's own
+# nra.co.za/sanral-tenders/list/open-tenders today (N.001-010-2021/1,
+# CONTRACT SANRAL - N.003-010-2020/2R, CONTRACT SANRAL - N.002-267-2024/2R,
+# CONTRACT SANRAL: C.003-081-2023/1): when the clause itself is phrased
+# "closing DATE AND TIME ... is" (the infix's own word order, already
+# matched by the `date\s+and\s+time` alternative above), the real sentence
+# states the DATE first and the TIME second - e.g. "The closing date and
+# time for receipt of tenders is Tuesday, 08 December 2026 at 12H00 pm
+# (South African Time)" or "...is 04 December 2026 @12H00 pm..." - the
+# mirror image of the "closing TIME AND DATE ... is 12:00 on 27 November
+# 2026" shape already handled, where the infix's word order also matches
+# the sentence's own value order. The regex assumed the TIME always comes
+# immediately after "is" (plus an optional day name) regardless of which
+# infix matched, so on every one of these 4 real, live tenders - half the
+# open-tenders list checked, not a one-off - this sentence returned None,
+# silently falling back to the 11:00 placeholder instead of the real stated
+# time, on tenders open for bidding today. Fixed by letting an optional
+# "<day number> <month name> <year>" date, with an "@"/"at"/","-style
+# connector after it, sit between the optional day-of-week name and the
+# time - only taken when a real date is actually there (every existing
+# time-first sample, real or fixture, has no digit-space-monthname
+# immediately after "is"/the day name, so this addition is a strict no-op
+# for them, confirmed in the regression below).
 CLOSING_TIME_RE = re.compile(
     r"closing\s+(?:time\s+and\s+date|date\s+and\s+time|time)\s+"
     r"(?:for\s+(?:the\s+)?(?:receipt\s+of\s+tenders|submission\s+of\s+tender\s+offers)\s+)?is\s+"
-    r"(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)\s*([AP]M)?",
+    r"(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?"
+    r"(?:\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s*[@,]?\s*)?"
+    r"(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)\s*([AP]M)?",
     re.IGNORECASE)
 
 

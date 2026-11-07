@@ -1,5 +1,104 @@
 # System Status
 
+## This pass (2026-11-07iii, standing solution-architect review): oriented from `5d42ab7`
+(immediately-preceding pass's own verified HEAD, this chain's own Finding 171). `git fetch origin
+main` clean, local matched `origin/main` exactly both at the start and immediately before pushing
+(`5d42ab7` throughout - no sibling commits landed during this pass, from either the concurrent
+session or this chain's own other forks). Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded - nothing merged, closed, or rebased by anyone since. Grepped
+`Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - 171 was
+still the highest recorded.
+
+**This pass's angle: continued the real-document methodology in `engine/intake/classify_tender.py`
+per the brief, specifically re-checking `find_closing_time()`/`CLOSING_TIME_RE` and
+`find_nra_reference()` against several MORE real, live SANRAL tenders than either Finding 170 or
+171 had checked.** Used `engine/discovery/detail.py`'s own `BASE =
+"https://www.nra.co.za/open-tenders/"` as the lead, which redirected (via the site's own current
+nav) to `https://www.nra.co.za/sanral-tenders/list/open-tenders` - SANRAL's own list of its 10
+currently-open tenders, fetched directly via `WebFetch`. Fetched 8 of those 10 detail pages
+directly (`WebFetch`) and read each one's own closing-time sentence, delivery-address sentence, and
+NRA-reference line verbatim.
+
+**Found and fixed Finding 172** - full write-up in `docs/specs/QA-Edge-Case-Findings.md`. One-line
+summary: `CLOSING_TIME_RE` assumed the TIME always comes before the DATE in the closing-time
+sentence (true for the "closing TIME AND DATE ... is 12:00 on 27 November 2026" shape already
+handled), but 4 of the 8 real, live, currently-open tenders fetched state the clause the other way
+round - "closing DATE AND TIME ... is &lt;date&gt; @/at &lt;time&gt;" - with the date itself
+sitting between the optional day-name and the time: e.g. *"The closing date and time for receipt
+of tenders is Tuesday, 08 December 2026 at 12H00 pm (South African Time)"*
+(CONTRACT SANRAL - N.003-010-2020/2R) and 3 others (N.001-010-2021/1, CONTRACT SANRAL -
+N.002-267-2024/2R, CONTRACT SANRAL: C.003-081-2023/1). Confirmed directly in Python that
+`CLOSING_TIME_RE.findall()` returned `[]` on all 4 real sentences before the fix - exactly half of
+the real, currently-open tenders checked this pass would have silently fallen back to the 11:00
+placeholder instead of their real stated closing time, on tenders open for bidding today.
+
+**Checked the OTHER 4 real notices too, confirming the new date-before-time handling is additive,
+not a reach.** CONTRACT SANRAL N.002-160-2027/1F, C.004-086-2022/1F, NRA 2026/0759 (E), and
+CONTRACT SANRAL: C.003-092-2024/1F all use the already-handled time-first "closing time and date
+... is 12:00 on &lt;date&gt;" shape and all matched cleanly, both before and after this fix. All 8
+notices fetched use the already-handled "Tenders must be placed inside the tender box at:" delivery
+anchor (no new `DELIVERY_RE` gap found this pass). `find_nra_reference()` matched correctly on the
+3 of these 8 that print an NRA reference at all ("SCM Reference Number: NRA 2026/0788", "NRA
+2025/0420", "NRA 2026/0759 (E)") - C.003-092-2024/1F genuinely has no NRA reference printed
+anywhere on its cover, a real negative result, not a bug (the function correctly returns `None`).
+`find_nra_reference()` is still only lightly spot-checked overall (now 4 real confirmed-clean
+samples across this pass and Finding 171's own check) - left as a live, not-yet-exhausted angle for
+a future pass, same as Finding 171 left it, rather than force-fitting a finding onto a genuinely
+clean result.
+
+**Fixed:** `CLOSING_TIME_RE` widened with an optional "`<day number> <month name> <year>`" date
+(with an optional `@`/`at`/`,` connector) between the optional day-of-week name and the time -
+matches only when a real date is actually there, so the common time-first case is unaffected. No
+change to `DELIVERY_RE`, `_address_lines_after()`, `find_nra_reference()`, or `discrepancies()` -
+a one-function, one-regex fix, same shape as Finding 171's own fix to a sibling anchor.
+
+**Verified red-then-green against all 4 real sentences and new fixtures.** Standalone Python check
+against the regex directly first (old regex: `[]` on all 4 real sentences; new regex: correct
+`(hour, minute, ampm)` on all 4, plus every existing real/fixture time-first sample unchanged). 4
+new checks appended to `test_find_closing_time_single_ambiguous_and_formats()` in
+`test_classify_tender.py`, using the real phrasing as fixtures. Reverted `classify_tender.py` via
+`git apply -R` on this pass's own diff (saved to a scratch file first) and re-ran `cd engine/intake
+&& python3 test_classify_tender.py` with its real exit code captured directly (no grepped pipe) -
+exactly the 4 new checks failed, `4 failure(s)`, exit code `1`; reapplied the same diff - `0
+failure(s)`, exit code `0`. `py_compile classify_tender.py` clean. Regression, the same four files
+Findings 170/171 regressed against, each run directly with its own real exit code: `python3
+engine/general/test_process_general_jobs.py`, `python3 engine/discovery/test_assess_tender.py`,
+`python3 engine/test_make_envelope_covers.py`, `python3 engine/test_form_field_audit.py` - all `0
+failure(s)`, exit code `0` each. Full `engine/` sweep, run via a loop capturing each file's own
+real exit code (not a single aggregated grep, run as a background task since it ran past the
+foreground timeout): `find engine -name "test_*.py" | wc -l` = 86, all 86 ran individually -
+`TOTAL=86 FAILED_FILES=0`, matching the standing baseline exactly.
+
+**Why pushed directly to `main`, not a PR.** Small (one optional regex group plus one comment
+block and four test checks), fully verified red-then-green against both real live data and new
+fixtures, regression-clean across the full 86-file sweep, and touches none of the standing
+PR-routing surface (no RLS, no money/billing, no hard-stop/gate logic, no worker-image install) -
+the same category and same direct-push precedent Findings 170/171 both used.
+
+**Backlog status.** Finding 168 (yearly billing quota period) and the `start_payfast_checkout()`
+revenue-integrity gap both remain exactly as left, untouched, per the standing guardrail - not
+re-checked this pass beyond the routine PR re-check above (nothing retrievable indicates Sarel has
+acted on either). All 9 PRs remain open and unmerged, same set as recorded by the immediately
+preceding pass - none touched, amended, or merged by this pass. `engine/intake/` is evidently NOT
+exhausted even after three real-document passes in a row (sibling's Finding 170, this chain's
+Findings 171 and 172) - a future pass fetching yet more real, live SANRAL notices, or testing
+`find_nra_reference()` against more real cover-page phrasings (still only 4 confirmed-clean real
+samples total), remains a live, evidence-backed angle, not a confirmed-exhausted one.
+
+To verify independently: `cd engine/intake && python3 test_classify_tender.py` and confirm `0
+failure(s)` including the 4 new checks naming "date-before-time". Independently fetch
+`https://www.nra.co.za/sanral-tenders/list/open-tenders` and then
+`https://www.nra.co.za/sanral-tenders/detail/contract-sanral-n-003-010-2020-2r` and confirm its
+real notice states "The closing date and time for receipt of tenders is Tuesday, 08 December 2026
+at 12H00 pm (South African Time)" - date before time - matching Finding 172's own write-up. Confirm
+via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged, and that `git log
+--oneline -1 origin/main` is this pass's own new commit (one ahead of `5d42ab7`), with no further
+sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07ii, standing solution-architect review): oriented from `18d4f7e`
 (immediately-preceding pass's own verified HEAD - NOT this chain's own lineage: it is the sibling
 session's own Finding 170 commit, `session_01UMAzowxArab6cV4KurgXNE`). `git fetch origin main` clean,

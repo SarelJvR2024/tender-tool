@@ -10654,3 +10654,92 @@ fixture data, regression-clean, no RLS/money/hard-stop/worker-image-install surf
 
 To verify independently: `cd engine/intake && python3 test_classify_tender.py` - expect
 `0 failure(s)`, including the new check naming "the address for submission of tender documents is".
+
+### Finding 172 (CONFIRMED, FIXED, moderate - `classify_tender.py`'s own `CLOSING_TIME_RE` assumed the TIME always comes before the DATE, but half of SANRAL's own currently-open tenders state the DATE first)
+
+**Area:** Intake (`engine/intake/classify_tender.py` - `CLOSING_TIME_RE`/`find_closing_time()`, the
+same function Finding 170 already fixed two gaps in - a day-of-week name before the time, and "for
+submission of tender offers" as an alternate infix).
+
+**Scenario:** continuing the real-document methodology (fetching REAL, live SANRAL tender notices
+from nra.co.za, not this repo's own fixtures) - `GET https://www.nra.co.za/sanral-tenders/list/open-tenders`
+lists SANRAL's own 10 currently-open tenders. Fetched 8 of their detail pages directly via
+`WebFetch` and read each one's own closing-time sentence verbatim. 4 of these 8 real, live, open
+tenders state the clause as "closing DATE AND TIME ... is", and in every one of those 4 the real
+sentence states the DATE first and the TIME second - the exact mirror of the already-handled
+"closing TIME AND DATE ... is 12:00 on 27 November 2026" shape, where the infix's own word order
+matches the sentence's own value order both ways:
+- N.001-010-2021/1: *"The closing date and time for receipt of tenders is Friday, 12 February 2027
+  @ 12H00 (South African Time)."*
+- CONTRACT SANRAL - N.003-010-2020/2R: *"The closing date and time for receipt of tenders is
+  Tuesday, 08 December 2026 at 12H00 pm (South African Time)."*
+- CONTRACT SANRAL - N.002-267-2024/2R: *"The closing date and time for receipt of tenders is 04
+  December 2026 @12H00 pm (South African Time)."*
+- CONTRACT SANRAL: C.003-081-2023/1: *"The closing date and time for receipt of tenders is 26
+  November 2026 @ 11:00 AM (South African Time)."*
+
+(The other 4 fetched - CONTRACT SANRAL N.002-160-2027/1F, C.004-086-2022/1F, NRA 2026/0759 (E), and
+CONTRACT SANRAL: C.003-092-2024/1F - all use the already-handled "closing time and date ... is
+12:00 on &lt;date&gt;" time-first shape and all matched cleanly, both before and after this fix,
+confirming the fix is additive and doesn't touch the common case. C.003-092-2024/1F also has no
+"NRA" reference at all on its cover, a genuine negative for `find_nra_reference()` on that document
+- correctly returns `None`, not a bug.)
+
+**Confirmed directly in Python** (not a guess) that `CLOSING_TIME_RE.findall()` on all 4 real
+date-first sentences above returned `[]` before this fix - `find_closing_time()` would have
+silently fallen back to the 11:00 placeholder (`process_general_jobs.py`'s own documented
+fallback) on 4 of 8 real tenders open for bidding today, instead of their real stated times (12:00,
+12:00, 12:00, 11:00) - the same "silently wrong data" impact Findings 170/171 already found in
+sibling anchors of this same module, just a third, independent gap, this time in
+`CLOSING_TIME_RE` itself rather than `DELIVERY_RE`.
+
+**Fixed:** added an optional "`<day number> <month name> <year>`" date (with an optional `@`/`at`/`,`
+style connector after it) between the optional day-of-week name and the time in `CLOSING_TIME_RE` -
+taken only when a real date is actually there, so every existing time-first sample (real or
+fixture) is unaffected (confirmed in the regression below: no digit-space-monthname sits
+immediately after "is"/the day name in any of those, so the new group matches zero-width for all
+of them). No change to `DELIVERY_RE`, `_address_lines_after()`, `find_nra_reference()`, or
+`discrepancies()` - a one-function, one-regex fix, same shape as Finding 171.
+
+**Verified red-then-green, against all 4 real sentences and new fixtures.** Ran the real sentences
+directly through the old and new regex in a standalone Python check first (all 4 real sentences:
+`[]` before, correct `(hour, minute, ampm)` tuples after - plus every existing real/fixture
+time-first sample unchanged). 4 new checks appended to
+`test_find_closing_time_single_ambiguous_and_formats()` in `test_classify_tender.py`, using the
+real phrasing (day name + "at", no day name + no space before "@", a ":" separator with "AM", and a
+day name + bare "@" with no "at") as fixtures. Saved this pass's own diff
+(`git diff -- engine/intake/classify_tender.py`), reverted it via `git apply -R`, re-ran
+`test_classify_tender.py` with its own real exit code captured directly (no grepped pipe) - exactly
+the 4 new checks failed, `4 failure(s)`, exit code `1`; reapplied the same diff via `git apply` -
+`0 failure(s)`, exit code `0`. `py_compile classify_tender.py` clean. Regression, the same four
+files Findings 170/171 regressed against, each run directly with its own real exit code: `python3
+engine/general/test_process_general_jobs.py`, `python3 engine/discovery/test_assess_tender.py`,
+`python3 engine/test_make_envelope_covers.py`, `python3 engine/test_form_field_audit.py` - all
+`0 failure(s)`, exit code `0` each (also `engine/intake/test_manual_intake.py` - skipped, needs a
+scratch Postgres per its own docstring, same as always). Full `engine/` sweep, run via a loop
+capturing each file's own real exit code (not a single aggregated grep): `find engine
+-name "test_*.py" | wc -l` = 86, all 86 ran individually - `TOTAL=86 FAILED_FILES=0`, matching the
+standing baseline exactly.
+
+**Backlog: unchanged** - a mechanical phrasing gap found by testing against real live data, not a
+new or existing judgment-call item. `engine/intake/` continues to NOT be exhausted - this is the
+THIRD real gap found there in as many passes using this exact methodology (sibling's Finding 170,
+this chain's Findings 171 and 172), across two different functions/regexes now
+(`DELIVERY_RE` and `CLOSING_TIME_RE`). `find_nra_reference()` remains only lightly spot-checked
+across real samples (3 confirmed-clean real cover-page references this pass and last: "SCM
+Reference Number: NRA 2026/0788", "NRA 2025/0420", "NRA 2026/0759 (E)" all matched correctly; one
+real tender, C.003-092-2024/1F, genuinely has no NRA reference printed at all) - still a live,
+not-yet-exhausted angle for a future pass, same note Finding 171 left.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green against both real and
+fixture data, regression-clean, no RLS/money/hard-stop/worker-image-install surface - same category
+and precedent as Findings 170/171):
+- `engine/intake/classify_tender.py`
+- `engine/intake/test_classify_tender.py`
+
+To verify independently: `cd engine/intake && python3 test_classify_tender.py` - expect
+`0 failure(s)`, including the 4 new checks naming "date-before-time". Independently fetch
+`https://www.nra.co.za/sanral-tenders/list/open-tenders` and then
+`https://www.nra.co.za/sanral-tenders/detail/contract-sanral-n-003-010-2020-2r` (or any of the
+other 3 named above) and confirm the real notice states its closing date before its closing time,
+matching this finding's own write-up.

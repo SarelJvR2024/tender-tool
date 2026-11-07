@@ -384,6 +384,27 @@ def test_find_closing_time_single_ambiguous_and_formats():
     check("'for submission of tender offers' is recognised, not just 'for receipt of tenders'",
           ct.find_closing_time("The closing time for submission of tender offers is 14:00 on 5 December 2026.")
           == {"value": "14:00", "ambiguous": False})
+    # Finding 172 (2026-11-07): real, confirmed live on 4 of 8 currently-open
+    # SANRAL tenders (nra.co.za/sanral-tenders/list/open-tenders) - when the
+    # clause reads "closing DATE and TIME ... is", the real sentence states
+    # the date BEFORE the time ("...is Tuesday, 08 December 2026 at 12H00
+    # pm", "...is 04 December 2026 @12H00 pm", "...is 26 November 2026 @
+    # 11:00 AM"), the mirror of the "time and date" shape above where the
+    # time comes first - without this, all of these returned None.
+    check("date-before-time ('date and time' infix, with a day name) is read, not just time-first",
+          ct.find_closing_time(
+              "The closing date and time for receipt of tenders is Tuesday, 08 December 2026 at 12H00 pm "
+              "(South African Time)."
+          ) == {"value": "12:00", "ambiguous": False})
+    check("date-before-time with no day name and no space before '@' is read",
+          ct.find_closing_time("The closing date and time for receipt of tenders is 04 December 2026 @12H00 pm (South African Time).")
+          == {"value": "12:00", "ambiguous": False})
+    check("date-before-time with a ':' separator and 'AM' is read",
+          ct.find_closing_time("The closing date and time for receipt of tenders is 26 November 2026 @ 11:00 AM (South African Time).")
+          == {"value": "11:00", "ambiguous": False})
+    check("date-before-time with a day name AND no explicit connector word (just '@') is read",
+          ct.find_closing_time("The closing date and time for receipt of tenders is Friday, 12 February 2027 @ 12H00 (South African Time).")
+          == {"value": "12:00", "ambiguous": False})
 
 
 def test_find_delivery_address_single_ambiguous_and_stops_correctly():
