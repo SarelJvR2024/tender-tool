@@ -58,7 +58,14 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   }
   const companyId = membership.company_id as string;
 
-  const [{ data: pending, error: pendingError }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }, { data: failed, error: failedError }] = await Promise.all([
+  const [
+    { data: pending, error: pendingError },
+    { data: principals, error: principalsError },
+    { data: people, error: peopleError },
+    { count: queuedCount },
+    { data: company, error: companyError },
+    { data: failed, error: failedError },
+  ] = await Promise.all([
     supabase
       .from("onboarding_document_results")
       .select("id, document_kind, document_kind_reason, fields, warnings, text_method, model, created_at, onboarding_uploads(original_filename)")
@@ -106,6 +113,18 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   }
 
   if (pendingError) console.error("onboarding_document_results select failed", pendingError);
+  // A failed principals/people/company read here is indistinguishable from
+  // the genuine "haven't added any yet" case below (review.tsx's own
+  // `principals.length === 0`/`people.length === 0` empty-state copy) unless
+  // flagged explicitly - and for `company`, it silently drops the real
+  // CIDB-contractor-name-mismatch check (review.tsx's `cidbMismatch`,
+  // QA-Edge-Case-Findings.md's own documented finding) with no sign it was
+  // ever meant to run. Same established bug class as the bulk-cv/page.tsx
+  // fix (bc1e7b5) - captured and logged, not silently dropped.
+  if (principalsError) console.error("document-scan: company_principals read failed", principalsError);
+  if (peopleError) console.error("document-scan: people read failed", peopleError);
+  if (companyError) console.error("document-scan: companies read failed", companyError);
+  const reviewDataError = !!(principalsError || peopleError || companyError);
 
   return (
     <SubPage
@@ -168,6 +187,13 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
             </div>
           ))}
         </Card>
+      )}
+
+      {reviewDataError && (pending ?? []).length > 0 && (
+        <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+          Couldn&apos;t load your directors/people or company record just now - the review cards below may wrongly
+          say nobody is on file yet, or miss a name-mismatch check. Try refreshing before confirming anything.
+        </div>
       )}
 
       <Card title={`To review (${pending?.length ?? 0})`}>
