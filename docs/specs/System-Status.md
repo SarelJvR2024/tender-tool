@@ -1,5 +1,91 @@
 # System Status
 
+## This pass (2026-11-07xv, standing solution-architect review): oriented from `c18485c`
+(immediately-preceding pass's own verified HEAD, a genuine negative sweeping `experience/`,
+`sanral-schedules/`, `toolkit/`, `billing/`'s last file, plus a 6-reader `engine/discovery/`
+re-verify). `git fetch origin main` clean, local matched `origin/main` exactly at the start and
+again immediately before this pass's own push - `c18485c` throughout, no sibling commits landed
+during this pass. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`: `#176`/
+`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165` (both
+draft) are all still open, same `updated_at` timestamps every preceding pass has recorded (`#182`
+2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md`
+myself before picking a number - 177 was the highest recorded at this handoff, confirming no new
+finding had landed from a sibling session either, before this pass's own Finding 178 below.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrails already allow (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle: `app/app/discovery/` (named as the top candidate by the preceding pass's own
+backlog note - "likely has interest/tag-setting write paths analogous to the ones already found
+broken elsewhere", untouched by this chain so far).** Read the whole surface in full: `page.tsx`,
+`actions.ts`, `preferencesActions.ts`, `OpportunityPreferencesPanel.tsx`, `OpportunityQuickActions
+.tsx`, `downgrade-flag.tsx`, `loading.tsx`. The dominant bug class this chain keeps finding
+(a discarded Supabase read's error treated as false-safe, traced into a `<select>`-into-whole-row-
+overwrite) is genuinely NOT present on this surface - every write here goes through a SECURITY
+DEFINER Postgres RPC (`set_opportunity_tag`, `set_opportunity_interest`, `acknowledge_discovery
+_downgrade`, `pursue_discovered_opportunity`) rather than a client-side diff-and-update, so there is
+no discarded-read-feeds-a-`<select>` instance of the kind Findings 175-177 found. But reading each
+RPC's own SQL body for the SAME underlying hazard those findings keep naming - a stale value
+feeding an overwrite on save - found a different root cause with the identical silent-data-loss
+symptom: `set_opportunity_tag()` (`app/supabase/migrations/0089_opportunity_tags_interest.sql`)
+reads the opportunity row ONCE into a plpgsql variable with no lock, then computes the new
+`company_tags` array against that in-memory snapshot and writes it back unconditionally - two
+concurrent "add tag" calls on the SAME row (two team members, a double-click, two browser tabs)
+can silently lose one tag to the other's overwrite, with zero error on either side.
+
+**Reproduced directly in a disposable scratch Postgres database** (`engine/security
+/replay_schema.sh`, dropped and the Postgres service stopped afterward, per the standing
+guardrail) - full detail, exact `psql` commands and exit codes, in this pass's own
+`docs/specs/QA-Edge-Case-Findings.md` Finding 178 entry, not duplicated here. Fixed with `for
+update` on the function's initial read, the same pattern this codebase already used for the
+identical race shape in 0107's `redeem_company_invite()` and 0113's `create_company_invite_checked
+()`. New migration: `app/supabase/migrations/0121_opportunity_tag_add_remove_race.sql`.
+`set_opportunity_interest()` was checked for the same shape and is safe (it sets `interest_marker`
+purely from its own parameter, never from a stale snapshot) - not touched.
+
+**Verification.** Red-then-green confirmed twice over against the scratch DB with a deliberately
+widened read-to-write window (two independent red runs, two independent green runs, real `psql`
+exit codes - detail in the Finding 178 entry). Full migration replay with 0121 included: `bash
+engine/security/replay_schema.sh` - exit 0, "Schema replay complete (111 migrations)". TS/JS suite
+re-run even though this fix touches no TypeScript: `npm run typecheck` - 0 errors. `npx eslint .` -
+0 errors, same 3 pre-existing warnings. `npx vitest run` - **505/505, 66 files**, unchanged. The
+`*.test.ts` node loop - **28 files, 0 failures**, unchanged. `npx next build` - compiled
+successfully, same route table, `/discovery` still a Partial Prerender route.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass. `app/app/discovery/` is now genuinely swept in full - every file and every
+backing RPC read, one real race-condition fix applied and pushed, everything else on the surface
+(the preferences panel's client-held state, `acknowledge_discovery_downgrade`'s already-safe
+live-column `coalesce()` pattern, `pursue_discovered_opportunity`'s naturally-idempotent
+insert-on-conflict shape) confirmed clean with specific reasoning in the Finding 178 writeup.
+A genuinely fresh `app/app/` surface for the next pass: `app/app/onboarding/` (still entirely
+untouched by this chain), `app/app/dashboard/`'s own write paths beyond what Finding 165 already
+covered, and `app/app/admin/` (the taxonomy-suggestion review path `experience/[id]/page.tsx`'s own
+suggestion flow writes into, named by two prior passes now, still not itself swept) remain the
+named-but-not-yet-opened candidates. `engine/discovery/`'s `sars_procurement.py` listing-drop risk
+(no live reproduction yet, lower priority per the task's own brief) and `randwater.py`'s TLS-
+blocked live-fetch limitation also remain open, unchanged.
+
+To verify independently: read `app/supabase/migrations/0089_opportunity_tags_interest.sql`'s
+original `set_opportunity_tag()` and `app/supabase/migrations/0121_opportunity_tag_add_remove_race
+.sql`'s replacement, and confirm the only change is `for update` added to the initial `select *
+into opp`. Reproduce the race yourself per the exact steps in `docs/specs/QA-Edge-Case-Findings.md`
+Finding 178's own "To verify independently" paragraph. Run `npm run typecheck`, `npx eslint .`,
+`npx next build`, `npx vitest run` (505/505, 66 files), and the `*.test.ts` node loop (28 files, 0
+failures) yourself and confirm the same results. Confirm via `mcp__github__list_pull_requests` that
+all 9 PRs are still open/unmerged at the same timestamps listed above, and that `git log --oneline
+-1 origin/main` is this pass's own new commit (one ahead of `c18485c`), with no further sibling
+commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xiv, standing solution-architect review): oriented from `096a13f`
 (immediately-preceding pass's own verified HEAD, Finding 177's `app/app/company/` three-part fix).
 `git fetch origin main` clean, local matched `origin/main` exactly at the start and again
