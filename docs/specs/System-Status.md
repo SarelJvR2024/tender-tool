@@ -10266,6 +10266,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - `daily_digest.py`'s own finance/cv_admin role filters checked ONLY the literal string "person_credential", so Finding 139's new `person_credential_before_closing` item type was silently dropped from cv_admin's digest (the one role whose job is to act on it) and silently shown to finance (whose matrix rule explicitly excludes it)
+
+Oriented from `d9e7b4c` (own prior pass: Finding 179, registrations-catalog lapses-before-closing).
+`git fetch origin main` found no new commits - still at `d9e7b4c` both before and after this pass's
+own work. **Numbering note, again**: re-checked the findings doc's own highest number before writing
+this entry (186, not 180) - this pass's new finding is 187.
+
+**Rotation: notify.** Read `daily_digest.py`'s `build_digest_for_person()` end to end, specifically
+checking whether every `document_expiry` item TYPE this function can carry is correctly recognised
+by its own role filters - not assumed from the surrounding comments (which describe the INTENT,
+"exactly the person_credential items") but the literal code (`i.get("type") == "person_credential"`).
+Finding 139 (yesterday, this same track) introduced a SECOND type for the identical underlying fact
+- a person's own credential, scoped to a tender's closing date - and neither the finance-exclusion
+filter nor the cv_admin-inclusion filter was ever updated for it, since both check one literal string.
+
+**Confirmed live, not just reasoned about**: called `build_digest_for_person()` directly with a
+`person_credential_before_closing` item. cv_admin's digest came back empty - the item was silently
+dropped, even though it is EXACTLY what cv_admin's own matrix rule describes. finance's digest came
+back WITH the item - even though finance's own matrix rule explicitly excludes a person's own
+credential renewal. Both role filters were doing the opposite of their own documented intent, for
+every such item, since the moment Finding 139 shipped.
+
+**Fixed**: added a `PERSON_CREDENTIAL_TYPES` tuple and changed both filters from exact-equality to
+membership checks against it. The company-item types (including Finding 179's new one from earlier
+this same pass) were already handled correctly by both filters, so this touches only the
+person-credential branch.
+
+**Verified red-then-green against all three "before closing" item types at once.** New checks in
+`test_watch_person_credentials.py`: a mixed batch of all three before-closing item types - cv_admin
+must see exactly the person one, finance exactly the two company ones. Reverted via `git apply -R` -
+both new checks failed exactly as predicted; reapplied - `0 failure(s)`. `py_compile` clean.
+Regression: `test_digest_live.py`, `test_send_digest_emails.py`, `test_digest_opt_in.py`,
+`test_watch_conditional_registrations.py`, `test_principals_registrations.py` - all `0 failure(s)`.
+
+**Backlog: unchanged at 18 items** - a mechanical role-routing gap introduced by an earlier fix in
+this same track, not a new judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean, no
+change to any other section's role filtering):
+- `engine/notify/daily_digest.py`
+- `engine/compliance/test_watch_person_credentials.py`
+
+To verify independently: `cd engine/compliance && python3 test_watch_person_credentials.py` - expect
+`0 failure(s)`, including the two new checks naming "person_credential_before_closing".
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - the registrations catalog (0050) never got the "lapses before closing" check Finding 132/139 built twice already, for its COMPANY-held rows specifically; person/principal-held rows and property_documents' own equivalent gap deliberately left open, not forced
 
 Oriented from `18d4f7e` (own prior pass: Finding 170, `classify_tender.py` real-document fix). `git

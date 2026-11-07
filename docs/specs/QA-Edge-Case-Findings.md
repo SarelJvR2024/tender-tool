@@ -11636,3 +11636,51 @@ To verify independently: read `app/app/company/document-scan/actions.ts`'s `conf
 **Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain exactly as left, untouched, per the standing guardrail. All 10 PRs remain open and unmerged (re-checked via `mcp__github__list_pull_requests`): `#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183` - none touched. `randwater.py`'s own live-reachability question remains exactly where Finding 185's own pass left it (closed loop on reachability specifically, code-only judgment on the ocid-collision question itself).
 
 To verify independently: read `engine/cv/extract_cv_fields.py`'s `fail_stale_uploads()` and confirm its own `GET` selects `company_id` and all 3 of its `system_alerts.record()` calls include `"company_id": up.get("company_id")` in `context`. Run `python3 engine/cv/test_extract_cv_fields.py` and confirm `test_fail_stale_uploads_alerts_carry_company_id()`'s 3 checks pass (exit `0`). Run the full `engine/` sweep (`find engine -name "test_*.py"`, loop with plain `python3 <file>`) and confirm `86/86, 0 failures`. Confirm via `mcp__github__list_pull_requests` that all 10 PRs are still open/unmerged, and that `git log --oneline -1 origin/main` is this finding's own new commit, with no further sibling commits having landed in between.
+
+### Finding 187 (CONFIRMED, FIXED, severe - `daily_digest.py`'s own finance/cv_admin role filters for the `document_expiry` section checked ONLY the literal string `"person_credential"`, so Finding 139's new `person_credential_before_closing` item type was silently dropped from cv_admin's digest - the ONE role whose entire job is to act on it - and silently shown to finance, whose own matrix rule explicitly says they should never see a person's credential renewal)
+
+**Area:** Notify (`engine/notify/daily_digest.py`'s `build_digest_for_person()` - the role-based section
+filtering that decides what each recipient's own daily digest email actually contains).
+
+**Scenario:** found while reading `build_digest_for_person()`'s `document_expiry` section routing end
+to end, specifically checking whether every item TYPE this section can ever carry is correctly
+recognised by its own role filters - not assumed from the surrounding comments, which describe the
+INTENT ("exactly the person_credential items") rather than the literal code
+(`i.get("type") == "person_credential"`). Finding 139 (2026-11-06, this same standing QA track)
+introduced a SECOND item type for the identical underlying fact - a specific person's own
+professional registration, just scoped to a tender's closing date instead of the plain reminder
+window - `"person_credential_before_closing"`. The finance-exclusion filter
+(`item.get("type") != "person_credential"`) and the cv_admin-inclusion filter
+(`item.get("type") == "person_credential"`) were never updated for it, since both check the one
+literal string, not the underlying category.
+
+**Confirmed live, not just reasoned about:** called `build_digest_for_person()` directly with a
+`person_credential_before_closing` item and both roles. cv_admin's own digest came back with
+`document_expiry: []` - the item was silently dropped, even though cv_admin's own matrix rule
+("only if the expiring item would block a specific person's own registration being usable on a
+pack") describes EXACTLY this item. finance's own digest came back WITH the item - even though
+finance's own matrix rule ("not a person's ECSA/SACPCMP renewal, not theirs to act on") explicitly
+excludes this exact case. Both role filters were doing the opposite of their own documented intent,
+for every `person_credential_before_closing` item, ever since Finding 139 shipped the day before.
+
+**Fix:** added `PERSON_CREDENTIAL_TYPES = ("person_credential", "person_credential_before_closing")`
+and changed both filters from exact-equality checks to membership checks against this tuple. The
+company-item types (`"document"`, `"document_before_closing"`, and Finding 179's new
+`"held_registration_before_closing"`) were already correctly handled by both filters (they're simply
+never equal to `"person_credential"`), so this fix touches only the person-credential branch.
+
+**Verified red-then-green, against all three "before closing" item types at once.** New checks in
+`test_watch_person_credentials.py`'s existing digest-routing section: a mixed batch of
+`person_credential_before_closing`/`document_before_closing`/`held_registration_before_closing`
+items - cv_admin must see exactly the person item, finance must see exactly the two company items.
+Reverted `daily_digest.py` via `git apply -R`, re-ran - both new checks failed exactly as predicted
+(cv_admin got nothing, finance got all three including the person item); reapplied - `0 failure(s)`.
+`py_compile` clean. Regression: `test_digest_live.py`, `test_send_digest_emails.py`,
+`test_digest_opt_in.py`, `test_watch_conditional_registrations.py`, `test_principals_registrations.py`
+- all `0 failure(s)`.
+
+**Regression:** `engine/notify/daily_digest.py` (1 new module-level constant, 2 filter conditions
+changed from `==`/`!=` to `in`/`not in`, ~15 lines including comments);
+`engine/compliance/test_watch_person_credentials.py` (2 new checks appended to the existing
+digest-routing test). No change to any other section's role filtering, `SECTION_VISIBILITY`, or the
+`own()` company-scoping function.

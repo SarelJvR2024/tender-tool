@@ -116,6 +116,36 @@ def main():
     check(viewer == {"count": 3}, f"viewer: count only ({viewer})")
     check(validator is None, "validator: no document-expiry section at all")
 
+    # Finding 187 (2026-11-07): build_digest_for_person()'s own finance/
+    # cv_admin filters checked ONLY the literal "person_credential" type -
+    # correct until Finding 139 added a second type, "person_credential_
+    # before_closing", for the identical "this is a PERSON's own credential"
+    # fact. Confirmed live before this fix: a person_credential_before_closing
+    # item was dropped from cv_admin's own digest (who should see it - that
+    # is exactly their matrix rule) and kept in finance's (who should not -
+    # "not a person's ECSA/SACPCMP renewal, not theirs to act on", same
+    # matrix rule as the plain person_credential case).
+    pcbc = {"type": "person_credential_before_closing", "person_name": "Pat Engineer",
+            "label": "ECSA professional registration", "status": "lapses_before_closing",
+            "expiry_date": D(90), "tender_label": "Z.001-2026", "closing_date": D(100)}
+    dbc = {"type": "document_before_closing", "label": "SARS Tax Compliance Status PIN",
+           "status": "lapses_before_closing", "expiry_date": D(90), "tender_label": "Z.001-2026",
+           "closing_date": D(100)}
+    hrbc = {"type": "held_registration_before_closing", "label": "SETA accreditation",
+            "status": "lapses_before_closing", "expiry_date": D(90), "tender_label": "Z.001-2026",
+            "closing_date": D(100)}
+    bc_signals = {"new_tenders": [], "document_expiry": [pcbc, dbc, hrbc], "tender_tasks": [],
+                  "readiness_changes": [], "submission_due": []}
+
+    def bc_section(role):
+        d = daily_digest.build_digest_for_person({"name": role, "tender_role": role, "company_name": "x"}, bc_signals)
+        return d.get("document_expiry")
+
+    cv_bc, fin_bc = (bc_section(r) for r in ("cv_admin", "finance"))
+    check(cv_bc == [pcbc], f"cv_admin sees the person_credential_before_closing item, same as a plain one ({cv_bc})")
+    check(fin_bc == [dbc, hrbc],
+          f"finance sees the two company-held before-closing items, NOT the person one ({fin_bc})")
+
     profile = {"key_people": [{"name": "Pat Engineer", "qualifications": {"ecsa_number": "20150155", "ecsa_expiry": D(10)}},
                               {"name": "Sam Later", "qualifications": {"ecsa_number": "2", "ecsa_expiry": D(300)}}]}
     local = daily_digest.local_person_credential_expiry(profile, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)

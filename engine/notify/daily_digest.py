@@ -202,6 +202,23 @@ for _sections in SECTION_VISIBILITY.values():
 CV_KEYWORDS = ("cv", "key_person", "key person", "reference", "specialist", "ecsa", "sacpcmp", "people.", "person")
 FINANCE_KEYWORDS = ("financial", "bee", "b-bbee", "bbee", "coid", "tax", "sars", "bank", "vat", "pricing", "price", "insurance", "csd")
 
+# Every document_expiry item TYPE that is about a specific PERSON's own
+# credential, not a company document - watch_deadlines.find_due_person_
+# credentials()'s own "person_credential", AND Finding 139's
+# "person_credential_before_closing" (the identical fact, just scoped to a
+# tender's closing date instead of the plain reminder window). Finding 187
+# (2026-11-07): build_digest_for_person()'s own finance/cv_admin filters
+# below only ever checked the ONE literal string "person_credential" -
+# correct until Finding 139 introduced this second type for the same
+# underlying concept, after which cv_admin (who should see it - it is
+# exactly their own "a person's registration isn't usable" case) silently
+# never did, and finance (who should NOT - "not theirs to act on", same as
+# the plain person_credential case) silently always did. Confirmed live:
+# a person_credential_before_closing item came back dropped from cv_admin's
+# own digest and kept in finance's, the reverse of the matrix both role
+# branches' own comments already describe.
+PERSON_CREDENTIAL_TYPES = ("person_credential", "person_credential_before_closing")
+
 
 def classify_text(text, keywords):
     t = (text or "").lower()
@@ -587,12 +604,12 @@ def build_digest_for_person(person, signals):
         if role == "finance":
             # Matrix: financial/tax/compliance documents - every company
             # document, but not a person's ECSA/SACPCMP renewal (not theirs to act on).
-            items = [i for i in items if i.get("type") != "person_credential"]
+            items = [i for i in items if i.get("type") not in PERSON_CREDENTIAL_TYPES]
         elif role == "cv_admin":
             # Matrix: only if the expiring item would block a specific person's own
             # registration being usable on a pack - exactly the person_credential
-            # items; company documents stay out.
-            items = [i for i in items if i.get("type") == "person_credential"]
+            # items (plain or lapses-before-closing); company documents stay out.
+            items = [i for i in items if i.get("type") in PERSON_CREDENTIAL_TYPES]
         if role == "viewer":
             digest["document_expiry"] = {"count": len(items)}
         else:
