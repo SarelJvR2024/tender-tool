@@ -47,6 +47,18 @@ cases = {
     "-": None,
     "": None,
     290000.0: 290000.0,
+    # QA pass, 2026-11-07: a text-typed negative amount (a BOQ omission/
+    # credit line item, or a negative award-value correction) seen either
+    # with a literal minus sign or standard accounting parentheses notation.
+    # A true Excel numeric cell keeps its sign fine (the int/float branch
+    # above, read from the cell's own raw <v> value, never its display
+    # format) - this only matters for a text-typed cell or an HTML table
+    # value, exactly the shape award_outcomes.py's own docstring says these
+    # numbers are seen in live.
+    "-45000.00": -45000.0,
+    "-R 45 000.00": -45000.0,
+    "(R 45 000.00)": -45000.0,
+    "(1 234,50)": -1234.50,
 }
 for raw, want in cases.items():
     got = ao.parse_rand(raw)

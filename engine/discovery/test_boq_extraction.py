@@ -306,6 +306,35 @@ def test_real_item_description_starting_with_the_word_total_is_not_dropped_as_a_
     check("Sub Total" not in descs, "the real 'Sub Total' row must still be excluded as a subtotal")
 
 
+def test_negative_omission_credit_line_keeps_its_sign():
+    """A BOQ "Omit"/credit line item - a real, if less common, row shape (an
+    item being deducted from the bill, e.g. a provisional-sum adjustment) -
+    text-typed here exactly as a buyer's own template would store it when
+    the cell isn't a plain Excel number: either a literal minus sign or
+    standard accounting parentheses notation. QA pass, 2026-11-07: this used
+    to come back None (parens) or silently flip positive (minus sign) via
+    award_outcomes.parse_rand()'s own bug - see that module's docstring."""
+    data = make_workbook_bytes({"BOQ": [
+        ["Description", "Unit", "Qty", "Rate", "Amount"],
+        ["Supply and lay 300mm diameter pipe", "m", 450, 650, 292500],
+        ["Omit: provisional sum for utility relocation (not required)", "sum", 1, None, "(R 45 000.00)"],
+        ["Backfill and compact in layers", "m3", 120, "-45,00", "-5 400,00"],
+    ]})
+    result = boq.parse_boq_workbook(io.BytesIO(data))
+    check(result["sheet"] == "BOQ", f"should still parse the BOQ sheet, got {result['sheet']}")
+    items = {it["description"]: it for it in result["items"]}
+    omit = items.get("Omit: provisional sum for utility relocation (not required)")
+    check(omit is not None, f"the omission line must still be kept as a real item, got {result['items']}")
+    if omit:
+        check(omit["amount_zar"] == -45000.0,
+              f"a parenthesised amount is accounting notation for negative, not a missing value - got {omit['amount_zar']!r}")
+    backfill = items.get("Backfill and compact in layers")
+    check(backfill is not None, f"the text-typed-rate/amount row must still be kept, got {result['items']}")
+    if backfill:
+        check(backfill["rate_zar"] == -45.0, f"a minus-signed rate must keep its sign, got {backfill['rate_zar']!r}")
+        check(backfill["amount_zar"] == -5400.0, f"a minus-signed amount must keep its sign, got {backfill['amount_zar']!r}")
+
+
 def main():
     test_basic_boq_parsed_with_totals_excluded()
     test_header_wording_variants_still_detected()
@@ -317,6 +346,7 @@ def main():
     test_unreadable_file_returns_honest_note_never_crashes()
     test_formula_error_cell_is_null_not_a_fabricated_zero()
     test_real_item_description_starting_with_the_word_total_is_not_dropped_as_a_subtotal_row()
+    test_negative_omission_credit_line_keeps_its_sign()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

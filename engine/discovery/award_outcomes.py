@@ -95,13 +95,36 @@ def parse_rand(raw):
     "R551 189,00" (NBSP thousands), "678228,5", "R 274 589 809.84",
     "R274,389,252.50", "R 75 720 000.00 (Including VAT.)", "-", "0.00".
     The last "," or "." followed by 1-2 digits at the end is the decimal
-    separator; every other separator is a thousands separator."""
+    separator; every other separator is a thousands separator.
+
+    QA pass, 2026-11-07: a text-typed negative amount - a BOQ omission/
+    credit line item (boq_extraction.py's own rate/amount columns), or a
+    negative award-value correction - used to silently lose its sign
+    ("-45000.00" -> 45000.0) or come back None entirely when written in
+    standard accounting parentheses notation ("(R 45 000.00)"), because the
+    old code stripped "(...)" unconditionally (built only for a trailing
+    annotation like "(Including VAT.)") and then threw away every character
+    that wasn't a digit/comma/period, "-" included. A genuine Excel numeric
+    cell is unaffected either way - sanral_fill.Workbook reads its raw <v>
+    value via the int/float branch above, never its display format, so its
+    sign was never at risk; this only ever mattered for a text-typed cell or
+    an HTML table value, exactly the shape this function's own docstring
+    says these numbers are seen in live."""
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
         return float(raw)
-    s = str(raw).replace("\xa0", " ")
-    s = re.sub(r"\(.*?\)", " ", s)  # "(Including VAT.)"
+    s = str(raw).replace("\xa0", " ").strip()
+    # The whole value wrapped in parens with nothing but a currency marker/
+    # digits/separators inside is accounting notation for negative, not a
+    # trailing annotation - "(R 45 000.00)", never "(Including VAT.)" (which
+    # has no digits of its own and falls through to the next branch as
+    # before).
+    if re.match(r"^\(\s*R?\s*[\d,.\s]+\)$", s):
+        negative, s = True, s[1:-1]
+    else:
+        s = re.sub(r"\(.*?\)", " ", s)  # "(Including VAT.)"
+        negative = bool(re.match(r"^[^0-9]*-", s))
     s = re.sub(r"[^0-9,.]", "", s)
     if not re.search(r"\d", s):
         return None
@@ -112,7 +135,8 @@ def parse_rand(raw):
         whole, frac = s, "0"
     whole = re.sub(r"[,.]", "", whole) or "0"
     try:
-        return float(f"{int(whole)}.{frac}")
+        value = float(f"{int(whole)}.{frac}")
+        return -value if negative and value else value
     except ValueError:
         return None
 

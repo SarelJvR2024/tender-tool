@@ -11611,6 +11611,55 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - Finding 200, `award_outcomes.py`'s `parse_rand()` silently flipped a text-typed negative rand amount positive, or returned `None` entirely for the same amount in accounting parentheses notation, reachable through `boq_extraction.py`'s own BOQ omission/credit line parsing
+
+Oriented from `c8eb357` (own prior pass: Finding 192, the `process_*_jobs.py` `company_id`/narrative-staleness
+sweep). `git fetch origin main` found 7 new sibling commits (all "standing solution-architect review"
+track, none colliding with this pass's own files, confirmed by file list): Findings 193 through 199
+(RPC error-capture gaps on `admin/customers`, `company/principals`, `document-scan`, `admin/taxonomy`,
+and the "plain update twin" RLS-zero-row-match family extended to `company/officeActions.ts` and 11
+more sites). Fast-forward merge was clean. Re-checked again immediately before this pass's own push -
+still the same tip, no new sibling commit landed in between.
+
+**This pass's own task**: discovery rotation. Constructed real adversarial/boundary input against
+`award_outcomes.parse_rand()` - the shared rand-amount text parser `boq_extraction.py`'s own docstring
+says it reuses "rather than a second hand-rolled parser" - specifically a negative amount, since every
+example in that function's own docstring is positive and no existing test exercised one.
+
+**Found: Finding 200.** `parse_rand("-45000.00")` returned `45000.0` (the minus sign silently dropped,
+not preserved) and `parse_rand("(R 45 000.00)")` - standard accounting negative notation - returned
+`None` entirely (the unconditional `"(...)"`-stripping, built only for a trailing annotation like
+`"(Including VAT.)"`, discarded every digit along with the parens). Confirmed via
+`sanral_fill.Workbook._decode_cell_value()` that a genuine Excel numeric cell is unaffected (its raw
+`<v>` value already carries the correct sign; display-format parens are never the stored value) - this
+only bites a text-typed cell or an HTML table value, exactly the shape this function's own docstring
+says these amounts are seen in live. Realistically reachable through `boq_extraction.py`'s own
+rate/amount columns: a real BOQ "Omit"/credit line (a provisional-sum deduction, a legitimate BOQ row
+shape) typed as text in a buyer's own template would either vanish (rejected by
+`extract_items_from_grid()`'s own "no number anywhere" skip once its only priced field reads `None`) or
+silently read as a wrong positive figure with no error anywhere downstream.
+
+**Fix**: `parse_rand()` now detects two negative shapes before the existing character-stripping - the
+whole trimmed value wrapped in parens with nothing but a currency marker/digits/separators inside
+(negative, parens removed, falls through normally; distinct from a non-numeric trailing annotation,
+still stripped as before), and a literal `-` appearing anywhere before the first digit - then negates
+the parsed magnitude at the end. Verified red-then-green: saved the diff, `git apply -R`, re-ran
+`test_award_outcomes.py`/`test_boq_extraction.py` - exactly the predicted failures (sign dropped/amount
+`None`); `git apply` to reapply, re-ran - `ALL PASSED`/`0 failure(s)`. Added 4 new cases to
+`test_award_outcomes.py`'s own `cases` dict and one new end-to-end test to `test_boq_extraction.py`
+(`test_negative_omission_credit_line_keeps_its_sign()`) building a real minimal in-memory `.xlsx` with
+text-typed negative cells - no mocking, the real `Workbook` -> `extract_items_from_grid()` ->
+`parse_rand()` path. `python3 -m py_compile` clean. Regression: `test_tender_enrichment.py` (also calls
+`parse_rand()`) and `test_store_award_outcomes.py` both still pass unchanged. See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 200 for the full write-up and independent-verification
+steps.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - Finding 192, a sweep across all 6 `process_*_jobs.py` worker bridges found 10 more `system_alerts.record()` calls missing `company_id` in context (Findings 186/188's bug class), plus a separate gap in `narrative/process_narrative_jobs.py`'s `fail_stale_jobs()` which never alerted on a real staleness reclaim at all
 
 Oriented from `e6af613` (own prior pass: Finding 187, daily_digest.py's person_credential filter).
