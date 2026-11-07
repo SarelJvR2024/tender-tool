@@ -10091,3 +10091,92 @@ load" branch of their own row (not only `membershipError`). Confirm `npx next bu
 with the same route table. Confirm `request_submission_pack_checked()`/`request_general_job_checked()`
 (migration `0083`/`0084`, re-read directly) still compute `company_packs_this_period(p_company_id)`
 independently of anything this page renders - this fix changes no enforcement path.
+
+### Finding 165 (CONFIRMED, FIXED, minor-but-same-shape - `app/dashboard/page.tsx`'s own "Team & CV bench" card rendered a false "0 team profiles" on a discarded `people` read error, the identical shape as Finding 164's billing-page fix, found on the one widely-trafficked page that same fix's own backlog note flagged as not yet swept)
+
+**Area:** Home (`app/app/dashboard/page.tsx`), the "Team & CV bench" card's "N team profiles · N
+with a CV on file" line.
+
+**Scenario:** followed Finding 164's own flagged-but-not-fixed avenue - swept other customer-facing
+pages with a live Supabase-sourced count for the same "discarded error -> false zero" shape.
+Checked `/dashboard`, `/analytics`, `/pipeline`, `/people`, `/company`, `/tenders/[id]` (see
+"Genuinely clean" below for each). `/dashboard` itself was already heavily reviewed - commit
+`829dbb9` (2026-11-06, "TS-sweep's 4th grep blind spot") had already widened this exact page's
+`Promise.all` destructure to capture `peopleRowsError` and added a `console.error` for it, with an
+inline comment reasoning it was safe to leave "logged, not gated": `peopleRows` feeds
+`hasSignatoryCapacity` (a boolean gate on the new-company setup checklist, defaulting to `false` on
+error - "not done yet," the safe direction) and `peopleCount` (used, that comment said, "the same
+way"). That reasoning covers `hasSignatoryCapacity` correctly but doesn't actually hold for
+`peopleCount`: unlike `hasSignatoryCapacity`, `peopleCount` isn't a boolean gate anywhere - it's
+rendered directly, as a literal fact, in the "Team & CV bench" card ("`{peopleCount}` team
+profiles · `{readiness.peopleWithCvCount}` with a CV on file"), with no branch anywhere checking
+`peopleRowsError` before showing it. On a real `people` select failure, the card would have shown a
+confident "0 team profiles" - not "not done yet," a flat false statement about the customer's own
+roster, sitting directly below a "View team →" link to the page that would show them it's wrong.
+Exactly the shape Finding 164 fixed one call ago (same review chain, same wording even - "Team: N
+of X" there, "N team profiles" here), on the one page `829dbb9`'s own commit had just touched for
+this exact error flag without catching this second use of it.
+
+**Genuinely clean - other candidates checked, not forced.** `app/app/company/page.tsx`: its own
+`registerCounts`/`readinessInputsError` Promise.all block already captures every count's `error`
+individually (`a.error`/`b.error`/`c.error`/`cvError`/`experienceError`/`peopleError`) and already
+renders a dedicated `registerCountsError || readinessInputsError` banner ("the counts and checklist
+above may be incomplete") - already correct, confirmed by reading the whole page, not assumed from
+the file existing. `lib/companyReadinessData.ts` (`fetchCompanyReadiness()`, used by both
+`/dashboard` and `/discovery`): its 3 internal read errors are deliberately logged-only by design
+(that file's own `829dbb9`-era comment: "never a false pass on the bid-readiness score... Logged")
+- a failure there under-reports the score/`peopleWithCvCount`, never over-reports it, the same
+accepted-safe-direction call this review's own prior passes have left alone elsewhere (e.g.
+`send-operational-alerts.ts`'s deliberate opt-in gating) - re-confirmed, not re-litigated, since
+widening `ReadinessResult`'s own return shape to carry an error would be a second call's worth of
+work across 2 call sites, not a one-line display fix like this one. `app/app/analytics/page.tsx`:
+the one query with no error destructured (`companies` select, used only to match the company's own
+name against market-outcome award text, never displayed as a count) is cosmetic; `marketError`
+(from `loadOutcomesForTenders`) already gates its own "Pricing & market intelligence" section with
+a dedicated "couldn't load" branch - already correct. `app/app/pipeline/page.tsx`: `opportunities`/
+`peopleRows` have no error destructured either, but both feed cosmetic lookups (a verdict badge per
+card, an assignee-name map) with no count or percentage rendered from either - a real failure there
+means a missing badge or blank assignee name, not a false "0 of X" fact; thin, but not this bug
+shape. `app/app/people/page.tsx` and `app/app/tenders/[id]/page.tsx`: neither runs its own
+`count`-style Supabase query at all - `/people` reads the full roster directly (a length, not a
+`{ count }` read, and its own `loadError` is already checked); `/tenders/[id]`'s `SummaryChip`
+counts are computed from already-loaded, already-error-guarded data (`compliance-data.ts`/
+`general-pack-review-data.ts`, both already covered by `829dbb9`'s own sweep) - nothing new to find
+in either. `app/app/experience/page.tsx`'s own `queuedCount` (an `onboarding_uploads` in-progress
+count) discards its own `error` with no `console.error` at all - flagged here for a future pass,
+not fixed this pass: it only gates a cosmetic "still being read" auto-refresh banner, not a fact
+about the customer's own data, a lower-severity miss than this finding and Finding 164, and fixing
+it well means also deciding whether to log it, which this pass didn't want to bundle into an
+otherwise one-line display fix.
+
+**Fix:** widened the "Team & CV bench" card's count line to check `peopleRowsError` first (same
+pattern the `vaultCompliancePct`/`documentExpiryError` fix two sections above it on this exact page
+already established in `829dbb9`): on error, it now shows "Couldn't load your team - try
+refreshing." instead of the counts; the happy path is pixel-identical to before (`peopleCount ?? 0`
+simplified to `peopleCount`, which is already guaranteed non-null by its own `?? 0` default two
+lines above - no behavior change there). Updated the file's own `829dbb9`-era comment to correct
+its reasoning: it now names `hasSignatoryCapacity` alone as the safe-to-leave-logged case and points
+at this fix for `peopleCount`, instead of lumping both together.
+
+**Verification run myself, real exit codes - no red/green test, honest limitation, same as Findings
+144 and 164.** `app/dashboard` has no extracted testable logic for this card and no page-level test
+file (`find . -iname "*dashboard*" -not -path "*/node_modules/*"` turns up only the already-separate
+`lib/dashboardStats.test.ts`, for pure stage-bucketing logic this fix doesn't touch). Correctness
+rests on `npm run typecheck` (0 errors), `npx eslint .` (0 errors, the same 3 pre-existing warnings),
+`npx next build` (compiled successfully, same route table), and a plain reading of the diff (the
+only two Promise-shape defaults touched are unchanged - this fix adds a conditional render branch,
+nothing upstream of it). `npx vitest run` - **493/493, 63 files**, unchanged. The `*.test.ts` node
+loop (no `--test` flag, real exit codes) - **28 files, 0 failures**, unchanged. Full `engine/` sweep
+(real exit codes) - **86 files, 0 failures**, unchanged (this fix touches no Python).
+
+**Regression:** `app/app/dashboard/page.tsx` only (~15 lines: one comment correction, one card's
+count line wrapped in a `peopleRowsError` conditional). No other file touched.
+
+**Pushed directly to `main`** - a read-only display-page fix on an already-captured, already-logged
+error flag, no RLS/money/hard-stop/worker-image-install surface touched.
+
+To verify independently: read `app/app/dashboard/page.tsx`'s "Team & CV bench" card and confirm its
+count line branches on `peopleRowsError` before rendering `peopleCount`/`readiness.peopleWithCvCount`.
+Confirm `npx next build` still compiles with the same route table. Confirm `app/lib/companyReadinessData.ts`
+and `app/app/company/page.tsx` still read as described above (the former logs-only by design, the
+latter already fully guarded) - re-check, not re-litigate, unless either file changes.

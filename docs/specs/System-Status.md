@@ -1,5 +1,83 @@
 # System Status
 
+## This pass (2026-11-07cc, standing solution-architect review): followed Finding 164's own
+flagged-but-not-fixed avenue - swept other customer-facing pages for the same "discarded Supabase
+read error -> false 0/empty display" shape - and found one real instance: `app/dashboard/page.tsx`'s
+own "Team & CV bench" card. Finding 165.
+
+**The sweep.** Checked every page the brief named by reading it end to end: `/dashboard`,
+`/analytics`, `/pipeline`, `/people`, `/company`, `/tenders/[id]`. `/company`, `/analytics` and
+`/people`/`/tenders/[id]` (the latter two run no `count`-style query of their own at all) all read
+genuinely clean - every count's own `error` is already captured and already feeds a visible
+"couldn't load" state, confirmed by reading each page's actual query block, not assumed. `/pipeline`
+has two reads with no `error` destructured (`discovered_opportunities`, `people`), but both feed
+cosmetic per-card lookups (a verdict badge, an assignee name), never a count or percentage rendered
+as fact - a real failure there means a missing badge, not a false "0 of X"; thin, but not this bug
+shape, not force-fit into a finding.
+
+**`/dashboard` - Finding 165, fixed.** `/dashboard` was already the most heavily reviewed page for
+this exact shape - commit `829dbb9` (2026-11-06) had already widened this page's own `Promise.all`
+to capture `peopleRowsError` and log it, with an inline comment reasoning it was safe left
+"logged, not gated" because `peopleRows` feeds `hasSignatoryCapacity` (a boolean checklist gate,
+safe-direction on error) and `peopleCount` ("the same way," that comment said). That reasoning
+holds for `hasSignatoryCapacity` but not for `peopleCount`: unlike the checklist gate, `peopleCount`
+is rendered directly as a literal fact in the "Team & CV bench" card ("N team profiles · N with a
+CV on file"), with nothing checking `peopleRowsError` before showing it - a real `people` read
+failure would have shown a confident, wrong "0 team profiles," the identical shape Finding 164 just
+fixed on the billing page's "Team: N of X" row, missed by the same commit that had just added the
+error flag for a different use of it. `lib/companyReadinessData.ts` (`fetchCompanyReadiness()`,
+also used by `/discovery`) was re-checked and left alone, not re-litigated: its 3 internal read
+errors are deliberately logged-only by design (under-reports the bid-readiness score/
+`peopleWithCvCount` on failure, never over-reports it) - a already-made, already-reasoned
+safe-direction call from the same `829dbb9` pass, and widening `ReadinessResult`'s own return shape
+to carry an error would be a second call's worth of work, not this pass's one-line display fix.
+Full write-up, including every page checked and why each was ruled in or out: Finding 165 in
+`docs/specs/QA-Edge-Case-Findings.md`.
+
+Oriented from `3e65e68` (immediately-preceding pass's own verified HEAD). `git fetch origin main`
+before starting and again right before writing this entry: clean both times, local matched
+`origin/main` exactly (`3e65e68` both times), no sibling commits landed during this pass. PRs
+re-checked via `mcp__github__list_pull_requests`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged, closed or
+touched this pass. (Note: PR #165 is an unrelated stale draft - not to be confused with this pass's
+new Finding 165, a plain numbering coincidence.)
+
+**Fix, verified (honest limitation - no red/green test, same as Finding 164's own precedent for an
+untestable RSC page).** Widened the "Team & CV bench" card's count line to check `peopleRowsError`
+before rendering the counts, showing "Couldn't load your team - try refreshing." on error instead -
+same pattern this exact page's own `vaultCompliancePct`/`documentExpiryError` fix already
+established two sections above it. Happy path unchanged. `npm run typecheck` - 0 errors. `npx
+eslint .` - 0 errors, same 3 pre-existing warnings. `npx next build` - compiled successfully, same
+route table. `npx vitest run` - **493/493, 63 files**, unchanged (no test file exists for this
+page, confirmed by `find` before concluding that). The `*.test.ts` node loop - **28 files, 0
+failures**, unchanged. Full `engine/` sweep - **86 files, 0 failures**, unchanged (this fix touches
+no Python).
+
+**Pushed directly to `main`** - a read-only display-page fix on an already-captured, already-logged
+error flag, no RLS/money/hard-stop/worker-image-install surface touched.
+
+**Backlog status.** The "other customer-facing pages with a live count" avenue Finding 164 flagged
+is now substantially covered: `/dashboard`, `/analytics`, `/pipeline`, `/people`, `/company`,
+`/tenders/[id]` all checked. One small, lower-severity loose end left for a future pass, not fixed
+here (deliberately not bundled into this pass's one-line fix): `app/experience/page.tsx`'s own
+`queuedCount` (an `onboarding_uploads` in-progress count) discards its own `error` with no
+`console.error` at all - it only gates a cosmetic "still being processed" auto-refresh banner, not a
+fact about the customer's own data, lower stakes than this finding and Finding 164, but still worth
+a logging-only fix sometime. The notification-engine Tier 0-3 TypeScript sweep, the Python digest
+trio, and the RLS-sweep-gap angle (PR #176) all remain exhausted as the immediately-preceding
+entries describe - not re-touched this pass. `start_payfast_checkout()`'s revenue-integrity gap
+(2026-11-07e) remains untouched, per the standing guardrail. PR #176/#178/#179/#180/#181 (awaiting
+Sarel's own merge decision) and #164/#165(draft)/#177 (stale drafts) remain exactly as described -
+not touched, not amended, not merged.
+
+To verify independently: read `app/app/dashboard/page.tsx`'s "Team & CV bench" card and confirm its
+count line branches on `peopleRowsError` before rendering `peopleCount`/`readiness.peopleWithCvCount`.
+Run `npx next build` from `app/` and confirm it still compiles with the same route table. Confirm
+via `mcp__github__list_pull_requests` that `#176`/`#178`/`#179`/`#180`/`#181` are still open and
+unmerged.
+
+---
+
 ## This pass (2026-11-07bb, standing solution-architect review): the notification-engine sweep
 (Findings 160-163) is now substantially exhausted per the preceding pass's own backlog note, so
 this pass broadened the search per its own brief - checked the heavily-mined Python digest

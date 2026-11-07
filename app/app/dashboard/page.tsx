@@ -209,10 +209,19 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // array-bracket case already fixed elsewhere this pass: "const" appears
   // once, at the very start of the line, never immediately before most of
   // these object patterns. opportunities defaults to an empty Discovery
-  // widget list (cosmetic); peopleRows feeds peopleCount/hasSignatoryCapacity
-  // below, which already default to 0/false - "not done yet" on the setup
-  // checklist, the safe direction, same as the dashboard's own companies-
-  // read precedent (3db3c87). Logged, not gated.
+  // widget list (cosmetic); peopleRows feeding hasSignatoryCapacity below
+  // (which defaults to false on error) is fine as-is - "not done yet" on the
+  // setup checklist is the safe direction, same as the dashboard's own
+  // companies-read precedent (3db3c87). peopleRows ALSO feeds peopleCount,
+  // which this same comment used to lump in with that reasoning - but
+  // peopleCount isn't a boolean gate, it's a literal "N team profiles"
+  // number rendered as fact in the Team & CV bench card below: on a real
+  // peopleRowsError it would have shown a false "0 team profiles" with zero
+  // indication anything had failed, the identical shape Finding 164 fixed on
+  // the billing page. Standing review, 2026-11-07cc: fixed below (Finding
+  // 165) - that card's count line now checks peopleRowsError directly,
+  // same pattern as the vaultCompliancePct/documentExpiryError fix just
+  // above it.
   if (opportunitiesError) console.error("discovered_opportunities select failed for dashboard", opportunitiesError);
   if (peopleRowsError) console.error("people select failed for dashboard", peopleRowsError);
   if (documentExpiryError) console.error("document expiry overview load failed for dashboard", documentExpiryError);
@@ -445,8 +454,14 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
               </Link>
             </div>
             <div className="text-xs text-foreground">
-              <span className="font-semibold">{peopleCount ?? 0}</span> team profile{(peopleCount ?? 0) === 1 ? "" : "s"} ·{" "}
-              <span className="font-semibold">{readiness.peopleWithCvCount}</span> with a CV on file
+              {peopleRowsError ? (
+                "Couldn't load your team - try refreshing."
+              ) : (
+                <>
+                  <span className="font-semibold">{peopleCount}</span> team profile{peopleCount === 1 ? "" : "s"} ·{" "}
+                  <span className="font-semibold">{readiness.peopleWithCvCount}</span> with a CV on file
+                </>
+              )}
             </div>
             {personExpiryRows.length > 0 ? (
               <div className="mt-2 flex flex-col">
