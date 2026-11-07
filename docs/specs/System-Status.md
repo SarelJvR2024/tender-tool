@@ -1,5 +1,127 @@
 # System Status
 
+## This pass (2026-11-07w, standing solution-architect review): independently re-verified the
+sibling track's `0f6595b` ("~46 SECURITY DEFINER functions' revoke-from-public never actually
+removed anon's own execute grant", migration `0120`) against primary sources, not assertion - every
+claim in it checks out. No new bug found or fixed by this pass; this entry exists because a
+significant security claim from a track this chain hadn't independently checked deserved the same
+scrutiny this review applies to its own work before being treated as settled.
+
+Oriented from `389d6a7` (this chain's own immediately-preceding pass, HEAD at that commit, matching
+the verified HEAD this pass was given). `git fetch origin main`: clean, `origin/main` matched local
+`HEAD` exactly, no sibling commits landed since `0f6595b`/`389d6a7`. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. No PR was touched, amended or merged.
+
+**What was actually checked, with real evidence, not a re-read of the commit's own prose:**
+
+1. **The underlying mechanism claim** (`alter default privileges in schema public grant all on
+   functions to anon, ...` runs once, platform-side, separately from and untouched by `revoke all
+   ... from public`) - confirmed this is pre-existing project infrastructure, not something the
+   sibling commit invented to support its own narrative: `engine/security/scratch_supabase_stub.sql`
+   already carried this exact `alter default privileges ... grant all on functions to anon,
+   authenticated, service_role` line (`git log` on the file: last touched `abcd91f`, well before
+   `0f6595b`/`fdf51d7`). This is standard, correct PostgreSQL behaviour (a named-role default-
+   privilege grant and the generic `PUBLIC`-pseudo-role default are two independent ACL entries;
+   revoking one never touches the other) - not a novel or dubious claim.
+
+2. **The "52 anon-executable pre-fix" count** - reproduced for real. Started a real scratch
+   Postgres 16 (`pg_ctlcluster 16 main start`, `sudo -u postgres psql`, local peer auth), applied
+   `scratch_supabase_stub.sql`, then replayed all 119 pre-`0120` migration files (`0001`-`0119`) in
+   filename order verbatim - clean, no manual fixture, no error. Ran the exact verification query
+   the commit's own migration header specifies
+   (`has_function_privilege('anon', p.oid, 'EXECUTE')` over non-trigger `security definer` functions
+   in `public`): **52**, matching the claim exactly, not approximately.
+
+3. **The migration's own revoke list** - counted `47` `revoke` statements in
+   `0120_security_definer_functions_anon_grant_table_cleanup.sql` by grep, independent of the
+   commit message's prose. `52 (pre-fix anon-executable) - 5 (named exclusions:
+   apply_payfast_itn/invite_preview/signups_enabled/start_payfast_checkout/
+   unsubscribe_lifecycle_email) = 47` - matches exactly.
+
+4. **Applied the real migration file** (not a hand-copied fragment) to the same scratch database -
+   re-ran the identical query: **5**, exactly the 5 named exclusions, confirmed by listing them.
+
+5. **Functional, not just grant-table, verification.** `set role anon; select
+   is_platform_admin();` / `select * from platform_admin_companies();` / `select
+   is_company_member(<uuid>);` - all three now raise `permission denied for function ...` post-fix
+   (pre-fix, re-confirmed these executed with no error, returning `f`/0 rows - the grant really was
+   live). `set role authenticated` on the same three calls - unaffected: still returns the correct
+   business-logic result (`f` for a non-admin, 0 rows for a non-member), not a new grant-level
+   denial. Zero regression for the one role that actually uses these, confirmed directly, not
+   inferred.
+
+6. **The two "never had any revoke/grant at all" functions** (`is_company_member`, 0001;
+   `tt_is_company_admin`, 0050) - grepped every migration file for any prior `grant`/`revoke`
+   statement naming either function: zero hits before `0120`. Claim confirmed, not assumed from the
+   commit's own prose.
+
+7. **The "zero RLS policies target anon/public" claim** underpinning the "not independently
+   exploitable" severity judgment - independently re-derived, not re-read: extracted every real
+   `create policy ... to <role>` clause across all migrations (158 total) - every single one targets
+   `authenticated`; none target `anon` or `public`. Confirms a real `anon` RPC call under the old,
+   buggy grant table could not have reached a table row an RLS policy would otherwise have blocked
+   anyway (though several of the 44 fixed functions also have their own internal `auth.uid()`/
+   `is_company_member()`/`is_platform_admin()` gate independent of RLS, as the commit says).
+
+8. **One minor imprecision found in the commit's own prose, not in its fix.** The commit's
+   migration header lumps `tt_pack_company`/`tt_person_in_company`/`tt_tender_visible_to` together
+   as "harmless id-existence booleans". Checked each definition individually:
+   `tt_person_in_company`/`tt_tender_visible_to` do return `boolean` as described, but
+   `tt_pack_company(p_pack uuid)` actually `returns uuid` (the pack's owning `company_id`), not a
+   boolean - a real id-to-id lookup, not an existence check. Traced its only 5 real call sites
+   (`0043`/`0065`/`0066`/`0097`, all inside `before insert` trigger bodies for cross-tenant-integrity
+   checks) - never exposed as a policy predicate or a client-callable existence check, so the
+   practical severity conclusion (harmless, since `tender_pack` ids are themselves unguessable UUIDs
+   and the only thing learned is which company owns a given pack id, with no further anon-reachable
+   lookup on that company id since no policy targets `anon`) still holds. The migration's actual fix
+   list is unaffected - `tt_pack_company` is still correctly revoked from `anon` in `0120` - this is
+   purely a two-word looseness in the explanatory comment ("boolean" vs. "uuid lookup"), not a defect
+   in the fix itself. Noted here so it isn't silently carried forward as settled prose if anyone
+   re-cites it.
+
+9. **Test suite, re-run for real on current `HEAD` (`389d6a7`), not re-read from the commit's own
+   numbers** (which were correct for the commit's own point in history - `389/389`/`50 files` - but
+   stale now that later passes in this chain added more tests): `npx tsc --noEmit` - 0 errors.
+   `npx eslint .` - 0 errors, the same 3 pre-existing warnings. `npx vitest run` - **474/474, 60
+   files**. The `*.test.ts` node loop (no `--test` flag, real exit codes) - **28 files, 0 failures**.
+   All match this chain's own current standing baseline exactly - `0120` is SQL-only and touches no
+   app code, so no regression was possible, but the full suite was run anyway per the standing
+   instruction.
+
+**Cleanup.** Scratch database (`rls_verify_0120`) dropped, Postgres cluster stopped after
+verification, same as the standing convention.
+
+**Conclusion: `0f6595b`'s claims are real, independently reproduced against primary sources (live
+Postgres, grep over the actual migration files, the actual test suite), not taken on the sibling
+track's own assertion.** It is correctly framed as hardening/defense-in-depth, not a live-
+vulnerability patch - every fixed function already had its own working protection against a real
+`anon` caller today (either no RLS policy ever exposed to `anon` in the first place, or the
+function's own internal `auth.uid()`-derived gate), confirmed above, not assumed. No issue found
+with the fix itself; the one imprecision found (item 8) is in the commit's explanatory prose, not
+in `0120`'s actual revoke list, which is correct and complete for its own stated scope.
+
+**No new fix or finding of this chain's own this pass.** With priority 1 (this verification)
+genuinely exhausted and the 2026-11-07v entry immediately above already recording `engine/
+discovery/` as freshly surveyed and clean, and no new sibling commits having landed to create
+overlap/duplication to flag, this pass's contribution is the verification above - a docs-only
+pass, per the standing instruction that this is an acceptable outcome when the verification itself
+is the real contribution. `start_payfast_checkout()`'s revenue-integrity gap remains untouched, per
+the standing guardrail. PR #176/#178/#179/#180/#181 (awaiting Sarel's own merge decision) and
+#164/#165/#177 (stale drafts) all remain exactly as described - not touched, not amended, not
+merged.
+
+To verify independently: start a scratch Postgres 16, run
+`engine/security/scratch_supabase_stub.sql` then every file in `app/supabase/migrations/` through
+`0119` in filename order, then `select count(*) from pg_proc p join pg_namespace n on
+n.oid=p.pronamespace where n.nspname='public' and p.prosecdef and p.prorettype !=
+'trigger'::regtype and has_function_privilege('anon', p.oid, 'EXECUTE');` - expect `52`. Apply
+`0120`, re-run - expect `5`. `set role anon; select is_platform_admin();` should raise `permission
+denied`; `set role authenticated; select is_platform_admin();` should still return `f`.
+
+---
+
 ## This pass (2026-11-07v, standing solution-architect review): closed the 2026-11-07u backlog
 note - `discovery/page.tsx`'s own `loadSegment()`-sourced pricing badge now logs its own failure
 like every other non-critical read on the same page; surveyed a wide slice of `engine/discovery/`
