@@ -118,7 +118,7 @@ export default async function AnalyticsPage() {
 
   // ----- 6. Pricing trends & competitor/market insights (lib/marketPricing.ts, real, already built for the per-tender market-context view - rolled up here across every tender this company has engaged) -----
   const tenderIds = tenders.map((t) => t.id);
-  const { byTender: outcomesByTender } = await loadOutcomesForTenders(supabase, tenderIds);
+  const { byTender: outcomesByTender, error: marketError } = await loadOutcomesForTenders(supabase, tenderIds);
   const companyNames = [company?.legal_name, company?.csd_trading_name];
   const matched: { outcome: import("@/lib/marketPricing").TenderOutcome; position: ReturnType<typeof ownPosition> }[] = [];
   for (const { tender, pack } of packed) {
@@ -277,7 +277,14 @@ export default async function AnalyticsPage() {
             <Users2 className="size-4 text-muted-foreground" aria-hidden />
             <h2 className="text-sm font-semibold text-foreground">Pricing trends &amp; who you compete against</h2>
           </div>
-          {!hasMarketData ? (
+          {marketError ? (
+            <ErrorState
+              icon={Users2}
+              title="Couldn't load pricing & competitor data"
+              description="Try refreshing - if it keeps happening, let us know."
+              className="py-6"
+            />
+          ) : !hasMarketData ? (
             <EmptyState
               icon={Users2}
               title="Not enough published outcomes matched yet"

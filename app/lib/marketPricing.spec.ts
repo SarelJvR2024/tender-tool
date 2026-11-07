@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byBuyer, byCategory, byProvince, ownPosition, tenderFrequencyTrend, type Bidder, type MarketRow, type TenderOutcome } from "./marketPricing";
+import { byBuyer, byCategory, byProvince, loadOutcomesForTenders, ownPosition, tenderFrequencyTrend, type Bidder, type MarketRow, type TenderOutcome } from "./marketPricing";
 
 /** A minimal, otherwise-"empty" market row - every field a real
  * public_tender_outcomes row has, defaulted to its own honest "nothing here"
@@ -184,5 +184,67 @@ describe("byBuyer / byProvince", () => {
     const breakdown = byProvince(rows);
     expect(breakdown.map((b) => b.key)).toEqual(["Gauteng", "Western Cape"]);
     expect(breakdown[0].n).toBe(2);
+  });
+});
+
+// Standing solution-architect review, 2026-11-07u: these two Supabase reads
+// (the tender_market_outcomes() RPC, then the public_tender_outcomes select)
+// were already correctly captured and returned as `error` HERE - but
+// app/app/analytics/page.tsx's own call site destructured only
+// `{ byTender: outcomesByTender }`, discarding `error` entirely, same bug
+// class as savingsCounterData.ts's own fix just above in this review
+// (fetchSavingsCounterSummary) and the briefing-attendance section this
+// very analytics page already gets right a few lines below its own
+// pricing section. A real RPC/table failure made the "Pricing trends & who
+// you compete against" section render the ordinary "Not enough published
+// outcomes matched yet" empty state - indistinguishable from the genuine
+// no-data case - instead of an error. Fixed in page.tsx (captures `error`,
+// renders ErrorState when set, same pattern as its own briefingTasksError
+// handling three sections above). This test locks in the data contract the
+// fix depends on: loadOutcomesForTenders() itself must keep returning a
+// real `error` and an EMPTY (not partial) byTender on either read failing,
+// not something page.tsx needs to re-derive.
+function makeRpcChain(resp: { data: unknown; error: { message: string } | null }) {
+  return Promise.resolve(resp);
+}
+function makeSelectChain(resp: { data: unknown; error: { message: string } | null }) {
+  const chain: Record<string, unknown> = {};
+  for (const m of ["select", "in"]) chain[m] = () => chain;
+  (chain as { then: unknown }).then = (resolve: (r: typeof resp) => void) => resolve(resp);
+  return chain;
+}
+function makeOutcomesSupabase(
+  rpcResp: { data: unknown; error: { message: string } | null },
+  selectResp: { data: unknown; error: { message: string } | null },
+) {
+  return {
+    rpc: () => makeRpcChain(rpcResp),
+    from: () => makeSelectChain(selectResp),
+  } as unknown as Parameters<typeof loadOutcomesForTenders>[0];
+}
+
+describe("loadOutcomesForTenders", () => {
+  it("returns a real error and an empty map (not a false 'nothing published' result) when the RPC fails", async () => {
+    const supabase = makeOutcomesSupabase({ data: null, error: { message: "rpc timeout" } }, { data: [], error: null });
+    const { byTender, error } = await loadOutcomesForTenders(supabase, ["t1"]);
+    expect(error).toBe("rpc timeout");
+    expect(byTender.size).toBe(0);
+  });
+
+  it("returns a real error and an empty map when the public_tender_outcomes select fails, even though the RPC itself succeeded", async () => {
+    const supabase = makeOutcomesSupabase(
+      { data: [{ tender_id: "t1", outcome_id: "o1" }], error: null },
+      { data: null, error: { message: "connection reset" } },
+    );
+    const { byTender, error } = await loadOutcomesForTenders(supabase, ["t1"]);
+    expect(error).toBe("connection reset");
+    expect(byTender.size).toBe(0);
+  });
+
+  it("the genuine 'nothing published yet' case still returns error: null with an empty map - not conflated with a failure", async () => {
+    const supabase = makeOutcomesSupabase({ data: [], error: null }, { data: [], error: null });
+    const { byTender, error } = await loadOutcomesForTenders(supabase, ["t1"]);
+    expect(error).toBeNull();
+    expect(byTender.size).toBe(0);
   });
 });

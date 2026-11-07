@@ -9492,3 +9492,94 @@ function, `test_cancelled_tab_fetch_failure_alerts_sarel`). No other file touche
 
 **Pushed directly to `main`** - small, narrow, does not touch RLS/money paths/hard-stop gates, and
 does not change what the production worker image installs/copies.
+
+---
+
+### Finding 158 (CONFIRMED, FIXED, moderate - `/analytics`' own "Pricing trends & who you compete
+against" section destructured only `{ byTender }` from `loadOutcomesForTenders()`, discarding its
+`error` entirely - a real failure of either the `tender_market_outcomes` RPC or the
+`public_tender_outcomes` select rendered the ordinary "Not enough published outcomes matched yet"
+empty state, indistinguishable from the genuine no-data case, with zero indication anything had
+failed)
+
+**Area:** `app/app/analytics/page.tsx` (section 6, "Pricing trends & competitor/market insights"),
+`app/lib/marketPricing.ts` (`loadOutcomesForTenders()` - already correct, not touched).
+
+**How this was found.** Continuing this review's own standing direction to pick a genuinely
+under-covered area once the discovery-pipeline fan-out/scoring slice, the tender-change/update-
+tracking subsystem and the DBSA-shaped reused-ref `ocid` pattern were all closed out: read
+`engine/discovery/award_outcomes.py` and `store_award_outcomes.py` (award-outcome tracking, named
+as a candidate in the standing backlog) end to end - both clean, not scheduled anywhere yet, errors
+propagate as `RuntimeError`/uncaught exceptions rather than being swallowed. Followed the data they
+write (`public_tender_outcomes`, migration 0053) forward into `app/lib/marketPricing.ts`, the one
+module that reads it for real, production-facing pages - a live, user-facing consumer of exactly
+the kind of external/government data this review already knows is unreliable to fetch (SANRAL,
+eTenders), and a module never itself audited by this review loop.
+
+`marketPricing.ts`'s three Supabase-reading functions (`loadOutcomesForTenders()`,
+`loadSegment()`, `loadMarketTrend()`) all correctly capture and return their own `error` already -
+confirmed by reading each in full, not assumed. Checked every real call site of each (`grep -rn`
+across `app/`): `app/app/tenders/[id]/market-context.tsx` (3 of the 3 functions) and
+`app/app/pipeline/pricing/market-comparison.tsx` (`loadOutcomesForTenders`) both correctly keep and
+render their own `error` (the former even surfaces a per-segment error inside `SegmentTable()`, not
+just the top-level one). `app/app/discovery/page.tsx`'s own `loadSegment()` call (an optional,
+additive per-card "indicative price range" badge with no error-UI of its own anywhere on that page)
+silently omits the badge on a failure rather than asserting anything false - checked and judged not
+the same bug shape: nothing on screen claims "no data" when the truth is "couldn't check", it just
+shows nothing extra, the same as a tender with no matching discipline.
+
+`app/app/analytics/page.tsx` was the one holdout, same shape as several prior findings in this
+review (`vault-quick-fix-actions.ts` being the one `hyphenated-actions.ts` holdout missing error
+capture; `savingsCounterData.ts`'s own fix earlier this same review day). Its "Pricing trends & who
+you compete against" section:
+
+```ts
+const { byTender: outcomesByTender } = await loadOutcomesForTenders(supabase, tenderIds);
+```
+
+discarding `error` entirely, three lines below the exact same page's OWN already-correct pattern for
+`briefingTasksError` (captured, checked, rendered as `ErrorState`) two sections above it in the same
+file - the asymmetry this review tracks, inside one page that gets it right in one place and wrong
+in another. `hasMarketData` (and therefore the whole section's branch) depends only on
+`outcomesByTender`, which `loadOutcomesForTenders()`'s own code always leaves empty on either of its
+two reads failing (confirmed by reading the function: the RPC's own failure returns before
+`byTender` is ever populated; the second select's failure returns with `byTender` still at its
+initial empty `Map`) - so a real RPC/table failure rendered exactly the same "Not enough published
+outcomes matched yet" empty state as a company that has genuinely never had an award outcome
+published for any tender it bid on, with no error shown anywhere on the page.
+
+**Fix.** Captured `error: marketError` from the same call, and added a `marketError ? <ErrorState
+.../> :` branch ahead of the existing `!hasMarketData` one, same component and same shape as this
+file's own `briefingTasksError` handling - a real failure now reads as "Couldn't load pricing &
+competitor data", never as "not enough data yet".
+
+**Verified genuinely.** `loadOutcomesForTenders()` itself had zero test coverage before this pass
+(confirmed: `grep -n "loadOutcomesForTenders" app/lib/marketPricing.spec.ts` - no hits) - added
+three tests (`app/lib/marketPricing.spec.ts`, reusing the sequential-chain mocking convention
+`savingsCounterData.spec.ts` already established for this exact bug class) locking in the data
+contract the page's fix depends on: the RPC failing returns a real `error` and an empty map; the
+second select failing (even though the RPC itself succeeded) does too; the genuine "nothing
+published yet" case still returns `error: null` with an empty map, never conflated with a failure.
+All three pass against the real, unmodified function - confirming the library side was already
+correct and the bug was purely at the page's own call site, not something a function-level test
+alone could have caught. `app/app/analytics/page.tsx` itself has no render-test infrastructure in
+this codebase (no `jsdom`/`@testing-library/react` dependency, `vitest.config.ts`'s own `include` is
+scoped to `*.spec.ts` only, and every page.tsx in this codebase is verified by typecheck/lint/build
+rather than a render test - same precedent `app/AGENTS.md`'s own "Full tender-workspace V/P/F
+redesign (prompt 9, part 0)" entry documents for page-level glue it couldn't unit-test either) - so
+this fix is additionally verified by `npm run typecheck` (clean), `npx eslint .` (0 errors, the
+same 3 pre-existing warnings as the standing baseline, `app/analytics/page.tsx`'s own pre-existing
+`STAGE_META` unused-var warning unchanged by this diff), the full `npx vitest run` (**472/472, 60
+files** - the standing baseline's 469 plus this pass's 3 new tests, file count unchanged since they
+were added to an existing file), and the complete `*.test.ts` node loop (`find . -name "*.test.ts"
+-not -path "*/node_modules/*"`, no `--test` flag, real exit codes) - **28 files, 0 failures**,
+matching the standing baseline exactly.
+
+**Regression:** `app/app/analytics/page.tsx` (+7 lines: captures `marketError`, one new `ErrorState`
+branch). `app/lib/marketPricing.spec.ts` (+3 new test cases under a new `describe("loadOutcomesForTenders")`
+block). No other file touched - `marketPricing.ts` itself needed no change.
+
+**Pushed directly to `main`** - small, narrow (one destructure + one conditional branch in a single
+page, following an already-correct pattern already used elsewhere in the same file), does not touch
+RLS/money paths/hard-stop gates, and does not change what the production worker image installs/
+copies.

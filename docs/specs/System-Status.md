@@ -1,5 +1,105 @@
 # System Status
 
+## This pass (2026-11-07u, standing solution-architect review): with the discovery-pipeline
+fan-out/scoring slice, the tender-change/update-tracking subsystem and the DBSA-shaped reused-ref
+`ocid` pattern all now closed out by this review's own chain, moved to a genuinely under-covered
+area (award-outcome tracking, named as a candidate in the standing backlog) and followed it from
+`engine/discovery/award_outcomes.py`/`store_award_outcomes.py` (clean) forward into their one real
+production consumer, `app/lib/marketPricing.ts` - found the exact dominant bug class this review
+tracks, but in `app/` for the first time this pass's own chain has looked there: `/analytics`'s own
+"Pricing trends & who you compete against" section discarded `loadOutcomesForTenders()`'s `error`
+entirely, rendering a real Supabase/RPC failure as the ordinary "not enough data yet" empty state.
+
+Oriented from `521d2ee` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180`/`#181` still open
+(`draft: false`), `#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this
+pass. No PR was touched or amended.
+
+**Why this angle.** The standing backlog explicitly named "award-outcome tracking" as one of the
+genuinely under-covered engine/ areas once the fan-out/scoring slice and the tender-change subsystem
+were closed. Read `engine/discovery/award_outcomes.py` (the reader: eTenders portal Awarded tab +
+SANRAL awarded/closed lists, report-only) and `engine/discovery/store_award_outcomes.py` (the
+writer: merges report rows into `public_tender_outcomes`, 0053) end to end. Both clean - not
+scheduled anywhere yet (`store_award_outcomes.py`'s own docstring says so plainly), and every real
+failure path raises rather than being swallowed (`RestClient._req()` raises `RuntimeError` on any
+HTTP error; `main()` has no bare `except` anywhere). No finding there.
+
+**Followed the data forward instead of stopping at a clean read.** `public_tender_outcomes` has
+exactly one real reader: `app/lib/marketPricing.ts`, consumed by `/market-intelligence`,
+`/analytics`, the tender workspace's own Market tab (`market-context.tsx`) and `/pipeline/pricing`
+(`market-comparison.tsx`) - a live, production-facing surface this review loop had never read, and
+exactly the shape of risk this review already knows to distrust (government-site-sourced data,
+read through a Supabase RPC + table select that can fail for reasons having nothing to do with
+whether real data exists).
+
+**The read.** `marketPricing.ts`'s three Supabase-reading functions (`loadOutcomesForTenders()`,
+`loadSegment()`, `loadMarketTrend()`) all correctly build and return their own `error` already -
+read each in full to confirm, not assumed. Traced every real call site of each with `grep -rn`
+across `app/`: `market-context.tsx` and `market-comparison.tsx` both already keep and render their
+own `error` correctly (the former even per-segment, inside `SegmentTable()`). `discovery/page.tsx`'s
+own `loadSegment()` call (an optional per-card "indicative price range" badge) silently drops the
+badge on failure rather than asserting anything false - checked and judged a different, lower-
+severity shape (nothing on screen claims "no data"; it just shows nothing extra), not fixed.
+`app/app/analytics/page.tsx` was the one holdout: its "Pricing trends & who you compete against"
+section destructured only `{ byTender: outcomesByTender }`, discarding `error`, three lines below
+this exact same page's own already-correct `briefingTasksError` handling two sections above it -
+the asymmetry this review tracks, inside one file that gets the pattern right once and wrong once.
+`hasMarketData` (the whole section's branch) depends only on `outcomesByTender`, which
+`loadOutcomesForTenders()` always leaves empty on either of its two reads failing - so a real
+failure rendered the identical "Not enough published outcomes matched yet" empty state as a company
+that has genuinely never had an outcome published, with zero indication anything had failed.
+
+**Fix.** Captured `error: marketError` from the same call; added a `marketError ? <ErrorState ...> :`
+branch ahead of the existing `!hasMarketData` one, same component and shape as the page's own
+`briefingTasksError` handling.
+
+**Verified genuinely.** `loadOutcomesForTenders()` had zero test coverage before this pass -
+confirmed by grep, not assumed. Added three tests to `app/lib/marketPricing.spec.ts` (reusing the
+sequential-chain Supabase mock `savingsCounterData.spec.ts` already established for this exact bug
+class) locking in the data contract the page's fix depends on: the RPC failing returns a real
+`error` + an empty map; the second select failing (RPC itself fine) does too; the genuine "nothing
+published yet" case returns `error: null` with an empty map, never conflated with a failure. All
+three pass against the real, unmodified function - the library side was already correct; the bug
+was purely at the page's own call site, which no function-level test alone could have caught.
+`page.tsx` itself has no render-test infrastructure in this codebase (no `jsdom`/
+`@testing-library/react`, `vitest.config.ts`'s own `include` is `*.spec.ts` only) - same documented
+precedent as `app/AGENTS.md`'s own "prompt 9, part 0" entry for page-level glue it couldn't unit-
+test either, so verified instead by `npm run typecheck` (clean), `npx eslint .` (0 errors, the same
+3 pre-existing warnings as the standing baseline, unchanged), the full `npx vitest run` - **472/472,
+60 files** (469 baseline + this pass's 3 new tests, same file), and the complete `*.test.ts` node
+loop (no `--test` flag, real exit codes) - **28 files, 0 failures**, matching the standing baseline.
+
+**Pushed directly to `main`** - small, narrow (one destructure + one conditional branch in a single
+page, following an already-correct pattern already used elsewhere in the same file), does not
+touch RLS/money paths/hard-stop gates, and does not change what the production worker image
+installs/copies.
+
+**Backlog status.** No change to any standing item except this pass's own entries above.
+`start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched,
+per the standing guardrail. PR #176/#178/#179/#180/#181 (all awaiting Sarel's own merge decision)
+remain exactly as described - not touched, not amended. PR #164/#165 (stale drafts) not touched.
+The tender-change/update-tracking subsystem, the discovery fan-out/scoring slice and the DBSA-shaped
+reused-ref `ocid` pattern are all unchanged by this pass (not re-touched; see prior entries for their
+own standing status - `lephalale.py`/`randwater.py` still genuinely unreachable,
+`sars_procurement.py`/`vaal_central_water.py` clean-but-architecturally-unchanged). **New backlog
+note:** `app/app/discovery/page.tsx`'s own `loadSegment()`-sourced per-card pricing badge silently
+drops on a fetch failure with no error surfaced anywhere on that page - judged a different, lower-
+severity shape than Finding 158 (no false claim is ever rendered, just a missing optional badge),
+not fixed this pass; a future pass could still decide to log it (e.g. to the browser console or a
+page-level banner) if Sarel wants visibility into it. `app/lib/marketPricing.ts` itself is otherwise
+now fully read and its real call sites fully traced - no other gap found there.
+
+To verify independently: run `npx vitest run app/lib/marketPricing.spec.ts` from `app/` and confirm
+`loadOutcomesForTenders` has 3 passing tests among the file's total. Read
+`app/app/analytics/page.tsx`'s "Pricing trends & who you compete against" section and confirm it
+now captures `error: marketError` and renders `ErrorState` when set, ahead of the `!hasMarketData`
+branch. Confirm via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` that
+`#176`/`#178`/`#179`/`#180`/`#181` are still open and unmerged.
+
+---
+
 ## This pass (2026-11-07t, standing solution-architect review): continued the backlog note
 2026-11-07s left (the tender-change/update-tracking subsystem read, not yet exhaustively audited
 line-by-line for siblings of Finding 156's bug shape) into `tender_changes.py` and found a real
