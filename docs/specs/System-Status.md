@@ -1,5 +1,141 @@
 # System Status
 
+## This pass (2026-11-07o, standing solution-architect review): read `engine/worker/Dockerfile` end to end and cross-checked every apt package/shelled-out tool against what `engine/` actually calls - found the one gap that matters: `send_pack_ready_email.py`'s render step shells out to `node`, and the built worker image has never had a `node` binary, nor the `app/` directory the render script lives in (`.dockerignore` excluded it wholesale). This is the direct, structural answer to a backlog item several prior passes (2026-11-05 through -07i) carried forward unresolved ("whether `send_pack_ready_email.py`'s own fix fires clean in its real always-on-worker environment... no visibility into that host's logs from here") - the "Bid Pack Compilation Complete" email has never actually sent in production, for any company, since the feature shipped 2026-10-27. Fixed; opened as **PR #181** (`fix/worker-pack-ready-email-node`), not pushed directly, since it changes what the production worker image installs/copies and a real `docker build` is the only thing that fully confirms it - got exactly that confirmation by manually dispatching this repo's own `bridge-worker-ci.yml` against the fix branch on GitHub Actions, where it ran green end to end (all 3 jobs, including the full engine regression suite).
+
+Oriented from `c2480f3` (immediately-preceding pass, HEAD at that commit). `git fetch origin main`
+both before starting and right before writing this entry: clean both times, local matched
+`origin/main`, no sibling commits landed during this pass. PRs re-checked via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#178`/`#179`/`#180` still open
+(`draft: false`), `#177`/`#164`/`#165` still drafts - all 7 unchanged, none touched this pass.
+
+**Why this angle.** The standing directive's own angle (b): read `engine/worker/Dockerfile` end to
+end and cross-check every package/tool it installs against what the Python code in `engine/`
+actually imports or shells out to - "is anything installed-but-unused, or (worse) used-but-not-
+installed." Grepped every real (non-test) `subprocess.run`/`subprocess.Popen` call across `engine/`
+against the Dockerfile's apt packages: `pdftotext`/`pdftoppm`/`pdfimages`/`pdfinfo` (all
+`poppler-utils`), `soffice` (LibreOffice), `tesseract` all matched cleanly, already installed. One
+call didn't: `engine/notify/send_pack_ready_email.py`'s `_render()` shells out to `["node",
+"--experimental-strip-types", RENDER_SCRIPT, ...]` - `node` appears nowhere in the Dockerfile at
+all (confirmed by grep, not a skim). `engine/pack/bridge_selftest.py`'s own `psql` call looked like
+a second candidate at first glance, but it's a dev/CI-only test harness never imported by
+`process_pack_jobs.py` itself or any module `run_bridges.py` loads - confirmed by grepping every
+importer of it (test files and `scenario_driver.py` only), so it never runs inside the built image
+and needed no Dockerfile entry.
+
+**The bug, traced to its real consequence, not assumed from the missing apt package alone.** Two
+independent, each-on-its-own-fatal gaps in `engine/worker/Dockerfile`'s built image: (1)
+`.dockerignore` excluded the entire `app` directory from the Docker build context (predating this
+notification feature, built 2026-10-27, by weeks) - the render script
+(`app/scripts/render-pack-ready-email.ts`) and its own `cwd` (`APP_DIR = <repo>/app`, which
+`_render()` passes as `subprocess.run(..., cwd=APP_DIR, ...)`) never existed in the image at all;
+(2) the Dockerfile never installed a `node` binary in the first place - even fixing (1) alone,
+Debian bookworm's own `nodejs` apt package is 18.x, which doesn't have `--experimental-strip-types`
+(added in Node 22.6). Reproduced directly, not inferred: mirrored the exact file set the
+Dockerfile's pre-fix `COPY` lines put into the image in a scratch directory, then ran the real
+`send_pack_ready_email()` against it with a fake Supabase client - raised `FileNotFoundError: No
+such file or directory: '<mirrored>/srv/app'` (Python's `subprocess.run` checks `cwd` exists before
+even trying to exec `node`), caught by the function's own top-level `except Exception`, recorded as
+a `system_alerts.record(..., "warning", ...)` row, and swallowed - the pack job itself always
+succeeds, only the email silently never sends. Confirmed the identical call against the FULL
+dev-sandbox repo checkout (which happens to have both `node` on `PATH` and a real `app/` directory)
+renders successfully - this is exactly why no prior verification of this code path ever caught the
+gap: every test of it has necessarily run from a full checkout, never from the actual stripped-down
+image the Dockerfile builds.
+
+**Practical consequence - not a delay, a permanent loss, every time.** Because the render failure
+happens *before* `claim_notification()` is ever called (deliberately, per this file's own
+2026-10-30 fix, so a render failure doesn't burn the one-time claim token) and this job id never
+runs again once the pack reaches "ready," this is a 100%-reproducible loss of this exact email for
+every pack, for every company, since 2026-10-27 - assuming `RESEND_API_KEY` is configured in the
+worker's real environment (a 2026-11-05 pass already confirmed the key is live and valid). See
+Finding 152 (`QA-Edge-Case-Findings.md`) for the full write-up, including severity reasoning (not
+escalated past "significant": no RLS/money-path exposure, no data loss, every recipient can still
+see "Pack Ready" live in the Tender Workspace - this is a missed proactive notification, not a
+missed or corrupted deliverable).
+
+**Fix.** `.dockerignore`: replaced the single blanket `app` exclusion with three precise ones
+(`app/node_modules`, `app/.next`, `app/.env*` with `!app/.env*.example`) - Docker can't re-include a
+file under an excluded parent directory, so the fix had to stop excluding `app` wholesale rather
+than carve an exception under it. `engine/worker/Dockerfile`: added Node.js 22 via the NodeSource
+apt repo (matching `app-ci.yml`'s own Node 22 pin), and two new `COPY app/lib app/lib` / `COPY
+app/scripts app/scripts` lines - not the whole `app/` directory, since `app/node_modules` (796 MB)
+and `app/.next` (157 MB) stay excluded and the render script's own runtime import chain needs no
+npm package at all: its one npm-importing dependency (`notificationEngine.ts`'s
+`@supabase/supabase-js`, reached via `emailTemplatesTier1.ts`'s `import type { NotificationEmail }
+from "./notificationEngine.ts"`) is type-only and fully erased by `--experimental-strip-types` -
+this codebase already independently established that erasure elsewhere (`pack-review-logic.ts`'s
+own comment), confirmed again here empirically rather than just cited.
+
+**Verified myself, genuine red-then-green, PLUS a real Docker build this sandbox cannot run
+itself.** Red: the mirrored pre-fix image layout, real `FileNotFoundError` every time (above).
+Green (local simulation): added only `app/lib` + `app/scripts` (no `node_modules`, no
+`package.json`) to the same mirrored layout and ran `node --experimental-strip-types
+app/scripts/render-pack-ready-email.ts '<json>'` directly - exit 0, correct `{"subject", "html",
+"text"}` JSON. Re-ran the full `send_pack_ready_email()` repro against that post-fix layout with a
+fake client (recipients/tender/company/`claim_notification`/`record_notification_sent` all stubbed)
+- **zero `system_alerts.record()` calls**, confirming the render step that used to fail every time
+now succeeds end to end. Ran the existing `engine/notify/test_send_pack_ready_email.py` (mocks
+`_render()` at the Python level, unaffected by this Dockerfile-only change) - **0 failures**, no
+regression, as expected since no Python source file was touched. **Then went further than a prior
+pass could**: pushed the fix to a branch (`fix/worker-pack-ready-email-node`) and manually
+dispatched this repo's own `bridge-worker-ci.yml` (`workflow_dispatch` - it only auto-triggers on
+`push` to `main`) against it, specifically to get its `container-build` job to run a REAL `docker
+build -f engine/worker/Dockerfile .` on a GitHub Actions runner (no Docker daemon in this sandbox).
+**Result: genuinely green.** `nodejs (22.23.4-1nodesource1)` installed cleanly via NodeSource
+inside the real build (confirmed from the job's own log output, not inferred); `COPY app/lib
+app/lib` and `COPY app/scripts app/scripts` both completed (`DONE 0.0s` - the files existed in the
+build context this time, unlike before); the image exported successfully
+(`sha256:7e9c8f1944575c3455acd6d2a9e3941a5a471b91a352af6e57d1a56269d3ef02`); the existing
+"refuses to run without credentials" smoke check inside the built image still passed unchanged
+(exit 1, correct error message, same as every prior build - unrelated to this fix, a pre-existing
+check). Watched the rest of that same run through to actual completion, not assumed clean because
+`container-build` alone passed: all 3 jobs - `tenant-isolation-db`, `container-build`,
+`smoke-test` (the full 86-step engine regression suite, including step 27's own
+"Pack-ready email - claim-before-send ordering... render/send failure isolation" test) - finished
+`completed success`, overall run conclusion `success`
+(`https://github.com/sareljvr2024/tender-tool/actions/runs/42344828824`). Opened **PR #181**
+(`fix/worker-pack-ready-email-node` -> `main`) with the full write-up above in its own description -
+not merged, left for Sarel's own decision, same as #176/#178/#179/#180.
+
+**What was and wasn't verified.** Not verified: a real live Resend send from inside the fixed image
+with a real API key (this pass's own repro used a fake key, deliberately - the live-send path
+itself is unchanged by this fix and was already independently confirmed working by the
+2026-10-27/2026-11-05 entries). Not verified: whether the NodeSource install step
+(`curl -fsSL https://deb.nodesource.com/setup_22.x | bash -`) succeeds inside Railway's own build
+environment specifically, as opposed to a GitHub Actions runner (confirmed) or this sandbox - both
+of the latter have unrestricted outbound HTTPS by default and Railway's own build environment
+doesn't suggest otherwise, but this rests on the same network reachability Railway's build already
+needs for `apt-get update`/`pip install` to work at all, not a newly introduced assumption. Not
+measured: how many real packs have gone "ready" since 2026-10-27, and therefore how many real
+pack-ready emails this bug has actually cost - no application-level metric exists for this, left as
+a natural follow-up for whoever reviews the PR, not guessed at here.
+
+**Backlog status.** The long-standing "whether `send_pack_ready_email.py`'s own fix fires clean in
+its real always-on-worker environment" judgment-call item (carried since 2026-11-05) is now
+resolved with a real, structural answer, not just re-deferred again - remove it from the backlog
+list below; it did not fire clean, root cause found and fixed, PR #181 open. `start_payfast_checkout()`'s
+revenue-integrity gap (2026-11-07e, options A/B/C) remains untouched, per the standing guardrail.
+The impersonation session-refresh gap in `proxy.ts`, `held_registrations`-vs-CV display format, and
+PR #176/#178/#179/#180 (all awaiting Sarel's own merge decision) remain exactly as described - not
+touched. PR #164/#165 (stale drafts) not touched. Migrations `0117`-`0120` still on `main`, still
+not applied to production - untouched this pass, still genuinely unverifiable from inside this
+environment. **New backlog note:** this pass's own **PR #181** (`fix/worker-pack-ready-email-node`)
+now needs Sarel's merge decision like the other five; once merged and actually deployed (a Railway
+rebuild, same as the still-pending pypdf/Pillow CVE bump), a future pass with real
+`pack_generation_jobs`/`notification_logs` access could confirm a live pack-ready send actually
+reaches a real inbox, closing the loop this pass could only get to "the image builds and renders
+correctly" on.
+
+To verify independently: read `.dockerignore` and `engine/worker/Dockerfile` on the
+`fix/worker-pack-ready-email-node` branch against this entry's description of the fix. Re-run this
+pass's own repro (mirror the Dockerfile's `COPY` lines into a scratch dir, run
+`send_pack_ready_email()` against it with a fake client before and after adding `app/lib`/
+`app/scripts`) to see the same red-then-green. Or just open
+`https://github.com/sareljvr2024/tender-tool/actions/runs/42344828824` and read the
+`container-build` job's own log directly.
+
+---
+
 ## This pass (2026-11-07n, standing solution-architect review): a genuine clean sweep - re-ran the exclusion-set file method, verified a real competitor-feature claim (the SANRAL "pricing guard") against the actual code, checked the one never-mentioned CI workflow, and chased down one promising-looking React-key hypothesis to a disproof - no new code bug found anywhere this pass touched
 
 Oriented from `9d06404` (immediately-preceding pass, HEAD at that commit). `git fetch origin main` both
