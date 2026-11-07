@@ -9202,3 +9202,61 @@ other file touched.
 **Pushed directly to `main`** - small, narrow (one reader's own de-duplication logic), does not
 touch RLS/money paths/hard-stop gates, and does not change what the production worker image
 installs/copies.
+
+### Finding 155 (CONFIRMED, FIXED, moderate - `confirm_pack.py`'s own inline `initial_graduated` parsing never got the non-string-date guard `years_experience_at()` was fixed for (Finding 138), so an uncaught `TypeError` from the real pack-confirmation gate was wrongly escalated from a routine, user-actionable refusal into what `process_pack_jobs.py`'s own caller treats as a genuine crash)
+
+**Area:** CV / pack generator (`engine/pack_generator/confirm_pack.py` - the one human-confirmation
+gate between an AI-suggested pack and the real fill engine; called directly by
+`engine/pack/process_pack_jobs.py` on every real SANRAL pack job).
+
+**Scenario:** Finding 138 (2026-11-06) fixed `suggest_pack.years_experience_at()` for a non-string
+`initial_graduated` value (a number, bool, or a list/dict - reachable via a hand-edited `profile.json`
+fed to this engine's own documented CLI usage) raising `TypeError` from `datetime.date.fromisoformat()`
+instead of the `ValueError` its callers already catch. `confirm_pack.py`'s `confirm()` does its OWN,
+separate inline parsing of the identical field (`grad = qual.get("initial_graduated"); ... grad_date =
+datetime.date.fromisoformat(grad)`, guarded only by `except ValueError`) and was never swept for the
+same fix.
+
+Confirmed directly: `datetime.date.fromisoformat(20150305)` (and `True`, a list, a dict, a float) all
+raise `TypeError: fromisoformat: argument must be str`, uncaught by this function's own `except
+ValueError`. **Worse than just an uncaught crash** - `process_pack_jobs.py`'s own real caller
+(`process_job()`) explicitly distinguishes the two exception types: a `ValueError` is "the confirm gate
+/ a filler refusing on purpose (the user can act on the message)", recorded as a `"warning"`-severity
+system alert with the clean message; anything else is treated as "a crash", recorded as `"error"`
+severity with the raw `f"{type(e).__name__}: {e}"` text. So this gap didn't just produce a worse error
+message - it wrongly escalated a routine, user-fixable bad-data case (go fix the date on the People
+page) into what Sarel's own alert triage treats as a genuine bug needing investigation.
+
+**Reachability**: `initial_graduated` is a proper Postgres `date` column (migration `0001`), so the
+real, automated `process_pack_jobs.py` path (reading from Supabase) can never actually produce a
+non-string value here - same conclusion reached for Findings 141/142 while investigating this exact
+bug class elsewhere. The gap is reachable via this module's own documented, standalone CLI usage
+(`python3 confirm_pack.py <suggestions> <selections> <profile.json> <out>`) against a hand-edited
+`profile.json`, the same vector Finding 138's own writeup names for `suggest_pack.py`'s sibling
+`--profile` flag.
+
+**Fixed anyway, by the same precedent Findings 141/142/the original `years_experience_at()` fix
+used**: added the identical `isinstance(grad, str)` check, raising the same clean, already-existing
+"not a valid YYYY-MM-DD date - fix it on the People page" `ValueError` rather than falling through to
+`fromisoformat()`.
+
+**Verified red-then-green.** No dedicated test file existed for `confirm_pack.py` anywhere in the
+repo (confirmed by `find`/grep - only `test_form_field_audit.py`, `pack/test_pack_suggestions.py` and
+`security/test_tenant_isolation.py` call into it indirectly, none testing this path). New
+`engine/pack_generator/test_confirm_pack.py` (first dedicated test file for this module): a minimal,
+template-free fixture (`confirm()` against plain JSON/YAML, no LibreOffice/workbook needed) checks 6
+non-string shapes (`int`, `True`, `False`, a list, a dict, a `float`) plus the 4 pre-existing, unaffected
+cases (a valid date, an unparsable string, a missing date, a future-dated/negative-experience date).
+Caught and fixed my own test bug before it ever reflected a real bug: the "future-dated" case first
+used a 1-month gap, which rounds to `0` years, not negative - widened to a multi-year gap to actually
+exercise the existing negative-experience guard. Reverted `confirm_pack.py` via `git apply -R`, re-ran
+- the 5 non-`False` non-string cases failed exactly as predicted (the raw `TypeError`, not caught by
+`except ValueError`); `False` was unaffected both times (already caught by the earlier `not grad`
+falsy check, same as `None`/`0`/`""` always were). Reapplied - `0 failure(s)`. `py_compile` clean.
+Regression: `engine/test_form_field_audit.py`, `engine/pack/test_pack_suggestions.py`,
+`engine/pack_generator/test_suggest_pack.py` - all `0 failure(s)`/`ALL PASSED`.
+
+**Regression:** `engine/pack_generator/confirm_pack.py` (`confirm()`, one `isinstance` guard added,
+~17 lines including comments); `engine/pack_generator/test_confirm_pack.py` (new file, first dedicated
+test coverage for this module). No change to the negative-experience check, the project-dropping
+logic, or any other validation in `confirm()`.

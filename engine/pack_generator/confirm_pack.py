@@ -68,6 +68,22 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
         if not grad:
             raise ValueError(f"{person['name']}: no initial_graduated date on file - "
                               f"years_experience cannot be computed, refusing to guess one.")
+        # Finding 155 (2026-11-07): a non-string value (a number, bool, or a
+        # list/dict - reachable via a hand-edited profile.json fed to this
+        # script's own documented CLI usage, same as suggest_pack.py's
+        # --profile flag) raises TypeError from fromisoformat(), not the
+        # ValueError caught just below - the identical gap
+        # years_experience_at() was fixed for in this same engine area
+        # (Finding 138, 2026-11-06), never swept into this sibling file.
+        # process_pack_jobs.py's own real caller treats a ValueError as this
+        # gate refusing on purpose (a "warning", user-actionable) and
+        # anything else as a crash (an "error") - so an uncaught TypeError
+        # here doesn't just show a worse message, it wrongly escalates a
+        # routine bad-data refusal into what looks like a real bug.
+        if not isinstance(grad, str):
+            raise ValueError(f"{person['name']}: initial_graduated ({grad!r}) is not a valid "
+                              f"YYYY-MM-DD date - fix it on the People page before confirming "
+                              f"this pack.")
         try:
             grad_date = datetime.date.fromisoformat(grad)
         except ValueError:

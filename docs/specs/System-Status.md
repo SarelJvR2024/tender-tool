@@ -5876,6 +5876,61 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - `confirm_pack.py`'s own inline `initial_graduated` parsing never got the non-string-date guard Finding 138 fixed for its sibling `years_experience_at()`, wrongly escalating a routine, user-actionable refusal into what `process_pack_jobs.py`'s own real caller treats as a genuine crash
+
+Oriented from `2b60b34` (own prior pass: Finding 143, CIDB_RE phrasing). `git fetch origin main`
+found one more round of sibling commits (`dbsa_procurement.py`'s own Ref No collision fix, Finding
+154; a `render-pack-ready-email.ts` test-coverage addition) - unrelated to this pass's own file,
+`git merge --ff-only` clean, no collision. **Numbering note**: the sibling track's own findings
+(144-154) landed in this same shared doc between my own Finding 143 and this entry - this pass's new
+finding is numbered 155, not 144, to stay in the one shared sequence both tracks use (caught before
+committing by re-checking the findings doc's own highest number, not assumed from memory).
+
+**Rotation: CV / pack generator.** `engine/cv/`'s three files are already heavily covered (clean
+sweeps, the claim-outside-try-block sweep, the control-character sweep) - picked
+`engine/pack_generator/confirm_pack.py` instead, the one human-confirmation gate between an
+AI-suggested pack and the real fill engine, never read end to end this session. Found the identical
+non-string-date gap Finding 138 fixed for `suggest_pack.years_experience_at()` in this file's own
+SEPARATE inline `initial_graduated` parsing - never swept, confirmed directly:
+`datetime.date.fromisoformat(20150305)` (and `True`, a list, a dict, a float) all raise `TypeError`,
+uncaught by this function's own `except ValueError`.
+
+**Worse than just an uncaught crash, traced through to the real caller**: `process_pack_jobs.py`'s
+own `process_job()` explicitly distinguishes `ValueError` ("the confirm gate ... refusing on
+purpose", recorded as a `"warning"`) from anything else ("a crash", recorded as an `"error"` with the
+raw exception text) - so this gap didn't just produce a worse message, it wrongly escalated a
+routine, user-fixable bad-data case into what Sarel's own alert triage treats as a genuine bug.
+
+**Reachability**: `initial_graduated` is a proper Postgres `date` column, so the real automated
+`process_pack_jobs.py` path can never actually produce a non-string value - same conclusion reached
+for Findings 141/142. Reachable via this module's own documented standalone CLI usage against a
+hand-edited `profile.json`, the same vector Finding 138 named for `suggest_pack.py`'s own
+`--profile` flag.
+
+**Fixed anyway**, by the same precedent: added the identical `isinstance(grad, str)` check.
+
+**Verified red-then-green.** No dedicated test file existed for `confirm_pack.py` at all - new
+`engine/pack_generator/test_confirm_pack.py` (first for this module), a minimal template-free
+fixture covering 6 non-string shapes plus the 4 pre-existing unaffected cases. Caught and fixed my
+own test bug first (a 1-month future-date gap rounds to 0, not negative - widened to multi-year).
+Reverted via `git apply -R` - the 5 non-`False` cases failed exactly as predicted (`False` unaffected
+both times, already caught by the earlier falsy check); reapplied - `0 failure(s)`. `py_compile`
+clean. Regression: `engine/test_form_field_audit.py`, `engine/pack/test_pack_suggestions.py`,
+`engine/pack_generator/test_suggest_pack.py` - all `0 failure(s)`/`ALL PASSED`.
+
+**Backlog: unchanged at 18 items** - the same already-established bug class fixed in a third sibling
+location, not a new judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green, regression-clean, new
+test file adds coverage with no prior gap left open):
+- `engine/pack_generator/confirm_pack.py`
+- `engine/pack_generator/test_confirm_pack.py`
+
+To verify independently: `cd engine/pack_generator && python3 test_confirm_pack.py` - expect
+`0 failure(s)`.
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - `assess_tender.CIDB_RE`'s own `"GRADING?"` could only ever match "GRADIN"/"GRADING", never the equally common "CIDB Grade X" phrasing - a tender naming its requirement this way silently read as having no CIDB requirement at all, in both discovery scoring and the non-SANRAL pack's own submission plan
 
 Oriented from `e34d59c` (own prior pass: Finding 142, `sanral_b7.py` NaN guard). `git fetch origin
