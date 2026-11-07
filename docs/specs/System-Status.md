@@ -1,5 +1,90 @@
 # System Status
 
+## This pass (2026-11-07hh, standing solution-architect review): oriented from `4db98ec`
+(immediately-preceding pass's own verified HEAD, Finding 169/PR #182). `git fetch origin main`
+clean, local matched `origin/main` exactly both at the start and at the end of this pass (`4db98ec`
+throughout - this pass makes a docs-only commit, no code or migration change). Re-checked all 9
+open PRs via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/
+`#182` and the two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at`
+timestamps the immediately-preceding pass recorded (including `#182`'s own `2026-11-07T09:35:52Z`,
+matching its creation at the very end of that pass) - nothing merged, closed, or rebased by anyone
+since. Checked PR #182's own comments (`mcp__github__pull_request_read`, `get_comments`) and the
+repo's open-issues list (`mcp__github__list_issues`, state `open`) for any sign Sarel has acted on
+or commented a decision on Finding 168 or the `start_payfast_checkout()` revenue-integrity gap:
+`#182` has only the automated Vercel-bot deploy comment, and there are zero open issues - nothing
+retrievable to this session indicates either has been decided.
+
+**This pass's angle: checked the brief's own named candidate - whether `bridge-worker-ci.yml`'s
+`push.paths` filter is missing `app/lib/**`/`app/scripts/**`, now that PR #181 touches exactly that
+boundary. Confirmed still true, and freshly relevant (not just a stale backlog note).** Read
+`.github/workflows/bridge-worker-ci.yml`'s `on.push.paths` on current `main`: `engine/**`,
+`templates/forms/**`, `templates/general_samples/**`, `fingerprints/**`,
+`config/discipline_taxonomy.json`, `app/supabase/migrations/**`, `.dockerignore`, and the workflow
+file itself - no `app/lib/**` or `app/scripts/**` entry. Read PR #181's actual diff
+(`git fetch origin pull/181/head:pr181_check`, `git diff main pr181_check -- engine/worker/Dockerfile
+.dockerignore`): it adds `COPY app/lib app/lib` and `COPY app/scripts app/scripts` to
+`engine/worker/Dockerfile` (plus a Node 22 install) so the worker image can shell out to
+`node --experimental-strip-types app/scripts/render-pack-ready-email.ts` (Finding 152's own fix) -
+a genuine new runtime dependency of the built image on those two directories' contents. Confirmed
+`main`'s current Dockerfile has no such `COPY` lines at all today, so this gap is not live on `main`
+yet - it is a gap in PR #181's own diff (not updating the CI trigger to match its own Dockerfile
+change), not a bug already shipped. Also confirmed, while reading the trigger block, that no
+workflow in this repo has a `pull_request` trigger at all (`grep -n "pull_request" .github/workflows/
+*.yml` - zero matches) - every one is `push: branches: [main]` plus `workflow_dispatch` only, which
+is also why PR #181's own description says it needed a manual `workflow_dispatch` to get a real
+`docker build` to run pre-merge; this is a repo-wide, pre-existing pattern, not something #181
+introduced, noted for context rather than filed as its own finding.
+
+**Not fixed on `main` (nothing to fix there yet - confirmed the gap doesn't exist on current
+`main`) and not edited onto PR #181's own branch (per the standing guardrail against rebasing or
+rewriting a PR branch this session didn't create).** Left a review comment on PR #181 instead
+(`mcp__github__add_issue_comment`, comment id `6705208596`) laying out the exact gap and a concrete
+suggested fix (add `app/lib/**` and `app/scripts/**` to the workflow's `paths` list) for whoever
+next revises that branch, or for Sarel's own call - the same "comment on the other PR rather than
+edit it" pattern PR #180 already used against PR #178. No code, migration, or workflow file was
+changed by this pass.
+
+**Consolidation (brief's option (b), done alongside the angle above since it came up real but
+small).** Re-verified PR #182 (created last pass) against the very latest `main` (`4db98ec`, not the
+`02610a2` it was branched from): `git fetch origin pull/182/head:pr182_check` then
+`git merge-tree --write-tree origin/main pr182_check` - clean merge, no `CONFLICT` text, tree
+`45b5d2a4...`. Also re-verified PR #176 the same way against the same latest `main` - also clean,
+no conflict. Checked #176 and #182 against EACH OTHER for real file/content overlap, not just "both
+touch RLS": `git diff --name-only $(git merge-base origin/main pr176_check) pr176_check` shows
+#176's own actual diff is exactly 2 files (`app/supabase/migrations/0119_employee_rls_systematic_
+sweep.sql`, `engine/security/test_tenant_isolation.py`); #182's own diff is `0121_pack_quota_rpcs_
+employee_gap.sql` plus the same `test_tenant_isolation.py` plus the two spec docs - so they DO share
+one file. Checked whether that shared file is a real conflict: `git diff ... -- engine/security/
+test_tenant_isolation.py` shows #176's hunk starts at its own pre-image line ~1060 (a new ~115-line
+block plus one line near `main()`) while #182's hunk starts at its own pre-image line ~1003 (a
+~20-line block) - non-overlapping regions of the file even accounting for the two PRs' different,
+non-adjacent base commits - and `git merge-tree pr176_check pr182_check` (merging the two PR
+branches directly against each other, not just each against `main`) returned a clean tree with zero
+conflict markers, the authoritative confirmation. **#176 and #182 do not conflict with each other.**
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail - re-confirmed via the PR/issue check
+above that nothing retrievable indicates Sarel has acted on either. All 9 PRs remain open and
+unmerged: #176/#178/#179/#180/#181/#182 (awaiting Sarel's own merge decision, #181 now additionally
+carrying this pass's own review comment) and #164/#165(draft)/#177(draft). The #179 real merge
+conflict (`pastSubmissionReuse.ts`, found `2026-11-07dd`) and the #178/#180 mutual overlap (also
+`2026-11-07dd`, self-disclosed by #180) are unchanged and not re-litigated here since neither
+branch has itself changed. `engine/cv/`/`engine/general/` (heavily mined), pack-assembly
+correctness, seat-limit boundary logic, and the plan-downgrade path all remain confirmed-exhausted
+per prior passes' own notes - not re-swept.
+
+To verify independently: read `.github/workflows/bridge-worker-ci.yml`'s `on.push.paths` and
+confirm `app/lib/**`/`app/scripts/**` are absent; read PR #181's diff and confirm its `COPY app/lib
+app/lib`/`COPY app/scripts app/scripts` lines; read PR #181's own comment thread and confirm this
+pass's comment (id `6705208596`) is present and accurate. `git fetch origin pull/176/head:pr176_check
+pull/182/head:pr182_check main && git merge-tree --write-tree origin/main pr176_check && git
+merge-tree --write-tree origin/main pr182_check && git merge-tree --write-tree pr176_check
+pr182_check` and confirm all three report a clean tree with no `CONFLICT` text. Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged with the timestamps
+recorded above.
+
+---
+
 ## This pass (2026-11-07gg, standing solution-architect review): oriented from `02610a2`
 (immediately-preceding pass's own verified HEAD, Finding 168). `git fetch origin main` clean, local
 matched `origin/main` exactly both at the start and immediately before pushing. Re-checked all 8 open
