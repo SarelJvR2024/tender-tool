@@ -1,5 +1,100 @@
 # System Status
 
+## This pass (2026-11-07v, standing solution-architect review): oriented from `2b1a6ae`
+(immediately-preceding pass's own verified HEAD, Finding 173). `git fetch origin main` clean, local
+matched `origin/main` exactly at the start and again immediately before pushing this entry - no
+sibling commits landed during this pass. Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded - nothing merged, closed, or rebased by anyone since. Grepped
+`Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself - 173 is still the highest recorded
+(this pass found no new numbered finding - see below).
+
+**This pass's angle: deliberately pivoted away from the real-document-parsing vein** (3 of this
+chain's own last 3 passes, plus the sibling's own Finding 170, all landed in that exact theme across
+`engine/discovery/` and `engine/intake/` - diminishing-returns territory per the brief's own framing)
+**to option (c), pure PR-mergeability consolidation** - the last full `git merge-tree` check against
+all 6 active real PRs was pass `2026-11-07dd` (oriented from `d925926`), and roughly a dozen commits
+(Findings 166 through 173, several docs-only) have landed on `main` since then, so a stale
+"mergeable" read was a real risk per the brief's own framing, not a hypothetical one.
+
+**Method: real local `git merge-tree --write-tree`, not GitHub's own `mergeable_state`** (still
+returns `"unknown"` for all 9 PRs via `mcp__github__pull_request_read` - not yet computed by GitHub,
+same as every prior pass found). Fetched all 9 PR heads (`git fetch origin pull/<n>/head:pr<n>` for
+164/165/176/177/178/179/180/181/182) and ran `git merge-tree --write-tree origin/main pr<n>` for
+each against the current, far-advanced `main` (`2b1a6ae`):
+
+- **#176, #177, #178, #180, #181, #182**: all clean merges against current `main`, no conflicts -
+  confirms the `2026-11-07dd`-pass finding still holds after a dozen more commits. Zero file overlap
+  with any of Findings 166-173's own commits for any of these 6.
+- **#179** (`fix/reuse-past-submission-target-stage-gate`): **still conflicts**, same file
+  (`app/lib/pastSubmissionReuse.ts`), same root cause as `2026-11-07dd` originally found and
+  reported (commit `829dbb9`'s own `error`-capturing rewrite of the identical `Promise.all`
+  destructure PR #179 also rewrites to add `pipeline_stage`) - re-confirmed byte-for-byte via
+  `git merge-tree --write-tree origin/main pr179`, exact same conflicting lines as before. PR #179's
+  branch itself is untouched (head sha `416a4db7` unchanged since it opened) and `main` has only
+  moved further away from its `e096b50` base since - this conflict was never going to resolve
+  itself and hasn't.
+- **New this pass, not previously stated this precisely: #179 now conflicts against every other
+  currently-open, non-stale PR branch too, not just against `main` directly.** Ran
+  `git merge-tree --write-tree pr<a> pr<b>` for all 21 unordered pairs among
+  {176,177,178,179,180,181,182}: `#179 vs #180`, `#179 vs #181`, and `#179 vs #182` each report the
+  exact same single-file conflict in `app/lib/pastSubmissionReuse.ts` (confirmed by inspecting each
+  pair's own conflict markers - all three are the identical `829dbb9`-vs-#179 collision, not three
+  separate new bugs). Root cause: #180/#181/#182 were each branched from a point on `main` already
+  past `829dbb9`, so merging any of them inherits that commit's rewrite, and #179 (branched before
+  `829dbb9` landed) collides with it the same way `main` itself does. No other pair among the 21
+  conflicts. This doesn't change the fix needed (the same trivial 3-way "keep both blocks" resolution
+  `2026-11-07dd` already named resolves it against `main` or against any of these siblings equally)
+  but it does mean **merge order no longer limits the blast radius of this one conflict** - whichever
+  of #180/#181/#182 goes in before #179, #179 will still need the same manual resolution against
+  whatever `main` looks like at that point.
+- **Re-confirmed the other previously-disclosed interaction**: `#178 vs #180` still conflict with
+  each other directly (`git merge-tree --write-tree pr178 pr180`, conflicts in both
+  `general-workspace.tsx` and `submission-pack.tsx`) - unchanged from `2026-11-07dd`'s own finding,
+  itself already self-disclosed in PR #180's own description.
+- **#164/#165** (the old stale drafts, NOT touched, per the standing guardrail): both now conflict
+  heavily against current `main` (6 files for #164, 1 file for #165) - unsurprising given they've
+  been stale since 2026-10-26 and untouched for ~40 commits' worth of drift; reported for
+  completeness since the task asked for all 9, not treated as a new finding (staleness this old was
+  already the known, accepted state of both).
+
+**CI/status check, spot-checked for #176/#179/#181 via `mcp__github__pull_request_read`
+(`get_status`)**: each reports exactly one status, `Vercel` deploy, `state: success` - no separate
+GitHub Actions test-suite gate runs against these PR branches (consistent with every prior pass's
+own note that Vercel-deploy is the only status GitHub reports here).
+
+**No fix made this pass - genuine consolidation result, not forced into a new numbered finding.**
+Nothing here is new product risk: every conflict found is either already-known-and-disclosed
+(#179 vs `main`, #178 vs #180) or a mechanical, zero-surprise restatement of the same known #179
+conflict against three more branches for the same reason. No PR branch was rebased, amended, or
+touched (per the standing guardrail against rewriting a PR this session didn't open) - all `pr<n>`
+local refs fetched for this check are plain read-only fetched refs, nothing pushed to them, and the
+one scratch worktree used to inspect #179's actual conflicting lines was removed afterward
+(`git worktree remove -f`, confirmed via `git worktree list` showing only the main checkout).
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged, same set
+as recorded by the immediately preceding pass - none touched, amended, or merged by this pass.
+`engine/discovery/`'s other direct-buyer readers and `capetown_procurement.py`'s own live refetch
+(both left open by `2026-11-07iv`) and `engine/intake/classify_tender.py`'s own `find_nra_reference()`
+(left open by `2026-11-07iii`) remain live, not-yet-exhausted angles for a future pass choosing
+option (a) or returning to that theme - not touched this pass, which deliberately chose (c) instead.
+PR #179's cross-branch conflict surface (above) is the one piece of this pass worth a future PR-facing
+session re-confirming only if #179, or any of #180/#181/#182, changes - otherwise stable until
+someone actually resolves #179's conflict by hand.
+
+To verify independently: `git fetch origin pull/179/head:pr179 pull/180/head:pr180
+pull/181/head:pr181 pull/182/head:pr182 main:origin-main-check` then `git merge-tree --write-tree
+pr180 pr179` (or swap in 181/182 for 180) and confirm each reports `CONFLICT (content): Merge
+conflict in app/lib/pastSubmissionReuse.ts`. Confirm `git merge-tree --write-tree origin/main pr176`
+(and 177/178/180/181/182) each exit 0 with no `CONFLICT` line. Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged, and that `git log --oneline
+-1 origin/main` is this pass's own new docs-only commit (one ahead of `2b1a6ae`), with no further
+sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07iv, standing solution-architect review): oriented from `297bfc9`
 (immediately-preceding pass's own verified HEAD, Finding 172). `git fetch origin main` clean, local
 matched `origin/main` exactly at the start, immediately before pushing, and again just now - no
