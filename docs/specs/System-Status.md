@@ -1,5 +1,120 @@
 # System Status
 
+## This pass (2026-11-07xxxiv, standing solution-architect review, background worker): Finding 195 - `app/app/company/document-scan/page.tsx`'s own `queuedCount` read never captured its own error (the one sibling Finding 144's own fix left out); Finding 196 - `app/app/admin/taxonomy/page.tsx`'s redundant `is_platform_admin()` RPC never captured its own error either - both fixed, pushed to `main`, oriented from `7045fa2`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`7045fa2` (Finding 194's own docs commit, the immediately preceding pass). Re-checked again
+immediately before each of this pass's own two pushes - still matching (`7045fa2` then `00c9038`
+after the first push), no sibling commit landed in between either check. Re-checked all 10 open PRs
+via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` three times this pass (start, between
+the two fixes, and before the second push): same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since; none merged by this session either. Per the binding guardrails, `#164`/`#165`
+were not touched, no PR was opened or merged, and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped `Finding [0-9]+` in
+`docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - `194` was the highest
+recorded at this handoff, confirming no new finding had landed from a sibling session since
+`7045fa2`, before this pass's own Findings 195/196 below. No scratch Postgres database was needed
+this pass (no race/lock reproduction - both fixes are missing error-captures on already-successful
+reads, verified by direct reading plus the full suite, no live Supabase/Postgres access required);
+no `git worktree` was created either (`app/node_modules` in the primary checkout is a real
+directory, not a symlink, so the usual bind-mounted-worktree step for `npx next build` does not
+apply, same as the last several passes' own precedent) - nothing to clean up.
+
+**This pass's own task, per the standing brief.** Picked up exactly where Finding 194's own
+"genuinely-checked-and-ruled-out" paragraph left off - its own named fresh ground: `app/app/company/
+team/page.tsx`, `app/app/company/properties/page.tsx`, `app/app/company/document-scan/page.tsx` and
+`app/app/company/page.tsx`, none of which had been read with the `Promise.all`-sibling-error-capture
+lens before (only their `actions.ts` write-path siblings were swept, for the TOCTOU bug class). Read
+all four end to end.
+
+**`team/page.tsx`, `properties/page.tsx` and `company/page.tsx`: genuinely clean, no new finding in
+any of the three** - every `Promise.all`/sequential-read block in all three already captures every
+sibling's own error and folds it into a visible banner (`company/page.tsx`'s two
+`storage.createSignedUrl()` loops don't check their own per-file error, but both loops do the exact
+same thing on failure - silently skip that one file's link - a consistent omission, not a
+sibling-divergent one, so it doesn't fit this method's own shape).
+
+**Found: Finding 195.** `document-scan/page.tsx`'s 6-way `Promise.all` captured `error` for 5 of its
+6 reads but not the 6th - `{ count: queuedCount }` (the `onboarding_uploads` in-progress count
+driving `AutoRefresh` and the "N documents still being read" banner). This exact read was already
+*listed* as one of this same `Promise.all`'s 6 siblings in Finding 144's own write-up (2026-11-06),
+but that fix only touched the other 3 (`principals`/`people`/`company`) - `queuedCount` was left
+exactly where it was, and (unlike Finding 165's own backlog note, which directly led to Finding 166
+closing the identical gap on `app/experience/page.tsx`'s copy of the same read) nothing ever flagged
+it as a loose end. Same severity judgement as Finding 166's own precedent for the identical table/
+column: logging-only, not a new UI gate - `queuedCount` only gates a cosmetic banner/auto-refresh,
+never a fact about the customer's own data, and `count ?? 0`'s fallback is already the safe
+direction. Fixed by destructuring `error: queuedError` and adding one `console.error`, with an
+inline comment citing Finding 166. No behavioural change to the happy path.
+
+**Found: Finding 196.** Grepped `is_platform_admin` across every `app/app/admin/**/*.tsx` to check
+whether `document-scan`'s exact shape recurred elsewhere admin-side. It does, once:
+`app/app/admin/taxonomy/page.tsx`'s own 3-way `Promise.all` never captures the `is_platform_admin()`
+RPC's own `error`, while its two siblings (`discipline_categories`, `discipline_category_suggestions`)
+both do - the only admin page that calls this RPC a SECOND time itself (every other admin page only
+relies on `admin/layout.tsx`'s own shared gate, which already calls the same RPC and `notFound()`s a
+genuine non-admin before any `/admin/*` page renders). Because the layout already confirmed the
+user is a platform admin moments earlier in the same request, a failure of this page's own
+redundant second call is near-certainly a second, independent, transient RPC blip hitting a real
+admin - not a genuine loss of admin status. Pre-fix, `canEdit` correctly fell to `false` on that
+failure (the safe direction, unchanged by this fix) but the page then told that real platform admin
+the specific, false claim "Read-only for your account: only a Tender Ready platform admin can
+change it." Fixed by logging the error and swapping that one sentence for an honest "Couldn't check
+whether you can edit this - try refreshing" whenever `isAdminError` is the actual cause, leaving the
+genuine non-admin copy untouched for the genuine non-admin case. `canEdit`'s own derivation and
+every other render path are unchanged.
+
+**Verification, run myself, real exit codes - no red/green test, honest limitation (same precedent
+as Findings 144/165/166/194 for an untestable RSC page with no extracted logic to unit-test).**
+Neither touched page has its own test file (confirmed via `find`). `npm run typecheck` (0 errors),
+`npx eslint .` (0 errors, same 3 pre-existing warnings), `npx vitest run` (**516/516, 67 files**,
+unchanged - run 3 times this pass after one unrelated flaky run mid-pass in an unconnected spec
+file, confirmed clean on the 2 re-runs either side of it), the node `*.test.ts` loop (28/28, plain
+`node <file>`, no flags), `npx next build` (clean, same 62-route table, `/company/document-scan` and
+`/admin/taxonomy` both present) - run directly in the primary checkout per the same
+node_modules-is-a-real-directory reasoning as the last several passes; and the full `engine/` Python
+sweep as a no-op regression check (86/86, unchanged - no Python touched).
+
+**Genuinely-checked-and-ruled-out siblings, so a future pass doesn't re-walk this exact ground.**
+Cross-checked every `Promise.all` site in `app/app/**/*.ts*` (46 files) against this doc's and the
+findings doc's own mention-count history rather than re-reading everything cold. Two files came
+back with **zero** mentions in either doc: `admin/taxonomy/page.tsx` (Finding 196, above) and
+`app/app/people/[id]/page.tsx` - read the latter end to end and found it genuinely clean (its own
+`Promise.all` and all 5 of its sequential secondary reads already capture every error and fold them
+into one banner, explicitly written with this exact bug class already in mind). Also checked
+`app/app/admin/telemetry/page.tsx` (its 2-way `Promise.all` is fully captured - clean; its only 2
+prior mentions are about an unrelated bug class, `HEALTH_SOURCE_GROUPS` miscategorisation).
+
+**Is the `Promise.all`-sibling-error-capture lead exhausted?** Thinning fast but not fully dead: the
+overwhelming majority of this pass's own 46-file grep already carries real prior-pass mention
+counts in one or both docs - a future pass should re-read one of those against its own specific
+prior entry (to confirm it's still genuinely clean, not just mentioned for an unrelated reason)
+rather than grepping `Promise.all` cold again. No more zero-mention files remain in `app/app/**/*.ts*`
+for this exact pattern as of this HEAD. **Concrete next angle named for the next pass**: apply the
+same "cross-check mention-count history for a zero-hit file" method to a different base grep -
+`supabase.storage.from(...).createSignedUrl` (signed-URL generation sites that silently skip a file
+on error, never checked for whether that silence is ever visibly inconsistent with a sibling that
+DOES show something), or `.insert(`/`.update(` sibling-divergence outside the already-thoroughly-
+swept TOCTOU/lost-update class (Findings 170-192).
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via the GitHub REST API three times this pass; nothing merged, closed, or rebased by
+anyone else. Pushed directly to `main` as two separate small commits - `00c9038` (Finding 195,
+`app/app/company/document-scan/page.tsx` only) and `9bd5522` (Finding 196,
+`app/app/admin/taxonomy/page.tsx` only) - each a display-only page fix with a `console.error` and/or
+a corrected message, no RLS/money-path/hard-stop-gate touched, no schema/migration/RPC change, no
+worker-image surface touched.
+
+To verify independently: see Findings 195 and 196's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the file-by-file diff check, the test run, the full
+suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxxiii, standing solution-architect review, background worker): Finding 194 - `app/app/company/principals/page.tsx`'s `company_ownership_breakdown` view read never captured its own error, unlike its `company_principals`/`people` siblings in the exact same `Promise.all` - fixed, pushed to `main`, oriented from `2cff019`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `2cff019`
