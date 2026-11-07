@@ -10342,3 +10342,112 @@ confirm it returns the raw `suggested_person_id` (not `None`) when that id isn't
 `python3 engine/pack/test_process_pack_jobs.py` and confirm `0 failure(s)`, real exit code 0. Confirm
 `grep -rn "\"overrides\"" engine/` still shows nothing else reads `pack.yaml`'s own
 `_provenance.overrides`, i.e. this fix's severity really is as low as described above.
+
+### Finding 168 (CONFIRMED, NOT FIXED - reported for Sarel's own judgment, same treatment as the
+`start_payfast_checkout()` revenue-integrity item - a yearly-billing company's bid-pack quota
+resets only once a YEAR, even though every plan's `max_packs_per_month` is an explicitly MONTHLY
+allowance)
+
+**Area:** `company_packs_this_period(p_company_id uuid)` (`app/supabase/migrations/0115_pack_quota_
+regression_and_request_race.sql`, lines 69-85, the live, current definition - re-merged 2026-11-04
+after 0109 regressed it, unchanged by 0116-0120, confirmed by `grep -rn "company_packs_this_period"
+app/supabase/migrations/` showing only 0083/0084/0096/0101(reference only)/0109/0115/0120(grant-
+revoke only) ever touch it). The one quota-counting RPC `company_can_request_pack()` and both real
+insert gates (`request_submission_pack_checked()`, `request_general_job_checked()`, same file) call
+before letting a company request a new bid pack; also the one number `app/app/billing/page.tsx`
+shows as "Bid packs this period: X of {max_packs_per_month}".
+
+**This pass's angle:** per the brief's option (c), a read-only investigation of the quota-counting
+RPC's own SQL in the migrations for an off-by-one/timezone/billing-period-boundary bug. `engine/cv/`
+(64 mentions in this file) and `engine/general/` (103 mentions) were both checked first via `grep -c`
+per the brief's own "heavily mined, skip" instruction and both came back far above a reasonable
+threshold for the "wrong not missing field" shape without a clear untouched angle, so this pass
+moved to (c) rather than force a CV/general re-sweep. `grep -i "yearly"` across both spec files first,
+to make sure this exact shape wasn't already found and deliberately deferred - the only yearly-
+billing hits are an unrelated privilege-escalation bug (`start_payfast_checkout()` lacking a role
+check, fixed by 0117) and the already-documented `start_payfast_checkout()` grants-before-ITN timing
+item (2026-11-07e) - neither is this bug.
+
+**What was found, reading `company_packs_this_period()`'s own body:**
+```sql
+select count(*)::integer
+from pack_generation_jobs
+where company_id = p_company_id
+  and status in ('requested', 'generating', 'ready')
+  and requested_at >= (
+    select coalesce(current_period_start, created_at) from company_subscriptions where company_id = p_company_id
+  )
+```
+This counts every in-flight-or-finished pack since `current_period_start` - no upper bound, and no
+re-derivation of a monthly window at all. `current_period_start` is set to `now()` in exactly one
+place in the whole codebase outside this function's own migration history - `apply_payfast_itn()`
+(`0112_payfast_itn_amount_verification.sql` line 100 and line 125) - and ONLY on a successful
+('COMPLETE') PayFast ITN, i.e. once per real recurring charge (confirmed: `grep -rln
+"current_period_start"` across `engine/`, `app/`, migrations other than the RPC's own hits only
+the two `apply_payfast_itn()` branches and the column's own `0083` migration comment - no monthly
+cron, no other write path anywhere). `lib/payfast.ts`'s own `PAYFAST_FREQUENCY` confirms PayFast is
+told to bill `monthly` interval subscriptions every month (code 3) and `yearly` interval
+subscriptions every 12 months (code 6, `developers.payfast.co.za`'s own documented codes) - so for a
+`billing_interval = 'yearly'` company, the ITN that resets `current_period_start` fires roughly once
+a YEAR, not once a month. Meanwhile `max_packs_per_month` is explicitly, by name and by
+`lib/billing.ts`'s own header comment ("plans differing only by seat count and monthly bid-pack
+volume"), a MONTHLY allowance - identical for a Professional company whether they pay monthly or
+pay for the whole year up front (`yearlyPriceZar()` just discounts the same monthly rate ×10, it
+does not scale the pack allowance). `company_packs_this_period()` has no logic anywhere to re-derive
+a rolling monthly window inside a yearly billing period - "this period" for a yearly biller really
+does mean the whole 12-month span between ITNs, not a month.
+
+**Net effect:** a yearly-billing company that uses its full monthly allotment once, early in its
+12-month billing cycle, stays capped at that same count - and blocked from requesting any more bid
+packs at all - for the remaining ~11 months, instead of getting a fresh `max_packs_per_month` every
+single month the way a monthly-billing company on the identical plan does. This is the opposite of
+"might let a company exceed its quota" - it is a real, severe UNDER-grant: a paying yearly customer
+on Professional (R2,990/mo equivalent, paid annually) gets roughly 1/12th of the bid-pack volume a
+monthly-billing Professional customer gets across the same year, for the same money, purely because
+of how `current_period_start` happens to be re-stamped.
+
+**Live-reproduced in a disposable scratch Postgres** (`service postgresql start`; `su postgres -c
+"psql -c 'CREATE DATABASE scratch_quota168'"`; `engine/security/replay_schema.sh -U postgres -d
+scratch_quota168`, all 110 migrations applied clean; dropped and `service postgresql stop`
+afterward - nothing left running). Seeded one company, `billing_interval = 'yearly'`,
+`plan_tier = 'professional'`, `status = 'active'`, `max_packs_per_month = 15` (the real Professional
+number), `current_period_start = now() - 11 months`, `current_period_end = now() + 1 month` (i.e. an
+ITN-driven annual renewal 11 months ago, due again in 1 month - the ordinary middle of a yearly
+cycle). Inserted exactly 15 `pack_generation_jobs` rows (`status = 'ready'`), all `requested_at`
+dated to 11 months ago (month 1 of this billing year) - the company's real, full, legitimately-used
+monthly allotment, used once, 11 months in the past, with ZERO packs requested since. As that
+company's own `owner` (`set role authenticated; select set_config('test.uid', ...)`, this repo's own
+stub convention): `select company_packs_this_period(...)` returned **15** (should be 0 - nothing
+requested in the current, 11-months-later, calendar month), `select company_can_request_pack(...)`
+returned **false** (should be true - 0 of 15 used so far this month). Called the real, live gate a
+genuine pack request goes through, `select request_general_job_checked(..., 'generate_pack')`, with
+no other state changed: it **raised** `"You've reached your plan's bid pack limit for this period -
+upgrade on the Billing page to generate more."` - the exact user-facing error a real customer would
+hit, 11 months into a 12-month cycle, having requested nothing in 11 months.
+
+**Why this is reported, not fixed, this pass - deliberately, not left for lack of time.** The
+correct SQL fix is not mechanical: it requires deciding what "this period" should mean for a yearly
+biller specifically a product-policy call, not a QA one. Candidate semantics differ in real,
+customer-visible ways Sarel would need to pick between, e.g.: (a) a rolling monthly window anchored
+to the billing anniversary day-of-month (needs the same day-of-month-overflow care `lib/payfast.ts`'s
+own `nextPeriodEnd()` already documents fixing once, for `addMonths()` vs bare `setMonth()`, so as
+not to introduce a sibling leap/short-month bug while fixing this one); (b) a plain calendar-month
+window (`date_trunc('month', now())`), simpler but not anniversary-aligned; or (c) treating a yearly
+plan's allowance as `max_packs_per_month * 12` available for the whole year up front, if that is
+actually the intended trade-off for paying annually (nothing in `lib/billing.ts`'s pricing comments
+says so, but it's a legitimate alternative design). This is the same shape of call the standing
+guardrail already reserves for `start_payfast_checkout()`'s revenue-integrity gap (2026-11-07e) -
+adjacent to real money and quota-enforcement, not a display bug - so, per this pass's own brief,
+reported for Sarel's judgment rather than guessed at and pushed to `main` or opened as a PR on a
+semantics nobody has confirmed.
+
+To verify independently: replay all 110 migrations onto a scratch Postgres
+(`engine/security/replay_schema.sh -U postgres -d <db>`), seed a company exactly as above (yearly
+Professional, `current_period_start` 11 months ago, 15 `ready` jobs dated to month 1 of that period,
+nothing since), and confirm `company_packs_this_period()` returns 15 and `company_can_request_pack()`
+returns false as that company's own member. Read `app/supabase/migrations/0115_pack_quota_
+regression_and_request_race.sql` lines 69-85 and confirm there is no month-window re-derivation in
+the function body. Read `app/lib/payfast.ts`'s `PAYFAST_FREQUENCY` (monthly=3, yearly=6) and
+`app/supabase/migrations/0112_payfast_itn_amount_verification.sql` lines 96-101/121-131 and confirm
+`current_period_start` is set to `now()` only on a successful ITN, which for `yearly` fires roughly
+once a year, not once a month.

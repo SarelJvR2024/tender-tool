@@ -1,5 +1,94 @@
 # System Status
 
+## This pass (2026-11-07ff, standing solution-architect review): oriented from `0543ac0`
+(immediately-preceding pass's own verified HEAD, Finding 167). `git fetch origin main` clean, local
+matched `origin/main` exactly both at the start and at the end of this pass (`0543ac0` throughout -
+this pass makes a docs-only commit, no code change). Re-checked all 8 open PRs via `mcp__github__
+list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181` and the two old stale drafts
+`#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the immediately-preceding
+pass recorded (`#176` 2026-11-06T11:14:35Z, `#177` 19:08:44Z, `#178` 22:40:23Z, `#179` 21:17:30Z,
+`#180` 22:40:26Z, `#181` 2026-11-07T06:00:46Z, `#164` 2026-10-26T20:14:25Z, `#165` 21:30:53Z) -
+nothing merged, closed, or rebased by anyone since the last pass's own check.
+
+**This pass's angle (per the brief's option order).** `engine/cv/` field-extraction correctness
+(option a) was checked first via `grep -c "engine/cv" docs/specs/QA-Edge-Case-Findings.md` - **64
+mentions** - and `engine/general/` (option b) via the same grep - **103 mentions**; both already
+heavily mined for exactly this file area across many prior passes (Findings 100/101/103/107/108/
+111/119-121 and others all live in or adjacent to these two directories), with no obviously fresh,
+untouched sub-angle jumping out on a read of the file list, so this pass moved to option (c): a
+read-only investigation of `company_packs_this_period()` (the quota-counting RPC Finding 164's own
+write-up flagged but didn't chase) for an off-by-one/timezone/billing-period-boundary bug.
+
+**Found a real one - Finding 168, reported, deliberately NOT fixed this pass.** Full write-up:
+Finding 168 in `docs/specs/QA-Edge-Case-Findings.md`. One-line summary: `company_packs_this_period()`
+(`0115_pack_quota_regression_and_request_race.sql`) counts every pack requested since `company_
+subscriptions.current_period_start` with no monthly re-derivation at all, and `current_period_start`
+is only ever reset by a successful PayFast ITN (`apply_payfast_itn()`, `0112`) - which for a
+`billing_interval = 'yearly'` company fires roughly once a YEAR (`lib/payfast.ts`'s own
+`PAYFAST_FREQUENCY`: monthly=3, yearly=6), not once a month. But `max_packs_per_month` is explicitly,
+by name and by `lib/billing.ts`'s own header comment, a MONTHLY allowance, identical whether a
+company pays monthly or pays the same rate annually up front. Net effect: a yearly-billing company
+that uses its full monthly allotment once, early in its 12-month cycle, stays capped at that same
+count and blocked from requesting any more packs for the remaining ~11 months, instead of getting a
+fresh monthly allotment every month like a monthly-billing company on the identical plan gets. This
+is a severe UNDER-grant (roughly 1/12th the real annual volume for the same money), not an over-
+grant, but it is exactly the "billing-period-boundary bug" shape the brief asked about.
+
+**Live-reproduced in a disposable scratch Postgres** (`service postgresql start`; `su postgres -c
+"psql -c 'CREATE DATABASE scratch_quota168'"`; `engine/security/replay_schema.sh -U postgres -d
+scratch_quota168`, all 110 migrations applied clean; dropped and `service postgresql stop`
+afterward - nothing left running). Seeded a yearly Professional company (`max_packs_per_month=15`,
+`current_period_start` 11 months ago, `current_period_end` 1 month away - the ordinary middle of a
+yearly cycle) with exactly 15 `ready` `pack_generation_jobs` rows dated to month 1 of that period
+(its real, full, legitimately-used monthly allotment, used once, 11 months back, nothing since). As
+that company's own `owner`: `company_packs_this_period()` returned **15** (should be 0 - nothing
+requested in the current calendar month), `company_can_request_pack()` returned **false** (should be
+true), and the real live gate, `request_general_job_checked(..., 'generate_pack')`, **raised** the
+exact user-facing "You've reached your plan's bid pack limit for this period..." error a real
+customer would hit 11 months into a 12-month cycle having requested nothing in 11 months. Full
+reproduction steps (exact SQL) are in Finding 168's own write-up.
+
+**Why reported, not fixed or PR'd, this pass - the brief's own explicit caution, not a shortcut.**
+The right SQL fix requires Sarel to pick a semantics for "this period" on a yearly plan (an
+anniversary-day-aligned rolling monthly window, a plain calendar-month window, or treating a yearly
+plan's allowance as `max_packs_per_month * 12` up front) - a product-policy call, not a QA one, the
+same shape of decision the standing guardrail already reserves for `start_payfast_checkout()`'s own
+revenue-integrity gap (2026-11-07e). This finding is about a DIFFERENT function (`company_packs_
+this_period()`, not `start_payfast_checkout()`) and does not touch or implement any part of that
+guarded item - the standing guardrail against touching `start_payfast_checkout()`'s fix was not
+breached, just the same "ask Sarel, don't guess on money-adjacent semantics" judgment applied to a
+sibling function.
+
+**No code changed this pass** - zero RLS/money/hard-stop/worker-image-install surface touched, since
+nothing was fixed. `npm run typecheck`/`npx eslint .`/`npx vitest run`/the node-test loop/`engine/`
+test count were NOT re-run (no code touched, nothing to regress) - confirmed instead that `git fetch
+origin main` immediately before this docs-only push still matched `origin/main` exactly (`0543ac0`),
+no sibling commits.
+
+**Pushed directly to `main`** - a docs-only commit (two spec files), per CLAUDE.md's own "never
+leave a real finding only in chat" rule; no code, no migration, nothing quota/payment-enforcing was
+touched or shipped.
+
+**Backlog status.** Finding 168 (above) is a new, concrete, independently-reproducible backlog item
+for Sarel's own judgment, same bucket as the `start_payfast_checkout()` revenue-integrity gap
+(2026-11-07e) - NOT fixed, NOT touched beyond this read-only investigation and write-up. `engine/cv/`
+and `engine/general/` remain heavily-mined-but-not-exhausted (64/103 mentions respectively) - a
+future pass could still find a fresh "wrong not missing field" angle there with a narrower, more
+specific sub-question than this pass's own quick mention-count check used to redirect to (c).
+`start_payfast_checkout()`'s own revenue-integrity gap (2026-11-07e) remains untouched, per the
+standing guardrail. PR #176/#178/#179/#180/#181 (awaiting Sarel's own merge decision) and
+#164/#165(draft)/#177(draft) remain exactly as described - not touched, not amended, not merged.
+
+To verify independently: replay all 110 migrations onto a scratch Postgres (`engine/security/
+replay_schema.sh -U postgres -d <db>`), seed a company exactly as Finding 168 describes (yearly
+Professional, `current_period_start` 11 months ago, 15 `ready` jobs dated to month 1 of that period,
+nothing since), and confirm `company_packs_this_period()` returns 15 and `company_can_request_pack()`
+returns false as that company's own member - then confirm `request_general_job_checked(...,
+'generate_pack')` raises the plan-limit error. Confirm via `mcp__github__list_pull_requests` that all
+8 PRs are still open and unmerged, with the same `updated_at` timestamps recorded above.
+
+---
+
 ## This pass (2026-11-07ee, standing solution-architect review): oriented from `d925926`
 (immediately-preceding pass's own verified HEAD). `git fetch origin main` clean, local matched
 `origin/main` exactly both at the start and immediately before pushing (`d925926`), no sibling
