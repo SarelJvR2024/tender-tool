@@ -1,5 +1,116 @@
 # System Status
 
+## This pass (2026-11-07xxxii, standing solution-architect review, background worker): Finding 193 - `app/app/admin/customers/page.tsx`'s per-company `platform_admin_company_members()` RPC never captured its own error, unlike its sibling `platform_admin_companies()` read in the exact same function - fixed, pushed to `main`, oriented from `c8eb357`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`c8eb357` (Finding 192's own pass, landed from the concurrent "QA/robustness review" sibling
+session, line ~10958 of this doc - confirmed read, not re-walked). Re-checked again immediately
+before this pass's own push - still `c8eb357`, no sibling commit landed in between. Re-checked all
+10 open PRs via `mcp__github__list_pull_requests` before and after this pass's own push: same set as
+every preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) -
+nothing merged, closed, or rebased by anyone since; none merged by this session either. Per the
+binding guardrails, `#164`/`#165` were not touched, no PR was opened or merged, and neither Finding
+168 nor the `start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped `Finding [0-9]+` in
+`docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - `192` was the highest recorded
+at this handoff (matching the task brief's own stated max), confirming no new finding had landed
+from a sibling session since `c8eb357`, before this pass's own Finding 193 below. No scratch
+Postgres database was needed this pass (no race/lock reproduction - the fix is a missing
+error-capture on an already-successful RPC call, verified with plain Vitest unit tests against a
+hand-built fixture, no live Supabase/Postgres access required); no `git worktree` was created either
+(see "Full verification suite" below for why the usual bind-mounted-worktree step for `npx next
+build` did not apply this pass) - nothing to clean up.
+
+**This pass's own task, per the standing brief**: find a genuinely-unswept family where one sibling
+silently drops/nulls/diverges from what its siblings do, with no explanatory comment and a real
+downstream consumer that would notice. Checked the brief's own named candidates against this doc's
+history first, as instructed, rather than assuming any was fresh: `app/app/billing/`'s Server
+Actions and `app/app/analytics/`'s data-loading functions have each had multiple dedicated passes
+(2026-11-07xxxi's own "why NOT picked" paragraph, still accurate - re-confirmed via `grep -n
+"app/billing\|app/analytics" docs/specs/System-Status.md` before ruling both out again, not
+assumed stale). `engine/notify/`'s email-building functions and the Tier 0-3 TypeScript senders are
+heavily mined (`send-compliance-digest.ts`/`send-discovered-tenders.ts`/`send-deadline-reminders.ts`/
+`send-operational-alerts.ts` all carry 5-26 mentions each in the findings doc alone, checked via
+`grep -c` before ruling them out, per this doc's own standing "check mention-count history first"
+instruction). `app/app/admin/`'s own Server Action WRITE paths (`actions.ts` family) were already
+swept (2026-11-07xiii), but explicitly only for the TOCTOU/lost-update bug class, never for this
+review's OTHER dominant bug class (a discarded read's error treated as false-safe) - and that same
+2026-11-07xiii entry had explicitly characterised every `app/app/admin/**/page.tsx` as "read-only
+display data... no write path" and stopped there, without ever applying the discarded-read-error
+lens to any of them. That gap - the admin pages' own READ paths, for the OTHER bug class - is where
+this pass landed, per the brief's own named candidate ("admin's other pages beyond System Alerts...
+with its own field-resolution pattern").
+
+**Found: Finding 193.** `app/app/admin/customers/page.tsx`'s `AdminCustomersPage()` fires three
+separate Supabase reads: one top-level `platform_admin_companies()` RPC (`error` captured and
+`console.error()`d correctly) and then, inside a `Promise.all(rows.map(...))`, one
+`platform_admin_company_members()` RPC and one `platform_admin_company_readiness_data()` RPC PER
+COMPANY ROW - neither of which had its own `error` ever read at all, with no comment anywhere
+explaining the omission. Three siblings doing the same "trust this RPC, use its `data`" job inside
+one function; one correctly checks `error`, two silently don't - the sibling-divergence shape this
+method looks for, just inside a single function rather than across files. Real, visible downstream
+consequence: a failed `platform_admin_company_members()` call produced the exact same `[]` a genuine
+zero-member company would, which `CustomerRow.tsx` rendered as "No members." and "no members" (the
+primary contact) in the expanded detail - directly underneath that SAME row's own header, which
+shows `member_count`, a real non-zero count sourced from the entirely separate, successfully-read
+`platform_admin_companies()` RPC. A platform admin expanding a company whose per-company RPC failed
+would see "3 members" in the header and "No members." immediately below it for the identical
+company - a direct, visible self-contradiction, not just a quiet wrong number.
+`platform_admin_company_readiness_data()`'s own discarded error was checked for the same shape and
+judged materially less severe: `CustomerRow.tsx`'s own pre-existing comment on `readinessPercent`
+already documents its `null` case as ambiguous ("couldn't be computed... e.g. a company somehow
+missing"), so a failed read rendering the same as "no row yet" is already this file's own stated,
+accepted behaviour - not an undocumented silent divergence the way the members RPC's total silence
+was.
+
+**Fix**: extracted the per-row derivation (previously inline in `page.tsx`'s own `rows.map()`) into
+a pure, testable `buildCustomerRow()` in a new `app/lib/customerRowData.ts` - the same
+fetcher-in-the-page/pure-builder-in-lib split already established by
+`fetchSavingsCounterSummary()`/`computeBidReadiness()`. Both RPC results' `error` are now captured
+and logged; a new `membersError: boolean` field on `Customer` lets `CustomerRow.tsx` show "Couldn't
+load members - try refreshing. If it keeps happening, let us know." and "couldn't load" instead of
+falsely implying zero members. The readiness RPC's error is now logged too (cheap, consistent) but
+deliberately does not change the UI, per the reasoning above. Verified red-then-green: `git stash
+push -u` on the 3 fix files with the new spec file left in place - real exit `1` (`Cannot find module
+'./customerRowData'`, the fix genuinely doesn't exist pre-fix); restored - real exit `0`, 6/6 new
+tests pass. Full suite all green: `npm run typecheck` (0 errors), `npx eslint .` (0 errors, 3
+pre-existing warnings unchanged), `npx vitest run` (512/512, 67 files, +6 tests/+1 file over the
+506/506/66-file baseline), the node `*.test.ts` loop (28/28, plain `node <file>`, no flags), `npx
+next build` (clean, `/admin/customers` compiles, same route table) - run directly in the primary
+checkout rather than a disposable worktree, since `app/node_modules` there is already a real
+directory, not a symlink, so the usual bind-mount step (needed only to dodge a *fresh worktree's*
+symlinked `node_modules` under Turbopack) does not apply; and the full `engine/` Python sweep as a
+no-op regression check (86/86, unchanged - no Python touched). See `docs/specs/QA-Edge-Case-
+Findings.md` Finding 193 for the full write-up, diff description, and independent-verification
+steps.
+
+**Genuinely-checked-and-ruled-out siblings, so a future pass doesn't re-walk this exact ground**:
+`app/app/admin/discovered-opportunities/page.tsx` and `app/app/admin/requirement-extractions/
+page.tsx` each fire exactly one top-level RPC with its error already correctly captured, and neither
+fires a second per-row RPC the way `admin/customers/page.tsx` does - no second read to have silently
+diverged from the first. `app/app/admin/tenders/page.tsx` fires two reads in its own `Promise.all`
+(the `platform_admin_tender_catalog` RPC, captured; `loadDisciplineTaxonomy()`, which already
+returns its own `error` field and falls back to `FALLBACK_TAXONOMY` rather than discarding a
+failure) - both already handled. `app/app/admin/page.tsx` (System Alerts + harness results) and
+`app/app/admin/billing/`/`telemetry/`/`settings/`/`notifications/`/`taxonomy/` were re-confirmed
+against this doc's own existing coverage (not re-read from scratch this pass) to already capture
+their own reads' errors.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via `mcp__github__list_pull_requests` before this pass's own push; nothing merged,
+closed, or rebased by anyone else. Pushed directly to `main` (small, safe - a display-only
+admin-page fix plus a small helper extraction and its own new test file, no RLS/money-path/
+hard-stop-gate touched, no schema/migration/RPC change, no worker-image surface touched) - `main` is
+now at `a34828e`.
+
+To verify independently: see Finding 193's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the file-by-file diff check, the test run, the full
+suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxxi, standing solution-architect review, background worker): Finding 191 - `app/app/my-cv/actions.ts`'s `applyMyCvExtraction()` never called `queueStandardCvs()`, unlike its full-People-page sibling `applyCvExtraction()` - fixed, pushed to `main`, oriented from `2ccb681`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `2ccb681`
