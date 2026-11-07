@@ -774,57 +774,29 @@ export async function applyCvExtraction(formData: FormData) {
     back("Nothing was ticked. Tick the fields to save, or discard the extraction.");
   }
 
-  // .select("id").maybeSingle() on both writes below matters: PostgREST
-  // returns a 2xx with `error: null` and zero rows affected when RLS's own
-  // USING clause (re-evaluated against the OLD row) no longer matches at
-  // write time - e.g. another admin's removeMember() (0114) revoking this
-  // user's own company_members row mid-request. No file/destructive
-  // consequence here (the "plain update twin" shape), but checking only
-  // `error` would silently no-op either write while this function still
-  // redirects as if both succeeded, leaving cv_extraction_results stuck on
-  // 'pending_review' with the UI believing it was already applied. Same
-  // shape, same fix, as this function's own documented sibling,
-  // app/app/my-cv/actions.ts applyMyCvExtraction() - found unswept here
-  // (the original this file's sibling was modeled on) in the standing
-  // review, 2026-11-06.
-  if (Object.keys(personUpdate).length > 0) {
-    const { data: updatedPerson, error } = await supabase
-      .from("people")
-      .update({ ...personUpdate, updated_at: new Date().toISOString() })
-      .eq("id", personId)
-      .select("id")
-      .maybeSingle();
-    if (error || !updatedPerson) {
-      console.error("people update failed for CV extraction", error);
-      back(error
-        ? "Could not save the person's fields - try again. If it keeps happening, let us know."
-        : "This person's roster record is no longer there to update - refresh and try again.");
-    }
-  }
-  if (projectRows.length > 0) {
-    const { error } = await supabase.from("projects").insert(projectRows);
-    if (error) {
-      console.error("projects insert failed for CV extraction", error);
-      back("Person fields saved, but the projects could not be added - try again. If it keeps happening, let us know.");
-    }
-  }
-
-  const { data: marked, error: markError } = await supabase
-    .from("cv_extraction_results")
-    .update({
-      review_status: "applied",
-      reviewed_by: user?.id ?? null,
-      reviewed_at: new Date().toISOString(),
-      applied: { person_fields: Object.keys(personUpdate), edited_fields: edited, projects_added: projectRows.length },
-    })
-    .eq("id", extractionId)
-    .select("id")
-    .maybeSingle();
-  if (markError || !marked) {
-    console.error("cv_extraction_results update failed", markError);
-    back(markError
-      ? "Saved, but the extraction couldn't be marked as reviewed - try again. If it keeps happening, let us know."
-      : "Saved, but the extraction result is no longer there to mark reviewed - refresh and try again.");
+  // Was three separate, unlocked writes here (people update, projects
+  // insert, cv_extraction_results mark-applied) with the LAST one never
+  // re-checking review_status in its own .eq() chain - a genuine two-
+  // concurrent-invocations race (double-click, two tabs on the same pending
+  // review card), silently duplicating `projects` rows with no error to
+  // either caller. Moved into one locked SQL transaction
+  // (apply_cv_extraction_checked, 0123), same pattern as 0121/0113/0107: the
+  // row's own `for update` lock makes a second concurrent call for the SAME
+  // extraction block until the first commits, then raise instead of
+  // silently re-applying. The .select("id").maybeSingle()-vs-RLS-revocation
+  // race this replaced (standing review, 2026-11-06) is still covered - the
+  // RPC's own is_company_member() check inside the same lock catches it,
+  // just as a thrown error instead of a silent zero-row match.
+  const { error: applyError } = await supabase.rpc("apply_cv_extraction_checked", {
+    p_extraction_id: extractionId,
+    p_person_id: personId,
+    p_person_fields: personUpdate,
+    p_project_rows: projectRows,
+    p_applied_meta: { person_fields: Object.keys(personUpdate), edited_fields: edited, projects_added: projectRows.length },
+  });
+  if (applyError) {
+    console.error("apply_cv_extraction_checked rpc failed", applyError);
+    back(applyError.message);
   }
 
   const queueError = await queueStandardCvs(supabase, companyId, personId!, user?.id ?? null);

@@ -124,7 +124,7 @@ export async function uploadMyCv(formData: FormData) {
  * stay something an owner/admin/member adds on the full People page).
  */
 export async function applyMyCvExtraction(formData: FormData) {
-  const { supabase, userId, personId } = await requireOwnPerson();
+  const { supabase, personId } = await requireOwnPerson();
   const extractionId = str(formData, "extraction_id");
   if (!extractionId) redirect(BACK);
 
@@ -145,38 +145,29 @@ export async function applyMyCvExtraction(formData: FormData) {
   }
   if (Object.keys(personUpdate).length === 0) fail("Nothing was ticked. Tick the fields to save, or discard the extraction.");
 
-  // Same zero-rows-matched race as saveMyDetails() above, chained twice here
-  // (the person update, then marking the extraction applied) - both gated by
-  // the identical "own linked person" RESTRICTIVE policy, so the same
-  // membership/link revocation mid-request can silently no-op either or
-  // both. Pre-fix this checked only `error` on both writes: a silent
-  // false-success would also leave cv_extraction_results stuck on
-  // 'pending_review' with nothing actually applied - not destructive (the
-  // row isn't lost, just never re-checked since the UI believes it's done),
-  // but the identical "plain update twin" silent-false-success shape, never
-  // swept into this file before now (standing review, 2026-11-06).
-  const { data: updatedPerson, error } = await supabase
-    .from("people")
-    .update({ ...personUpdate, updated_at: new Date().toISOString() })
-    .eq("id", personId)
-    .select("id")
-    .maybeSingle();
-  if (error || !updatedPerson) {
-    console.error("people update failed (my-cv applyMyCvExtraction)", error);
-    fail("Your roster record is no longer linked to your account - refresh and try again.");
-  }
-
-  const { data: marked, error: markError } = await supabase
-    .from("cv_extraction_results")
-    .update({ review_status: "applied", reviewed_by: userId, reviewed_at: new Date().toISOString(), applied: { person_fields: Object.keys(personUpdate) } })
-    .eq("id", extractionId)
-    .select("id")
-    .maybeSingle();
-  if (markError || !marked) {
-    console.error("cv_extraction_results mark-applied failed (my-cv applyMyCvExtraction)", markError);
-    fail(markError
-      ? `Saved, but couldn't mark the extraction reviewed: ${markError.message}`
-      : "Saved your details, but the extraction result is no longer there to mark reviewed - refresh and try again.");
+  // Was two separate, unlocked writes here (people update, then marking the
+  // extraction applied) with the SECOND one never re-checking review_status
+  // in its own .eq() chain - a genuine two-concurrent-invocations race
+  // (double-click, two tabs on the same pending review card), same shape as
+  // app/app/people/actions.ts applyCvExtraction() (0123) and the exact thing
+  // this file's own discardMyCvExtraction() already guards against below
+  // (standing review, 2026-11-06) - the "apply" twin never got that same
+  // guard until now. Moved into one locked SQL transaction
+  // (apply_my_cv_extraction_checked, 0123): a second concurrent call for the
+  // SAME extraction blocks on the row's own `for update` lock until the
+  // first commits, then raises instead of silently re-applying. The zero-
+  // rows-matched RLS-revocation race this replaced is still covered - the
+  // RPC's own is_company_member() check inside the same lock catches it, as
+  // a thrown error instead of a silent zero-row match.
+  const { error } = await supabase.rpc("apply_my_cv_extraction_checked", {
+    p_extraction_id: extractionId,
+    p_person_id: personId,
+    p_person_fields: personUpdate,
+    p_applied_meta: { person_fields: Object.keys(personUpdate) },
+  });
+  if (error) {
+    console.error("apply_my_cv_extraction_checked rpc failed", error);
+    fail(error.message);
   }
 
   redirect(`${BACK}?saved=extracted`);

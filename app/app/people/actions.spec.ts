@@ -38,10 +38,13 @@ function makeChain(queue: Resp[], insertCalls?: unknown[]) {
 function makeSupabase(
   fromQueues: Resp[][],
   storageOpts?: { listFiles?: Record<string, { name: string }[]> },
+  rpcQueue: Resp[] = [],
 ) {
   let fromCallIndex = 0;
+  let rpcCallIndex = 0;
   const insertCalls: unknown[] = [];
   const removeCalls: { bucket: string; paths: string[] }[] = [];
+  const rpcCalls: { name: string; params: unknown }[] = [];
   return {
     client: {
       auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
@@ -49,6 +52,16 @@ function makeSupabase(
         const queue = fromQueues[fromCallIndex] ?? [];
         fromCallIndex += 1;
         return makeChain(queue, insertCalls);
+      },
+      // apply_cv_extraction_checked()/apply_my_cv_extraction_checked() (0123)
+      // moved the read-gate-write sequence into one locked Postgres
+      // transaction - from this TS-level mock's point of view that's a
+      // single rpc() call, queued the same way .from() responses are.
+      rpc: async (name: string, params: unknown) => {
+        rpcCalls.push({ name, params });
+        const next = rpcQueue[rpcCallIndex] ?? { data: null, error: null };
+        rpcCallIndex += 1;
+        return next;
       },
       storage: {
         from: (bucket: string) => ({
@@ -62,6 +75,7 @@ function makeSupabase(
     },
     insertCalls,
     removeCalls,
+    rpcCalls,
   };
 }
 
@@ -130,13 +144,15 @@ const pendingExtraction = {
 
 describe("applyCvExtraction - source_note's 'today' is SAST-anchored, not a naive UTC date", () => {
   it("stamps the project's source_note from sastToday(), not new Date().toISOString().slice(0, 10)", async () => {
-    const { client, insertCalls } = makeSupabase([
-      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId's company_members lookup
-      [pendingExtraction], // cv_extraction_results select
-      [{ data: null, error: null }], // projects insert
-      [{ data: { id: "extraction-1" }, error: null }], // cv_extraction_results update().select("id").maybeSingle() (mark applied) - real match
-      [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs' own "already queued" check - skips the insert branch entirely
-    ]);
+    const { client, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId's company_members lookup
+        [pendingExtraction], // cv_extraction_results select
+        [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs' own "already queued" check - skips the insert branch entirely
+      ],
+      undefined,
+      [{ data: null, error: null }], // apply_cv_extraction_checked (0123) - succeeds
+    );
     supabaseState.current = client;
 
     const { applyCvExtraction } = await import("./actions");
@@ -152,9 +168,11 @@ describe("applyCvExtraction - source_note's 'today' is SAST-anchored, not a naiv
     expect(url).toContain("/people/person-1");
     expect(url).not.toContain("error=");
 
-    const projectInsert = insertCalls[0] as Array<{ source_note: string }>;
-    expect(projectInsert).toHaveLength(1);
-    expect(projectInsert[0].source_note).toContain("confirmed 2099-01-01");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].name).toBe("apply_cv_extraction_checked");
+    const params = rpcCalls[0].params as { p_project_rows: Array<{ source_note: string }> };
+    expect(params.p_project_rows).toHaveLength(1);
+    expect(params.p_project_rows[0].source_note).toContain("confirmed 2099-01-01");
   });
 });
 
@@ -197,16 +215,19 @@ describe("savePerson - edit path, real update still succeeds", () => {
   });
 });
 
-// applyCvExtraction()/discardCvExtraction() - the same membership-revoked-
-// mid-request "plain update twin" shape as savePerson() above, found
-// unswept in THIS file (standing review, 2026-11-06). Notably,
-// app/app/my-cv/actions.ts's own applyMyCvExtraction()/
-// discardMyCvExtraction() - explicitly documented there as "same shape as
-// app/app/people/actions.ts applyCvExtraction" - were already fixed for
-// this exact race; the original this file's sibling was modeled on had
-// never itself been swept. No file/destructive consequence (person fields
-// just don't get re-applied; cv_extraction_results can get stuck on
-// 'pending_review'), but still a real silent-false-success.
+// applyCvExtraction()'s own people-update/projects-insert/mark-applied
+// sequence used to be three separate, unlocked writes, the last of which
+// never re-checked review_status in its own .eq() chain - a genuine two-
+// concurrent-invocations race (double-click, two tabs on the same pending
+// review card) that silently duplicated real `projects` rows with no error
+// to either caller, found by the standing review's own systematic sweep of
+// Server Actions for the Finding-178/180 read-then-write/TOCTOU-gate shape
+// (2026-11-07). Moved into one locked SQL transaction
+// (apply_cv_extraction_checked, 0123) - from this TS-level mock's point of
+// view, the people update / projects insert / mark-applied write is now a
+// single rpc() call, and any failure path (the row no longer pending_review,
+// the caller no longer a company member, a genuine DB error) comes back as
+// one rpc error instead of three separately-checked zero-row writes.
 const extractionTickedPersonField = {
   person_id: "person-1",
   extraction_id: "extraction-1",
@@ -214,13 +235,16 @@ const extractionTickedPersonField = {
   f_ecsa_level: "Professional Engineer",
 };
 
-describe("applyCvExtraction - person update matches zero rows", () => {
-  it("does not report success, and does not go on to insert projects or mark the extraction applied", async () => {
-    const { client } = makeSupabase([
-      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
-      [pendingExtraction], // cv_extraction_results select
-      [{ data: null, error: null }], // people update().select("id").maybeSingle() - zero-row RLS match
-    ]);
+describe("applyCvExtraction - apply_cv_extraction_checked rpc reports a failure", () => {
+  it("does not report success, and does not go on to queue standard CVs", async () => {
+    const { client, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingExtraction], // cv_extraction_results select
+      ],
+      undefined,
+      [{ data: null, error: { message: "These extracted fields were already saved or discarded." } }],
+    );
     supabaseState.current = client;
 
     const { applyCvExtraction } = await import("./actions");
@@ -228,36 +252,24 @@ describe("applyCvExtraction - person update matches zero rows", () => {
 
     expect(url).not.toContain("cv_applied=");
     expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("already saved or discarded"));
+    // queueStandardCvs() must not run at all once the rpc itself failed -
+    // no further .from() call beyond the two reads above.
+    expect(rpcCalls).toHaveLength(1);
   });
 });
 
-describe("applyCvExtraction - person update matches, but marking the extraction applied matches zero rows", () => {
-  it("does not report success, leaving the extraction genuinely re-checkable rather than silently stuck on 'pending_review'", async () => {
-    const { client } = makeSupabase([
-      [{ data: { company_id: "company-1" }, error: null }],
-      [pendingExtraction],
-      [{ data: { id: "person-1" }, error: null }], // people update - real match
-      [{ data: null, error: null }], // cv_extraction_results update().select("id").maybeSingle() - zero-row RLS match
-    ]);
-    supabaseState.current = client;
-
-    const { applyCvExtraction } = await import("./actions");
-    const url = await expectRedirect(applyCvExtraction(formDataWith(extractionTickedPersonField)));
-
-    expect(url).not.toContain("cv_applied=");
-    expect(url).toContain("/people/person-1?error=");
-  });
-});
-
-describe("applyCvExtraction - person update + mark-applied both genuinely match", () => {
-  it("still succeeds normally with the added .select().maybeSingle() gates", async () => {
-    const { client } = makeSupabase([
-      [{ data: { company_id: "company-1" }, error: null }],
-      [pendingExtraction],
-      [{ data: { id: "person-1" }, error: null }], // people update - real match
-      [{ data: { id: "extraction-1" }, error: null }], // cv_extraction_results update - real match
-      [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs' "already queued" check
-    ]);
+describe("applyCvExtraction - apply_cv_extraction_checked rpc succeeds", () => {
+  it("succeeds normally and passes the ticked person fields through to the rpc call", async () => {
+    const { client, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingExtraction],
+        [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs' "already queued" check
+      ],
+      undefined,
+      [{ data: null, error: null }],
+    );
     supabaseState.current = client;
 
     const { applyCvExtraction } = await import("./actions");
@@ -265,6 +277,10 @@ describe("applyCvExtraction - person update + mark-applied both genuinely match"
 
     expect(url).toContain("/people/person-1?cv_applied=");
     expect(url).not.toContain("error=");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].name).toBe("apply_cv_extraction_checked");
+    const params = rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ ecsa_level: "Professional Engineer" });
   });
 });
 
@@ -277,13 +293,15 @@ describe("applyCvExtraction - person update + mark-applied both genuinely match"
 // duplicate set of 4 standard-CV jobs. Now fails closed instead.
 describe("applyCvExtraction - queueStandardCvs' own pending-check read fails", () => {
   it("does not queue a duplicate set of standard CVs, and reports the failure rather than silently proceeding", async () => {
-    const { client, insertCalls } = makeSupabase([
-      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
-      [pendingExtraction], // cv_extraction_results select
-      [{ data: { id: "person-1" }, error: null }], // people update - real match
-      [{ data: { id: "extraction-1" }, error: null }], // cv_extraction_results update (mark applied) - real match
-      [{ data: null, error: { message: "read failed" } }], // queueStandardCvs' own pending check - errors
-    ]);
+    const { client, insertCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingExtraction], // cv_extraction_results select
+        [{ data: null, error: { message: "read failed" } }], // queueStandardCvs' own pending check - errors
+      ],
+      undefined,
+      [{ data: null, error: null }], // apply_cv_extraction_checked - succeeds
+    );
     supabaseState.current = client;
 
     const { applyCvExtraction } = await import("./actions");

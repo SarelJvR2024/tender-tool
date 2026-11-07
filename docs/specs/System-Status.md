@@ -1,5 +1,203 @@
 # System Status
 
+## This pass (2026-11-07xxii, standing solution-architect review): oriented from `9544439`
+(immediately-preceding pass's own verified HEAD, the 7-source document-extraction re-verify).
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`9544439` - and again just before pushing this pass's own fix commit, still `9544439`, no sibling
+commit landed during this pass (the sibling "QA/robustness review" track confirmed quiet this pass
+too). Grepped `### Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself before picking a
+number - 183 was still the highest recorded; this pass's own fix below is Finding 184. Re-checked
+all 9 open PRs via `gh api repos/sareljvr2024/tender-tool/pulls?state=open`: `#176`/`#177`(draft)/
+`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`(both draft) are all
+still open, same set every preceding pass has recorded - nothing merged, closed, or rebased by
+anyone since.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrail already allows (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle, per the task brief: a SEVENTH systematic angle, applying the Finding-178/180
+"unlocked read-then-write" / "TOCTOU gate bypass" lesson (previously found only in SQL) to
+TypeScript Server Actions instead** - `app/app/*/actions.ts` and `app/lib/**` write-path helpers,
+looking for (a) a read feeding a computed value into a write with no optimistic-concurrency guard
+and no backing DB constraint/lock, or (b) a gate-check read followed by a SEPARATE write that never
+re-checks the gate, where two genuinely concurrent invocations of the SAME Server Action (two tabs,
+a double-click, two team members) could race.
+
+**Method.** Read every `actions.ts` under `app/app/` (22 files: `admin/*`, `company/*`, `discovery`,
+`experience`, `invite`, `my-cv`, `onboarding`, `people`, `pipeline`, `tenders/[id]`, `tenders/new`,
+`_components`), tracing each write-after-read sequence into its real backing Postgres call (not
+just reading the TypeScript in isolation) to tell which already inherit atomicity from a locked RPC
+or a DB-level constraint and which don't.
+
+**Already safe, checked and ruled out, each for a named reason:**
+- `app/app/company/team/actions.ts` - `createInvite()`/`setMemberRole()`/`removeMember()` each
+  already call a locked, checked RPC (`create_company_invite_checked` 0113,
+  `set_member_role_checked`/`remove_member_checked` 0114) - their own header comments document the
+  exact race this angle looks for, already closed by a prior pass.
+- `app/app/company/bank-accounts/actions.ts` - `saveBankAccount()`'s write is a plain `.update()`/
+  `.insert()` keyed by the form's own `id`/fields, not by a prior read's computed value; uniqueness
+  is a real DB constraint (`bank_accounts_one_...`), not an app-level check-then-write. No TOCTOU
+  gate read precedes either write.
+- `app/app/tenders/[id]/actions.ts` `requestTenderCv()` - has an app-level "already pending?" SELECT
+  before its INSERT, but migration 0075's partial unique index
+  (`generated_cvs_dedupe_pending_idx`, scoped to `tender_pack_id is not null`) is the real,
+  already-documented backstop: a race past the SELECT hits the unique index and returns a clean
+  `23505`, handled explicitly. Not a candidate (same class Finding 178's own pass ruled
+  `set_opportunity_interest()` out for).
+- `app/app/discovery/actions.ts` - every write goes through `set_opportunity_tag()`/
+  `set_opportunity_interest()`, already fixed/ruled-out by Finding 178's own migration 0121.
+- `app/app/invite/actions.ts` - `redeem_company_invite()` RPC, already fixed by migration 0107/0122
+  (Findings 180/the `redeem_company_invite` race).
+- `app/app/people/actions.ts` `discardCvExtraction()` and `app/app/my-cv/actions.ts`
+  `discardMyCvExtraction()` - both already guard their own update with
+  `.eq("review_status", "pending_review")` (standing review, 2026-11-06), so a second concurrent
+  discard (or a discard racing an apply) gets a clean zero-row "already moved on" error, not a
+  silent double-discard.
+- `app/app/pipeline/actions.ts`, `app/app/experience/actions.ts`, `app/app/company/principals|
+  properties|registrations/actions.ts`, `app/app/onboarding/actions.ts`, `app/app/tenders/new/
+  actions.ts`, `app/app/admin/*/actions.ts` - every write in these files is a plain `.update()`/
+  `.insert()`/`.delete()` keyed directly by an id the caller supplied (or a freshly-generated one),
+  never by a value read-then-recomputed from an earlier SELECT in the same request. No read-then-
+  write window to race in the first place.
+
+**The real finding: `applyCvExtraction()` (`app/app/people/actions.ts`) and its self-service twin
+`applyMyCvExtraction()` (`app/app/my-cv/actions.ts`) both had exactly the angle-(b) shape - a gate-
+check read, then a separate write that never re-checks the gate.** Both read `cv_extraction_results`
+once, check `review_status === 'pending_review'`, then perform the people update / (for the full
+version) projects insert / cv_extraction_results mark-applied write as **three separate, unlocked
+REST calls**, and the LAST of those three never repeated the `review_status = 'pending_review'`
+check in its own `.eq()` chain. Their own sibling, `discardMyCvExtraction()`/`discardCvExtraction()`,
+already had exactly that guard (standing review, 2026-11-06, with a comment literally naming "the
+row having moved on from 'pending_review' already" as the risk) - the two "apply" paths never got
+it, a plain oversight: the fix landed on the sibling function, never the twin right next to it.
+
+**Real, reachable race, not contrived:** two concurrent "Apply"/"Save selected fields" submissions
+for the SAME extraction - a double-click before the page navigates away, or the same pending-review
+card left open in two browser tabs - both pass the initial read's `review_status` check before
+either commits. For `applyCvExtraction()` specifically this duplicates real rows in `projects` (NOT
+idempotent - every ticked project gets inserted twice, silently, with no error to either caller) and
+queues a second full set of standard-CV-generation jobs (`queueStandardCvs()`, itself already
+flagged by its own comment as having no database-level backstop of its own, unlike
+`requestTenderCv()`'s migration-0075-backed dedupe). Neither caller sees any error either way -
+`cv_extraction_results.applied` is simply overwritten a second time and both redirects report
+success.
+
+**Fix (migration `0123_cv_extraction_apply_race.sql`), same pattern as 0121/0113/0107/0114: move the
+read-gate-write sequence into one locked SQL transaction per caller.** `apply_cv_extraction_checked()`
+and `apply_my_cv_extraction_checked()` (both `security definer`) lock the `cv_extraction_results` row
+(`for update`), re-check company membership/person match/`review_status = 'pending_review'` under
+that lock, then perform the people update (`_apply_cv_person_fields()`, a private, never-granted
+helper mirroring the TypeScript `personUpdate` object's own "only ticked keys present" shape
+exactly - same convention as 0024's `_manual_tender_documents()`), the projects insert (full version
+only), and the mark-applied write, all before releasing the lock. A second concurrent call for the
+SAME extraction blocks on the row lock until the first commits, then raises a clear error
+("These extracted fields were already saved or discarded.") instead of silently re-applying. Both
+Server Actions now make ONE `supabase.rpc()` call in place of their old three-separate-write
+sequence; all validation (date format, select options, required fields, the SAST-anchored
+`source_note`) stays exactly where it was, in TypeScript - only the WRITE itself moved into the
+database.
+
+**Verification - real two-session Postgres reproduction, not just unit tests.** Built a disposable
+scratch database (`tt_scratch_0123`, local Postgres 16, started and stopped for this pass only,
+dropped at the end - never this app's live DB) with a minimal schema matching the real
+`companies`/`company_members`/`is_company_member()`/`people`/`projects`/`cv_uploads`/
+`cv_extraction_results` shapes verbatim from `0001_init_schema.sql`/`0008_cv_uploads.sql`/
+`0023_cv_extraction_results.sql` (the full 113-file migration replay hit unrelated storage/auth-
+schema gaps this scratch DB doesn't need - not worth fighting for a schema-shape repro). **Red:**
+a copy of the OLD three-separate-query shape (no lock, `pg_sleep(1)` right after the read to widen
+the window deterministically, same technique 0121's own repro used) run as two genuinely concurrent
+`psql` sessions against the SAME extraction - both calls returned successfully, final `projects`
+row count: **2** (the same project duplicated), `cv_extraction_results.applied` overwritten twice,
+no error either side - the exact bug, reproduced for real. **Green:** the identical two concurrent
+calls against `apply_cv_extraction_checked()` (a `pg_sleep(1)`-widened copy, to prove the second
+caller genuinely BLOCKS rather than just winning a fast race - confirmed by wall-clock timing, the
+second call's total time ~1.8s against the lock-wait + its own 1s sleep): the first call committed
+normally (1 project row, ~0.56ms wait); the second call's `for update` blocked until the first
+committed, then raised "These extracted fields were already saved or discarded." - final `projects`
+row count: **1**, exactly one extraction applied, one clear error returned to the loser. Also ran
+direct functional checks against the real (non-sleep) functions: ticked person fields (including a
+date field) write correctly, a ticked project inserts correctly, `applied` metadata is stored
+correctly, a second synchronous call on an already-applied row raises cleanly, and
+`apply_my_cv_extraction_checked()` (no-projects variant) updates its one ticked field correctly.
+Scratch DB dropped and the Postgres service stopped at the end of this pass.
+
+**Full TS/JS verification suite, all green.** `npm run typecheck` - exit `0`. `npx eslint .` - exit
+`0`, "0 errors, 3 warnings" (unchanged pre-existing warnings: `Logo.tsx` x2 `no-img-element`,
+`analytics/page.tsx` 1 unused-var). `npx vitest run` - exit `0`, **503/503 passed, 66 files**
+(down from the standing 505/505 baseline: the two now-obsolete TS-level "zero-rows-matched" race
+tests per apply function were consolidated into one rpc-level success/failure pair each, since that
+race-detection logic moved from TypeScript into the new locked SQL function and is no longer
+separately observable at the TS mock layer - `app/app/people/actions.spec.ts` and
+`app/app/my-cv/actions.spec.ts` both updated to mock `supabase.rpc()` the same way they already
+mocked `.from()`, asserting on the real parameters passed to the rpc call rather than reimplementing
+its internals). The node `*.test.ts` loop (plain `node <file>`, no flags) - **28 files, 0
+failures**, unchanged. `npx next build` - clean, no errors (every `app/app/people`/`app/app/my-cv`
+route still builds). Full `engine/` Python sweep re-run as a regression check even though no Python
+changed - `find engine -name "test_*.py" | wc -l` = `86`, looped with plain `python3 <file>` -
+**86/86, 0 failures**, unchanged.
+
+**A second, real, CONCRETELY CHECKED (not speculative) instance of the exact same bug class, found
+by this pass's own survey but deliberately NOT fixed this pass - named precisely for whoever opens
+it next.** `app/app/company/document-scan/actions.ts` (483 lines, the onboarding AI-document-review
+screen, 0063) has the identical angle-(b) shape, repeated across FIVE separate "confirm" paths that
+all share one gate (`loadPendingResult()`, line 134: reads `onboarding_document_results`, checks
+`review_status === 'pending_review'`) and one shared "mark applied" write (`markApplied()`, line
+149: `update({review_status: 'applied', ...}).eq('id', resultId)` - no re-check of `review_status`
+in its own `.eq()` chain, same gap `applyCvExtraction()` had). The clearest, most severe instance:
+**`confirmExperienceItem()` (line ~291, `supabase.from("experience_items").insert(row)`)** - two
+concurrent confirms of the SAME onboarding document (double-click, two tabs) would both pass
+`loadPendingResult()`'s gate and both insert, producing a genuine duplicate `experience_items` row
+with no error to either caller - the exact `projects`-duplication shape this pass's own fix just
+closed for `cv_extraction_results`/`projects`. `confirmCvHandoff()` (line ~378,
+`cv_uploads.insert()`) has the same duplicate-row risk; `confirmVaultDocument()` (line 226,
+`companies.update()`) and `confirmIdDocument()` (line 339, `company_principals.update()`) are lower
+severity (overwriting the same scalar columns twice is closer to idempotent, though each also
+copies the source file to a FRESH `randomUUID()` path per call, so the loser's copy becomes a real,
+silently orphaned file in storage - a cost/clutter leak, not corruption). `skipOnboardingDocument()`
+(line 416) and `discardOnboardingDocument()` (line 444) already have a `.select("id").maybeSingle()`
+zero-row check (2026-11-06 pass) but THAT check only catches an RLS-revocation race, not this one -
+neither re-checks `review_status = 'pending_review'` in its own `.eq()` chain either, so a confirm
+racing a discard/skip for the same document can leave `review_status` as whichever write committed
+last, inconsistent with what was actually filed.
+
+**Why this was found but NOT fixed this pass, deliberately:** unlike `cv_extraction_results`\
+`'`s single shared target shape (people + projects, one RPC per caller), this file's fix needs a
+SEPARATE locked RPC per confirm path (each writes a DIFFERENT target table - `companies`,
+`experience_items`, `company_principals`, `cv_uploads` - plus a storage-copy side effect each), and
+merely guarding `markApplied()`'s own final write (the ".eq() alone is sufficient" option) would
+NOT close the real race, for the same reason it wouldn't have for `applyCvExtraction()`: the
+damaging write (the insert/update) happens BEFORE `markApplied()` runs, so by the time a guard on
+the last step could reject the loser, the duplicate insert has already happened. A correct fix
+needs the SAME "lock the gate row before the first dependent write, not just the last one" pattern
+this pass's own `0123` migration establishes, applied five separate times with equal care (and,
+ideally, five separate real two-session reproductions) - a properly-scoped pass of its own, not a
+rushed addition to this one. Flagged here with exact file/line evidence so a future pass can open it
+directly rather than re-discovering it from scratch.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by every
+preceding pass. This pass's own new angle (TypeScript Server Action read-then-write/TOCTOU-gate
+races) is NOT fully exhausted the way the SQL-side angles 2/3 were: `app/app/company/document-
+scan/actions.ts`'s own five-confirm-path version of the identical bug (named precisely above) is the
+clear next candidate for a future pass to open, using this pass's `0123` migration as the fix
+template. A second, lower-priority residual: `queueStandardCvs()`'s own explicitly-documented "no
+database-level backstop" gap (comment in `app/app/people/actions.ts`, pre-dates this pass) - this
+pass's fix already stops the specific `applyCvExtraction()`-driven double-invocation from ever
+reaching it, but a genuinely independent second `queueStandardCvs()` trigger for the same person
+(none exists today - it has exactly one call site) would still race it if one is ever added.
+
+To verify independently: re-run this pass's own scratch-DB red/green reproduction (steps above) in
+a fresh disposable Postgres. Run `npm run typecheck`/`npx eslint .`/`npx vitest run`/the node
+`*.test.ts` loop/`npx next build` and confirm the exit codes and counts above. Confirm via `gh api
+repos/sareljvr2024/tender-tool/pulls?state=open` that all 9 PRs are still open/unmerged, and that
+`git log --oneline -1 origin/main` is this pass's own new fix commit (one ahead of `9544439`), with
+no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xxi, standing solution-architect review): oriented from `980bf79`
 (immediately-preceding pass's own verified HEAD, Finding 183's `sars_procurement.py` document-
 extraction fix). `git fetch origin main` at the start found local already matching `origin/main`

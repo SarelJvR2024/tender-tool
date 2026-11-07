@@ -47,8 +47,10 @@ function makeChain(queue: Resp[]) {
   return chain;
 }
 
-function makeSupabase(fromQueues: Resp[][]) {
+function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
   let fromCallIndex = 0;
+  let rpcCallIndex = 0;
+  const rpcCalls: { name: string; params: unknown }[] = [];
   return {
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from: () => {
@@ -56,6 +58,17 @@ function makeSupabase(fromQueues: Resp[][]) {
       fromCallIndex += 1;
       return makeChain(queue);
     },
+    // apply_my_cv_extraction_checked() (0123) moved the read-gate-write
+    // sequence into one locked Postgres transaction - from this TS-level
+    // mock's point of view that's a single rpc() call, queued the same way
+    // .from() responses are.
+    rpc: async (name: string, params: unknown) => {
+      rpcCalls.push({ name, params });
+      const next = rpcQueue[rpcCallIndex] ?? { data: null, error: null };
+      rpcCallIndex += 1;
+      return next;
+    },
+    rpcCalls,
   };
 }
 
@@ -147,52 +160,52 @@ const EXTRACTION_FORM = {
   f_ecsa_level: "Pr Eng",
 };
 
-describe("applyMyCvExtraction - person update matches zero rows", () => {
-  it("does not report success, and does not go on to mark the extraction applied", async () => {
-    supabaseState.current = makeSupabase([
-      ...requireOwnPersonOk(),
-      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }], // cv_extraction_results read
-      [{ data: null, error: null }], // people update().select("id").maybeSingle() - zero-row RLS match
-    ]);
+// applyMyCvExtraction()'s own person-update-then-mark-applied sequence used
+// to be two separate, unlocked writes, the second of which never re-checked
+// review_status in its own .eq() chain - the exact gap this file's own
+// discardMyCvExtraction() (below) was already fixed for (standing review,
+// 2026-11-06), never applied to its "apply" twin until now. Moved into one
+// locked SQL transaction (apply_my_cv_extraction_checked, 0123) - standing
+// review, 2026-11-07 (Server Action read-then-write/TOCTOU-gate sweep). From
+// this TS-level mock's point of view, the write is now a single rpc() call.
+describe("applyMyCvExtraction - apply_my_cv_extraction_checked rpc reports a failure", () => {
+  it("does not report success", async () => {
+    supabaseState.current = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }], // cv_extraction_results read
+      ],
+      [{ data: null, error: { message: "These extracted fields were already saved or discarded." } }],
+    );
 
     const { applyMyCvExtraction } = await import("./actions");
     const url = await expectRedirect(applyMyCvExtraction(formDataWith(EXTRACTION_FORM)));
 
     expect(url).not.toContain("saved=extracted");
     expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("already saved or discarded"));
   });
 });
 
-describe("applyMyCvExtraction - person update matches, but marking the extraction applied matches zero rows", () => {
-  it("does not report success, leaving the extraction genuinely re-checkable rather than silently stuck", async () => {
-    supabaseState.current = makeSupabase([
-      ...requireOwnPersonOk(),
-      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
-      [{ data: { id: "person-1" }, error: null }], // people update - real match
-      [{ data: null, error: null }], // cv_extraction_results update().select("id").maybeSingle() - zero-row RLS match
-    ]);
-
-    const { applyMyCvExtraction } = await import("./actions");
-    const url = await expectRedirect(applyMyCvExtraction(formDataWith(EXTRACTION_FORM)));
-
-    expect(url).not.toContain("saved=extracted");
-    expect(url).toContain("/my-cv?error=");
-  });
-});
-
-describe("applyMyCvExtraction - real update still succeeds", () => {
-  it("saves and marks the extraction applied when both updates genuinely match", async () => {
-    supabaseState.current = makeSupabase([
-      ...requireOwnPersonOk(),
-      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
-      [{ data: { id: "person-1" }, error: null }],
-      [{ data: { id: "extraction-1" }, error: null }],
-    ]);
+describe("applyMyCvExtraction - apply_my_cv_extraction_checked rpc succeeds", () => {
+  it("saves and marks the extraction applied, passing the ticked fields through to the rpc call", async () => {
+    const supabase = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+      ],
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = supabase;
 
     const { applyMyCvExtraction } = await import("./actions");
     const url = await expectRedirect(applyMyCvExtraction(formDataWith(EXTRACTION_FORM)));
 
     expect(url).toBe("/my-cv?saved=extracted");
+    expect(supabase.rpcCalls).toHaveLength(1);
+    expect(supabase.rpcCalls[0].name).toBe("apply_my_cv_extraction_checked");
+    const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ ecsa_level: "Pr Eng" });
   });
 });
 
