@@ -126,6 +126,19 @@ def test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_on
           by_id["job-corrupt"]["status"] == "generating", by_id["job-corrupt"])
     check("both the real stale job and the malformed row got their own alert, each correctly severed",
           sorted((a[0][0], a[0][2]) for a in alerts) == [("pack", "error"), ("pack", "warning")], alerts)
+    # Standing review, 2026-11-07 (re-verification of Finding 192's own "all
+    # 6 bridges swept" claim): Finding 192 added company_id to this file's
+    # OTHER system_alerts.record() call sites, but this exact one - the
+    # malformed-started_at "warning" alert right here, in this same
+    # fail_stale_jobs() function - was missed, even though job.get(
+    # "company_id") was already in scope two lines below it (the "stuck in
+    # 'generating'" error alert right after it). Its true siblings,
+    # process_cv_jobs.py/process_narrative_jobs.py's own identically-shaped
+    # malformed-timestamp alerts, both already carried company_id - this was
+    # the one file where the twin alert in the SAME function diverged.
+    malformed_alert = next(kw for (a, kw) in alerts if a[2] == "warning")
+    check("the malformed-started_at alert now carries company_id too, not just the stuck-job alert",
+          malformed_alert.get("context", {}).get("company_id") == "co-a", malformed_alert)
 
 
 def test_adapt_person_carries_sacnasp_and_sagc_through():

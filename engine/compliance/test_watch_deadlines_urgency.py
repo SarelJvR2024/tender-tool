@@ -251,6 +251,66 @@ def closing_day_handles_a_sast_tagged_offset_correctly():
               f"got {before[0]['closing_date']!r}")
 
 
+def lapsing_before_closing_malformed_closing_date_alerts_carry_company_id():
+    """Standing review, 2026-11-07 (re-verification of Finding 192's own
+    "all 6 process_*_jobs.py bridges swept" claim, extended to every
+    system_alerts.record() call site in engine/, not just those 6 files):
+    both find_documents_lapsing_before_closing() and
+    find_person_credentials_lapsing_before_closing() raise a 'warning' alert
+    when a pursued tender's own closing_date can't be parsed - but neither
+    alert's context carried company_id, even though the company (or its
+    pack) is right there in scope at that exact call site (confirmed by this
+    same file's own sibling alerts two lines below each one, which already
+    use company["id"]/pack["company_id"] - this was the one divergent alert
+    in each function, not a codebase-wide gap)."""
+    print("find_documents_lapsing_before_closing()/find_person_credentials_lapsing_before_closing(): "
+          "a malformed tender closing_date's own alert carries company_id too")
+    today = datetime.date(2026, 11, 7)
+    rows = {
+        "companies": [{"id": "co-malformed", "legal_name": "Malformed Closing Co"}],
+        "tender_packs": [{"id": "pk-malformed", "company_id": "co-malformed", "tender_id": "t-malformed"}],
+        "tenders": [{"id": "t-malformed", "contract_no": "M.001-2026", "title": "bad closing date",
+                    "status": "open", "closing_date": "not-a-real-timestamp"}],
+        "tender_pack_assignments": [{"tender_pack_id": "pk-malformed", "confirmed_person_id": "p-malformed"}],
+        "people": [{"id": "p-malformed", "company_id": "co-malformed", "name": "Malformed Engineer",
+                   "ecsa_expiry": D(90)}],
+    }
+
+    def fake(url, key, path):
+        table, _, query = path.partition("?")
+        out = [dict(r) for r in rows.get(table, [])]
+        for part in query.split("&"):
+            if not part or part.startswith(("select=", "order=")):
+                continue
+            col, _, cond = part.partition("=")
+            if cond.startswith("eq."):
+                out = [r for r in out if str(r.get(col)) == cond[3:]]
+            elif cond.startswith("in.("):
+                vals = set(re.findall(r"[^,()]+", cond[3:]))
+                out = [r for r in out if str(r.get(col)) in vals]
+            elif cond == "not.is.null":
+                out = [r for r in out if r.get(col) is not None]
+        return out
+
+    real_request = wd.supabase_request
+    alerts = []
+    real_record = system_alerts.record
+    system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    wd.supabase_request = fake
+    try:
+        before_docs = wd.find_documents_lapsing_before_closing("u", "k", {}, today, wd.DEFAULT_DOC_LEAD_DAYS)
+        before_people = wd.find_person_credentials_lapsing_before_closing("u", "k", {}, today, wd.DEFAULT_DOC_LEAD_DAYS)
+    finally:
+        wd.supabase_request = real_request
+        system_alerts.record = real_record
+    check(before_docs == [], f"the malformed-closing-date pack is skipped, not crashed on ({before_docs})")
+    check(before_people == [], f"same for the person-credential check ({before_people})")
+    check(len(alerts) == 2, f"both functions raised their own alert ({alerts})")
+    for a, kw in alerts:
+        check(kw.get("context", {}).get("company_id") == "co-malformed",
+              f"...and each alert's context carries the company_id already in scope there ({a}, {kw})")
+
+
 def find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment():
     """Finding 132's own flagged-not-fixed gap (2026-11-05), implemented
     2026-11-06: a key person's own professional registration that is fine
@@ -321,6 +381,7 @@ def main():
     wd.supabase_request = fake_request
     days_until_malformed_inputs()
     closing_day_handles_a_sast_tagged_offset_correctly()
+    lapsing_before_closing_malformed_closing_date_alerts_carry_company_id()
     find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment()
     seen = {}
     print(f"run 1 - {TODAY}")

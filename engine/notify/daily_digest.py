@@ -892,7 +892,8 @@ def main():
             print(f"  WARNING: could not build a digest for {label} ({type(e).__name__}: {e}) - skipping this one, "
                   "the rest of the run continues.")
             system_alerts.record("digest", f"Could not build a digest for one roster entry ({label}): "
-                                 f"{type(e).__name__}: {e}", "error", exc=e)
+                                 f"{type(e).__name__}: {e}", "error", exc=e,
+                                 context={"company_id": p.get("company_id")})
 
     def total(k):
         return sum((totals.get(k) or {}).values())

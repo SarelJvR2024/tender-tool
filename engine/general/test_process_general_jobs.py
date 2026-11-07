@@ -107,6 +107,14 @@ def test_fail_stale_jobs_recovers_a_stuck_general_job():
           "malformed-timestamp row (warning) - the malformed row did not silently cost job-stale its own alert",
           len(alerts) == 2 and sorted(a[0][0] for a in alerts) == ["general", "general"]
           and sorted(a[0][2] for a in alerts) == ["error", "warning"], alerts)
+    # Standing review, 2026-11-07 (re-verification of Finding 192's own "all
+    # 6 bridges swept" claim): the malformed-started_at "warning" alert right
+    # here was missed by that sweep - job.get("company_id") was already in
+    # scope (the "stuck in 'generating'" error alert two lines below it
+    # already used it), but this twin alert, in the same function, didn't.
+    malformed_alert = next(kw for (a, kw) in alerts if a[2] == "warning")
+    check("the malformed-started_at alert now carries company_id too, not just the stuck-job alert",
+          malformed_alert.get("context", {}).get("company_id") == "co-a", malformed_alert)
 
 
 class FixedDateTime(datetime.datetime):

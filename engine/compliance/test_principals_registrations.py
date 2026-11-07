@@ -390,7 +390,44 @@ def part2(psql):
     check(left == "0", "deleting the company removes its principals (cascade)")
 
 
+def find_held_registrations_lapsing_before_closing_malformed_closing_date_alert_carries_company_id():
+    """Standing review, 2026-11-07 (re-verification of Finding 192's own
+    "all 6 process_*_jobs.py bridges swept" claim, extended to every
+    system_alerts.record() call site in engine/): this function's own
+    malformed-closing-date alert never carried company_id, even though
+    p["company_id"] (the tender_packs row right there in the loop) is the
+    exact same value every "due" row this module builds already carries -
+    the one system_alerts.record() call in this whole file that didn't."""
+    print("find_held_registrations_lapsing_before_closing(): a malformed tender closing_date's own alert "
+          "carries company_id too")
+    fixture.ROWS.clear()
+    fixture.ROWS.update({
+        "held_registrations": [{"id": "h-malformed", "company_id": "co-malformed", "registration_type_id": "rt-x",
+                                "person_id": None, "principal_id": None, "registration_number": "X", "category": None,
+                                "expiry_date": D(90)}],
+        "registration_types": [{"id": "rt-x", "slug": "x", "label": "X"}],
+        "companies": [{"id": "co-malformed", "legal_name": "Malformed Closing Co"}],
+        "tender_packs": [{"company_id": "co-malformed", "tender_id": "t-malformed"}],
+        "tenders": [{"id": "t-malformed", "contract_no": "M.001-2026", "title": "bad closing date", "status": "open",
+                    "closing_date": "not-a-real-timestamp"}],
+    })
+    wd.supabase_request = fixture.fake_request
+    alerts = []
+    real_record = wd.system_alerts.record
+    wd.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        before = rr.find_held_registrations_lapsing_before_closing("u", "k", {}, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    finally:
+        wd.system_alerts.record = real_record
+    check(before == [], f"the malformed-closing-date pack is skipped, not crashed on ({before})")
+    check(len(alerts) == 1, f"exactly one alert fired ({alerts})")
+    if alerts:
+        check(alerts[0][1].get("context", {}).get("company_id") == "co-malformed",
+              f"...and it carries the company_id already in scope there ({alerts[0]})")
+
+
 def main():
+    find_held_registrations_lapsing_before_closing_malformed_closing_date_alert_carries_company_id()
     part1()
     psql = os.environ.get("REGISTRATION_PSQL")
     if psql:

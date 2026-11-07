@@ -157,7 +157,8 @@ def find_held_registrations_lapsing_before_closing(url, key, seen, today, lead_d
             wd.system_alerts.record(
                 "deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') is not a valid "
                 "date - its held-registration lapsing-before-closing check was skipped.", "warning",
-                context={"tender_id": tender["id"], "closing_date": tender["closing_date"]})
+                context={"tender_id": tender["id"], "closing_date": tender["closing_date"],
+                         "company_id": p["company_id"]})
             continue
         closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
                        if closing_ts.tzinfo else closing_ts.date())

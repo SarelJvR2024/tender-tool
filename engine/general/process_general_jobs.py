@@ -809,7 +809,8 @@ def fail_stale_jobs(client, now=None):
         except ValueError:
             system_alerts.record("general", f"A general engine job's started_at ({started!r}) is not a "
                                  "valid timestamp - its stale-reclaim check was skipped, not treated as stale.",
-                                 "warning", context={"job_id": job["id"], "started_at": started})
+                                 "warning", context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                                      "started_at": started})
             continue
         if started_dt < cutoff:
             client.update(JOBS_TABLE, {"id": job["id"], "status": "generating"}, {

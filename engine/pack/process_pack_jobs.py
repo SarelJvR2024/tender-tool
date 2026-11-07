@@ -859,7 +859,8 @@ def fail_stale_jobs(client, now=None):
         except ValueError:
             system_alerts.record("pack", f"A SANRAL pack job's started_at ({started!r}) is not a valid "
                                  "timestamp - its stale-reclaim check was skipped, not treated as stale.",
-                                 "warning", context={"job_id": job["id"], "started_at": started})
+                                 "warning", context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                                      "started_at": started})
             continue
         if started_dt < cutoff:
             client.update("pack_generation_jobs", {"id": job["id"], "status": "generating"}, {

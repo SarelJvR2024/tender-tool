@@ -310,6 +310,33 @@ def main():
         daily_digest.tender_changes.run = real_run
         daily_digest.system_alerts.record = real_record
 
+    print("a roster entry whose own digest build crashes is alerted with its company_id, not just its own alert "
+          "(standing review, 2026-11-07 - re-verification of Finding 192's own 'all 6 bridges swept' claim: this "
+          "file's own per-roster-entry alert wasn't one of the 6 bridges Finding 192 covered, but is the exact "
+          "same bug class - p['company_id'] was already read two lines above this alert's own try block)")
+    real_build = daily_digest.build_digest_for_person
+    real_record = daily_digest.system_alerts.record
+    recorded = []
+    daily_digest.system_alerts.record = lambda *a, **kw: recorded.append((a, kw))
+
+    def broken_build(person, signals):
+        if person.get("email") == "thandi@guarding.example":  # u-guard's own label
+            raise RuntimeError("simulated bad roster entry")
+        return real_build(person, signals)
+    daily_digest.build_digest_for_person = broken_build
+    try:
+        digests = run()
+        alert = next((kw for a, kw in recorded if a[0] == "digest" and "roster entry" in a[1]), None)
+        check(alert is not None, f"the crashed roster entry gets its own alert ({recorded})")
+        if alert is not None:
+            check(alert.get("context", {}).get("company_id") == "co-guard",
+                  f"...carrying that person's own company_id ({alert})")
+        check("pieter@architects.example" in digests,
+              "the OTHER roster entries' digests still built normally, not cost by this one's crash")
+    finally:
+        daily_digest.build_digest_for_person = real_build
+        daily_digest.system_alerts.record = real_record
+
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -440,7 +440,8 @@ def find_documents_lapsing_before_closing(url, key, seen, today, lead_days=DEFAU
         except ValueError:
             system_alerts.record("deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') "
                                  "is not a valid date - its lapsing-before-closing check was skipped.",
-                                 "warning", context={"tender_id": tender["id"], "closing_date": tender["closing_date"]})
+                                 "warning", context={"tender_id": tender["id"], "closing_date": tender["closing_date"],
+                                                      "company_id": company["id"]})
             continue
         # closingDayOf() in app/lib/dates.ts normalizes to an absolute UTC
         # instant FIRST, then adds 2h - correct for any input offset. This
@@ -550,7 +551,8 @@ def find_person_credentials_lapsing_before_closing(url, key, seen, today, lead_d
             system_alerts.record("deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') "
                                  "is not a valid date - its person-credential lapsing-before-closing check was "
                                  "skipped.", "warning", context={"tender_id": tender["id"],
-                                                                  "closing_date": tender["closing_date"]})
+                                                                  "closing_date": tender["closing_date"],
+                                                                  "company_id": pack["company_id"]})
             continue
         closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
                        if closing_ts.tzinfo else closing_ts.date())
