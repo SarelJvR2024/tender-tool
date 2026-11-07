@@ -300,6 +300,44 @@ describe("confirmIdDocument - certified_id_on is SAST-anchored, not a naive UTC 
   });
 });
 
+describe("confirmIdDocument - reviewed_by on the mark-applied write is the real signed-in user, not null", () => {
+  it("passes the real userId through to markApplied(), the same as every other confirm* sibling", async () => {
+    // Standing review, 2026-11-07: confirmIdDocument() is the only
+    // markApplied()-calling sibling in this file whose requireCompanyId()
+    // destructuring drops `userId` entirely and passes a literal `null`
+    // instead - present since this function's very first commit (eb5a846f,
+    // 2026-10-18), with no comment anywhere explaining it (unlike every
+    // other deliberate quirk in this file, which always gets one). The
+    // real, 100%-of-the-time consequence: every certified ID document ever
+    // filed through this screen gets onboarding_document_results.reviewed_by
+    // = NULL in the audit trail, even though the real signed-in user's id
+    // was sitting right there in requireCompanyId()'s own return value at
+    // zero extra cost - exactly what confirmVaultDocument()/
+    // confirmExperienceReferenceLetter()/confirmCvHandoff() each correctly
+    // pass through.
+    const { client, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingIdResult],
+        [{ data: { id: "principal-1" }, error: null }],
+        [{ data: { id: "principal-1" }, error: null }], // real match
+        [{ data: null, error: null }],
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmIdDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-2", principal_id: "principal-1" });
+    await expectRedirect(confirmIdDocument(fd));
+
+    const markAppliedUpdate = updateCalls.find(
+      (c): c is { reviewed_by: string | null } => typeof c === "object" && c !== null && "reviewed_by" in c,
+    );
+    expect(markAppliedUpdate?.reviewed_by).toBe("user-1");
+  });
+});
+
 // discardOnboardingDocument() - a sibling of confirmVaultDocument()/
 // confirmIdDocument() above, in this SAME file, never checked before this
 // pass (found re-reading the whole file end to end for siblings of its own

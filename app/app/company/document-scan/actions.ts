@@ -305,10 +305,25 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
 // id_document -> company_principals.certified_id_path (0050). There is no
 // way to know WHICH principal an ID document is for from the document
 // alone, so the reviewer must pick one - never guessed, never auto-created.
+//
+// Standing review, 2026-11-07: this function used to pass a literal `null`
+// for markApplied()'s own `userId` param (and never even destructured
+// `userId` off requireCompanyId()'s return value) - the only one of this
+// file's four markApplied()-calling confirm* functions that did, present
+// since this function's very first commit (eb5a846f, 2026-10-18) with no
+// comment anywhere explaining it, unlike every other deliberate quirk in
+// this file. Real, 100%-of-the-time consequence, not a race: every
+// certified ID document ever filed through this screen got
+// onboarding_document_results.reviewed_by stamped NULL, even on a company's
+// most compliance-sensitive document type (a director/shareholder's own
+// identity document) - an audit trail silently missing who actually
+// reviewed and filed it. Fixed by threading the already-available `userId`
+// through, exactly as confirmVaultDocument()/confirmExperienceReferenceLetter()/
+// confirmCvHandoff() already do.
 // ---------------------------------------------------------------------------
 
 export async function confirmIdDocument(formData: FormData) {
-  const { supabase, companyId } = await requireCompanyId();
+  const { supabase, companyId, userId } = await requireCompanyId();
   const resultId = str(formData, "result_id");
   const principalId = str(formData, "principal_id");
   if (!resultId) fail("Missing document.");
@@ -344,7 +359,7 @@ export async function confirmIdDocument(formData: FormData) {
     fail(error ? error.message : "That person is no longer on your directors/shareholders register - it may have been removed. Refresh and try again.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
-  await markApplied(supabase, resultId!, null, { table: "company_principals", id: principalId, column: "certified_id_path" });
+  await markApplied(supabase, resultId!, userId, { table: "company_principals", id: principalId, column: "certified_id_path" });
   const back = backTo(formData);
   revalidatePath(back);
   redirect(`${back}?saved=filed`);

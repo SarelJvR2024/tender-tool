@@ -1,5 +1,118 @@
 # System Status
 
+## This pass (2026-11-07xxiv, standing solution-architect review): `randwater.py` live-reachability closed out for good via GitHub Actions (real, repeatable negative) + Finding 185 (`confirmIdDocument()`'s `reviewed_by = null` quirk, fixed), oriented from `204bb8e`
+(immediately-preceding pass's own verified HEAD, the PR-backlog consolidation pass). `git fetch
+origin main` at the start found local already matching `origin/main` exactly - `204bb8e` - and
+again just before pushing this pass's own fix commit, still `204bb8e`, no sibling commit landed
+during this pass. Re-checked all 10 open PRs via `mcp__github__list_pull_requests`: same set as
+the preceding pass's own count (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/
+`#183`) - nothing merged, closed, or rebased by anyone since. Per the binding guardrail, none of
+#164/#165/#183 was touched.
+
+**Part 1 - `randwater.py`'s GitHub-Actions live-reachability check, per this pass's own primary
+task.** This repo already has `.github/workflows/test-randwater-reachability.yml` (a
+`workflow_dispatch`-only one-off, added 2026-10-20 by a prior pass, exactly the precedent this
+pass's task brief pointed at via `lephalale.py`'s own test-file comment). It had already been run
+once, on 2026-10-20 (run `39508282401`), with `conclusion: failure`. **This pass re-dispatched it
+fresh today** (`mcp__github__actions_run_trigger`, `run_workflow`, ref `main`) to get a
+same-day, independently-repeatable result rather than relying on an 18-day-old single data point -
+run `42385584013`, job `128442151079`, **`conclusion: failure`**, real log retrieved via
+`mcp__github__get_job_logs`:
+```
+RuntimeError: GET https://bids.randwater.co.za/Public/Procurement/Bids/ViewPublishedBids.aspx
+failed after 3 attempts: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify
+failed: unable to get local issuer certificate (_ssl.c:1035)>
+```
+**Identical failure shape to the original 2026-10-20 run**, now confirmed from a real GitHub
+Actions `ubuntu-24.04` runner - a genuinely different network path from both this sandbox and the
+original research pass's own environment - on two separate days 18 days apart. This sandbox's own
+`openssl s_client` against the same host was also checked this pass and found to be **useless as
+independent confirmation**: this environment's outbound TLS is intercepted by its own agent proxy
+(the returned chain's issuer is `O = Anthropic, CN = Egress Gateway SDS Issuing CA (production)`,
+re-signed per-host with a `NotBefore` of today), so a local `openssl` check here can never see Rand
+Water's own real certificate chain - only GitHub Actions' real, unproxied failure counts as
+evidence. **This closes out, for good, the "maybe GitHub Actions' different network path would
+reach it" question this backlog has carried for several passes**: the answer, now confirmed twice
+on two different days from two different real runner instances, is no - this is a genuine,
+repeatable, server-side TLS chain misconfiguration (the server never sends Thawte's required
+intermediate cert, per a still-earlier pass's own `openssl s_client` finding), not a sandbox
+trust-store artifact and not a one-off network blip on either side.
+
+**Because no real page content has ever been obtainable from ANY network path this review has
+access to (confirmed again this pass, not merely re-assumed), the `randwater.py` ocid-collision
+question itself could NOT be live-verified this pass either - stated plainly, not blurred.** Falling
+to the task's own explicit structural/code-only fallback instead: read `randwater.py`'s own
+`ocid=f"randwater:{ref}"` construction and its one real artifact this review has ever had - Sarel's
+own real browser-captured page source, 2026-10-20, preserved verbatim in `test_randwater.py`'s
+`FIXTURE_PAGE` - very carefully.
+
+**This is a code-only, NOT live-verified, judgment call**, offered with its own reasoning spelled
+out so a future pass with real access can check it against the real site directly: `randwater.py`'s
+own `ref` values (e.g. `RFQ10419311`, `RFQ10418855`, `RFQ10420501` - all 4 of the one real fixture's
+bids) are large, apparently-sequential, system-generated transaction numbers from what is almost
+certainly an e-procurement/SRM platform's own auto-numbering (a `test_randwater.py` comment already
+calls this "source-namespaced, stable, no OCDS id to fake"), structurally unlike the short,
+human-assigned, committee-chosen reference codes (`B01/2026`-shaped) that were the actual, confirmed
+culprits in every one of the four sibling sources this bug class WAS fixed for (`kouga.py`,
+`dbsa_procurement.py`, `sars_procurement.py`, `lephalale.py`) - a human-assigned file number is
+exactly the kind of identifier a procurement officer re-uses when manually re-advertising under the
+same internal reference; an auto-incrementing system transaction number is not naturally reused by
+the system that generates it. Separately, and unlike all four of those fixed sources, `randwater.py`
+captures NO per-bid URL or slug at all (confirmed from its own docstring: per-bid detail sits behind
+a DevExpress AJAX popup, not a plain URL, deliberately not implemented) - so even if a real
+collision were ever found, there is no ready-made disambiguator field available to suffix the ocid
+with, the way the other four fixes did; a fix here would have to fall back to `closing_date` and/or
+`title`, a different shape of fix than every sibling. **This is a reasoned, lower-likelihood-than-
+the-fixed-sources judgment, not a disproof** - the one real fixture this review has ever had shows
+zero duplicate refs among its 4 bids, which is far too small a sample to rule anything in or out.
+Per the standing "no speculative fix against undemonstrated risk" discipline (named explicitly by
+Findings 181/182's own writeups for this exact item), **no code change was made to `randwater.py`
+this pass** - the risk is real-but-unconfirmed exactly as every prior pass left it, now with a
+repeatable, cross-day negative on the live-reachability question specifically, and a documented
+structural reason it is less likely (not zero) here than in the four already-fixed siblings.
+
+**Part 2 - Finding 185, a genuine, deterministic (not speculative, not a race) bug found via this
+task's own named secondary fallback.** `confirmIdDocument()` (`app/app/company/document-scan/
+actions.ts`) hardcoded a literal `null` for `onboarding_document_results.reviewed_by` on every
+certified ID document ever filed through the onboarding document-scan screen - the ONLY one of this
+file's four `markApplied()`-calling confirm paths that drops `userId` from its own
+`requireCompanyId()` destructuring, present since the function's very first commit (`eb5a846f`,
+2026-10-18) with no comment anywhere justifying it, unlike this file's own firm convention of
+commenting every deliberate quirk. `requireCompanyId()` already returns `userId` for free. Real,
+100%-of-the-time consequence on this screen's single most compliance-sensitive document type (a
+director/shareholder's own certified identity document): the audit trail silently shows nobody
+reviewed it. Fixed by threading `userId` through, exactly matching
+`confirmVaultDocument()`/`confirmExperienceReferenceLetter()`/`confirmCvHandoff()`'s own existing
+pattern. Full details, red-then-green verification, and the Finding-185-numbering collision note
+with PR #183's own self-claimed "Finding 185" are in `QA-Edge-Case-Findings.md`.
+
+**Full verification suite, all green (summary; exact commands/exit codes in `QA-Edge-Case-
+Findings.md`'s own Finding 185 entry).** `npm run typecheck` exit `0`. `npx eslint .` exit `0`, 0
+errors, 3 pre-existing warnings. `npx vitest run` exit `0`, **504/504, 66 files** (503 baseline + 1
+new test). Node `*.test.ts` loop - 28 files, 0 failures. `npx next build` clean. Full `engine/`
+Python sweep (no Python changed) - 86/86, 0 failures.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 10 PRs remain open and unmerged, same set as the preceding
+pass. `randwater.py`'s own reused-ref risk is now a closed loop on the "can we get live data"
+question specifically (confirmed twice, 18 days apart, that no available network path can) - any
+future attempt to resolve the ocid-collision question for real needs either the server's own TLS
+chain fixed (outside this review's control) or Sarel's own browser capturing a fresh real page
+(the only route that has ever actually worked for this one site). PR #183's own internal "Finding
+185" self-reference needs renumbering by whoever merges it, now that this pass's own Finding 185
+has actually landed in `QA-Edge-Case-Findings.md` first.
+
+To verify independently: `mcp__github__actions_list` (`list_workflow_runs`,
+`test-randwater-reachability.yml`) and confirm run `42385584013` shows `conclusion: failure` with
+the `CERTIFICATE_VERIFY_FAILED` error above via `mcp__github__get_job_logs`. Read
+`app/app/company/document-scan/actions.ts`'s `confirmIdDocument()` and confirm it passes `userId`
+(not `null`) into `markApplied()`. Run `npx vitest run app/app/company/document-scan/
+actions.spec.ts` and confirm all 10 tests pass. Confirm via `mcp__github__list_pull_requests` that
+all 10 PRs are still open/unmerged, and that `git log --oneline -1 origin/main` is this pass's own
+new commit (one ahead of `204bb8e`), with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xxiii, standing solution-architect review): PR-backlog consolidation, oriented from `1a65a86`
 (immediately-preceding pass's own verified HEAD, Finding 184's `applyCvExtraction()` race fix).
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `1a65a86`
