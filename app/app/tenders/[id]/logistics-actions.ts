@@ -49,7 +49,15 @@ export async function saveSubmissionLogistics(formData: FormData) {
   const courierContact = ((formData.get("courier_contact") as string | null) ?? "").trim() || null;
 
   const supabase = await createClient();
-  const { error } = await supabase
+  // .select("id").maybeSingle() matters here exactly as it does on every
+  // sibling plain `tender_packs` update: PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own `using
+  // (is_company_member(company_id))` (0001, re-evaluated against the OLD
+  // row) no longer matches - e.g. a membership revoked mid-request -
+  // indistinguishable from a real update by `error` alone. Without this
+  // check the form below redirected "saved=logistics" even though nothing
+  // was actually saved (standing review, 2026-11-07).
+  const { data: updated, error } = await supabase
     .from("tender_packs")
     .update({
       submission_type: submissionType,
@@ -59,8 +67,10 @@ export async function saveSubmissionLogistics(formData: FormData) {
       courier_contact: courierContact,
     })
     .eq("tender_id", tenderId)
-    .eq("company_id", companyId);
-  if (error) {
+    .eq("company_id", companyId)
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) {
     console.error("tender_packs logistics update failed", error);
     back(`error=${encodeURIComponent("Could not save submission logistics - try again. If it keeps happening, let us know.")}`);
   }

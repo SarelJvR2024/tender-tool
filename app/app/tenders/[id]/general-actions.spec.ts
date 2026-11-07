@@ -109,6 +109,16 @@ function formData(tenderId: string, docId: string) {
   return fd;
 }
 
+async function expectRedirect(p: Promise<unknown>): Promise<string> {
+  try {
+    await p;
+    throw new Error("expected a redirect, action returned normally");
+  } catch (e) {
+    if (e instanceof RedirectSignal) return e.url;
+    throw e;
+  }
+}
+
 afterEach(() => {
   vi.resetModules();
   supabaseState.current = null;
@@ -185,5 +195,60 @@ describe("removePrivateTenderDocument - count read genuinely succeeds above zero
     expect(resetCalls).toHaveLength(0);
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0].fn).toBe("request_general_job_checked");
+  });
+});
+
+// Standing review, 2026-11-07: a from-scratch re-grep of every `.update(`
+// site in app/app for the "plain update twin" RLS-zero-row shape (the one
+// Finding 197 closed out for company_offices) found saveGeneralAnswers()'s
+// own `companies` update was never swept for it - PostgREST returns a 2xx
+// with `error: null` and zero rows affected when RLS's own `using
+// (is_company_member(id))` (0001) no longer matches at write time (a
+// membership revoked mid-request), indistinguishable from a real update by
+// `error` alone. Pre-fix, the function still redirected "?saved=answers"
+// with no indication the company-fields half of the save never took effect.
+function generalAnswersFormData(tenderId: string) {
+  const fd = new FormData();
+  fd.set("tender_id", tenderId);
+  fd.set("c:sars_tcs_pin", "ABC123");
+  return fd;
+}
+
+const genericManifest = { questions: [], company_fields: [{ column: "sars_tcs_pin" }] };
+
+describe("saveGeneralAnswers - companies update matches zero rows (RLS race)", () => {
+  it("redirects with an error, not the bare '?saved=answers', when the companies update matches no row", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: null, error: null }], // tenders select
+      [{ data: { document_requirements: genericManifest }, error: null }], // tender_packs select (ownPack)
+      [{ data: null, error: null }], // companies update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { saveGeneralAnswers } = await import("./general-actions");
+
+    const url = await expectRedirect(saveGeneralAnswers(generalAnswersFormData("tender-1")));
+
+    expect(url).toContain("/tenders/tender-1?error=");
+    expect(url).not.toBe("/tenders/tender-1?saved=answers#general-preparation");
+  });
+});
+
+describe("saveGeneralAnswers - companies update genuinely succeeds", () => {
+  it("redirects to the real success URL when the update actually matches", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: null, error: null }], // tenders select
+      [{ data: { document_requirements: genericManifest }, error: null }], // tender_packs select (ownPack)
+      [{ data: { id: "company-1" }, error: null }], // companies update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { saveGeneralAnswers } = await import("./general-actions");
+
+    const url = await expectRedirect(saveGeneralAnswers(generalAnswersFormData("tender-1")));
+
+    expect(url).toBe("/tenders/tender-1?saved=answers#general-preparation");
   });
 });

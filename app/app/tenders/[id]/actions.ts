@@ -544,7 +544,17 @@ export async function syncWonProjectToTeam(formData: FormData) {
   if (!packRow || packRow.tender_id !== tenderId) fail("Tender pack not found.");
   if (packRow!.pipeline_stage !== "won") fail("This tender hasn't been marked Won on the pipeline board yet.");
 
-  const { error: updErr } = await supabase
+  // .select("id").maybeSingle() matters here exactly as it does on every
+  // sibling plain `tender_packs`/company-scoped update elsewhere in this
+  // codebase: PostgREST returns a 2xx with `error: null` and zero rows
+  // affected when RLS's own `using (is_company_member(company_id))` (0001,
+  // re-evaluated against the OLD row) no longer matches - e.g. a membership
+  // revoked between the packRow read above and this write. Without this
+  // check the function went on to sync `projects` off `assignmentRows`,
+  // which this same race also empties via RLS, and redirected to
+  // "#won-project" with no error shown even though the completed-project
+  // details were never actually saved (standing review, 2026-11-07).
+  const { data: updated, error: updErr } = await supabase
     .from("tender_packs")
     .update({
       project_completed_at: completedAt,
@@ -552,8 +562,10 @@ export async function syncWonProjectToTeam(formData: FormData) {
       project_completion_note: note,
     })
     .eq("id", tenderPackId!)
-    .eq("company_id", companyId);
-  if (updErr) {
+    .eq("company_id", companyId)
+    .select("id")
+    .maybeSingle();
+  if (updErr || !updated) {
     console.error("tender_packs update failed for won-project sync", updErr);
     fail("Could not save the completed-project details - try again. If it keeps happening, let us know.");
   }

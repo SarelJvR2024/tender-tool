@@ -107,7 +107,7 @@ describe("syncWonProjectToTeam - tender_pack_assignments read fails", () => {
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
       [wonPackRow], // tender_packs select (gate re-derive)
-      [{ data: null, error: null }], // tender_packs update
+      [{ data: { id: "pack-1" }, error: null }], // tender_packs update
       [{ data: null, error: { message: "read replica unavailable" } }], // tender_pack_assignments select -> FAILS
       [{ data: null, error: null }], // tenders select
       [{ data: null, error: null }], // tender_requirements select
@@ -135,7 +135,7 @@ describe("syncWonProjectToTeam - all reads succeed, no confirmed positions", () 
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
       [wonPackRow],
-      [{ data: null, error: null }], // tender_packs update
+      [{ data: { id: "pack-1" }, error: null }], // tender_packs update
       [{ data: [], error: null }], // tender_pack_assignments select - genuinely empty
       [{ data: { contract_no: "C1", title: "Road upgrade" }, error: null }], // tenders select
       [{ data: [], error: null }], // tender_requirements select
@@ -153,5 +153,42 @@ describe("syncWonProjectToTeam - all reads succeed, no confirmed positions", () 
     const url = await expectRedirect(syncWonProjectToTeam(fd));
 
     expect(url).toBe("/tenders/tender-1#won-project");
+  });
+});
+
+// Standing review, 2026-11-07: a from-scratch re-grep of every `.update(`
+// site in app/app for the "plain update twin" RLS-zero-row shape (the one
+// Finding 197 closed out for company_offices) found this function's own
+// `tender_packs` update was a 7th, never-swept file sharing it. The read
+// above (`wonPackRow`) confirms the pack is "won" and this company's own,
+// but that read and this write are not atomic - a membership revoked
+// between them (removeMember(), 0114) makes RLS's own `using
+// (is_company_member(company_id))` (0001) match zero rows at write time,
+// returned as a 2xx with `error: null`, indistinguishable from a real
+// update by `error` alone. Pre-fix, the function went on to read
+// `tender_pack_assignments` (also RLS-scoped, also silently emptied by the
+// same race) and redirected to the bare success anchor even though the
+// completed-project details were never actually saved.
+describe("syncWonProjectToTeam - tender_packs update matches zero rows (RLS race)", () => {
+  it("reports an error, not the bare success anchor, when the update itself matches no row", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [wonPackRow], // tender_packs select (gate re-derive) - still sees the row
+      [{ data: null, error: null }], // tender_packs update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { syncWonProjectToTeam } = await import("./actions");
+
+    const fd = formDataWith({
+      tender_id: "tender-1",
+      tender_pack_id: "pack-1",
+      project_completed_at: "2026-11-01",
+    });
+    const url = await expectRedirect(syncWonProjectToTeam(fd));
+
+    expect(url).toContain("/tenders/tender-1?error=");
+    // Must not be the bare success redirect this bug produced pre-fix.
+    expect(url).not.toBe("/tenders/tender-1#won-project");
   });
 });

@@ -68,10 +68,27 @@ export async function saveVaultQuickFields(
   if (Object.keys(update).length === 0) return { ok: false, error: "Nothing to save." };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("companies").update(update).eq("id", verified.companyId);
-  if (error) {
+  // .select("id").maybeSingle() matters here exactly as it does on every
+  // sibling plain update in this codebase (company/actions.ts
+  // updateCompanyProfile(), uploadVaultDocument(), etc.): PostgREST returns
+  // a 2xx with `error: null` and zero rows affected when RLS's own `using
+  // (is_company_member(id))` (0001, re-evaluated against the OLD row) no
+  // longer matches - e.g. another admin's removeMember() (0114) revoking
+  // this user's own company_members row between requireCompanyId() above
+  // and this write - indistinguishable from a real update by `error` alone.
+  // This file's own requireCompanyId() re-checks membership synchronously,
+  // but that check and this write are not atomic, so the same race window
+  // every sibling file's fix closes is open here too (standing review,
+  // 2026-11-07).
+  const { data: updated, error } = await supabase.from("companies").update(update).eq("id", verified.companyId).select("id").maybeSingle();
+  if (error || !updated) {
     console.error("companies update failed (vault quick fix)", error);
-    return { ok: false, error: "Could not save - try again. If it keeps happening, let us know." };
+    return {
+      ok: false,
+      error: error
+        ? "Could not save - try again. If it keeps happening, let us know."
+        : "Your company record is no longer there - refresh and try again.",
+    };
   }
 
   revalidatePath("/company");
@@ -115,8 +132,21 @@ export async function uploadCoidQuickFix(
     return { ok: false, error: `Could not upload ${file.name} - try again. If it keeps happening, let us know.` };
   }
 
-  const { error } = await supabase.from("companies").update({ [column]: storagePath }).eq("id", verifiedCompanyId);
-  if (error) {
+  // .select("id").maybeSingle() here matters exactly as it does on
+  // company/actions.ts's own uploadVaultDocument(), which this function is
+  // a copy of: without it, the same membership-revoked-mid-request race
+  // (0114) leaves the just-uploaded file orphaned AND deletes the still-
+  // referenced previous file below regardless - worse than a plain orphan,
+  // since the row ends up pointing at a file that no longer exists. This
+  // copy never got the fix uploadVaultDocument() already has (standing
+  // review, 2026-11-07).
+  const { data: updated, error } = await supabase
+    .from("companies")
+    .update({ [column]: storagePath })
+    .eq("id", verifiedCompanyId)
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) {
     console.error("companies update failed for vault document (coid quick fix)", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);
     return { ok: false, error: "Could not save this document - try again. If it keeps happening, let us know." };

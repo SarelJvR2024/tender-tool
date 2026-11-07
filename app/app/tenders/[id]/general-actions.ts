@@ -96,8 +96,18 @@ export async function saveGeneralAnswers(formData: FormData) {
     if (clearError) console.error("tender_answers clear-delete failed", clearError);
   }
   if (Object.keys(companyUpdate).length > 0) {
-    const { error } = await supabase.from("companies").update(companyUpdate).eq("id", companyId);
-    if (error) {
+    // .select("id").maybeSingle() matters here exactly as it does on every
+    // sibling plain `companies` update (company/actions.ts
+    // updateCompanyProfile(), uploadVaultDocument()): PostgREST returns a
+    // 2xx with `error: null` and zero rows affected when RLS's own `using
+    // (is_company_member(id))` (0001, re-evaluated against the OLD row) no
+    // longer matches - e.g. a membership revoked mid-request - indistin-
+    // guishable from a real update by `error` alone. Without this check the
+    // function below redirected "?saved=answers" with no indication the
+    // company-fields half of the save never took effect (standing review,
+    // 2026-11-07).
+    const { data: updated, error } = await supabase.from("companies").update(companyUpdate).eq("id", companyId).select("id").maybeSingle();
+    if (error || !updated) {
       console.error("companies update failed for general answers", error);
       redirect(back(tenderId, `?error=${encodeURIComponent("Answers saved, but your company details could not be updated - try again. If it keeps happening, let us know.")}`));
     }

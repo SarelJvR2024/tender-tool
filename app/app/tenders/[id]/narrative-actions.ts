@@ -161,7 +161,17 @@ export async function uploadNarrativeFinal(formData: FormData) {
   });
   if (uploadError) fail(`Could not upload file: ${uploadError.message}`);
 
-  const { error: updateError } = await supabase
+  // .select("id").maybeSingle() matters here exactly as it does on every
+  // sibling plain `narrative_documents`/company-scoped update elsewhere in
+  // this codebase: PostgREST returns a 2xx with `error: null` and zero rows
+  // affected when RLS's own `using (is_company_member(company_id))` (0087,
+  // re-evaluated against the OLD row) no longer matches - e.g. a membership
+  // revoked between the `row` check above and this write - indistinguishable
+  // from a real update by `error` alone. Without this check the file above
+  // is uploaded to storage (overwriting the fixed, deterministic path) but
+  // the row's own final_* columns never actually change to match - a silent
+  // mismatch, not just a silent no-op (standing review, 2026-11-07).
+  const { data: updated, error: updateError } = await supabase
     .from("narrative_documents")
     .update({
       final_storage_path: storagePath,
@@ -169,8 +179,14 @@ export async function uploadNarrativeFinal(formData: FormData) {
       final_uploaded_at: new Date().toISOString(),
       final_uploaded_by: user?.id ?? null,
     })
-    .eq("id", docId);
-  if (updateError) fail(`Uploaded, but couldn't save it against the document: ${updateError.message}`);
+    .eq("id", docId)
+    .select("id")
+    .maybeSingle();
+  if (updateError || !updated) {
+    fail(updateError
+      ? `Uploaded, but couldn't save it against the document: ${updateError.message}`
+      : "That document is no longer there - it may have been removed. Refresh and try again.");
+  }
 
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}#narrative-documents`);

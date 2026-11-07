@@ -117,7 +117,7 @@ describe("saveVaultQuickFields - real membership, real save", () => {
   it("saves normally when the membership read genuinely succeeds", async () => {
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId - real membership
-      [{ data: null, error: null }], // companies update
+      [{ data: { id: "company-1" }, error: null }], // companies update
     ]);
     supabaseState.current = client;
 
@@ -126,6 +126,32 @@ describe("saveVaultQuickFields - real membership, real save", () => {
     const res = await saveVaultQuickFields("tender-1", "company-1", { sars_tcs_pin: "ABC123" });
 
     expect(res).toEqual({ ok: true });
+  });
+});
+
+// Standing review, 2026-11-07: a from-scratch re-grep of every `.update(`
+// site in app/app for the "plain update twin" RLS-zero-row shape (the one
+// Finding 197 closed out for company_offices) found this file's own two
+// `companies` updates were never swept for it - requireCompanyId()'s own
+// synchronous membership re-check and this write are not atomic, so a
+// membership revoked between them (removeMember(), 0114) makes RLS's own
+// `using (is_company_member(id))` (0001) match zero rows at write time,
+// returned as a 2xx with `error: null`, indistinguishable from a real
+// update by `error` alone.
+describe("saveVaultQuickFields - companies update matches zero rows (RLS race)", () => {
+  it("reports a real failure, not ok:true, when the update itself matches no row", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId - real membership
+      [{ data: null, error: null }], // companies update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { saveVaultQuickFields } = await import("./vault-quick-fix-actions");
+
+    const res = await saveVaultQuickFields("tender-1", "company-1", { sars_tcs_pin: "ABC123" });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).not.toBe("Not signed in to this company.");
   });
 });
 
@@ -147,5 +173,58 @@ describe("uploadCoidQuickFix - requireCompanyId's own company_members read fails
       expect(res.error.toLowerCase()).toContain("try again");
     }
     expect(removeCalls).toHaveLength(0);
+  });
+});
+
+describe("uploadCoidQuickFix - real membership, real save", () => {
+  it("uploads, saves the new path, and removes only the previous file", async () => {
+    const { client, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { coid_letter_document_path: "company-1/vault/coid/old.pdf" }, error: null }], // existing read
+      [{ data: { id: "company-1" }, error: null }], // companies update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { uploadCoidQuickFix } = await import("./vault-quick-fix-actions");
+
+    const file = new File(["x"], "coid.pdf", { type: "application/pdf" });
+    const res = await uploadCoidQuickFix("tender-1", "company-1", file);
+
+    expect(res).toEqual({ ok: true });
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0].paths).toEqual(["company-1/vault/coid/old.pdf"]);
+  });
+});
+
+// Standing review, 2026-11-07: a from-scratch re-grep of every `.update(`
+// site in app/app for the "plain update twin" RLS-zero-row shape found this
+// function's own `companies` update was an unswept copy of company/
+// actions.ts's own uploadVaultDocument() - same table, same destructive
+// consequence class: without a zero-row check, a membership revoked between
+// requireCompanyId() and this write leaves the row still pointing at the OLD
+// file while the code unconditionally deletes that same OLD file from
+// storage below - worse than a plain orphan, since the row ends up
+// referencing a file that no longer exists, while the just-uploaded new file
+// sits permanently unreferenced.
+describe("uploadCoidQuickFix - companies update matches zero rows (RLS race)", () => {
+  it("removes the just-uploaded new file, and does NOT delete the still-referenced previous file", async () => {
+    const { client, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { coid_letter_document_path: "company-1/vault/coid/old.pdf" }, error: null }], // existing read
+      [{ data: null, error: null }], // companies update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { uploadCoidQuickFix } = await import("./vault-quick-fix-actions");
+
+    const file = new File(["x"], "coid.pdf", { type: "application/pdf" });
+    const res = await uploadCoidQuickFix("tender-1", "company-1", file);
+
+    expect(res.ok).toBe(false);
+    // The still-referenced OLD file must survive: only the newly-uploaded
+    // file (not "old.pdf") may ever be passed to remove().
+    const removedPaths = removeCalls.flatMap((c) => c.paths);
+    expect(removedPaths).not.toContain("company-1/vault/coid/old.pdf");
+    expect(removeCalls).toHaveLength(1);
   });
 });
