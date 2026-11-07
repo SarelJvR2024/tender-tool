@@ -1,5 +1,114 @@
 # System Status
 
+## This pass (2026-11-07vi, standing solution-architect review): oriented from `b79e5ea`
+(immediately-preceding pass's own verified HEAD, pure PR-mergeability consolidation, no new
+finding). `git fetch origin main` clean, local matched `origin/main` exactly at the start and
+again immediately after this pass's own read-only work (no push follows) - `b79e5ea` throughout,
+no sibling commits landed during this pass. Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded (`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z,
+`#180` 2026-11-06T22:40:26Z, `#179` 2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177`
+2026-11-06T19:08:44Z, `#176` 2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164`
+2026-10-26T20:14:25Z) - nothing merged, closed, or rebased by anyone since. Grepped `Finding
+[0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - 173 is still the
+highest recorded, confirming no new finding landed from the sibling session either.
+
+**This pass's angle: option (c), a real read-for-correctness sweep of `app/app/tenders/[id]/`
+Server Action files this chain's own earlier findings (164/165/178-180) never individually
+covered**, deliberately pivoting away from this chain's 4-real-document-parsing-passes-in-a-row
+per the brief's own lean. Read every one of the following in full, tracing control flow and
+every `redirect()`/error-handling branch rather than skimming: `b7-actions.ts`,
+`comment-actions.ts` (`addTenderComment`/`deleteTenderComment`), `logistics-actions.ts`
+(`saveSubmissionLogistics`/`advanceDispatchStatus`), `update-actions.ts`
+(`acceptTenderUpdateDate`, cross-checked against its real RPC, `accept_tender_update_date()` in
+`0111_tender_update_resolution_v3.sql` - confirmed it already re-derives membership/pipeline-stage
+authorization server-side, not trusting the caller), `pack-inputs-actions.ts`
+(`startTenderPack`/`confirmPositionPerson`/`uploadTenderTemplate`), `vault-quick-fix-actions.ts`
+(confirmed its `requireCompanyId()` error-capture fix from earlier today, `9fcde8f`, is the latest
+state - not re-fixing something already fixed), `general-pack-review-actions.ts`,
+`pack-review-actions.ts`, `general-actions.ts` (all 5 exports, including the already-fixed
+`removePrivateTenderDocument` count-read branch, Finding 147), `narrative-actions.ts`
+(`requestNarrativeDocument`/`uploadNarrativeFinal`), and the first ~440 of 655 lines of
+`actions.ts` (`requestTenderCv`/`requestSubmissionPack`/`addTenderTask`/`reassignTenderTask`/
+`advanceTaskStatus`/`ensureClosingMilestone`/`ensureBriefingMilestone`/`setTenderReminder`/
+`syncWonProjectToTeam`). Also read `submission-logistics-form.tsx`, `tender-updates.tsx` (its
+`ACTIVE_STAGES` constant, confirmed it already matches `accept_tender_update_date()`'s own
+`briefing_shortlisted`-inclusive stage list from 0111 - no app/RPC drift), `quick-blocker-drawer.tsx`
+and `retry-button.tsx` as the client-side callers of several of the above.
+
+**Genuine negative result - no new finding, nothing fixed, reported honestly per the standing
+brief rather than forced.** Every one of these files has already been through this chain's own
+prior standing-review sweeps (the `requireCompanyId()` error-capture sweep, `b002f4e`; the
+raw-error-leak sweep, `bf22aa7`; the two TS-sweep grep-blind-spot passes, `507e351`/`829dbb9`; and
+individual per-file fixes - `c275ab9` for `general-actions.ts`, `9fcde8f` for
+`vault-quick-fix-actions.ts`) and read as correct on this pass's own independent trace:
+- Every bare `back(...)`/`fail(...)` call that isn't prefixed with `return` (a pattern that
+  recurs across most of these files) is still safe: confirmed directly against
+  `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/redirect.md` (Next 16.4.2, the
+  version actually pinned here) that `redirect()` always throws a `NEXT_REDIRECT` error and does
+  not require `return redirect()` for correct control flow - this is not the latent bug it might
+  look like on a skim, and no file here is calling redirect() inside a try/catch that would
+  swallow it.
+- `acceptTenderUpdateDate()` (`update-actions.ts`) passes no `tenderId`/company scoping into its
+  RPC call at all - looked like a possible IDOR until the RPC itself (`accept_tender_update_date()`,
+  0111) was read in full: it independently re-derives `auth.uid()`, re-checks `is_company_member()`
+  against the tender's owner, and re-checks the calling company actually has a `tender_packs` row
+  in an active pipeline stage for that tender, inside the same `security definer` transaction - the
+  Server Action's thin pass-through is correct, not a gap.
+- `deleteTenderComment()` (`comment-actions.ts`) has one small, genuinely-real but not
+  worth-fixing imprecision: deleting a comment_id that isn't the caller's own (or doesn't exist)
+  silently 0-row-no-ops and still redirects to the same "success" anchor with no error shown,
+  rather than telling the caller nothing happened - RLS/the `author_id` filter already make this
+  safe (nobody else's comment can actually be deleted), so this is a cosmetic UX miss with no
+  product-risk surface, not escalated to a numbered finding.
+- `confirmPackReview()`/`confirmGeneralPackReview()`'s one-time "I've reviewed this" row has no
+  freshness/hash check against the pack's live data, so a confirmation from before a later edit
+  stays valid without forcing a re-review - traced through to `requestSubmissionPack()`/
+  `requestJob()`'s own hard-stop checks (unfilled positions, missing templates, Form B7, Fix-item
+  count) and confirmed every one of those is independently recomputed from live data at request
+  time regardless of the stale confirmation, so this can't let a real compliance gap through
+  silently - whether a real edit should force RE-review is a product-policy call (same category as
+  Finding 168/the PayFast gap), not a code bug, so left unflagged rather than force-fitted.
+- `logistics-actions.ts`'s `advanceDispatchStatus()` and `actions.ts`'s `advanceTaskStatus()`/
+  `reassignTenderTask()` take a client-supplied `currentStatus` with no DB re-check before
+  computing "next" - a real TOCTOU shape in isolation, but traced through: two concurrent clicks
+  with the same believed `currentStatus` both compute the same `next` value, so the race is
+  idempotent (same end state either order), not a lost-update bug.
+- `pack-inputs-actions.ts`'s `confirmPositionPerson()` and `general-actions.ts`'s
+  `saveGeneralAnswers()`/`removePrivateTenderDocument()` already have this chain's own prior
+  standing-review comments tracing every logged-only (non-gating) error branch to its real
+  downstream consequence - re-verified those traces hold on a fresh read, nothing missed.
+
+No code change made this pass. `vault-quick-fix-actions.ts` was confirmed NOT to need the fix it
+already has (dated same-day, `9fcde8f`) - re-checking it wasn't wasted since this pass needed to
+rule it back in as "already covered", not assume so from the file list alone.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged,
+same set as recorded by the immediately preceding pass - none touched, amended, or merged by this
+pass. The remaining ~215 lines of `actions.ts` (task-assignee/position-suggestion helpers beyond
+line ~440) and every `.tsx` file under `app/app/tenders/[id]/` were NOT read this pass (this pass
+was server-action-logic-only, per the brief's own (c) framing) - a live, not-yet-exhausted angle
+for a future pass, not declared exhausted. `engine/discovery/`'s other direct-buyer readers and
+`capetown_procurement.py`'s own live refetch (left open by `2026-11-07iv`) and
+`engine/intake/classify_tender.py`'s own `find_nra_reference()` (left open by `2026-11-07iii`)
+remain live angles too, untouched this pass.
+
+To verify independently: read any of `app/app/tenders/[id]/{b7,comment,logistics,update,
+pack-inputs,narrative}-actions.ts`, `general-actions.ts`, `{pack-review,general-pack-review}-
+actions.ts` and confirm every `redirect()`/`fail()`/`back()` call that isn't prefixed `return` is
+still followed by code that cannot execute after it (because `redirect()` throws - see
+`app/node_modules/next/dist/docs/01-app/03-api-reference/04-functions/redirect.md`). Read
+`accept_tender_update_date()` in `app/supabase/migrations/0111_tender_update_resolution_v3.sql`
+and confirm it re-derives `is_company_member()`/pipeline-stage authorization itself rather than
+trusting `update-actions.ts`'s caller. Confirm via `mcp__github__list_pull_requests` that all 9
+PRs are still open/unmerged at the same `updated_at` timestamps listed above, and that `git log
+--oneline -1 origin/main` is this pass's own new docs-only commit (one ahead of `b79e5ea`), with no
+further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07v, standing solution-architect review): oriented from `2b1a6ae`
 (immediately-preceding pass's own verified HEAD, Finding 173). `git fetch origin main` clean, local
 matched `origin/main` exactly at the start and again immediately before pushing this entry - no
