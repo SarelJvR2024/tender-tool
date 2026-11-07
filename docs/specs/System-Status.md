@@ -1,5 +1,114 @@
 # System Status
 
+## This pass (2026-11-07xxxvi, standing solution-architect review, background worker): Finding 198 - a NEW re-verification methodology (checking a past "fixed all N files" claim's own full scope, rather than looking for a fresh sibling divergence) found 6 more `system_alerts.record()` sites across 5 files missing `company_id`, in and outside Finding 192's own 6-file scope - fixed, 4 test files extended/added, pushed to `main`, oriented from `396dbbb`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `396dbbb`
+(Finding 197's own docs commit, the immediately preceding pass). Re-checked again immediately
+before this pass's own push - still `396dbbb`, no sibling commit landed in between. Re-checked all
+10 open PRs via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` twice this pass (start and
+immediately before the push): same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since; none merged by this session either. Per the binding guardrails, `#164`/`#165`
+were not touched, no PR was opened or merged, and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped `Finding [0-9]+` in
+both docs myself before picking a number - `197` was the highest recorded at this handoff,
+confirming no new finding had landed from a sibling session since `396dbbb`, before this pass's own
+Finding 198 below. No scratch Postgres database was needed this pass (every one of the 6 call sites
+is a missing-context-key bug on an already-correctly-handled error path, verified with in-memory
+fixtures and `system_alerts.record`/`set_sink` monkey-patching, no live Supabase/Postgres access
+required); no `git worktree` was created either - nothing to clean up.
+
+**This pass's own task, per the standing brief: a genuinely new methodology.** The brief named this
+explicitly as a new angle, complementary to the sibling-comparison method Findings 170-197 all used:
+re-verify a past "fixed all N files" claim by re-running its own search from scratch, rather than
+hunting for a brand-new divergence. Two concrete candidates were named to check first.
+
+**Candidate 1 (the `requireCompanyId()`/company-membership error-capture sweep) - already
+re-verified twice over, confirmed exhausted for now, not re-walked a third time.** This doc's own
+history (`2026-11-06` pass, `b002f4e`; re-checked again the very next pass, `2026-11-07h`,
+`9fcde8f`) already did exactly this: re-ran the sweep's own grep from scratch twice, found and fixed
+one real miss each time (the camelCase `officeActions.ts`/`preferencesActions.ts` loophole, then the
+hyphenated `*-actions.ts` loophole covering 33 files, then `vault-quick-fix-actions.ts`'s own
+differently-signed `requireCompanyId(companyId)` - confirmed deliberately safe and left alone, not a
+miss). Re-reading that history before starting confirmed this candidate is genuinely exhausted as of
+this HEAD - re-running the identical grep a third time with no new angle would just reproduce the
+same confirmed-clean result, not find anything new. Moved to candidate 2 instead of spending this
+pass's budget re-confirming an already-twice-confirmed negative.
+
+**Candidate 2 (Finding 192's own 6-file `system_alerts.record()`/`company_id` sweep) - the real
+target, because its own claim was explicitly scoped narrower than the full surface.** Finding 192's
+own write-up says, in its own words, that it swept "all 6 `process_*_jobs.py` worker bridges" - a
+real, bounded, never-re-verified claim, and the standing brief's own second half asked specifically
+to widen the check to every `system_alerts.record(` call site in the ENTIRE `engine/` tree, not just
+those 6 files, which is exactly what a "was this claim's own stated scope the full truth" check
+needs to do.
+
+**Found: Finding 198, via the widened grep.** `grep -rn "system_alerts.record(" engine/ --include="*.py"`
+(excluding `test_*.py`) - 97 raw hits, 89 real calls (8 were a docstring example and 7 comments that
+merely mention the call by name, confirmed by reading each). Read every one's own `context=` dict
+and checked whether a company-linked row was already in scope at that exact point - the same test
+Finding 192's own write-up used. Found 6 more sites, across 5 files (one pair in the same file),
+missing `company_id` even with one already in scope: `pack/process_pack_jobs.py`'s and
+`general/process_general_jobs.py`'s own `fail_stale_jobs()` malformed-`started_at` "warning" alerts
+(the twin "stuck in 'generating'" error alert 2 lines below each already had it - and this is the
+one site Finding 192's OWN file-by-file list never named for either file, even though it named and
+fixed the identically-shaped alert in `narrative/process_narrative_jobs.py`); `watch_deadlines.py`'s
+two "lapses before closing" functions and `registration_reminders.py`'s own third sibling of them,
+whose malformed-tender-closing-date alerts never carried `company_id` despite every OTHER "due" row
+either file builds tagging it religiously; and `daily_digest.py`'s own per-roster-entry crash alert
+in `main()`, despite `p["company_id"]` being read on the very next line after the loop it sits
+inside. Full file-by-file detail, the exact fix, and the complete list of sites deliberately checked
+and ruled OUT (the `extract_cv_fields.py`/`general/requirements.py`/`onboarding/classify_documents.py`
+OCR-crash alerts with no row in scope; every whole-run/whole-batch alert; everything else already
+correctly carrying `company_id`) are in Finding 198's own write-up
+(`docs/specs/QA-Edge-Case-Findings.md`) - not duplicated here.
+
+**Fixed** by adding `"company_id": <value already in scope>` to each of the 6 `context` dicts - no
+new query anywhere, matching Finding 192's own precedent exactly. **Test coverage**: 2 existing test
+files (`engine/pack/test_process_pack_jobs.py`, `engine/general/test_process_general_jobs.py`)
+extended with a `company_id`-in-context assertion on their existing malformed-timestamp-alert check;
+2 files with no prior coverage of this exact alert got a new test scenario
+(`engine/compliance/test_watch_deadlines_urgency.py`'s new
+`lapsing_before_closing_malformed_closing_date_alerts_carry_company_id()`;
+`engine/compliance/test_principals_registrations.py`'s new
+`find_held_registrations_lapsing_before_closing_malformed_closing_date_alert_carries_company_id()`);
+`engine/notify/test_digest_live.py` got a new scenario inside `main()`'s own established `run()`
+harness, monkey-patching `build_digest_for_person()` to raise for one specific roster entry and
+asserting the alert's `context.company_id`. **Verified red-then-green myself for every one of the
+6**: reverted each production file to `git show HEAD:<path>` one at a time, reran its own test
+file(s) - every new/extended assertion failed exactly as predicted (`context` had no `company_id`
+key); restored each file from a saved copy, reran - 0 failures across all 4 affected test files.
+
+**Verification, full suite, all run myself, real exit codes.** `python3 -m py_compile` clean on all
+5 touched production files. Full `engine/` sweep: `find engine -name "test_*.py" | wc -l` = **86**,
+looped with plain `python3 <file>` - **86/86, 0 failures** (file count unchanged - 4 existing files
+extended, not a new file added). No TypeScript/`app/` file touched this pass, so the TS suite was
+not re-run.
+
+**Is this new methodology exhausted?** For Finding 192's own specific claim: yes, now genuinely
+exhausted - every one of the 89 real call sites across the whole `engine/` tree has been read and
+judged, not just the 6 files Finding 192 named. The METHOD itself is far from exhausted though - see
+Finding 198's own closing paragraph for two concrete fresh targets for the next pass (the
+`held_registrations` two-insert-sites family, checked only for field-omission so far, never for the
+`requireCompanyId()`/RLS-zero-row sibling patterns; or one more from-scratch `.update(` re-grep
+across `app/app/**/*.ts*`, independent of this doc's own file list, to confirm no seventh file shares
+Finding 197's own just-closed-out "plain update twin" shape).
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via the GitHub REST API twice this pass; nothing merged, closed, or rebased by anyone
+else. Pushed directly to `main` as one commit (`1a3d33e`) - 5 production files (each a one-key addition to an
+existing `context` dict) plus 4 extended/new test files, no RLS/money-path/hard-stop-gate touched, no
+schema/migration/RPC change, no worker-image surface touched.
+
+To verify independently: see Finding 198's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the exact call sites, the red/green test run, the
+full suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxxv, standing solution-architect review, background worker): Finding 197 - `app/app/company/officeActions.ts`'s `saveCompanyOffice()` was the one file in the already-established "plain update twin" RLS-zero-row-match sibling family (`company/actions.ts`, `properties/actions.ts`, `principals/actions.ts`, `registrations/actions.ts`, `bank-accounts/actions.ts`) never swept for that fix - fixed, new test added, pushed to `main`, oriented from `570a690`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `570a690`
