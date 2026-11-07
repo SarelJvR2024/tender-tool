@@ -1,5 +1,134 @@
 # System Status
 
+## This pass (2026-11-07xxvii, standing solution-architect review, background worker): independent scratch-Postgres re-verification of PR #183's `reviewed_by` follow-up fix (PASS, no new work on the PR) + `gov_sources.py` 11-source sibling-comparison lead closed out - Finding 189 (`lephalale.py`'s `normalize()` never took the batch listing's own "Date uploaded" value, so `published_date` was always `None`, fixed), oriented from `6f2d4b6`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `6f2d4b6`
+(Finding 188's own pass). All of this pass's own research, the independent PR #183 re-verification,
+and the Finding 189 fix + regression test were done against that base. `git fetch origin main`
+immediately before this pass's own push found **no sibling commit** had landed in the meantime -
+local HEAD and `origin/main` matched exactly, a clean fast-forward push, no rebase/renumbering
+needed this time (unlike the immediately preceding pass's own real 187/188 collision). Re-checked
+all 10 open PRs via `mcp__github__list_pull_requests`, before and after this pass's own push: same
+set as every preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`)
+- nothing merged, closed, or rebased by anyone since, and PR #183's branch head is still exactly
+`24a0153`, unchanged. Per the binding guardrails, #164/#165 were not touched, no PR was opened or
+merged, and neither Finding 168 nor the `start_payfast_checkout()` revenue-integrity gap was
+implemented.
+
+**Part 1 - the coordinator's named special task: an independent, from-scratch scratch-Postgres
+re-verification of PR #183's own `reviewed_by` follow-up fix (`24a0153`), since the prior pass only
+cross-checked it by reading the diff, not by rebuilding the reproduction itself. Result: PASS,
+clean, matching the prior pass's own claim exactly.** `sudo service postgresql start`; created a
+fresh scratch database (`scratch_pr183_verify`); a disposable `git worktree` at
+`origin/fix/onboarding-document-scan-confirm-race` (`24a0153`). **Red:** swapped in the migration
+file's content AT ITS OWN PARENT COMMIT (`24a0153^`, the pre-fix version with `reviewed_by = null`
+hardcoded) inside that same worktree, replayed all 114 migrations via `engine/security/
+replay_schema.sh` against the fresh database, seeded one company / one `company_members` owner /
+one `company_principals` row / one `onboarding_uploads` + pending `onboarding_document_results` row
+(`document_kind='id_document'`), called `apply_onboarding_id_document_checked()` as that signed-in
+member (`set role authenticated` + `set_config('test.uid', ...)`, matching
+`scratch_supabase_stub.sql`'s own documented recipe) - `reviewed_by` landed `NULL` in the database,
+despite `test.uid` naming a real, identifiable caller throughout. **Green:** restored the real
+branch-tip migration file (`git checkout --`, confirmed `reviewed_by = auth.uid()` at the right
+line first), dropped and recreated the scratch database, replayed again, re-ran the identical
+seed-and-call script unchanged - `reviewed_by` landed the real calling user's uuid
+(`11111111-1111-1111-1111-111111111111`), confirmed via `reviewed_by_matches_real_caller = t` in
+the query. **Cleanup, confirmed:** scratch database dropped (`DROP DATABASE
+scratch_pr183_verify`), worktree removed (`git worktree remove --force`), Postgres service stopped
+(`sudo service postgresql stop`) - `service postgresql status` confirms `down`. No change made to
+PR #183's own branch or content this pass (this was re-verification only, not new work) - per the
+binding guardrail, PR #183 remains open, unmerged, untouched.
+
+**Part 2 - the main lead: `engine/discovery/gov_sources.py`'s 11-source family, closing out the
+open angle Finding 188's own pass named as "not yet exhaustively checked."** Read every one of the
+11 readers' own `fetch_releases()`/`normalize()` (or `sanral_releases()`) in full against
+`source_http.release()`'s complete field set, checking each omission against whether the
+underlying site genuinely has no equivalent data (the overwhelming majority - confirmed real, not
+a drop, for `province`/`briefing`/`modified_date`/`opening_date` across most sources) versus a
+field the reader's own parsing already has in hand and never wires through.
+
+**The real finding (Finding 189): `lephalale.py`'s `normalize()` never took the listing's own "Date
+uploaded" value as a parameter at all, so every Lephalale release's `published_date` was always
+`None`** - unlike `kouga.py`/`vaal_central_water.py`/`dbsa_procurement.py`/`cidb_tenders.py`/every
+other sibling with an equivalent field, all of which correctly pass theirs through.
+`parse_listing()`'s own docstring already correctly describes its return shape as `[(url, label,
+uploaded_date, closing_date)]` - the same "Date uploaded" column name and semantics as
+`vaal_central_water.py`'s own (confirmed from `test_lephalale.py`'s real `FIXTURE_LISTING`:
+`<th>Date uploaded</th>`, real values like `2026-10-05`) - and `fetch_releases()`'s own loop already
+read it correctly into a bound variable (`uploaded`) on every call; `normalize()`'s signature
+(`internal_ref, tnumber, desc, closing_dt, batch_url, batch_label`) simply had no parameter to
+receive it, so it was read off the live page and discarded before ever reaching
+`source_http.release()`. Two real, live downstream consumers silently lost this field's effect for
+Lephalale only: `tender_changes.diff_listing()`'s late-added-addendum detection on first sighting
+(gated on `published_date`, so it could never fire for a Lephalale release) and
+`tender_changes.relistings()`'s same-bid-number "which listing is newer" sort (falls back to an
+arbitrary `ocid`-string sort without `published_date`, risking exactly the wrong-newest-listing
+call its own docstring says Lephalale's own real re-advertisement pattern can trigger - the same
+mechanism `lephalale.py`'s own `_disambiguate_reused_refs()` already guards a narrower version of).
+**Fixed** with the smallest correct change: `normalize()` gained one new parameter, `uploaded=None`
+(default, so the pre-existing 6-positional-argument test call site keeps working unchanged), now
+passing `published_date=sh.iso_sast(uploaded)` through - the identical convention every sibling
+reader already uses for its own equivalent field. `fetch_releases()`'s own call site now passes its
+already-bound `uploaded` loop variable through as the 7th argument. No other function touched.
+
+**Verified red-then-green.** Two new checks added to `test_lephalale.py`'s existing "normalize() ->
+the shared release shape" section (`published_date` defaults to `None` without the new argument;
+a second `normalize()` call with the real fixture's own `uploaded` value produces
+`published_date == "2026-10-05T00:00:00+02:00"`). Red: reverted `lephalale.py` to its parent
+commit's content (`git show HEAD:engine/discovery/lephalale.py`) with the new test left unchanged -
+real exit `1`, failing exactly as predicted (`TypeError: normalize() takes 6 positional arguments
+but 7 were given` - the old signature has no 7th parameter for the new test's real value). Green:
+restored the fix - real exit `0`, all 41 checks pass, "ALL PASSED". `python3 engine/discovery/
+test_gov_sources.py` and `python3 engine/discovery/test_tender_changes.py` - both exit `0`, no
+regression in either of `published_date`'s two real consumers. Full `engine/` Python sweep -
+`find engine -name "test_*.py" | wc -l` = `86`, looped with plain `python3 <file>`, real exit codes
+captured directly - **86/86, 0 failures**, unchanged count. Python-only, single-file production
+change plus its own test file - no TypeScript/schema/other call-site touched, so
+`npm run typecheck`/`npx eslint .`/`npx vitest run`/`npx next build` were not re-run (same scope
+discipline as Finding 188).
+
+**Genuine negatives, closing out the `gov_sources.py` lead for this field set (full detail in
+Finding 189's own writeup):** `randwater.py` and `sanral` genuinely have no publish-date field on
+their own live pages/detail pages to drop (SANRAL's detail-page "Create Date" stat is a document
+timestamp, not the tender's own publish date, unlike "Last Updated"/`modified_date`, which is
+already correctly wired - a defensible, if underdocumented, choice, not a bug); every other
+`published_date`-bearing source (`etenders_portal`/`cidb_tenders`/`dbsa_procurement`/
+`eskom_bulletin`/`transnet_etenders`/`capetown_procurement`/`sars_procurement`/`kouga`/
+`vaal_central_water`) already correctly passes its own equivalent field through; `briefing` is
+genuinely only published by `etenders_portal`'s and `transnet_etenders`'s own sites (checked across
+all 11); `modified_date` is genuinely only available from `etenders_portal`/`eskom_bulletin`/
+`sanral` (checked across all 11), and all three already use it correctly. **This closes out the
+`gov_sources.py` 11-source field-set lead** named by Finding 188's own pass and the immediately
+preceding System-Status.md entry as "not claimed exhaustively checked" - no further divergence
+found after Finding 189's own fix.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 10 PRs remain open and unmerged, same set as every preceding
+pass - PR #183 untouched this pass (independently re-verified only, see Part 1; still `24a0153`,
+still open, unmerged). This pass's own new commit (`587d212`) pushed directly to `main` (small,
+safe, single-file Python fix plus its own test - no RLS/money-path/hard-stop-gate/worker-image
+surface touched), per the binding guardrails' own "small, safe fix -> push directly" rule. The
+`gov_sources.py` 11-source sink-field lead, open since Finding 188's own pass, is now genuinely
+closed out field-by-field - no further open angle left on this specific lead; a future pass should
+pick a new, as-yet-unswept family rather than re-walking this one.
+
+To verify independently: re-run this pass's own PR #183 scratch-Postgres reproduction (start
+Postgres, fresh scratch DB, replay `fix/onboarding-document-scan-confirm-race` at `24a0153^` for
+red / `24a0153` for green via `engine/security/replay_schema.sh`, seed company/member/principal/
+pending `onboarding_document_results`, call `apply_onboarding_id_document_checked()` as that member)
+and confirm the same red/green `reviewed_by` result; drop the database and stop Postgres after.
+Read `engine/discovery/lephalale.py`'s `normalize()` and confirm it takes a 7th parameter
+`uploaded=None` and passes `published_date=sh.iso_sast(uploaded)` through to `sh.release()`, and
+that `fetch_releases()`'s own call site passes its loop's `uploaded` variable as the 7th argument.
+Run `python3 engine/discovery/test_lephalale.py` and confirm 41/41 checks pass (exit `0`). Run
+`python3 engine/discovery/test_gov_sources.py` and `python3 engine/discovery/test_tender_changes.py`
+(both exit `0`). Re-run the full `engine/` sweep and confirm `86/86, 0 failures`. Confirm via
+`mcp__github__list_pull_requests` that all 10 PRs are still open/unmerged, that PR #183's branch
+head is still `24a0153`, and that `git log --oneline -1 origin/main` is this pass's own new commit
+(`587d212`, one ahead of `6f2d4b6`), with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07xxvi, standing solution-architect review): PR #183 `reviewed_by` follow-up fix (pushed to its branch, not merged) + engine-layer sibling-comparison sweep extended to `general/`, `discovery/`, `intake/`, `onboarding/`, `security/`, `pack_generator/`, `narrative/`, `worker/` + top-level form fillers - Finding 188 (`process_onboarding_jobs.fail_stale_uploads()`'s alerts never carried `company_id`, the identical bug class as Finding 186 found independently in a true sibling file, fixed), oriented from `e6af613`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `e3be115`
