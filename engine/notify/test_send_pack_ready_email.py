@@ -102,11 +102,55 @@ def test_skips_cleanly_when_already_claimed(monkeypatch):
     check("nothing was sent/logged once the claim came back already-taken", "record_notification_sent" not in rpc_names)
 
 
-def test_skips_cleanly_with_no_opted_in_recipients():
-    client = _base_client(recipients=[{"email": "b@example.com", "daily_digest_opt_in": False}])
+def test_skips_cleanly_with_no_valid_email_recipients():
+    client = _base_client(recipients=[{"email": "", "daily_digest_opt_in": True}])
     pr.send_pack_ready_email(client, _job(), 42, "https://tenderready.app")
     rpc_names = [c[0] for c in client.rpc_calls]
-    check("no send was logged when nobody is opted in", "record_notification_sent" not in rpc_names)
+    check("no send was logged when nobody has a usable email", "record_notification_sent" not in rpc_names)
+
+
+def test_sends_regardless_of_daily_digest_opt_in(monkeypatch):
+    """Standing-review finding, 2026-11-07: this used to filter recipients
+    on daily_digest_opt_in - but that flag is the unrelated "new tenders
+    discovered" digest opt-in (migration 0073; Notifications.tsx's own
+    toggle is literally labelled "daily digest", default off), not a
+    general "do I want email from this company" switch. Same reasoning as
+    lib/notificationRecipients.ts's own criticalBidRecipients() (2026-10-30),
+    which deliberately does NOT filter on it for corrigenda/returnables/
+    closing-deadline alerts - a pack with its own tight courier/print
+    deadline is exactly as time-critical as those. A company member who
+    never opted into the digest must still get told their own pack is
+    ready."""
+    client = _base_client(recipients=[
+        {"email": "never-opted-into-digest@example.com", "daily_digest_opt_in": False},
+    ])
+    rendered = {"subject": "s", "html": "<p>h</p>", "text": "t"}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        return FakeCompletedProcess(0, stdout=json.dumps(rendered))
+
+    sent_to = []
+
+    class FakeResp:
+        def read(self):
+            return json.dumps({"id": "resend-1"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout):
+        sent_to.append(json.loads(req.data.decode())["to"][0])
+        return FakeResp()
+
+    monkeypatch_module(pr.subprocess, "run", fake_run)
+    monkeypatch_module(pr.urllib.request, "urlopen", fake_urlopen)
+    pr.send_pack_ready_email(client, _job(), 42, "https://tenderready.app")
+
+    check("the pack-ready email was sent even though daily_digest_opt_in is False",
+          sent_to == ["never-opted-into-digest@example.com"], sent_to)
 
 
 def test_missing_api_key_does_not_claim_so_the_email_can_still_be_sent_once_one_is_added():
@@ -310,7 +354,8 @@ def monkeypatch_module(obj, attr, value, env=None):
 
 def main():
     test_skips_cleanly_when_already_claimed(None)
-    test_skips_cleanly_with_no_opted_in_recipients()
+    test_skips_cleanly_with_no_valid_email_recipients()
+    test_sends_regardless_of_daily_digest_opt_in(None)
     test_missing_api_key_does_not_claim_so_the_email_can_still_be_sent_once_one_is_added()
     test_happy_path_renders_sends_and_logs(None)
     test_render_failure_is_caught_and_never_raises(None)

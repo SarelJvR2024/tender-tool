@@ -1,5 +1,43 @@
 # System Status
 
+## This pass (2026-11-07y, standing solution-architect review): independently re-verified the
+immediately-preceding pass's `2899410` (Finding 160, founder-digest null-safe metric counts) in
+full - diff read, both new spec files run myself (13/13), a genuine manual red-then-green revert
+on `countScoutBacklog()` (reverted to `return 0`, confirmed the exact predicted
+`expected +0 to be null` failure, restored, confirmed green), and the full regression suite
+(`npm run typecheck` clean, `npx eslint .` 0 errors/3 warnings, `npx vitest run` 487/487 across 62
+files exactly matching the claim, node-test loop 28 files/0 failures) - all confirmed solid, no
+discrepancies. Then found and fixed a new, separate bug while continuing to read the notification
+engine: `engine/notify/send_pack_ready_email.py` was gating its recipients list on
+`daily_digest_opt_in` - the unrelated, default-off "new tenders discovered" digest toggle
+(migration 0073) - rather than sending to every company member unconditionally, the way
+`lib/notificationRecipients.ts`'s own `criticalBidRecipients()` already does (and explains why,
+in its own 2026-10-30 header comment) for exactly this class of time-critical, per-bid alert. Net
+effect: any company where nobody has ever clicked "Turn on daily digest" gets zero recipients for
+every "your bid pack is ready" email, silently - on top of, and independent from, PR #181's
+still-unmerged worker-image delivery fix. Finding 161.
+
+Oriented from `2899410` (immediately-preceding pass's own verified HEAD). `git fetch origin main`
+before starting and again right before writing this entry: clean both times, local matched
+`origin/main` exactly, no sibling commits landed during this pass. PRs re-checked via
+`mcp__github__list_pull_requests`: `#176`/`#178`/`#179`/`#180`/`#181` still open (`draft: false`),
+`#164`/`#165`/`#177` still drafts - all 8 unchanged, none merged or closed this pass. No PR was
+touched, amended or merged.
+
+**Fix, verified red then green.** `test_send_pack_ready_email.py`'s existing
+`test_skips_cleanly_with_no_opted_in_recipients` encoded the old, wrong behaviour as expected; run
+with only the source fix applied (test not yet updated) failed exactly that one test, exactly as
+predicted. Replaced it with a same-shape "no valid email" test and added
+`test_sends_regardless_of_daily_digest_opt_in` asserting the fixed behaviour - 0 failures. Full
+`engine/` sweep (real exit codes) - 86 files, 0 failures. `npm run typecheck`/`npx eslint .`/
+`npx vitest run`/node-test loop all unchanged (this fix touches no TypeScript). Full write-up:
+Finding 161 in `docs/specs/QA-Edge-Case-Findings.md`.
+
+**Pushed directly to `main`** - one-line behavioural change plus its test, confined to a single
+already-isolated sender function, no RLS/money/hard-stop/worker-image surface touched.
+
+---
+
 ## This pass (2026-11-07x, standing solution-architect review): found and fixed a real instance of
 this review's own dominant bug class one hop further downstream than usual - not a page's empty
 state or a discovery script's silent fallback, but the rendered business number itself, inside the

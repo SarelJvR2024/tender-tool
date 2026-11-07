@@ -17,6 +17,15 @@ every TypeScript sender already uses (migration 0093) - called here via
 client.rpc(), not a second Python-only dedupe mechanism. Shows up in
 /admin/notifications identically to every other notification type.
 
+Recipients: every company_members email, with no daily_digest_opt_in
+filter - same reasoning as lib/notificationRecipients.ts's own
+criticalBidRecipients() (2026-10-30). That flag is the unrelated
+"new tenders discovered" digest opt-in (migration 0073); filtering a
+pack-ready notification on it would mean a company's own bidding team
+silently never hears their pack - with its own tight courier/print
+deadline - is ready, unless someone found and clicked a toggle labelled
+"daily digest" (fixed 2026-11-07, standing review finding).
+
 Never raises into the caller: a failure here (render, Resend, logging) must
 not fail the pack job itself - the pack is real and already uploaded by the
 time this runs, so the worst case is a missed/delayed email, not a lost
@@ -111,7 +120,19 @@ def send_pack_ready_email(client, job, page_count, app_url):
             return
 
         recipients_raw = client.rpc("company_notification_recipients", {"p_company_id": company_id})
-        recipients = [r["email"] for r in recipients_raw if r.get("daily_digest_opt_in") and r.get("email") and "@" in r["email"]]
+        # NOT gated on daily_digest_opt_in - same reasoning as
+        # lib/notificationRecipients.ts's own criticalBidRecipients()
+        # (2026-10-30, used for corrigenda/returnables/closing-deadline
+        # alerts): that flag is the "new tenders discovered" digest opt-in
+        # only (migration 0073; app/app/company/Notifications.tsx's own
+        # toggle is literally labelled "daily digest", default off), not a
+        # general "do I want email from this company" switch. Found
+        # 2026-11-07: this file was filtering on it anyway, so any company
+        # member who never opted into the unrelated discovered-tenders
+        # digest silently never got told their own bid pack - with its own
+        # tight courier/print deadline, per this module's own header
+        # comment - was ready.
+        recipients = [r["email"] for r in recipients_raw if r.get("email") and "@" in r["email"]]
         if not recipients:
             return
 

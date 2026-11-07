@@ -9747,3 +9747,74 @@ app/lib/emailTemplatesTier3.spec.ts` and confirm 13/13 pass. Read
 `app/lib/emailTemplatesTier3.ts`'s `founderDailyDigestEmail()` and confirm `metric(null)` returns
 `"Couldn't load"`, not `"0"` or `"null"`. Read `app/scripts/send-founder-digest.ts`'s 4 `count*()`
 functions and confirm each `return null;` (not `return 0;`) on its own `if (error)` branch.
+
+---
+
+### Finding 161 (CONFIRMED, FIXED, moderate - `engine/notify/send_pack_ready_email.py` gated a
+time-critical, per-bid-pack notification on the unrelated "new tenders discovered" digest opt-in,
+so any company member who never opted into that digest silently never got told their own bid pack
+was ready)
+
+**Area:** `engine/notify/send_pack_ready_email.py` (`send_pack_ready_email()`'s recipient filter).
+
+**How this was found.** Reading `send_pack_ready_email.py` end to end as part of this chain's
+continuing sweep of the notification engine (the same module PR #181 fixed the worker-image
+delivery path for). Its recipient lookup calls `company_notification_recipients()` and then
+filtered the result on `r.get("daily_digest_opt_in")` - identical in shape to
+`lib/notificationRecipients.ts`'s own `operationalRecipients()`. But that flag (migration 0073) is
+specifically the "new tenders discovered" digest opt-in, default off, surfaced in
+`app/app/company/Notifications.tsx` under a toggle literally labelled "Turn on daily digest" -
+confirmed by reading that component's own header comment ("digest email only ... Narrowed to 'new
+opportunities only'") and `daily_digest.py`'s own real digest sender, the only other place in the
+codebase this flag legitimately gates anything. `lib/notificationRecipients.ts` already drew this
+exact distinction on 2026-10-30, adding a second, unfiltered `criticalBidRecipients()` specifically
+for "critical, bid-specific" alerts (corrigenda, returnables blockers, closing-deadline reminders)
+with its own header comment spelling out why: "the opt-in flag is a preference about the
+discovered-tenders digest only ... gating these three on it would mean a company's own bidding
+team silently misses an addendum or a closing deadline unless someone found and clicked a toggle
+described as a generic 'daily digest'." A pack-ready notification - this module's own header
+comment says instant delivery matters because "teams are often working against tight
+courier/print deadlines" - is exactly as time-critical and exactly as per-bid as those three, but
+this Python sender had duplicated the wrong (digest-gated) TypeScript pattern instead of the
+right (ungated) one.
+
+**Consequence.** Any company member who never opted into the unrelated "new tenders discovered"
+digest - the default state for every member, since that opt-in is off until explicitly turned on -
+never received the "your bid pack is ready" email at all, regardless of whether PR #181's
+worker-image fix is deployed. Not a transient/intermittent gap: for a company where nobody has
+ever clicked "Turn on daily digest," 100% of that company's `pack_ready` emails go to zero
+recipients, silently (`send_pack_ready_email()` returns cleanly with no `system_alerts` row, since
+an empty recipient list reads as "nothing to do," not a failure - itself the dominant bug-class
+shape, just one step upstream: the ambiguity here is "opted out of X" being silently treated as
+"opted out of this unrelated Y" rather than a discarded error, but the end state is the same
+silent, unrecoverable loss this whole review tracks).
+
+**Fix.** Removed the `daily_digest_opt_in` filter from the recipients list in
+`send_pack_ready_email()` - now keeps every `company_notification_recipients()` row with a usable
+email, same unfiltered shape as `criticalBidRecipients()`. Added a header comment on the function
+and a module-docstring line naming the reasoning and precedent explicitly, so this doesn't
+regress back to the wrong pattern later.
+
+**Verified genuinely, red then green.** `engine/notify/test_send_pack_ready_email.py` had an
+existing test, `test_skips_cleanly_with_no_opted_in_recipients`, that asserted the *old, wrong*
+behaviour (a recipient with `daily_digest_opt_in: False` gets no email) - ran the full suite
+against the fix with that test still in place first: 1 failure, exactly that test, exactly as
+predicted (`FAIL no send was logged when nobody is opted in`). Replaced it with
+`test_skips_cleanly_with_no_valid_email_recipients` (a genuine empty-email case, still correctly
+skipped) and added `test_sends_regardless_of_daily_digest_opt_in`, asserting a recipient with
+`daily_digest_opt_in: False` now receives the email - reran: 0 failures. Full `engine/` sweep
+(real exit codes, not grep) - 86 files, 0 failures, unchanged. `npm run typecheck` - 0 errors.
+`npx eslint .` - 0 errors, same 3 pre-existing warnings. `npx vitest run` - 487/487, 62 files,
+unchanged (this fix touched no TypeScript). Per-file `*.test.ts` node loop (no `--test` flag) -
+28 files, 0 failures, unchanged.
+
+**Regression:** `engine/notify/send_pack_ready_email.py` (recipient filter + header comment,
+~10 lines). `engine/notify/test_send_pack_ready_email.py` (one test replaced, one added).
+
+**Pushed directly to `main`** - a one-line behavioural change plus its test, confined to a single
+already-isolated sender function, does not touch RLS/money paths/hard-stop gates, and does not
+change what the production worker image installs/copies.
+
+To verify independently: run `python3 engine/notify/test_send_pack_ready_email.py` and confirm
+`0 failure(s)`. Read `send_pack_ready_email()`'s recipient filter and confirm it checks only
+`r.get("email")`/`"@" in r["email"]`, with no `daily_digest_opt_in` condition.
