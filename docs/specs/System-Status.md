@@ -1,5 +1,129 @@
 # System Status
 
+## This pass (2026-11-07ix, standing solution-architect review): oriented from `85ffaee`
+(immediately-preceding pass's own verified HEAD, `classify_tender.py`'s `find_nra_reference()`
+finishing check, genuine negative that closed out that file's whole real-document methodology).
+`git fetch origin main` clean, local matched `origin/main` exactly at the start and again
+immediately before this pass's own push - `85ffaee` throughout, no sibling commits landed during
+this pass. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/
+`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165`(both draft) are all
+still open, same `updated_at` timestamps every preceding pass has recorded (`#182`
+2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since. Grepped `Finding [0-9]+` in
+`docs/specs/QA-Edge-Case-Findings.md` myself - 173 is still the highest recorded, confirming no
+new finding landed from the sibling session either.
+
+**This pass's angle: picked lead (b)'s discovery re-sweep, specifically
+`engine/discovery/transnet_etenders.py`** - of the 7 direct-buyer readers named in the handoff
+(`transnet_etenders.py`/`randwater.py`/`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/
+`lephalale.py`/`sars_procurement.py`), checked each one's own `git log` first: `dbsa_procurement.py`
+and `sars_procurement.py` already have 3 real prior fixes each, `lephalale.py` 2,
+`vaal_central_water.py`/`kouga.py` 1 each, while `transnet_etenders.py` and `randwater.py` have
+**zero** prior fixes to the reader itself (only test-fixture/batch-cleanup commits) - the least
+re-trodden ground, per the handoff's own steer to pick the fewest-prior-fixes files. Tried
+`randwater.py` first (re-confirmed its own documented limitation still holds, see below), then did
+the real, thorough work on `transnet_etenders.py`.
+
+**Method: real live `curl`/HTTP calls through the session's own proxy against the actual API the
+module calls, running the module's own unmodified code against the real response - not a re-read
+of the file or its one existing fixture.** `curl`'d
+`https://transnetetenders.azurewebsites.net/Home/GetAdvertisedTenders` directly (200, 109,716
+bytes, read 2026-11-07): 104 real open tenders across 7 divisions (TNPA 59, TFR 30, TCC 5, TPL 4,
+TPT 4, TE 1, TP 1 - every `DIVISIONS` key the module maps actually occurs live, no fallback-label
+path exercised). Then ran the module's REAL `fetch_documents()`/`normalize()`/`briefing()`/
+`DOC_LINK` against every one of the 104 rows' own live detail pages
+(`/Home/TenderDetails?Id=<rowKey>`), in a standalone `python3 -I` harness importing
+`transnet_etenders` directly (not a guess from reading HTML by eye):
+- **Dates**: all 104 rows' `closingDate`/`publishedDate`/and every present `briefingDate` parsed
+  through `sh.iso_sast()` with zero failures (0/104) - today's live data never exercises a format
+  `source_http.py`'s `_US_DT` regex doesn't already expect.
+- **Document links**: fetched all 104 real detail pages and ran `fetch_documents()` on each - zero
+  exceptions, 0-28 documents per tender (avg 4.4), zero titles containing quote characters that
+  could have broken the regex's `['"]`-delimited capture. Cross-checked with a deliberately
+  *broader* `href=...blob.core.windows.net...` regex against the same 104 raw pages to see if the
+  module's exact-subdomain-matching `DOC_LINK` (`publishedetenders\.blob\.core\.windows\.net`
+  literally) was silently missing any differently-hosted blob link - **zero mismatches across all
+  104 pages**, every single blob href on every page is one the module's own regex already catches.
+- **The 2 tenders with 0 documents** (`TNPA/2026/10/0007/114899/RFP`,
+  `TPT/2026/10/0002/115112/RFQ`) were individually inspected in raw HTML: both have only the
+  hidden, `style="display:none"` `_AttachmentReferenceLink` div (the bare container-root URL, no
+  filename) and no visible per-file `<a>` link at all - a genuine "no documents published yet"
+  state, not a scraper gap.
+- **The list JSON's own `attachment` field** (present on all 104 rows, never read by `normalize()`
+  or `fetch_documents()`) was checked against the real detail-page document lists for one tender
+  per division (7 rows) - it is always just the bare container-root URL (same value as the hidden
+  `_AttachmentReferenceLink` div, no filename, not a real downloadable document), confirming the
+  module is correct to ignore it rather than missing a usable field.
+- **Uniqueness/collision risk** (the exact bug class already fixed in `dbsa_procurement.py` and
+  `kouga.py` - a reused ref colliding two listings onto one ocid): all 104 live `rowKey` values and
+  all 104 `tenderNumber` values are unique - `ocid=f"transnet-etenders:{rowKey}"` has no live
+  collision to produce.
+- **`briefing()`'s compulsory-detection**: live distribution across all 104 rows is
+  `True: 11, False: 42, None (ambiguous, no keyword at all): 43` - spot-checked several of the 43
+  "no keyword" cases (e.g. "MS TEAMS", "Click here to join the meeting") and confirmed `None` is
+  the honest, correct answer, not a bug - the module isn't supposed to guess compulsory/voluntary
+  from a bare venue string.
+- `recordsFiltered`/`totalCount` both equal 104, matching `len(result)` exactly - no server-side
+  pagination silently truncating the list the way the brief's own randwater.py note flags as a
+  real risk class for a different source.
+
+**`randwater.py` lead: re-confirmed its own documented live-fetch limitation still holds, not a
+new finding.** Tried `curl` (direct, and again with `--cacert /root/.ccr/ca-bundle.crt`) against
+`https://bids.randwater.co.za/Public/Procurement/Bids/ViewPublishedBids.aspx` - both attempts
+failed with the exact same `SSL certificate problem: unable to get local issuer certificate` the
+module's own docstring already documents from 2026-10-20. Confirmed this is the target site's own
+certificate chain, not this session's proxy: `curl $HTTPS_PROXY/__agentproxy/status` shows the
+proxy itself healthy (`"enabled": true`, `"bundleCoversEveryHost": true`, no relay failures), and
+the same proxy fetched `transnetetenders.azurewebsites.net` and `nra.co.za` cleanly in this same
+pass. `randwater.py` remains genuinely untested against its live site, exactly as its own docstring
+already says - this is a re-confirmation, not new ground, so no docstring change was needed.
+
+**Genuine, thoroughly-earned negative result on `transnet_etenders.py` - no new finding, nothing
+fixed, reported honestly per the standing brief rather than forced**, this chain's 5th consecutive
+negative. Per the brief's own steer after 4 negatives in a row, this pass made a real effort before
+concluding it: live-fetched the actual list API, ran the module's real document-fetching code
+against all 104 live detail pages (not a sample), checked the previously-unread `attachment` list
+field against real detail pages, checked for the exact collision/pagination/subdomain-mismatch bug
+classes this codebase's other readers have actually had, and inspected the 2 zero-document cases
+individually rather than assuming they were a parsing miss - and every one of those checks came
+back clean against today's real, live data.
+
+**Verification.** `cd engine/discovery && python3 test_gov_sources.py` - real exit code `0`
+captured directly (not through a grepped pipe), "ALL PASSED" (no code changed, so this is a
+regression check, not a red-then-green cycle - there was no fix to cycle). Full `engine/` sweep,
+each file run individually with its own real exit code captured before any pipe:
+`find engine -name "test_*.py" | wc -l` = `86`; looped every one with plain `python3 <file>` -
+`TOTAL=86 FAILED_FILES_COUNT=0`, matching the standing baseline exactly, unchanged.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged,
+same set as recorded by every preceding pass - none touched, amended, or merged by this pass.
+`transnet_etenders.py` is now genuinely checked live and closed out for this round -
+`randwater.py` remains blocked from live verification by its own target site's TLS chain problem
+(re-confirmed, not new), and `dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/
+`lephalale.py`/`sars_procurement.py` remain the still-not-re-swept-this-round readers from Finding
+173's own backlog note, each already carrying 1-3 prior real fixes (so not virgin territory,
+per the handoff's own caveat) - a concrete angle for a future pass. The remaining ~215 lines of
+`app/app/tenders/[id]/actions.ts` beyond line ~440 and every `.tsx` file under that directory also
+remain untouched, as `2026-11-07vi`/`vii` left them.
+
+To verify independently: `curl
+https://transnetetenders.azurewebsites.net/Home/GetAdvertisedTenders` yourself (set the
+`X-Requested-With: XMLHttpRequest` header to match what `fetch_list()` sends) and compare the real
+JSON shape against `engine/discovery/transnet_etenders.py`'s `normalize()`/`briefing()`;
+`curl .../Home/TenderDetails?Id=<any live rowKey>` and compare against `DOC_LINK`. Try `curl
+https://bids.randwater.co.za/Public/Procurement/Bids/ViewPublishedBids.aspx` yourself and confirm
+the same TLS chain error still reproduces. Run `cd engine/discovery && python3
+test_gov_sources.py` and confirm exit `0`/"ALL PASSED". Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged at the same `updated_at`
+timestamps listed above, and that `git log --oneline -1 origin/main` is this pass's own new
+docs-only commit (one ahead of `85ffaee`), with no further sibling commits having landed in
+between.
+
+---
+
 ## This pass (2026-11-07viii, standing solution-architect review): oriented from `99a3fb6`
 (immediately-preceding pass's own verified HEAD, `capetown_procurement.py`'s live refetch, genuine
 negative). `git fetch origin main` clean, local matched `origin/main` exactly at the start and
