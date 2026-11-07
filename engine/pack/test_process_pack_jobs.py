@@ -50,9 +50,14 @@ class FakeClient:
 
     def __init__(self, rows):
         self.rows = rows
+        self.upserted = []  # (table, rows, on_conflict) - recorded, not applied to self.rows
 
     def select(self, table, filters=None, order=None):
         return [r for r in self.rows if all(r.get(k) == v for k, v in (filters or {}).items())]
+
+    def upsert(self, table, rows, on_conflict):
+        self.upserted.append((table, rows, on_conflict))
+        return rows
 
     def update(self, table, filters, body):
         matched = [r for r in self.rows if all(r.get(k) == v for k, v in (filters or {}).items())]
@@ -261,6 +266,121 @@ def test_process_job_sends_the_pack_ready_email_on_success():
         check("...with APP_URL", sent_app_url == ppj.APP_URL, sent_app_url)
 
 
+def test_process_job_writes_field_provenance_to_the_db_on_success():
+    print("process_job(): on a successful SANRAL pack build, the merged field_provenance.json "
+          "is now upserted into the field_provenance table (tender_pack_id, last write wins on a "
+          "repeated field_key) - the Finding this pass fixed: this bridge only ever wrote a "
+          "field_provenance.json FILE, never a DB row, while its general-family sibling "
+          "(process_general_jobs.py's run_pack()) has upserted it since that engine's own first "
+          "commit. The Tender Workspace readiness report / Pack Review 'Form answers' / "
+          "compliance report all read this table by tender_pack_id and showed nothing for any "
+          "real SANRAL pack as a result.")
+    work_root = tempfile.mkdtemp(prefix="test_pack_field_provenance_work_root_")
+    job = {"id": "job-1", "status": "requested", "engine": "sanral",
+           "company_id": "co-a", "tender_id": "t-a", "tender_pack_id": "pack-xyz"}
+    client = FakeClient([dict(job)])
+
+    def fake_gather(client, job, work):
+        return {}
+
+    def fake_build_submission_pack(work_dir, **kwargs):
+        os.makedirs(work_dir, exist_ok=True)
+        pdf_path = os.path.join(work_dir, "submission_pack.pdf")
+        fin_path = os.path.join(work_dir, "financial.pdf")
+        prov_path = os.path.join(work_dir, "field_provenance.json")
+        open(pdf_path, "wb").close()
+        open(fin_path, "wb").close()
+        import json as _json
+        _json.dump([
+            {"field_key": "a_forms.A8.litigation", "status": "confirmed", "value": "No", "reason": None,
+             "source": "fill_a_forms.py"},
+            # Same field_key written twice (e.g. by two merged fillers) - last write wins,
+            # same rule process_general_jobs.py's own write already applies.
+            {"field_key": "contract_data.henning_email", "status": "missing", "value": None,
+             "reason": "stale draft", "source": "fill_docx_forms.py"},
+            {"field_key": "contract_data.henning_email", "status": "confirmed", "value": "henning@klipcorp.co.za",
+             "reason": None, "source": "fill_docx_forms.py"},
+        ], open(prov_path, "w"))
+        return pdf_path, {
+            "page_count": 42, "sections": ["s1"], "omitted": [],
+            "financial": {"page_count": 5},
+            "outputs": {"pdf": pdf_path, "financial_pdf": fin_path, "field_provenance": prov_path},
+        }
+
+    real_gather, real_build, real_verify, real_send = (
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email)
+    ppj.gather = fake_gather
+    ppj.build_submission_pack = fake_build_submission_pack
+    ppj.verify_pack = lambda pdf, manifest: []
+    ppj.send_pack_ready_email = lambda client, job, page_count, app_url: None
+    try:
+        manifest = ppj.process_job(client, job, work_root, keep=True)
+    finally:
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email = (
+            real_gather, real_build, real_verify, real_send)
+        shutil.rmtree(work_root, ignore_errors=True)
+
+    check("process_job() returns the real manifest on success", manifest is not None, manifest)
+    check("exactly one field_provenance upsert was made", len(client.upserted) == 1, client.upserted)
+    if client.upserted:
+        table, rows, on_conflict = client.upserted[0]
+        check("...into the field_provenance table", table == "field_provenance", table)
+        check("...on_conflict is tender_pack_id,field_key (matches the unique constraint)",
+              on_conflict == "tender_pack_id,field_key", on_conflict)
+        by_key = {r["field_key"]: r for r in rows}
+        check("exactly 2 distinct field_key rows (the duplicate key collapsed to one)",
+              len(rows) == 2, rows)
+        check("every row carries THIS job's own tender_pack_id",
+              all(r["tender_pack_id"] == "pack-xyz" for r in rows), rows)
+        check("the non-duplicated field carries its own confirmed value",
+              by_key.get("a_forms.A8.litigation", {}).get("value") == "No", by_key)
+        check("the duplicated field_key kept the LAST entry (confirmed), not the first (missing)",
+              by_key.get("contract_data.henning_email", {}).get("status") == "confirmed", by_key)
+        check("...with the last entry's own value",
+              by_key.get("contract_data.henning_email", {}).get("value") == "henning@klipcorp.co.za", by_key)
+
+
+def test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent():
+    print("process_job(): no field_provenance.json in outputs (or an empty one) must not crash "
+          "or upsert an empty batch - same defensive shape as process_general_jobs.py's own "
+          "`if prov_pack and res[\"provenance\"]:` guard")
+    work_root = tempfile.mkdtemp(prefix="test_pack_field_provenance_absent_work_root_")
+    job = {"id": "job-1", "status": "requested", "engine": "sanral",
+           "company_id": "co-a", "tender_id": "t-a", "tender_pack_id": "pack-xyz"}
+    client = FakeClient([dict(job)])
+
+    def fake_gather(client, job, work):
+        return {}
+
+    def fake_build_submission_pack(work_dir, **kwargs):
+        os.makedirs(work_dir, exist_ok=True)
+        pdf_path = os.path.join(work_dir, "submission_pack.pdf")
+        fin_path = os.path.join(work_dir, "financial.pdf")
+        open(pdf_path, "wb").close()
+        open(fin_path, "wb").close()
+        return pdf_path, {
+            "page_count": 42, "sections": ["s1"], "omitted": [],
+            "financial": {"page_count": 5},
+            "outputs": {"pdf": pdf_path, "financial_pdf": fin_path},  # no "field_provenance" key at all
+        }
+
+    real_gather, real_build, real_verify, real_send = (
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email)
+    ppj.gather = fake_gather
+    ppj.build_submission_pack = fake_build_submission_pack
+    ppj.verify_pack = lambda pdf, manifest: []
+    ppj.send_pack_ready_email = lambda client, job, page_count, app_url: None
+    try:
+        manifest = ppj.process_job(client, job, work_root, keep=True)
+    finally:
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email = (
+            real_gather, real_build, real_verify, real_send)
+        shutil.rmtree(work_root, ignore_errors=True)
+
+    check("process_job() still returns the real manifest, no crash", manifest is not None, manifest)
+    check("no field_provenance upsert was attempted", client.upserted == [], client.upserted)
+
+
 def test_suggested_person_label_flags_a_real_override_even_when_unresolved():
     print("Finding 167: _suggested_person_label() must still flag a real AI-suggestion "
           "override even when the suggested person's own row was never fetched into this "
@@ -294,6 +414,8 @@ def main():
     test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response()
     test_process_job_sends_the_pack_ready_email_on_success()
+    test_process_job_writes_field_provenance_to_the_db_on_success()
+    test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent()
     test_suggested_person_label_flags_a_real_override_even_when_unresolved()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

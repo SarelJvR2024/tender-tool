@@ -1,5 +1,89 @@
 # System Status
 
+## This pass (2026-11-07xxix, standing solution-architect review, background worker): Finding 190 - `process_pack_jobs.py` (SANRAL) has never written a `field_provenance` DB row, unlike its general-family sibling - fixed, pushed to `main`; `own_path()`/authority-letter-template sibling leads closed out as genuine negatives, oriented from `de37b03`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`de37b03` (the immediately preceding pass's own two-genuine-negatives entry below). Re-checked
+again immediately before this pass's own push - still `de37b03`, no sibling commit landed in
+between. Re-checked all 10 open PRs via `mcp__github__list_pull_requests`: same set as every
+preceding pass (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing
+merged, closed, or rebased by anyone since. Per the binding guardrails, #164/#165 were not
+touched, no PR was opened or merged, and neither Finding 168 nor the `start_payfast_checkout()`
+revenue-integrity gap was implemented. No scratch Postgres database, worktree, or temp branch was
+created this pass (the fix was verified with an in-memory `FakeClient`, the same harness
+`test_process_pack_jobs.py` already uses - no live database needed) - nothing to clean up.
+
+**Method, per this pass's own brief: `process_pack_jobs.py` vs. `process_general_jobs.py`'s
+"other shared patterns beyond the alert-context one already checked"** - template loading,
+document-path validation (`own_path()`), provenance logging. Read both bridges' full
+`process_job()`/`run_pack()` end to end comparing every write each makes.
+
+**Finding 190 (severe, fixed): the SANRAL pack bridge has never written a single
+`field_provenance` row to the database.** `process_general_jobs.py`'s `run_pack()` upserts
+`field_provenance` after every successful general-pack build (confirmed in that engine's own
+first commit, `d050bdb`, 2026-10-16); `process_pack_jobs.py` only ever produces a
+`field_provenance.json` FILE (via `assemble_pack.py`/`run_forms_pipeline.py`) and never persists
+it - confirmed by reading this file's ENTIRE git history (`git log -p --follow`), not just its
+current content: the string appears only in comments/docstrings across every revision, never a
+DB write. Three real, live consumers read this table by `tender_pack_id` expecting a real engine
+run to have populated it, and have shown nothing for every real SANRAL pack since Pack Review
+(migration `0059`) shipped: `app/app/tenders/[id]/page.tsx`'s own "3-bucket readiness report",
+`pack-review-data.ts`'s "Form answers" section, and `compliance-data.ts`'s compliance report. The
+one place `field_provenance` rows have ever existed for a SANRAL-shaped pack is
+`seed_demo_company.py`'s own direct insert for the Mzansi demo company - never for a real
+customer. Presentation-only (not a hard-stop gate - `requestSubmissionPack()`'s own readiness
+check never reads this table), but total blast radius: every real SANRAL pack, ever, since the
+real job-queue bridge went live. Fixed by adding `SupabaseRest.upsert()` to
+`process_pack_jobs.py` (identical shape to `process_general_jobs.py`'s own, the same kind of gap
+the pack-ready-email fix already found and fixed for `.rpc()` on this same class) and a new
+field_provenance-write block in `process_job()`, reading the already-produced local JSON file and
+upserting it with the same "last write wins on a repeated field_key" dedup rule
+`process_general_jobs.py` already applies. `job["tender_pack_id"]` is reused directly - already
+re-derived and company/tender-matched by `gather()` earlier in the same function. No schema/
+migration/RPC change: reuses the existing table and its existing unique constraint exactly as the
+general bridge already does. Full detail, including the red-then-green reproduction (real exit
+`1` -> real exit `0`) and the full verification suite, is in `QA-Edge-Case-Findings.md`'s Finding
+190 - not repeated here.
+
+**Two sibling-comparison leads chased from the same read, both closed out as genuine negatives:**
+(1) `own_path()`/cross-tenant storage-path validation - `process_general_jobs.py`'s
+`download_tender_documents()` reads `tenders.document_urls`'s `storage_path` with no `own_path()`
+call, unlike every other client-writable storage path either file reads. Looked like a missing
+defense-in-depth call; traced the actual write path and found it is already defended twice over -
+the TS `cleanDocuments()` (`app/app/tenders/new/actions.ts`) rejects any path outside the caller's
+own `manual/<companyId>/<tenderId>/` prefix before the RPC call, and the RPC itself
+(`_manual_tender_documents()`, migration `0024`) independently re-validates the identical prefix
+server-side in SQL. Private documents on a shared tender are separately re-checked by
+`private_documents_for()`'s own prefix check. Real, already-existing defense-in-depth, not a gap.
+(2) `load_document_templates()` (company authority-letter templates) has no equivalent in
+`process_general_jobs.py` - checked and ruled out: general tenders have no fixed, buyer-issued
+authority-letter FORM the way SANRAL's Form A1 is, so there is no template mechanism for the
+general bridge to have been missing. A real architectural difference, not a dropped feature.
+
+**The optional `CV_KEYWORDS`/`sacnasp`/`sagc` tightening named in this pass's brief as a
+low-priority fallback was NOT done** - this finding was judged a better use of the time, per the
+brief's own stated priority ("only do this if your main task... doesn't turn up anything
+better"). Not written up as a QA Finding (it remains the prior pass's own "future tightening"
+note, not a bug).
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 10 PRs remain open and unmerged, same set as every
+preceding pass - nothing merged by anyone else. Pushed directly to `main` per the binding
+guardrails' own "small, safe fix -> push directly" rule (single-file Python production change
+plus its own test file, presentation-only, no RLS/money-path/hard-stop-gate/schema/RPC/worker-
+image surface touched).
+
+To verify independently: `grep -n "upsert" engine/pack/process_pack_jobs.py` and confirm both the
+new `SupabaseRest.upsert()` method and its one call site inside `process_job()` exist. Run
+`python3 engine/pack/test_process_pack_jobs.py` and confirm all checks pass (exit `0`), including
+the two new field_provenance tests. Run the full `engine/` sweep (`find engine -name
+"test_*.py"`, loop with plain `python3 <file>`) and confirm `86/86, 0 failures`. Confirm via
+`mcp__github__list_pull_requests` that all 10 PRs are still open/unmerged, and that `git log
+--oneline -1 origin/main` is this pass's own new commit, with no sibling commits having landed in
+between.
+
+---
+
 ## This pass (2026-11-07xxviii, standing solution-architect review, background worker): two named sibling-comparison leads swept to completion, BOTH genuine negatives - no new finding, no code change, nothing pushed, oriented from `143e1b1`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `143e1b1`

@@ -202,6 +202,14 @@ class SupabaseRest:
                         {"Content-Type": "application/json"})
         return json.loads(out or b"[]")
 
+    def upsert(self, table, rows, on_conflict):
+        # Same shape as engine/general/process_general_jobs.py's own
+        # Supabase.upsert() - process_job() calls this for field_provenance,
+        # the SAME way its general-family sibling already does.
+        out = self._req("POST", f"/rest/v1/{table}?on_conflict={on_conflict}", rows,
+                        {"Prefer": "return=representation,resolution=merge-duplicates"})
+        return json.loads(out) if out else []
+
     def download(self, bucket, path, dest):
         data = self._req("GET", f"/storage/v1/object/{bucket}/{urllib.parse.quote(path)}")
         os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -756,6 +764,36 @@ def process_job(client, job, work_root, keep=False):
                           CONTENT_TYPES.get(os.path.splitext(local)[1], "application/octet-stream"))
             uploaded[key] = remote
         pdf_remote = uploaded.pop("pdf")
+
+        # Finding, standing review 2026-11-07: this SANRAL bridge has never
+        # written a single field_provenance row for a real pack - only
+        # merged field_provenance.json into a FILE (assemble_pack.py,
+        # run_forms_pipeline.py), same as its general-family sibling used to
+        # before process_general_jobs.py's own run_pack() started upserting
+        # it into the DB (field_provenance table, migration 0002) on every
+        # successful build. The Tender Workspace's own readiness report
+        # (page.tsx), Pack Review's "Form answers" section (pack-review-
+        # data.ts) and the compliance report (compliance-data.ts) all read
+        # this table by tender_pack_id, expecting a real engine run to have
+        # populated it - for SANRAL that has never happened outside the demo
+        # seed script (seed_demo_company.py), so all three have shown
+        # nothing for every real SANRAL pack since Pack Review (0059)
+        # shipped. job["tender_pack_id"] is already re-derived and company/
+        # tender-matched by gather() above (raises ValueError otherwise,
+        # aborting before this point ever runs) - safe to reuse directly,
+        # same trust boundary this function already relies on for
+        # job["company_id"]/job["tender_id"] in its own except block below.
+        prov_path = outputs.get("field_provenance")
+        if prov_path and os.path.exists(prov_path):
+            entries = json.load(open(prov_path))
+            seen = {}
+            for e in entries:
+                seen[e["field_key"]] = e  # last write wins, same as process_general_jobs.py's own write
+            if seen:
+                client.upsert("field_provenance", [{"tender_pack_id": job["tender_pack_id"],
+                                                     **{k: e[k] for k in ("field_key", "status", "value", "reason", "source")}}
+                                                    for e in seen.values()], "tender_pack_id,field_key")
+
         client.update("pack_generation_jobs", {"id": job["id"]}, {
             "status": "ready", "storage_path_pdf": pdf_remote, "output_files": uploaded,
             "page_count": manifest["page_count"], "manifest": manifest, "completed_at": _ts(),
