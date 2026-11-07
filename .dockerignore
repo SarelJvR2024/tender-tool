@@ -1,8 +1,19 @@
-# For engine/worker/Dockerfile (build context = repo root). The worker only
-# needs engine/, templates/ and config/test_companies/; keep the Next.js
-# app, its node_modules, generated output and local state out of the image.
+# For engine/worker/Dockerfile (build context = repo root). The worker needs
+# engine/, templates/, config/test_companies/, and - since
+# engine/notify/send_pack_ready_email.py shells out to `node` to render
+# packReadyEmail() via app/scripts/render-pack-ready-email.ts, the one
+# canonical TS email template - app/lib and app/scripts too (System-Status.md
+# Finding 152: a blanket `app` exclusion here meant that script, and its
+# cwd, never existed in the built image, so the pack-ready email has never
+# actually sent in production). Everything else under app/ (the Next.js app
+# itself, its node_modules/.next, and any real .env* file) stays out -
+# Docker can't re-include a file under an excluded parent, so these are
+# listed individually rather than as a single `app` line with exceptions.
 .git
-app
+app/node_modules
+app/.next
+app/.env*
+!app/.env*.example
 out
 packs
 state
