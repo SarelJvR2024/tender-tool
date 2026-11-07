@@ -371,6 +371,19 @@ def test_find_closing_time_single_ambiguous_and_formats():
               "The closing time and date for receipt of tenders is 2:00pm on 5 December 2026. "
               "The closing time and date for receipt of tenders is 14:00 on 5 December 2026."
           ) == {"value": "14:00", "ambiguous": False})
+    # Finding 170 (2026-11-07): BOTH real on a real, current SANRAL Book 1
+    # (N.003-010-2027/3R, clause C.2.15) - a day-of-week name right before
+    # the time, AND "for submission of tender offers" instead of the only
+    # phrasing this module's docstring had confirmed ("for receipt of
+    # tenders"). Confirmed live before fixing: this exact sentence returned
+    # None, falling back to the 11:00 placeholder on a real, currently open
+    # tender instead of its real stated time (12:00).
+    check("a day-of-week name right before the time is skipped, not a blocker",
+          ct.find_closing_time("The closing time for submission of tender offers is Friday, 12H00 on the 24 July 2026")
+          == {"value": "12:00", "ambiguous": False})
+    check("'for submission of tender offers' is recognised, not just 'for receipt of tenders'",
+          ct.find_closing_time("The closing time for submission of tender offers is 14:00 on 5 December 2026.")
+          == {"value": "14:00", "ambiguous": False})
 
 
 def test_find_delivery_address_single_ambiguous_and_stops_correctly():
@@ -397,6 +410,27 @@ def test_find_delivery_address_single_ambiguous_and_stops_correctly():
     check("a genuinely different second address sets ambiguous=True", result["ambiguous"] is True, result)
     check("'lines' stays the FIRST address found (unchanged default), not the moved/later one",
           result["lines"][0] == "The Reception Area", result)
+
+    # Finding 170 (2026-11-07): real, confirmed live on a real, current
+    # SANRAL Book 1 (N.003-010-2027/3R) - DELIVERY_RE's own match on "tender
+    # box at:\n" is immediately followed by a sub-heading restating the
+    # anchor itself ("Location of tender box:") before the real address
+    # starts. That heading isn't an address line, but it was wrongly treated
+    # as a disqualifying SENTENCE (it contains "tender", the stop-word
+    # below's own trigger) - find_delivery_address() returned None on a
+    # real, currently open tender even though the real address was right
+    # there, one line further down.
+    heading_then_address = (
+        "Tenders must be placed inside the tender box at:\n\n\n"
+        "Location of tender box:\n"
+        "Reception area\n"
+        "The Provincial Office\n"
+        "58 Van Eck Place, Mkondeni\n"
+    )
+    result = ct.find_delivery_address(heading_then_address)
+    check("a short sub-heading restating the anchor is skipped, not a false stop",
+          result is not None and result["lines"] == ["Reception area", "The Provincial Office",
+                                                       "58 Van Eck Place, Mkondeni"], result)
 
 
 def test_discrepancies_contract_no_and_closing_date():

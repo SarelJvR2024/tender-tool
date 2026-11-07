@@ -7397,6 +7397,67 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-07, standing QA/robustness review): fix - `classify_tender.py`'s own closing-time and delivery-address readers both returned `None` on a real, live, currently open-for-bidding SANRAL tender, found by fetching the real document rather than relying on this repo's own fixtures
+
+Oriented from `ed08e7c` (own prior pass: Finding 155, `confirm_pack.py` non-string-date guard). `git
+fetch origin main` found one more round of sibling commits (Findings 156-169, PR #182's pack-quota
+RLS gap, several more `console.error`-missing fixes, a pack-ready-email/daily-digest opt-in gating
+bug) - all unrelated to this pass's own file, `git merge --ff-only` clean, no collision. **Numbering
+note, again**: re-checked the findings doc's own highest number before writing this entry (169, not
+155) - this pass's new finding is 170.
+
+**Rotation: intake.** `classify_tender.py`'s three extraction helpers
+(`find_nra_reference()`/`find_closing_time()`/`find_delivery_address()`) are specifically scoped to
+SANRAL's own Book 1 Tender Notice wording (confirmed by their own docstrings and by tracing their
+ONE real call site, `process_general_jobs.py`'s SANRAL-route branch) - but Book 1 itself is never
+uploaded to the product, so there is no real local sample to test these against at all. Rather than
+force a fix on reasoning alone (this doc's own standing discipline), fetched a REAL, live, currently
+open SANRAL tender notice directly (N.003-010-2027/3R, found via web search, downloaded from its own
+public tender-documents host) and ran all three functions against its real extracted text.
+
+**Found: `find_closing_time()` and `find_delivery_address()` both returned `None`** on this real
+document, even though both values are explicitly stated in it (`find_nra_reference()` worked
+correctly). Two distinct gaps on the SAME real sentence (SANRAL's own numbered clause C.2.15, *"The
+closing time for submission of tender offers is Friday, 12H00 on the 24 July 2026"*): a day-of-week
+name between "is" and the time, which the regex never allowed for; and "for submission of tender
+offers", a second real SANRAL phrasing the regex's optional infix never accepted (it only ever
+matched "for receipt of tenders", the one phrasing previously confirmed). A third gap in
+`find_delivery_address()`'s own line-collection helper: the real document's "tender box at:\n" is
+immediately followed by a short sub-heading restating the anchor ("Location of tender box:") before
+the real address starts - wrongly treated as a disqualifying sentence by the existing
+"tender/must/shall" stop-word guard, since it happens to repeat "tender box".
+
+**Impact**: without either closing-time fix, `process_general_jobs.py`'s own documented fallback
+silently substituted the 11:00 placeholder for this real, currently-open tender's own stated 12:00 -
+a real company could be building a pack for this exact tender today. Without the address fix, the
+real tender-box venue for the envelope covers was lost entirely.
+
+**Fixed**: `CLOSING_TIME_RE` widened with an optional day-of-week-name alternation and a widened
+infix accepting both real phrasings; `_address_lines_after()` now skips a short, colon-ending
+heading line before any real address content has been collected, unchanged once collection has
+started.
+
+**Verified red-then-green against both the real document and new fixtures.** Confirmed all three
+functions' real output against the downloaded document directly, before and after - `closing_time`
+and `delivery` both went from `None` to the real, correct values. New checks in
+`test_classify_tender.py` using the real phrasings as fixtures. Reverted via `git apply -R` - exactly
+the 3 new checks failed, nothing else; reapplied - `0 failure(s)`. `py_compile` clean. Regression:
+`test_process_general_jobs.py`, `engine/discovery/test_assess_tender.py`,
+`test_make_envelope_covers.py`, `test_form_field_audit.py` - all `0 failure(s)`.
+
+**Backlog: unchanged at 18 items** - a mechanical phrasing/parsing gap found by testing against real
+live data, not a new or existing judgment-call item.
+
+Committed and pushed directly to `main` (small, fully verified red-then-green against both real and
+fixture data, regression-clean):
+- `engine/intake/classify_tender.py`
+- `engine/intake/test_classify_tender.py`
+
+To verify independently: `cd engine/intake && python3 test_classify_tender.py` - expect
+`0 failure(s)`, including the new checks naming "a day-of-week name" and "a short sub-heading".
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - `confirm_pack.py`'s own inline `initial_graduated` parsing never got the non-string-date guard Finding 138 fixed for its sibling `years_experience_at()`, wrongly escalating a routine, user-actionable refusal into what `process_pack_jobs.py`'s own real caller treats as a genuine crash
 
 Oriented from `2b60b34` (own prior pass: Finding 143, CIDB_RE phrasing). `git fetch origin main`

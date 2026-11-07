@@ -10544,3 +10544,59 @@ above, and confirm `company_packs_this_period()` and `company_can_request_pack()
 for the employee and their real values for the owner. Run `TENANT_PSQL="psql -U postgres -d <db>"
 python3 engine/security/test_tenant_isolation.py` and confirm `ALL PASSED` including the two new
 `[18]` checks naming these functions by name.
+
+### Finding 170 (CONFIRMED, FIXED, moderate - `classify_tender.py`'s own `CLOSING_TIME_RE` and `find_delivery_address()` both returned `None` on a real, current, open-for-bidding SANRAL Book 1, silently losing the real closing time and tender-box address a general-family pack build would otherwise have recorded automatically)
+
+**Area:** Intake (`engine/intake/classify_tender.py` - `CLOSING_TIME_RE`/`find_closing_time()` and
+`_address_lines_after()`/`find_delivery_address()`, both called from `process_general_jobs.py`'s own
+SANRAL-route branch when a tender's closing date/delivery address aren't already recorded).
+
+**Scenario:** fetched a REAL, live, currently-open SANRAL tender document (N.003-010-2027/3R, "THE
+UPGRADE OF NATIONAL ROUTE 3 SECTION 1", found via web search, downloaded directly from its own public
+tender-documents host) and ran this module's own functions against its real extracted text, rather
+than only the fixtures already committed. `find_closing_time()` and `find_delivery_address()` BOTH
+returned `None` on this real document, even though both values are clearly, explicitly stated in it.
+`find_nra_reference()` worked correctly (confirmed against the real text too).
+
+**Two distinct gaps in `CLOSING_TIME_RE`, both on the SAME real sentence** (clause C.2.15, SANRAL's
+own numbered Tender Data clause: *"The closing time for submission of tender offers is Friday, 12H00
+on the 24 July 2026"*):
+1. A day-of-week name ("Friday,") sits between "is" and the time - the regex required the time
+   immediately after "is", with no allowance for this.
+2. "for submission of tender offers" - the regex's optional infix only ever accepted "for (the)
+   receipt of tenders", the ONE phrasing this module's own docstring had confirmed (from R.396 Book
+   1 T-6) - this is a second, equally real SANRAL phrasing for the identical clause, on a different
+   real contract.
+
+Without either fix, `process_general_jobs.py`'s own documented fallback silently substituted the
+11:00 placeholder for this real tender's own stated 12:00 closing time - a currently-open tender a
+real company could be building a pack for today.
+
+**One gap in `_address_lines_after()`**: `DELIVERY_RE`'s own match on "tender box at:\n" is
+immediately followed, on this real document, by a short sub-heading restating the anchor itself
+("Location of tender box:") before the real address lines start. That heading isn't an address line,
+but it isn't a disqualifying SENTENCE either - it was only ever caught by the function's own
+"tender/must/shall" stop-word guard because it happens to repeat "tender box", the anchor's own
+words, not because it signals real prose. `find_delivery_address()` returned `None` on this real
+document even though the real address was right there, one line further down.
+
+**Fixed:** `CLOSING_TIME_RE` widened with an optional day-of-week-name alternation before the time,
+and the "for ... of ..." infix widened to accept "submission of tender offers" alongside "receipt of
+tenders". `_address_lines_after()` now skips (not collects, not a stop) a short (≤40 char),
+colon-ending heading line, but only before any real address line has been seen - a heading
+appearing mid-address still correctly ends collection, unchanged.
+
+**Verified red-then-green, against both the real document AND new fixtures.** Confirmed all three
+functions return the real, correct values when run directly against the downloaded document's own
+extracted text (`closing_time: 12:00`, the real 4-line Provincial Office address, `nra: NRA
+2026/0631`) - before the fix, the first two returned `None`. New checks in
+`test_classify_tender.py` using the real phrasings as fixtures. Reverted `classify_tender.py` via
+`git apply -R`, re-ran - exactly the 3 new checks failed as predicted, nothing else; reapplied -
+`0 failure(s)`. `py_compile` clean. Regression: `test_process_general_jobs.py`,
+`engine/discovery/test_assess_tender.py`, `test_make_envelope_covers.py`, `test_form_field_audit.py`
+- all `0 failure(s)`.
+
+**Regression:** `engine/intake/classify_tender.py` (`CLOSING_TIME_RE`, `_address_lines_after()`, ~25
+lines including comments); `engine/intake/test_classify_tender.py` (3 new checks appended to the
+existing closing-time/delivery-address test functions). No change to `find_nra_reference()`,
+`discrepancies()`, or any other function in this file.

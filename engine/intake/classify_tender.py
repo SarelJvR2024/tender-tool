@@ -196,9 +196,25 @@ DELIVERY_RE = re.compile(
 # find_nra_reference()/find_delivery_address() above already exist to avoid,
 # just not yet closed for this function. A real 24-hour time with no AM/PM
 # suffix (every sample seen so far) is completely unaffected.
+#
+# Two real gaps, both confirmed live, 2026-11-07, on the SAME sentence of a
+# real, current SANRAL Book 1 (N.003-010-2027/3R, its own numbered Tender
+# Data clause C.2.15: "The closing time for submission of tender offers is
+# Friday, 12H00 on the 24 July 2026") - without either fix below, the one
+# sentence this function is built to read returned None on a real tender
+# open for bidding today, falling back to the 11:00 placeholder
+# (process_general_jobs.py's own documented fallback) instead of the real
+# stated time (12:00):
+#   1. an optional day-of-week name right before the time ("...is Friday,
+#      12H00...") - the regex required the time immediately after "is";
+#   2. "for submission of tender offers" - the optional infix only ever
+#      accepted "for (the) receipt of tenders", the ONE other phrasing this
+#      module's own docstring had confirmed (R.396 Book 1 T-6); this is a
+#      second, equally real SANRAL phrasing for the identical clause.
 CLOSING_TIME_RE = re.compile(
-    r"closing\s+(?:time\s+and\s+date|date\s+and\s+time|time)\s+(?:for\s+(?:the\s+)?receipt\s+of\s+tenders\s+)?is\s+"
-    r"(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)\s*([AP]M)?",
+    r"closing\s+(?:time\s+and\s+date|date\s+and\s+time|time)\s+"
+    r"(?:for\s+(?:the\s+)?(?:receipt\s+of\s+tenders|submission\s+of\s+tender\s+offers)\s+)?is\s+"
+    r"(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)\s*([AP]M)?",
     re.IGNORECASE)
 
 
@@ -209,6 +225,19 @@ def _address_lines_after(all_text, end):
         if not line:
             if lines:
                 break
+            continue
+        # A short sub-heading restating the anchor itself ("Location of
+        # tender box:") - confirmed live, 2026-11-07, on a real, current
+        # SANRAL Book 1 (N.003-010-2027/3R): DELIVERY_RE's own match on
+        # "tender box at:\n" is immediately followed by exactly this kind of
+        # heading line before the real address starts. It isn't an address
+        # line itself, but it isn't a disqualifying SENTENCE either - it was
+        # only ever caught by the "tender" stop-word below because it
+        # happens to repeat "tender box", the anchor's own words, not
+        # because it signals real prose. Skipped (not collected, not a stop)
+        # only before any real address line has been seen - once collecting,
+        # a heading like this mid-address still correctly ends it.
+        if not lines and line.endswith(":") and len(line) <= 40:
             continue
         if (re.fullmatch(r"[A-Z]{1,2}-\d+", line) or line.endswith(".") or len(line) > 70
                 or line.startswith(("•", "-", "*")) or re.search(r"\b(?:tender|must|shall)\b", line, re.IGNORECASE)):
