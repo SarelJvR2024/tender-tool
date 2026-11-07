@@ -114,6 +114,33 @@ CIDB_FEED_AWARDED = {"tender_ID": "47", "description": "Website hosting and main
                       "tender_advert_date_time": "2026-09-14 09:12:33", "tender_awards_date_time": "2026-10-15 08:16:17",
                       "status": "active", "realstatus": "Awarded"}
 
+# Real row, checked live 2026-11-07 (cidb 004 2627): the description field
+# itself embeds a raw <a href> to a second real document (a pricing
+# schedule) that tender_advert_file/tender_briefing_file never mention.
+CIDB_FEED_DESC_LINK = {
+    "tender_ID": "46", "bid_number": "cidb 004 2627",
+    "description": ("Appointment of a service provider for electrical infrastructure upgrade project.\r\n\r\n"
+                     '<a href="https://www.cidb.org.za/wp-content/uploads/2026/06/Annexure-B-BOQ.xlsx" '
+                     'target="_blank" style="color:#b62836;font-weight:bold;">Click here</a> to download the '
+                     "Pricing Schedule.\r\n\r\n\r\n"),
+    "tender_advert_file": "https://www.cidb.org.za/wp-content/tender-uploads/x.pdf", "tender_briefing_file": "",
+    "tender_advert_date_time": "2026-06-01 17:35:25", "tender_awards_date_time": "2026-06-29 12:58:56",
+    "status": "active", "realstatus": "Awarded",
+}
+# Real row, checked live 2026-11-07 (cidb 005 2526): the real site's own
+# markup is missing the opening quote on href (`href=...xlsx"`, closing
+# quote still there) - the real malformed shape, not a hypothetical.
+CIDB_FEED_DESC_LINK_UNQUOTED = {
+    "tender_ID": "43", "bid_number": "cidb 005 2526",
+    "description": ("Appointment of a service provider/s for general maintenance.\r\n"
+                     '<a href=https://www.cidb.org.za/wp-content/uploads/2026/04/annexure-a.xlsx" '
+                     'target="_blank" style="color:#b62836;font-weight: bold;">Click here</a> to download the '
+                     "corrected Pricing Schedule for General Maintenance."),
+    "tender_advert_file": "", "tender_briefing_file": "",
+    "tender_advert_date_time": "2026-01-01 00:00:00", "tender_awards_date_time": "2026-01-01 00:00:00",
+    "status": "active", "realstatus": "Awarded",
+}
+
 DBSA_TABLE_HTML = """<table><tr><th>OPEN RFP's and RFR's</th><th>Date Published</th><th>Closing Date and Time</th></tr>
 <tr><td><a href="/sites/default/files/x.pdf">RFP 164/2026:  Appointment of a Professional Service Provider</a></td><td>12 October 2026</td><td>02 November 2026 @ 23H55</td></tr>
 <tr><td>RFP 186/2026:  A typo&#39;d closing date tender</td><td>2 October 2026</td><td>23 Ocober 2026 @ 23H55</td></tr>
@@ -249,6 +276,28 @@ def test_new_sources():
     check("cidb: realstatus is", open_r["status"] == "advertised" and awarded_r["status"] == "awarded")
     check("cidb: no closing_date field published -> unset, not treated as expired",
           open_r["closing_date"] is None and open_r["is_closed"] is False)
+
+    # Found 2026-11-07, checked against the real live feed: cidb's own
+    # description field sometimes embeds a raw <a href> to a second real
+    # document (a pricing schedule / addendum) that tender_advert_file/
+    # tender_briefing_file never mention - it was silently missing from
+    # `documents` entirely, and the literal HTML stayed in title/description.
+    desc_link_r = cidb_tenders.normalize(CIDB_FEED_DESC_LINK)
+    check("cidb: description-embedded <a href> document is recovered into documents",
+          any(d["url"].endswith("Annexure-B-BOQ.xlsx") and "Pricing Schedule" in d["title"]
+              for d in desc_link_r["documents"]), desc_link_r["documents"])
+    check("cidb: the tender_advert_file document is still kept alongside it",
+          any(d["title"] == "Tender advert" for d in desc_link_r["documents"]), desc_link_r["documents"])
+    check("cidb: the raw <a> markup is stripped from title/description",
+          "<a " not in desc_link_r["description"] and "<a " not in desc_link_r["title"], desc_link_r["description"])
+
+    # Real malformed markup (cidb 005 2526): href's opening quote is missing
+    # on the live site's own page, closing quote still there.
+    unquoted_r = cidb_tenders.normalize(CIDB_FEED_DESC_LINK_UNQUOTED)
+    check("cidb: a description link with a missing opening quote on href is still recovered",
+          any(d["url"].endswith("annexure-a.xlsx") for d in unquoted_r["documents"]), unquoted_r["documents"])
+    check("cidb: markup stripped even on the malformed-quote row",
+          "<a " not in unquoted_r["description"], unquoted_r["description"])
 
     rows = dbsa_procurement.parse_table(DBSA_TABLE_HTML)
     check("DBSA: header row skipped, 2 tenders parsed", len(rows) == 2, len(rows))

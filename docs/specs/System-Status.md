@@ -1,5 +1,91 @@
 # System Status
 
+## This pass (2026-11-07iv, standing solution-architect review): oriented from `297bfc9`
+(immediately-preceding pass's own verified HEAD, Finding 172). `git fetch origin main` clean, local
+matched `origin/main` exactly at the start, immediately before pushing, and again just now - no
+sibling commits landed during this pass. Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded - nothing merged, closed, or rebased by anyone since. Grepped
+`Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself before picking a number - 172 was
+still the highest recorded.
+
+**This pass's angle: pivoted away from `engine/intake/classify_tender.py` to `engine/discovery/`,
+per the brief's own lean - that file had 3 real-document findings in 3 consecutive passes (sibling's
+Finding 170, this chain's 171/172), diminishing-returns territory.** Read every direct-buyer reader
+under `engine/discovery/` and their `git log` history first, to pick genuinely under-checked ones:
+`lephalale.py`, `vaal_central_water.py`, `kouga.py`, `sars_procurement.py`, `dbsa_procurement.py`
+each already have 1-3 of their own prior real-document fix commits; `capetown_procurement.py` and
+`cidb_tenders.py` had none beyond their original add-commit. Read both in full, then fetched
+`cidb_tenders.py`'s own real, live feed directly (`GET https://www.cidb.org.za/tenders.json`,
+2026-11-07) and read 25 real rows end to end.
+
+**Found and fixed Finding 173** - full write-up in `docs/specs/QA-Edge-Case-Findings.md`. One-line
+summary: 8 of the 25 real rows read (32%) have a `description` field that embeds a raw HTML
+`<a href="...">Click here</a> to download the Pricing Schedule/Addendum...` sentence linking a
+SECOND real document - `normalize()` only ever built `documents` from `tender_advert_file`/
+`tender_briefing_file`, so that second document (a pricing schedule or addendum, real URLs, e.g.
+cidb 004 2627's `Annexure-B-Transformer-and-Electrical-Installations-Unpriced-BOQ.xlsx`) was
+silently missing from `documents` entirely, and since `sh.clean()` only normalizes whitespace
+(never strips tags), the literal `<a href=...>` HTML stayed in `title`/`description` verbatim too.
+One real row (cidb 005 2526) has a genuinely malformed tag on the live site's own markup - a missing
+opening quote on `href`. Only 1 of 34 rows is currently `realstatus: "Open"` (the only one that
+actually reaches `normalize()` in the live pipeline, per `fetch_releases()`'s own Open-only filter),
+and that one row's description happens to be plain text - so this has zero live impact on `main`
+TODAY, but the 32% base rate on this exact feed makes it a near-certainty on a future Open row, not
+a one-off; reported on that explicit basis, not forced onto the one row currently reachable.
+
+**Fixed:** added `_extract_description_links()` - finds any embedded `<a href>` (tolerant of the
+real missing-quote shape), recovers it as a `{"title","url"}` document, and returns the description
+with the tag(s) stripped. `normalize()` merges the recovered document(s) into `documents`
+(de-duplicated by URL) alongside the existing two fields, and uses the stripped text for
+`title`/`description`. No change to `source_http.clean()` itself or any other reader - no evidence
+any other feed in this package embeds raw HTML in a text field the way cidb's does.
+
+**Verified red-then-green against the real feed and new fixtures.** Confirmed directly against the
+live feed that the new helper recovers all 8 real embedded links correctly and strips the markup.
+Added 2 new real-row fixtures (`CIDB_FEED_DESC_LINK`, `CIDB_FEED_DESC_LINK_UNQUOTED`, the latter
+reproducing the real malformed-quote row) and 5 new checks to `test_gov_sources.py`. Saved this
+pass's own diff, reverted via `git apply -R`, re-ran `python3 engine/discovery/test_gov_sources.py`
+with its own real exit code (no grepped pipe) - exactly 4 of the 5 new checks failed (the 5th was
+already true either way), exit code `1`; reapplied - `ALL PASSED`, exit code `0`. `py_compile`
+clean on both changed files. Regression: `python3 engine/general/test_process_general_jobs.py`,
+`python3 engine/discovery/test_assess_tender.py`, `python3 engine/test_make_envelope_covers.py`,
+`python3 engine/test_form_field_audit.py`, `python3 engine/discovery/test_download_discovered_documents.py`
+(the one other place importing `cidb_tenders` for its `documents`) - each run individually with its
+own real exit code, all `0`. Full `engine/` sweep, run via a loop capturing each file's own real
+exit code (background task, past the foreground timeout): `find engine -name "test_*.py" | wc -l` =
+86, all 86 ran individually - `TOTAL=86 FAILED_FILES=0`, matching the standing baseline exactly.
+
+**Why pushed directly to `main`, not a PR.** Small (one helper function, two call-site lines, two
+new fixtures/5 checks), fully verified red-then-green against both real live data and new fixtures,
+regression-clean across the full 86-file sweep, and touches none of the standing PR-routing surface
+(no RLS, no money/billing, no hard-stop/gate logic, no worker-image install) - the same category and
+same direct-push precedent Findings 170-172 all used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both remain
+exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged, same set
+as recorded by the immediately preceding pass - none touched, amended, or merged by this pass.
+`engine/intake/classify_tender.py` was deliberately NOT re-checked a 4th consecutive time (the
+pivot itself was this pass's angle) - it remains a live angle for a future pass per Finding 172's
+own note, not declared exhausted. `engine/discovery/`'s OTHER direct-buyer readers
+(`transnet_etenders.py`, `randwater.py`, `dbsa_procurement.py`, `vaal_central_water.py`, `kouga.py`,
+`lephalale.py`, `sars_procurement.py`) were not re-swept this pass (each already has its own prior
+real-document fix history) and `capetown_procurement.py` was read in full and looks clean against
+its own documented real-row fixtures but wasn't independently re-fetched live this pass - both a
+live, evidence-backed angle for a future pass, not confirmed-exhausted.
+
+To verify independently: `cd engine/discovery && python3 test_gov_sources.py` and confirm
+`ALL PASSED`, including the 5 new "cidb:" checks naming "description-embedded"/"malformed".
+Independently fetch `https://www.cidb.org.za/tenders.json` and find a row whose `description`
+contains `<a href` (tender_ID 46 / "cidb 004 2627" at the time of this pass) and confirm it embeds a
+real `<a href="...">Click here</a> to download the Pricing Schedule.` sentence, matching Finding
+173's own write-up. Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still
+open/unmerged, and that `git log --oneline -1 origin/main` is this pass's own new commit (one ahead
+of `297bfc9`), with no further sibling commits having landed in between.
+
+---
+
 ## This pass (2026-11-07iii, standing solution-architect review): oriented from `5d42ab7`
 (immediately-preceding pass's own verified HEAD, this chain's own Finding 171). `git fetch origin
 main` clean, local matched `origin/main` exactly both at the start and immediately before pushing
