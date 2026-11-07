@@ -1,5 +1,123 @@
 # System Status
 
+## This pass (2026-11-07xxxv, standing solution-architect review, background worker): Finding 197 - `app/app/company/officeActions.ts`'s `saveCompanyOffice()` was the one file in the already-established "plain update twin" RLS-zero-row-match sibling family (`company/actions.ts`, `properties/actions.ts`, `principals/actions.ts`, `registrations/actions.ts`, `bank-accounts/actions.ts`) never swept for that fix - fixed, new test added, pushed to `main`, oriented from `570a690`
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `570a690`
+(Finding 195/196's own write-up commit, the immediately preceding pass). Re-checked again
+immediately before this pass's own push - still `570a690`, no sibling commit landed in between.
+Re-checked all 10 open PRs via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` twice this
+pass (start and immediately before the push): same set as every preceding pass
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`) - nothing merged, closed, or
+rebased by anyone since; none merged by this session either. Per the binding guardrails, `#164`/`#165`
+were not touched, no PR was opened or merged, and neither Finding 168 nor the
+`start_payfast_checkout()` revenue-integrity gap was implemented, and Finding 190's own
+pre-existing-SANRAL-pack `field_provenance` backfill was not attempted. Grepped `Finding [0-9]+` in
+both docs myself before picking a number - `196` was the highest recorded at this handoff,
+confirming no new finding had landed from a sibling session since `570a690`, before this pass's own
+Finding 197 below. No scratch Postgres database was needed this pass (the race is reproduced by
+mocking the Supabase-client chain - the same established technique every sibling fix in this family
+already used, no live Supabase/Postgres access required); no `git worktree` was created either
+(`app/node_modules` in the primary checkout is a real directory, not a symlink, so the usual
+bind-mounted-worktree step for `npx next build` does not apply, same as every recent pass's own
+precedent) - nothing to clean up.
+
+**This pass's own task, per the standing brief.** The immediately preceding pass named two angles:
+signed-URL sibling divergence (`createSignedUrl`/`createSignedUrls` sites where one silently skips a
+file on error while a sibling shows something), and `.insert`/`.update` sibling divergence where one
+call site omits a column its siblings all include, outside the already-swept TOCTOU/lost-update class.
+
+**Angle 1 (signed-URL divergence) - thoroughly checked, genuine negative, closed.** Grepped every
+`createSignedUrl`/`createSignedUrls` call site in `app/app/**/*.ts*` - 16 sites total, not just the
+2 `company/page.tsx` loops the prior pass had already looked at: `tenders/[id]/cv-compare.tsx`,
+`general-workspace.tsx`, `page.tsx` (x2), `narrative-documents.tsx`, `submission-pack.tsx`,
+`private-documents.tsx`, `admin/page.tsx`, `company/registrations/page.tsx`, `company/page.tsx` (x2),
+`company/properties/page.tsx`, `company/principals/page.tsx`, `experience/[id]/page.tsx`,
+`experience/page.tsx`, `people/[id]/page.tsx`. Read every one's own error-handling in full. All 16
+do the identical thing on a failed signed-URL generation: silently omit that file's link, with no
+per-file or batch-level `error` ever destructured anywhere in the whole codebase for this call
+family. This is a genuinely uniform, codebase-wide pattern, not a sibling-divergent one - confirms
+and extends Finding 195's own judgement call for `company/page.tsx`'s two loops to all 14 other
+call sites. No finding here; logged as a closed negative so a future pass doesn't re-grep this.
+
+**Angle 2 (`.insert`/`.update` column-omission divergence) - checked across every multi-site table
+family found, genuine negative in every concrete case.** Grepped `.insert(`/`.update(`/`.upsert(`
+across `app/app/**/*.ts*` (32 files), grouped by table name, and diffed the actual field lists for
+every table written from 2+ call sites: `cv_uploads` (5 sites - `people/actions.ts` x3,
+`my-cv/actions.ts`, `document-scan/actions.ts`'s CV handoff) all insert the identical 7-column shape;
+`tender_answers` (4 upsert sites) all set `answered_by`; `bank_accounts`/`property_documents`/
+`company_offices` insert/update pairs each reuse one shared `row` object for both branches, so there
+is nothing to diverge; `generated_cvs` has one direct insert site, the other producer
+(`queueStandardCvs()`) already consolidated into one shared function by Finding 191; `held_registrations`'s
+two insert sites have genuinely different field counts, traced to two genuinely different-sized UI
+forms (the People page's own "quick add" form has no `issued_by`/`issued_on`/`certified_on`/`notes`
+inputs at all), not a write path dropping data its own form collected. No field-omission divergence
+found anywhere. Logged as a closed negative for this exact shape.
+
+**Found: Finding 197, via a third angle surfaced while tracing the `company_offices` family for
+angle 2.** Comparing `company/officeActions.ts`'s `saveCompanyOffice()` against its true siblings -
+`updateCompanyProfile()`, `saveProperty()`, `savePrincipal()`, `saveHeldRegistration()`,
+`saveBankAccount()` - showed it was the ONE file in this entire, already-thoroughly-fixed "plain
+update twin" RLS-zero-row-match sibling family whose update branch never got the
+`.select("id").maybeSingle()` + zero-row check every one of the other five already has (each one's
+own in-file comment explicitly cites this exact bug class). Confirmed `company_offices`'s own RLS
+policy (migration `0015`) is the identical `using (is_company_member(company_id)) with check
+(is_company_member(company_id))` shape as every sibling table - not a different policy that would
+make the omission deliberate. Real consequence: on a membership-revoked-mid-request race (same
+realistic trigger as every sibling fix - another admin's `removeMember()` deleting this user's own
+`company_members` row mid-submit), PostgREST returns `{data: null, error: null}` (zero rows matched),
+indistinguishable from a real update by `error` alone - pre-fix, the action still redirected with
+`saved=office`, a false success with no destructive consequence (no file upload precedes this write),
+the same severity class as `updateCompanyProfile()`'s own already-fixed instance.
+
+**Fixed** by restructuring the update/insert ternary into an `if/else` (same shape `saveProperty()`
+already uses) and adding the zero-row check to the update branch only - the insert branch's own RLS
+`with check` already raises a real error on a genuine violation. **New test file**
+`app/app/company/officeActions.spec.ts` (no prior coverage existed), copying the established mocking
+harness from `app/app/company/actions.spec.ts` exactly, calling the real unmodified exported
+`saveCompanyOffice()`. **Verified red-then-green myself**: post-fix 3/3 pass; reverted just this file
+to its pre-fix state (`git show HEAD:app/app/company/officeActions.ts`, since this pass's own commit
+had not yet been made) and reran - 1/3 failed exactly as predicted (`expected
+'/company?saved=office#offices' not to contain 'saved=office'`); restored the fix, reran - 3/3 pass
+again.
+
+**Verification, full suite, all run myself, real exit codes.** `npm run typecheck` (0 errors),
+`npx eslint .` (0 errors, same 3 pre-existing warnings, unchanged), `npx vitest run` (**519/519,
+68 files** - up from the 516/67 baseline by exactly this pass's 1 new file/3 new tests), the node
+`*.test.ts` loop (28/28, plain `node <file>`, no flags, unchanged), `npx next build` (compiled
+successfully, same route table, `/company` present) - run directly in the primary checkout per the
+same node_modules-is-a-real-directory reasoning as every recent pass; and the full `engine/` Python
+sweep as a no-op regression check (86/86, unchanged - no Python touched).
+
+**Is either named angle, or this pass's own third one, exhausted?** Angle 1 (signed-URL divergence):
+**yes, fully ruled out** across all 16 call sites in `app/app` - uniformly silent-skip, zero
+exceptions; nothing left here without reframing it as an app-wide design question rather than a bug
+hunt. Angle 2 (insert/update column-omission): checked across every multi-site table family found
+via this grep; no divergence anywhere - likely exhausted for this specific sub-shape, though a future
+schema change adding new sibling call sites could reopen it. **This pass's own third angle**
+("diff which files in a known, multi-file-fixed sibling family actually received the established
+fix") found one real gap and is itself probably exhausted for the `company_offices` family
+specifically (all six sibling files now confirmed fixed), but the same method applied to a DIFFERENT
+established multi-file fix pattern in this doc's own history (e.g. the 23-file `requireCompanyId()`
+error-capture sweep, or the `system_alerts.record()`/`company_id`-in-context pattern across the 6
+`process_*_jobs.py` worker bridges) is a concrete, fresh, reusable angle for a future pass - "a past
+pass's own 'fixed all N files' claim" is worth re-verifying file-by-file rather than assumed complete,
+independent of both of this pass's own named leads.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 10 PRs remain open and unmerged - same set as every preceding pass,
+re-confirmed via the GitHub REST API twice this pass; nothing merged, closed, or rebased by anyone
+else. Pushed directly to `main` as one commit, `73652a6` (Finding 197, `app/app/company/officeActions.ts`
+plus its own new test file) - an app-side race-check fix (not the RLS policy itself) matching an
+already-five-times-established pattern, no schema/migration/RPC change, no worker-image surface
+touched.
+
+To verify independently: see Finding 197's own "to verify independently" paragraph in
+`docs/specs/QA-Edge-Case-Findings.md` - it covers the file-by-file diff check, the red/green test
+run, the full suite, and the PR/HEAD re-confirmation in one place, not duplicated here.
+
+---
+
 ## This pass (2026-11-07xxxiv, standing solution-architect review, background worker): Finding 195 - `app/app/company/document-scan/page.tsx`'s own `queuedCount` read never captured its own error (the one sibling Finding 144's own fix left out); Finding 196 - `app/app/admin/taxonomy/page.tsx`'s redundant `is_platform_admin()` RPC never captured its own error either - both fixed, pushed to `main`, oriented from `7045fa2`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
