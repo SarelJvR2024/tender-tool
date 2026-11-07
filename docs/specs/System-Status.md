@@ -1,5 +1,99 @@
 # System Status
 
+## This pass (2026-11-07vii, standing solution-architect review): oriented from `a3ffb9e`
+(immediately-preceding pass's own verified HEAD, the `app/app/tenders/[id]/` Server Action sweep,
+genuine negative). `git fetch origin main` clean, local matched `origin/main` exactly at the start
+and again immediately before this pass's own push - `a3ffb9e` throughout before this pass's own
+commit, no sibling commits landed during this pass. Re-checked all 9 open PRs via
+`mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/`#180`/`#181`/`#182` and the
+two old stale drafts `#164`/`#165`(both draft) are all still open, same `updated_at` timestamps the
+immediately-preceding pass recorded (`#182` 2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z,
+`#180` 2026-11-06T22:40:26Z, `#179` 2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177`
+2026-11-06T19:08:44Z, `#176` 2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164`
+2026-10-26T20:14:25Z) - nothing merged, closed, or rebased by anyone since. Grepped `Finding
+[0-9]+` in `docs/specs/QA-Edge-Case-Findings.md` myself - 173 is still the highest recorded,
+confirming no new finding landed from the sibling session either.
+
+**This pass's angle: finished open lead (a) - `engine/discovery/capetown_procurement.py`'s own
+live refetch against its real source portal**, left open since `2026-11-07iv` and still open after
+two consolidation passes in between, per the brief's own steer back to a concrete bounded lead
+after two negative/consolidation passes in a row.
+
+**Method: real live `curl` (through the session's own HTTPS proxy) against every page the module
+reads, not just a re-read of the file or its fixtures.** Fetched and inspected, with the same
+parsing code the module itself runs (`parse_table`/`normalize_rfq`/`parse_award_detail`,
+reproduced locally against the real bytes), all four of:
+- `https://web1.capetown.gov.za/web1/procurementportal/RFQ` (200, 370,845 bytes, read 2026-11-07):
+  241 open RFQ rows, still the documented 8-cell layout (`Reference Number | Title | Category |
+  Closing Date | Closing Date Sortable | Posted Date | Posted Date Sortable | <empty detail-link
+  cell>`) `normalize_rfq()`'s own comment already assumes. All 241 rows' closing dates parsed as
+  genuinely still in the future (none stale/already-closed), so the hardcoded `status="advertised"`
+  is still correct for every row read. Confirmed the page is a client-side jQuery DataTable
+  (`"sPaginationType": "full_numbers", "iDisplayLength": 15` - a 15-row-per-page *browser* view) but
+  the full, un-paginated 241-row table is already present in the raw server-rendered HTML the
+  regex-based reader GETs directly - so there is no hidden "page 2" the scraper is silently missing,
+  a real risk worth ruling out explicitly rather than assuming. US-style datetimes
+  (`"11/20/2026 10:00:00 AM"`) still match `source_http.py`'s `_US_DT` regex and parse correctly.
+  `html.unescape()` + tag-strip still correctly decodes entities and non-ASCII (`&amp;` -> `&`,
+  "HIRING OF DÉCOR" keeps its "É"). `robots.txt` still 404s, re-confirming the module's own
+  docstring claim.
+- `https://web1.capetown.gov.za/web1/procurementportal/Award/ViewAwards` (200, 148,339 bytes): 100
+  award rows, still the documented 7-cell layout `fetch_awards()`'s own indexing assumes
+  (reference, title, category, status, award date, award date sortable, empty link cell); only
+  statuses seen on the live page today are "Awarded" and "Unawarded", both handled.
+- `https://web1.capetown.gov.za/web1/procurementportal/Award/Details/331753` (an "Awarded" detail
+  page): confirmed `parse_award_detail()` correctly recovers the real supplier name ("TRI STAR
+  TECHNOLOGY CC") from it. Worth noting for whoever next edits `test_gov_sources.py`: the real
+  page's actual markup is `<label class="detailsLabel">To</label><div><label
+  class="detailsValue">TRI STAR TECHNOLOGY CC</label>...`, not the `<dl><dt>To</dt><dd>...</dd></dl>`
+  shape its own `CAPETOWN_AWARD_DETAIL` fixture uses - not a bug, since `parse_award_detail()`'s
+  strip-every-tag-to-"|"-and-collapse approach is deliberately structure-agnostic and handles both
+  correctly (re-verified against the real page's actual bytes, not just the fixture), but the
+  fixture itself is a simplified stand-in for the real shape, not a literal copy of it, which is
+  worth knowing before trusting it as ground truth for a future change here.
+- `https://web1.capetown.gov.za/web1/procurementportal/Award/Details/329790` (an "Unawarded" detail
+  page, reason "NO ACCEPTABLE BIDS ARE RECEIVED." instead of a "To" field): confirmed
+  `parse_award_detail()` correctly returns `None` for the supplier, no crash, no false match.
+
+**Genuine negative result - no new finding, nothing fixed, reported honestly per the standing
+brief rather than forced.** Every assumption the module's own docstring and parsing logic make
+about the real portal (column layout, date format, pagination, robots.txt, the award-detail "To"
+extraction) still holds exactly against today's live pages. This closes out lead (a) as
+genuinely checked against current reality, not just re-read against its own fixtures.
+
+**Verification.** `python3 engine/discovery/test_gov_sources.py` (its own `capetown_procurement`
+section, `test_transnet_capetown()`) - real exit code `0`, "ALL PASSED" (no code changed, so this
+is a regression check, not a red-then-green cycle - there was no fix to cycle). Full `engine/`
+sweep (real exit codes, captured before any pipe, not grep): `find engine -name "test_*.py" | wc
+-l` = `86`; looped every one with plain `python3 <file>` (not `python3 -I` - tried that first,
+which produced one false failure, `general/test_fill_sbd_docx.py` -> `ModuleNotFoundError:
+No module named 'fill_sbd_docx'`, because `-I` drops the script's own directory from `sys.path` in
+this Python build; confirmed it's not a real failure by re-running that one file plain, which gives
+`0 failure(s)`/exit `0` - noting this here so a future pass doesn't waste time on the same false
+trail) - **86 files, 0 failures**, matching the standing baseline exactly, unchanged.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged,
+same set as recorded by the immediately preceding pass - none touched, amended, or merged by this
+pass. Lead (a) (`capetown_procurement.py`'s live refetch) is now genuinely closed out, clean,
+checked against today's real pages - not left open any further. Lead (b)
+(`engine/intake/classify_tender.py`'s `find_nra_reference()`, checked against only 4 real samples
+total across 2 passes) remains the one still-open, not-yet-exhausted angle from this chain's recent
+backlog for a future pass. The remaining ~215 lines of `app/app/tenders/[id]/actions.ts` beyond
+line ~440 and every `.tsx` file under that directory also remain untouched, as `2026-11-07vi` left
+them.
+
+To verify independently: `curl` the same four live URLs listed above yourself and compare their
+real HTML against `engine/discovery/capetown_procurement.py`'s `parse_table()`/`normalize_rfq()`/
+`parse_award_detail()`/`AWARD_TO`/`DETAIL` regexes. Run
+`python3 engine/discovery/test_gov_sources.py` and confirm exit `0`/"ALL PASSED". Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged at the same `updated_at`
+timestamps listed above, and that `git log --oneline -1 origin/main` is this pass's own new
+docs-only commit (one ahead of `a3ffb9e`), with no further sibling commits having landed in
+between.
+
+---
+
 ## This pass (2026-11-07vi, standing solution-architect review): oriented from `b79e5ea`
 (immediately-preceding pass's own verified HEAD, pure PR-mergeability consolidation, no new
 finding). `git fetch origin main` clean, local matched `origin/main` exactly at the start and
