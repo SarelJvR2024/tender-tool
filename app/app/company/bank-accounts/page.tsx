@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { needsPersonFallbackOption } from "@/lib/principals";
 import { deleteBankAccount, saveBankAccount } from "./actions";
 import { Card, DangerButton, Disclosure, Select, SubPage, Submit, Text, fmtDate, grid } from "../_components/ui";
 
@@ -38,13 +39,17 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
   const isAdmin = membership?.role === "owner" || membership?.role === "admin";
 
   // RLS returns rows only to owners/admins; members get the masked summary.
-  const [{ data: accountRows, error: accountsError }, { data: summaries, error: summariesError }, { data: principals }] = await Promise.all([
+  const [{ data: accountRows, error: accountsError }, { data: summaries, error: summariesError }, { data: principals, error: principalsError }] = await Promise.all([
     supabase.from("bank_accounts").select("id, principal_id, bank_name, branch_name, branch_code, account_holder, account_type, account_number, opened_on"),
     membership ? supabase.rpc("bank_account_summaries", { p_company: membership.company_id }) : Promise.resolve({ data: [], error: null }),
     supabase.from("company_principals").select("id, full_name, holder_type").eq("holder_type", "natural_person").order("full_name"),
   ]);
   if (accountsError) console.error("bank_accounts select failed", accountsError);
   if (summariesError) console.error("bank_account_summaries rpc failed", summariesError);
+  // Logged only: AccountForm's own "Whose account" <select> (Finding 177)
+  // already stays safe on a failed read via needsPersonFallbackOption()
+  // below, regardless of this error.
+  if (principalsError) console.error("company_principals select failed (bank-accounts)", principalsError);
   // A failed company_members read (membershipError) is indistinguishable
   // from the genuine "not an owner/admin" case below (isAdmin falls back to
   // false either way) unless flagged explicitly - it would otherwise show
@@ -127,6 +132,15 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
 }
 
 function AccountForm({ a, principals }: { a?: Account; principals: { id: string; full_name: string }[] }) {
+  // Finding 177: if the `company_principals` read that built `principals`
+  // failed (or the director was since removed), `a.principal_id` may not be
+  // among `principals` - without this, the <select> below would silently
+  // show "The company" and ANY unrelated save of this form (e.g. just the
+  // branch code) would resubmit that, permanently reassigning a real
+  // director-held bank account to the company - the most fraud-sensitive
+  // detail this app holds (see this file's own header comment). Same fix
+  // shape as needsPersonFallbackOption()'s other two uses (Finding 177).
+  const principalFallbackNeeded = needsPersonFallbackOption(a?.principal_id ?? null, principals);
   return (
     <form action={saveBankAccount} autoComplete="off">
       {a && <input type="hidden" name="account_id" value={a.id} />}
@@ -135,7 +149,11 @@ function AccountForm({ a, principals }: { a?: Account; principals: { id: string;
           name="principal_id"
           label="Whose account"
           defaultValue={a?.principal_id ?? ""}
-          options={[{ value: "", label: "The company" }, ...principals.map((p) => ({ value: p.id, label: p.full_name }))]}
+          options={[
+            { value: "", label: "The company" },
+            ...(principalFallbackNeeded ? [{ value: a!.principal_id as string, label: "(unavailable right now - keeping this pick)" }] : []),
+            ...principals.map((p) => ({ value: p.id, label: p.full_name })),
+          ]}
         />
         <Text name="bank_name" label="Bank" defaultValue={a?.bank_name} required />
         <Text name="branch_name" label="Branch name" defaultValue={a?.branch_name} />

@@ -1,5 +1,90 @@
 # System Status
 
+## This pass (2026-11-07xiii, standing solution-architect review): oriented from `c41b6e7`
+(immediately-preceding pass's own verified HEAD, Finding 176's `person_role_eligibility` fix).
+`git fetch origin main` clean, local matched `origin/main` exactly at the start and again
+immediately before this pass's own push - `c41b6e7` throughout, no sibling commits landed during
+this pass. Re-checked all 9 open PRs via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/
+`#178`/`#179`/`#180`/`#181`/`#182` and the two old stale drafts `#164`/`#165` (both draft) are all
+still open, same `updated_at` timestamps every preceding pass has recorded (`#182`
+2026-11-07T09:35:52Z, `#181` 2026-11-07T09:44:45Z, `#180` 2026-11-06T22:40:26Z, `#179`
+2026-11-06T21:17:30Z, `#178` 2026-11-06T22:40:23Z, `#177` 2026-11-06T19:08:44Z, `#176`
+2026-11-06T11:14:35Z, `#165` 2026-10-26T21:30:53Z, `#164` 2026-10-26T20:14:25Z) - nothing merged,
+closed, or rebased by anyone since. Grepped `Finding [0-9]+` in `docs/specs/QA-Edge-Case-Findings.md`
+myself - 176 was the highest recorded at this handoff, confirming no new finding had landed from a
+sibling session either, before this pass's own Finding 177 below.
+
+**Note on the standing backlog, carried over plainly: the unreviewed PR backlog (9 open PRs, the
+oldest two since 2026-10-26) and Finding 168/the `start_payfast_checkout()` revenue-integrity gap
+have now gone unaddressed for a very long stretch of consecutive passes.** This pass took no action
+on either beyond what the standing guardrails already allow (no PR was opened, merged, or touched;
+neither billing item was implemented) - flagged here as this pass's own honest observation.
+
+**This pass's angle: `app/app/company/` (named as a candidate by three prior passes, finally
+reached).** Swept the whole surface in full per the task's own brief: `page.tsx`, every subpage
+(`bank-accounts/`, `principals/`, `properties/`, `registrations/`, `team/`, `document-scan/`) and
+every file in `_components/`. `company/page.tsx` itself was already fully careful (every one of its
+6 reads captures and banners its own error); the `_components/*.tsx` files do no reads of their
+own at all. But applying the standing methodology explicitly - tracing every read's value into
+every component/action it feeds, not stopping at a cosmetic-looking display use - turned up THREE
+separate real instances of the dominant bug class in one sweep, all sharing the identical shape:
+a discarded `people`/`company_principals` read feeds a person/holder `<select>` whose
+`defaultValue` then matches no `<option>` on a failed read, so the browser silently selects the
+first option instead; and because the matching save action (`savePrincipal`/`saveHeldRegistration`/
+`saveBankAccount`) always writes that field fresh from the submitted form on EVERY save of an
+always-whole-row form, saving any unrelated field on an existing row silently and permanently
+overwrites a real link - `principals/page.tsx`'s "Also one of your people (CV)?" select
+(`company_principals.person_id`, which `engine/pack/process_pack_jobs.py`'s own
+`directors_on_record()` reads onto a real generated SANRAL Form C.1.2.3), `registrations
+/page.tsx`'s "Held by" select (`held_registrations.person_id`/`principal_id`), and `bank-accounts
+/page.tsx`'s "Whose account" select (`bank_accounts.principal_id`, on the register this file's own
+header comment calls "the most fraud-sensitive detail Tender Ready holds"). Exactly the same root
+cause and consequence shape as Findings 175/176, now found three times in a row on one surface -
+reinforcing that this methodology (trace past the first "looks cosmetic" read into every real
+consumer) keeps finding genuine severe bugs rather than being exhausted. Every other DB-sourced
+`<select>` on this surface was checked and confirmed safe (static-constant option lists, or a
+fresh-record form with nothing stale to lose) - see `docs/specs/QA-Edge-Case-Findings.md`'s own
+Finding 177 entry for the full per-file accounting, not duplicated here.
+
+**Verification.** `npm run typecheck` - 0 errors. `npx eslint .` - 0 errors, the same 3
+pre-existing warnings. `npx next build` - compiled successfully, same route table, `/company`,
+`/company/principals`, `/company/registrations` and `/company/bank-accounts` all still Partial
+Prerender routes. `npx vitest run` - **505/505, 66 files** (the baseline 497/64 plus this fix's own
+new `app/lib/principals.spec.ts` (4 tests) and `app/lib/registrations.spec.ts` (4 tests)). The
+`*.test.ts` node loop (no `--test` flag, real exit codes) - **28 files, 0 failures**, unchanged.
+Red-then-green run myself on both new tests (one at a time): reverted each of
+`needsPersonFallbackOption()`/`needsHolderFallbackOption()`'s own body to `return false;`,
+confirmed the exact predicted 2-of-4 failures each time, restored, confirmed green again both
+times. `engine/` sweep not re-run - this fix touches no Python.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched. All 9 PRs remain open and unmerged, same set as recorded by
+every preceding pass (PR #177's number is coincidental and unrelated to QA Finding 177, per the
+standing numbering caveat). `app/app/company/` is now genuinely swept in full - every file read,
+three real fixes applied this pass, the rest confirmed clean with specific per-file reasoning (see
+Finding 177's own write-up). `app/app/people/` was already swept clean (Finding 176's own backlog
+note). `engine/discovery/`'s still-not-re-swept direct-buyer readers (`dbsa_procurement.py`/
+`vaal_central_water.py`/`kouga.py`/`lephalale.py`/`sars_procurement.py`) and `randwater.py`'s own
+TLS-blocked live-fetch limitation remain live angles for a future pass; with both of this review's
+own named `app/app/` surfaces (`people/`, `company/`) now swept, a future pass may get more value
+switching to one of those Python live-fetch angles, or to a fresh `app/app/` surface not yet
+explicitly named by any prior pass's own write-up (e.g. `app/app/experience/`, `app/app
+/sanral-schedules/`, `app/app/toolkit/` - not checked this pass, offered only as unexplored, not
+confirmed fresh).
+
+To verify independently: read `app/lib/principals.ts`'s `needsPersonFallbackOption()` and `app/lib
+/registrations.ts`'s `needsHolderFallbackOption()`, and the three `<select>` blocks in
+`app/app/company/principals/page.tsx`, `app/app/company/registrations/page.tsx` and `app/app
+/company/bank-accounts/page.tsx`, and confirm each matches `docs/specs/QA-Edge-Case-Findings.md`'s
+own Finding 177 writeup. Run `npm run typecheck`, `npx eslint .`, `npx next build`, `npx vitest run`
+(505/505, 66 files), and the `*.test.ts` node loop (28 files, 0 failures) yourself and confirm the
+same results. Confirm via `mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged
+at the same `updated_at` timestamps listed above, and that `git log --oneline -1 origin/main` is
+this pass's own new commit (one ahead of `c41b6e7`), with no further sibling commits having landed
+in between.
+
+---
+
 ## This pass (2026-11-07xii, standing solution-architect review): oriented from `32a3154`
 (immediately-preceding pass's own verified HEAD, Finding 175's three-part `EconomicsForm`/
 credit-attribution fix). `git fetch origin main` clean, local matched `origin/main` exactly at the

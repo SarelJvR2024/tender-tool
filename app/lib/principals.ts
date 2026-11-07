@@ -171,6 +171,22 @@ export function idWarnings(p: Pick<PrincipalRow, "id_number" | "gender" | "sa_ci
   return out;
 }
 
+// Same shape, same reason, as `dealEconomics.ts`'s `needsCreditFallbackOption()`
+// (Finding 175): a discarded `people`-select error (or a genuine removal)
+// makes a `person_id`-driven <select>'s `defaultValue` match no <option>, so
+// the browser silently renders its first option as selected instead. Any
+// save of this form then resubmits THAT option's value, silently nulling out
+// a real link - here, `company_principals.person_id`, which
+// `engine/pack/process_pack_jobs.py`'s `directors_on_record()` reads to pull
+// a director's ECSA/SACPCMP registration number onto a real SANRAL Form
+// C.1.2.3. Call this before building a person_id <select>'s options, and add
+// a synthetic option for `assignedPersonId` when it returns true so the
+// currently-picked person is never silently swapped for "No" on an unrelated
+// save.
+export function needsPersonFallbackOption(assignedPersonId: string | null, people: { id: string }[]): boolean {
+  return !!assignedPersonId && !people.some((p) => p.id === assignedPersonId);
+}
+
 export const PRINCIPAL_DOCUMENT_KINDS = {
   certified_id: { pathColumn: "certified_id_path", nameColumn: "certified_id_filename", label: "Certified ID copy" },
   disability_proof: { pathColumn: "disability_proof_path", nameColumn: "disability_proof_filename", label: "Disability proof (medical certificate)" },

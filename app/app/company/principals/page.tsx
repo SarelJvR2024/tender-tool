@@ -11,6 +11,7 @@ import {
   idWarnings,
   isBlack,
   maskId,
+  needsPersonFallbackOption,
   parseSaId,
   type OwnershipBreakdown,
   type PrincipalRow,
@@ -32,7 +33,7 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
   const supabase = await createClient();
 
   const { data: company, error: companyError } = await supabase.from("companies").select("id, legal_name, black_ownership_pct").single();
-  const [{ data: rows, error: rowsError }, { data: breakdownRow }, { data: people }, { data: banks }] = await Promise.all([
+  const [{ data: rows, error: rowsError }, { data: breakdownRow }, { data: people, error: peopleError }, { data: banks }] = await Promise.all([
     supabase.from("company_principals").select(PRINCIPAL_COLUMNS).order("ownership_pct", { ascending: false, nullsFirst: false }).order("full_name"),
     supabase.from("company_ownership_breakdown").select("*").maybeSingle(),
     supabase.from("people").select("id, name").order("name"),
@@ -40,6 +41,10 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
   ]);
   if (companyError) console.error("companies select failed on principals page", companyError);
   if (rowsError) console.error("company_principals select failed", rowsError);
+  // Logged only: PrincipalForm's own "Also one of your people (CV)?" <select>
+  // (Finding 177) already stays safe on a failed read via
+  // needsPersonFallbackOption() below, regardless of this error.
+  if (peopleError) console.error("people select failed on principals page", peopleError);
   const principals = (rows ?? []) as PrincipalRow[];
   const breakdown = breakdownRow as OwnershipBreakdown | null;
   const bankByPrincipal = new Map<string, { bank_name: string; last4: string }>();
@@ -250,6 +255,14 @@ function DocumentLine({ p, kind, urls, title }: { p: PrincipalRow; kind: "certif
 }
 
 function PrincipalForm({ p, people }: { p?: PrincipalRow; people: { id: string; name: string }[] }) {
+  // Finding 177: if the `people` read that fed this list failed (or the
+  // linked person was genuinely removed), `p.person_id` may not be among
+  // `people` - without this, the <select> below would silently show "No"
+  // and ANY unrelated save of this form (e.g. just fixing `position`) would
+  // resubmit that, permanently nulling out a real
+  // company_principals.person_id link. Same fix shape as
+  // dealEconomics.ts's needsCreditFallbackOption() (Finding 175).
+  const personFallbackNeeded = needsPersonFallbackOption(p?.person_id ?? null, people);
   return (
     <form action={savePrincipal}>
       {p && <input type="hidden" name="principal_id" value={p.id} />}
@@ -273,7 +286,11 @@ function PrincipalForm({ p, people }: { p?: PrincipalRow; people: { id: string; 
           name="person_id"
           label="Also one of your people (CV)?"
           defaultValue={p?.person_id ?? ""}
-          options={[{ value: "", label: "No" }, ...people.map((x) => ({ value: x.id, label: x.name }))]}
+          options={[
+            { value: "", label: "No" },
+            ...(personFallbackNeeded ? [{ value: p!.person_id as string, label: "(unavailable right now - keeping this pick)" }] : []),
+            ...people.map((x) => ({ value: x.id, label: x.name })),
+          ]}
         />
       </div>
       <div className="mt-3.5 mb-2 text-xs font-semibold text-foreground">For a person</div>

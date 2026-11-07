@@ -75,6 +75,26 @@ export function parseHolder(v: string | null): { person_id: string | null; princ
   return null;
 }
 
+// Same shape, same reason, as `principals.ts`'s `needsPersonFallbackOption()`
+// (Finding 177) and `dealEconomics.ts`'s `needsCreditFallbackOption()`
+// (Finding 175): HeldForm's "Held by" <select> is built from the `people`
+// and `company_principals` reads on registrations/page.tsx. If either read
+// fails (previously a fully discarded error on both) or the held-by person/
+// director is since removed, the current holder value is missing from the
+// `holders` option list, so the <select>'s defaultValue matches no
+// <option> and the browser silently selects the first option ("The
+// company") instead. saveHeldRegistration() (registrations/actions.ts)
+// always writes `person_id`/`principal_id` fresh from the submitted
+// "holder" field on every save (update(row) with ...parseHolder(holder)
+// spread in) - so saving ANY other field on this form (e.g. just the expiry
+// date) would silently reassign a real person/director-held registration
+// to "held by the company" instead, with zero error anywhere. Call this
+// before building the <select>'s options, and add a synthetic option for
+// the current value when it returns true.
+export function needsHolderFallbackOption(currentValue: string, holders: { value: string }[]): boolean {
+  return currentValue !== "company" && !holders.some((h) => h.value === currentValue);
+}
+
 /** Where a stored_in type is actually recorded, as a link the page can show. */
 export function storedInHint(storedIn: string | null): { text: string; href: string } | null {
   if (!storedIn) return null;

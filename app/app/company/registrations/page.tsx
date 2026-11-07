@@ -5,6 +5,7 @@ import { filenameFromPath, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import {
   HELD_COLUMNS,
   KIND_LABELS,
+  needsHolderFallbackOption,
   REGISTRATION_TYPE_COLUMNS,
   SCOPE_LABELS,
   storedInHint,
@@ -29,7 +30,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
   const { error, saved } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: typeRows, error: typesError }, { data: heldRows, error: heldError }, { data: people }, { data: principals }] = await Promise.all([
+  const [{ data: typeRows, error: typesError }, { data: heldRows, error: heldError }, { data: people, error: peopleError }, { data: principals, error: principalsError }] = await Promise.all([
     supabase.from("registration_types").select(REGISTRATION_TYPE_COLUMNS).eq("active", true).order("sort_order").order("label"),
     supabase.from("held_registrations").select(HELD_COLUMNS).order("expiry_date", { ascending: true, nullsFirst: false }),
     supabase.from("people").select("id, name").order("name"),
@@ -37,6 +38,11 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
   ]);
   if (typesError) console.error("registration_types select failed", typesError);
   if (heldError) console.error("held_registrations select failed", heldError);
+  // Logged only: HeldForm's own "Held by" <select> (Finding 177) already
+  // stays safe on a failed read via needsHolderFallbackOption() below,
+  // regardless of either error.
+  if (peopleError) console.error("people select failed on registrations page", peopleError);
+  if (principalsError) console.error("company_principals select failed on registrations page", principalsError);
   const loadError = typesError || heldError;
   const types = (typeRows ?? []) as RegistrationType[];
   const typeById = new Map(types.map((t) => [t.id, t]));
@@ -251,12 +257,29 @@ function HeldRow({
 
 function HeldForm({ h, holders, types }: { h?: HeldRegistration; holders: Holder[]; types: { value: string; label: string }[] }) {
   const holderValue = h ? (h.person_id ? `person:${h.person_id}` : h.principal_id ? `principal:${h.principal_id}` : "company") : "company";
+  // Finding 177: if the `people`/`company_principals` reads that built
+  // `holders` failed (or the held-by person/director was genuinely
+  // removed), `holderValue` may not be among `holders` - without this, the
+  // <select> below would silently show "The company" and ANY unrelated
+  // save of this form (e.g. just the expiry date) would resubmit that,
+  // permanently reassigning a real person/director-held registration to
+  // "held by the company". Same fix shape as needsPersonFallbackOption()
+  // (Finding 177) / needsCreditFallbackOption() (Finding 175).
+  const holderFallbackNeeded = needsHolderFallbackOption(holderValue, holders);
   return (
     <form action={saveHeldRegistration}>
       {h && <input type="hidden" name="held_id" value={h.id} />}
       <div className={grid}>
         <Select name="registration_type_id" label="Registration" defaultValue={h?.registration_type_id ?? ""} required options={[{ value: "", label: "Choose" }, ...types]} />
-        <Select name="holder" label="Held by" defaultValue={holderValue} options={holders.map((x) => ({ value: x.value, label: x.label }))} />
+        <Select
+          name="holder"
+          label="Held by"
+          defaultValue={holderValue}
+          options={[
+            ...(holderFallbackNeeded ? [{ value: holderValue, label: "(unavailable right now - keeping this pick)" }] : []),
+            ...holders.map((x) => ({ value: x.value, label: x.label })),
+          ]}
+        />
         <Text name="registration_number" label="Registration / licence number" defaultValue={h?.registration_number} />
         <Text name="category" label="Grade / class / category (e.g. PSIRA Grade A, SAQA ID)" defaultValue={h?.category} />
         <Text name="issued_by" label="Issued by (which SETA, municipality ...)" defaultValue={h?.issued_by} />

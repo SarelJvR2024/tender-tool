@@ -11180,3 +11180,162 @@ failures) yourself and confirm the same results. Confirm via `mcp__github__list_
 all 9 PRs are still open/unmerged at the same timestamps, and that `git log --oneline -1
 origin/main` is this pass's own new commit, with no further sibling commits having landed in
 between.
+
+### Finding 177 (CONFIRMED, FIXED, severe - three separate discarded `people`/`company_principals` reads across `app/app/company/` each fed a person/holder `<select>` whose unrelated-save overwrite silently reassigned a real director/person link to "nobody"/"the company")
+
+**Area:** `app/app/company/principals/page.tsx` (`PrincipalForm`'s "Also one of your people
+(CV)?" `<select>`), `app/app/company/registrations/page.tsx` (`HeldForm`'s "Held by" `<select>`),
+`app/app/company/bank-accounts/page.tsx` (`AccountForm`'s "Whose account" `<select>`) - three
+independent instances of the identical shape, found in one pass's own full sweep of
+`app/app/company/` (named as a candidate by three prior passes and finally reached this pass).
+
+**How this was found.** Per the directive's own standing methodology ("trace every value a read
+produces into every component or Server Action it feeds, not just its own display use"), read
+every file under `app/app/company/` (`page.tsx` and its 7 subpages' `page.tsx`/`actions.ts`, plus
+every `_components/*.tsx`). Most of the surface was already careful about this review's dominant
+bug class - `page.tsx` itself captures and banners every one of its own reads, and the
+`_components/` files do no reads of their own at all. But `principals/page.tsx`'s own `people`
+select (`const [..., { data: people }, ...] = await Promise.all([...])`) discarded its error
+entirely - and tracing it past its own "No" default into `PrincipalForm`'s `person_id` `<select>`
+(options built as `[{value:"",label:"No"}, ...people.map(...)]`, `defaultValue={p?.person_id ??
+""}`) found the same severe shape Findings 175/176 already established: when `people` fails (or
+the linked person is since removed), the `<select>`'s `defaultValue` matches no `<option>`, so the
+browser silently selects "No" instead - and `savePrincipal()` (`app/app/company/principals
+/actions.ts` line 95: `person_id: str(formData, "person_id")`) always writes `person_id` fresh from
+EVERY submit of this whole-row form, so saving ANY other field on an existing director/shareholder
+(position, ownership %, appointed-on date...) silently and permanently nulls out a real
+`company_principals.person_id` link, with zero error anywhere. This link is not cosmetic:
+`engine/pack/process_pack_jobs.py`'s `directors_on_record()` (confirmed by reading it directly,
+line ~342) reads `company_principals.person_id` to pull a director's ECSA/SACPCMP registration
+number onto a real generated SANRAL Form C.1.2.3 ("Name of Partners, Members or Directors") - so
+this bug's reach extends past internal app state into an actual tender submission document, making
+it, if anything, more severe than Finding 175/176's own internal-only consequences.
+
+Having established the shape, grepped every other `<select>` in `app/app/company/**/page.tsx`
+whose `options` are built from a variable (DB-sourced) array rather than a module-level constant
+(`grep -n "options={\[" -A3 **/page.tsx _components/*.tsx | grep -B2 "\.map("`), to check each
+sibling rather than stopping at the first hit (the explicit lesson of Finding 165's own incomplete
+"genuinely clean" writeup, cited in Finding 175). Two more real instances of the identical shape
+turned up:
+- **`registrations/page.tsx`'s `HeldForm`'s "Held by" `<select>`** - built from BOTH the `people`
+  and `company_principals` reads (`const [..., { data: people }, { data: principals }] = await
+  Promise.all([...])`, both errors fully discarded). `holderValue` (`person:<id>`/`principal:<id>`/
+  `company`) falls back to the FIRST option, `"company"`, when it isn't in the `holders` list -
+  and `saveHeldRegistration()` (`app/app/company/registrations/actions.ts` line 43-49:
+  `const holder = parseHolder(str(formData, "holder")); const row = {..., ...holder, ...}`) always
+  writes `person_id`/`principal_id` fresh from the submitted "holder" value into the whole-row
+  update on every save - so saving ANY other field on an existing person/director-held registration
+  (expiry date, certificate upload, registration number...) silently reassigns it to "held by the
+  company" instead.
+- **`bank-accounts/page.tsx`'s `AccountForm`'s "Whose account" `<select>`** - built from the
+  `company_principals` read (`const [..., { data: principals }] = await Promise.all([...])`,
+  error fully discarded). `a.principal_id` falls back to the first option (`""`, "The company")
+  when the director isn't in the loaded `principals` list - and `saveBankAccount()`
+  (`app/app/company/bank-accounts/actions.ts` line 37/49: `const principalId = str(formData,
+  "principal_id"); const row = {..., principal_id: principalId, ...}`) always writes
+  `principal_id` fresh from the submitted value on every save, so saving ANY other field on an
+  existing director-attributed bank account (bank name, branch code, opened-on date...) silently
+  reassigns it to "the company's account" instead - on the one register this file's own header
+  comment calls "the most fraud-sensitive detail Tender Ready holds."
+
+Every other DB-sourced `<select>`/dropdown across the surface was checked and is safe: `team
+/page.tsx`'s "Link to an existing person" option (always a brand-new invite, `defaultValue=""`,
+nothing to lose) and its "Role" select (static `ROLES` constant); `properties/page.tsx`'s
+province/ownership-basis/SAPOA-grade selects (all static constant arrays, `PROVINCES`/
+`OWNERSHIP_BASES`/`SAPOA_GRADES`); `principals/page.tsx`'s gender/race selects (static `GENDERS`/
+`RACES`); `document-scan/review.tsx`'s `principal_id`/`person_id` selects (a fresh, `required`,
+no-`defaultValue` choice for filing a newly-scanned document, not an edit of an existing row - no
+stale value to lose, and already covered for its own display-only discarded-read shape by Finding
+144). `page.tsx` itself, `OfficeLocations.tsx`, `Notifications.tsx`, `officeActions.ts`,
+`digestActions.ts`, `document-scan/actions.ts` and every `_components/*.tsx` file were also read in
+full and do not exhibit this shape (either no DB-sourced `<select>` at all, or a form field keyed
+to a value that is never silently defaulted - `EditForm`'s `BEE_PROOF_TYPES` and ISO 9001 selects
+are both static constants too).
+
+**Fixed, in three parallel instances, same pattern as Finding 175's `needsCreditFallbackOption`:**
+1. **`app/lib/principals.ts`:** added `needsPersonFallbackOption(assignedPersonId, people)` - a
+   tiny pure helper, returning whether the currently-linked person is missing from the loaded
+   `people` (or `company_principals`, same `{id: string}[]` shape) list.
+2. **`app/lib/registrations.ts`:** added `needsHolderFallbackOption(currentValue, holders)` - same
+   idea, for the `"company"`/`"person:<id>"`/`"principal:<id>"` holder-value shape.
+3. **`principals/page.tsx`'s `PrincipalForm`, `registrations/page.tsx`'s `HeldForm`, and
+   `bank-accounts/page.tsx`'s `AccountForm`:** each `<select>` now renders a synthetic `<option
+   value={<the current value>}>(unavailable right now - keeping this pick)</option>` whenever the
+   matching helper returns true, so `defaultValue` always matches a real `<option>` and an
+   unrelated save can never again silently null out or reassign a real link. The happy path
+   (person/holder resolved normally) renders byte-for-byte as before - the new option only ever
+   appears when it is needed. `bank-accounts/page.tsx` reuses `needsPersonFallbackOption` directly
+   (same `{id}[]`-membership shape as `principals.ts`'s own use, no need for a third near-duplicate
+   helper).
+4. **All three pages' own `Promise.all` destructuring:** now also captures `error: peopleError` /
+   `error: principalsError` on the previously fully-discarded `people`/`company_principals` reads
+   and `console.error`s them - logged, not gated (the `<select>` fixes above already make the
+   underlying value safe regardless, same "visibility-only" treatment Finding 175 gave its own
+   page-level `people` reads).
+
+**Verified red-then-green, real exit codes, for each of the two new pure helpers.** Added
+`app/lib/principals.spec.ts` (4 tests) and `app/lib/registrations.spec.ts` (4 tests) - the
+extractable, testable logic in this fix (the `<select>` JSX itself has none, same honest-limitation
+shape as Findings 144/164-166/174/175 for the rest of each diff). Green: `npx vitest run
+lib/principals.spec.ts lib/registrations.spec.ts` - **8/8 passed**, exit 0. Red: reverted
+`needsPersonFallbackOption`'s own body to `return false;` alone, re-ran `lib/principals.spec.ts` -
+**exit 1, 2 of 4 failed** (`AssertionError: expected false to be true`), exactly the two predicted
+"needs fallback" cases, both negative-control cases ("nobody linked", "person already in the list")
+still passing; restored, re-ran - **4/4 passed, exit 0** again. Repeated identically for
+`needsHolderFallbackOption`'s own body (`return false;`) against `lib/registrations.spec.ts` -
+**exit 1, 2 of 4 failed**, same shape, same two negative controls still passing; restored, re-ran -
+**4/4 passed, exit 0** again. Both restores confirmed by `grep`-reading each file's own body back
+out afterward.
+
+Full suite after restoring both real fixes: `npm run typecheck` - 0 errors, exit 0. `npx eslint .`
+- 0 errors, the same 3 pre-existing warnings, exit 0. `npx next build` - compiled successfully,
+exit 0, same route table (`/company`, `/company/principals`, `/company/registrations`, `/company
+/bank-accounts` all still Partial Prerender routes). `npx vitest run` - **505/505, 66 files** (the
+baseline 497/64 plus this fix's own new 4+4/1+1) - exit 0. The `*.test.ts` node loop (plain `node
+<file>`, no `--import tsx`, no `--test` flag, real exit codes) - **28 files, 0 failures**,
+unchanged, exit 0 on every file. `engine/` sweep not re-run - this fix touches no Python.
+
+**Regression:** `app/lib/principals.ts` (+16 lines, one new pure function), `app/lib
+/principals.spec.ts` (new file, 4 tests), `app/lib/registrations.ts` (+20 lines, one new pure
+function), `app/lib/registrations.spec.ts` (new file, 4 tests), `app/app/company/principals
+/page.tsx` (~12 lines: one destructured `error`, one `console.error`, one local `const`, one
+conditional array entry), `app/app/company/registrations/page.tsx` (~17 lines: two destructured
+`error`s, two `console.error`s, one local `const`, one conditional array entry, one import),
+`app/app/company/bank-accounts/page.tsx` (~16 lines: one destructured `error`, one `console.error`,
+one local `const`, one conditional array entry, one import). No other file touched.
+
+**Pushed directly to `main`** - a read-path logging addition plus a write-path correctness fix that
+only ever changes behavior on an already-broken-upstream render (the happy path's rendered HTML and
+written data are unchanged in all three forms), with genuine red/green unit tests added for both
+new pure helpers; no RLS touched, no Payfast/money-processing path (bank account attribution is
+company-internal metadata - the account number itself still always prints WITHHELD on generated
+documents, per this file's own existing design, untouched here), no worker-image-install surface
+touched - same category and direct-push precedent Findings 164-166/170-176 all used.
+
+**Backlog status.** Finding 168 and the `start_payfast_checkout()` revenue-integrity gap both
+remain exactly as left, untouched, per the standing guardrail. All 9 PRs remain open and unmerged
+(re-checked this pass via `mcp__github__list_pull_requests`: `#176`/`#177`(draft)/`#178`/`#179`/
+`#180`/`#181`/`#182` and the two stale drafts `#164`/`#165`, same `updated_at` timestamps every
+preceding pass has recorded - note PR #177's number is coincidental and unrelated to this Finding
+177, per the standing numbering caveat). None touched, amended, or merged by this pass.
+`app/app/company/` is now genuinely swept in full - every file read, three real fixes applied, the
+rest confirmed clean with specific reasoning per file/selector above, so a future pass should not
+re-tread this surface without new evidence. `engine/discovery/`'s still-not-re-swept direct-buyer
+readers (`dbsa_procurement.py`/`vaal_central_water.py`/`kouga.py`/`lephalale.py`/
+`sars_procurement.py`) and `randwater.py`'s own TLS-blocked live-fetch limitation remain live angles
+for a future pass, as does the rest of `app/app/people/` (already swept clean per Finding 176's own
+backlog note) - a genuinely fresh, not-yet-opened surface is now the best next candidate; see this
+entry's own System-Status.md write-up for a suggestion.
+
+To verify independently: read `app/lib/principals.ts`'s `needsPersonFallbackOption()` and `app/lib
+/registrations.ts`'s `needsHolderFallbackOption()`, and each of the three `<select>` blocks in
+`principals/page.tsx`/`registrations/page.tsx`/`bank-accounts/page.tsx`, and confirm the synthetic
+fallback `<option>` only renders when the linked person/holder is missing from the loaded list.
+Confirm all three pages now destructure `error` from their own `people`/`company_principals` reads
+and log it. Run `npx vitest run lib/principals.spec.ts lib/registrations.spec.ts` (8/8), then revert
+only each helper's own body to `return false;` in turn and re-run to see the same 2 failures (per
+file) this entry describes. Run `npm run typecheck`, `npx eslint .`, `npx next build`, and the full
+`npx vitest run` yourself and confirm the same results (505/505, 66 files). Confirm via
+`mcp__github__list_pull_requests` that all 9 PRs are still open/unmerged at the same timestamps, and
+that `git log --oneline -1 origin/main` is this pass's own new commit, with no further sibling
+commits having landed in between.
