@@ -1060,6 +1060,59 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_storage_experience_documents_employee_gap(db):
+    """Standing review, 2026-11-08, Finding 209: the 'experience-documents'
+    bucket's own storage.objects RLS ("experience-documents: tenant
+    isolation by path prefix", 0012) checks only is_company_member(...) on
+    the company-id path segment, never role - even though experience_items,
+    the one real table this bucket backs, already gives 'employee' a
+    COMPLETE BLOCK at the table level (0077's own "experience_items:
+    employee has no access" RESTRICTIVE policy). Same storage-schema shape
+    PR #188/#189/#190 already found and fixed for tender-documents/
+    cv-documents/company-documents - this is that same reproduction and fix
+    for experience-documents (migration 0130), one of the 4 buckets PR
+    #190's own write-up explicitly left open."""
+    print("\n[20] Storage: experience-documents bucket's own RLS vs. experience_items' employee-has-no-access block")
+    i = {k: str(uuid.uuid4()) for k in ("uOwner", "uEmp", "c")}
+    c, uOwner, uEmp = i["c"], i["uOwner"], i["uEmp"]
+    db.one(f"""
+insert into auth.users (id, email) values ('{uOwner}', 'iso20owner@example.test'), ('{uEmp}', 'iso20emp@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso20 Experience Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uOwner}', 'owner'), ('{c}', '{uEmp}', 'employee');
+insert into experience_items (company_id, project_name, document_type, storage_path, original_filename) values
+  ('{c}', 'Real Project 1', 'completion_certificate', '{c}/experience/real-track-record.pdf', 'real-track-record.pdf');
+select 1;""")
+    path = f"{c}/experience/real-track-record.pdf"
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('experience-documents', '{path}')", uOwner)
+    check(ok, f"owner uploads the real experience-document object the legitimate way ({err.splitlines()[0] if err else 'ok'})")
+
+    print("  -- control: the table-level block already holds --")
+    check(db.one(f"select count(*) from experience_items where company_id = '{c}'", uEmp) == "0",
+          "employee sees 0 experience_items rows (0077's own RESTRICTIVE policy)")
+
+    print("  -- storage.objects itself must mirror that same block --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'experience-documents' and name = '{path}'", uEmp) == "0",
+          "employee can't SELECT the real experience-document object")
+    bad, _ = refused(db, f"insert into storage.objects (bucket_id, name) values ('experience-documents', '{c}/experience/planted-by-employee.pdf')", uEmp)
+    check(bad, "employee can't plant a new object under the company's own experience/ prefix")
+    check(db.one(f"with u as (update storage.objects set metadata = '{{\"tampered\":true}}'::jsonb where name = '{path}' returning 1) select count(*) from u", uEmp) == "0",
+          "employee can't tamper with the real object's metadata")
+    check(db.one(f"with d as (delete from storage.objects where name = '{path}' returning 1) select count(*) from d", uEmp) == "0",
+          "employee can't delete the real object")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'experience-documents' and name = '{path}'") == "1",
+          "the real object is still present afterward (superuser read)")
+
+    print("  -- owner/admin/member access is completely unaffected --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'experience-documents' and name = '{path}'", uOwner) == "1",
+          "owner can still see the real object")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('experience-documents', '{c}/experience/owner-new.pdf')", uOwner)
+    check(ok, f"owner can still upload a new object ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"with d as (delete from storage.objects where name = '{c}/experience/owner-new.pdf' returning 1) select count(*) from d", uOwner) == "1",
+          "owner can still delete their own new object")
+    check(db.one(f"select count(*) from storage.objects where name = '{c}/experience/owner-new.pdf'") == "0",
+          "owner's delete of their own new object actually took effect (superuser read)")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1069,6 +1122,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_storage_experience_documents_employee_gap(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")

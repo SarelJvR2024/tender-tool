@@ -1,5 +1,150 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): the primary task handed off by PR #190's own write-up - the 4 remaining `storage.objects` buckets sharing the "`is_company_member()`-only, never role" shape (`experience-documents`, `narrative-documents`, `onboarding-documents`, `submission-packs`) - reproduced the first of the 4, `experience-documents`, red then green in a real scratch Postgres (Finding 209); fixed in migration `0130`, **opened as PR per the binding guardrail (any authorization-bypass finding goes through a PR, never a direct push, regardless of diff size), not merged**; the other 3 confirmed (by reading their own migrations and 0077 directly) to share the identical shape but NOT yet reproduced red/green - left open, named explicitly, for a future pass, so this storage-bucket angle is NOT YET exhausted
+
+`git fetch origin main` at the start showed local already matching the known HEAD `8c5bd03`
+(the concurrent sibling "QA/robustness review" track's own Finding-203-numbered SANRAL Pack Review
+fix, already confirmed safe per the handoff brief - unrelated to this RLS work, not touched).
+Re-fetched again immediately before pushing this pass's branch - still `8c5bd03`, no further sibling
+commit landed in between. Checked the open-PR backlog via `gh api repos/sareljvr2024/tender-tool/
+pulls?state=open`: confirmed exactly the 17 open PRs expected (`#164`/`#165`/`#176`-`#190`), matching
+the handoff brief precisely - nothing merged, closed or rebased by anyone, including this session.
+Per the binding guardrails, `#164`/`#165`/`#183`/`#184` were not touched at all. `#185` through `#190`
+were read **read-only** (`gh pr diff`) - specifically #188's and #190's own fix migrations (0127,
+0129), to confirm the exact "4 RESTRICTIVE policies, select/insert/update/delete, full-block shape"
+convention this pass's own fix reuses verbatim, and every open PR's migration filename, to confirm
+the next genuinely unclaimed migration number (see below) - never built on, merged, or pushed to.
+
+**Migration-number check, done fresh rather than assumed.** `ls app/supabase/migrations/` on `main`
+tops out at `0123`. `gh pr diff <n> --name-only` across every one of the other 16 open PRs: `#164`
+claims `0099` (pre-existing, unrelated), `#176` claims `0119`, `#182` claims `0121`, `#183`/`#184`/
+`#185` each independently claim `0124` (the already-flagged collision, not this pass's to fix), `#186`
+claims `0125`, `#187` claims `0126`, `#188` claims `0127`, `#189` claims `0128`, `#190` claims `0129`.
+Highest claimed anywhere is `0129` (PR #190) - this pass's own migration is `0130`, genuinely
+unclaimed, confirmed by reading every open PR's diff directly, not assumed from the handoff brief's
+own numbers (which this check corroborated exactly).
+
+**Finding-number check, done fresh rather than assumed.** `docs/specs/QA-Edge-Case-Findings.md` on
+`main` itself tops out at Finding 203 (the sibling track's own fix, the one already flagged as
+colliding with PR #185's own claimed 203 - not this pass's to renumber). PRs #186-#190 claim
+204-208 on their own unmerged branches. This pass's own finding is **209**, genuinely the next
+unclaimed number - confirmed by reading the findings doc fresh at the start of this pass, matching
+the handoff brief's own prediction exactly.
+
+**The primary task: the 4 buckets PR #190's own write-up explicitly left open.** Grepped every
+migration for each bucket's literal name (`grep -rln "experience-documents\|narrative-documents\|
+onboarding-documents\|submission-packs" app/supabase/migrations/*.sql`) and read each bucket's own
+storage policy and the real table(s) it backs, cross-referenced against `0077_company_invites_and_
+employee_role.sql`'s own full list of "employee has no access" RESTRICTIVE policies (read directly,
+not assumed):
+
+- `experience-documents` (`0012_experience_items.sql`, path `"<company_id>/experience/<uuid>-
+  <filename>"`) backs `experience_items`, which has its own full-block RESTRICTIVE policy (0077
+  line 332). **Reproduced red then green this pass - see Finding 209 below and the new migration
+  `0130_experience_documents_storage_employee_gap.sql`.**
+- `narrative-documents` (`0087_narrative_documents.sql`, path `"<company_id>/tenders/<tender_id>/
+  <job_id>/<file>"`, its own header comment says explicitly "same tenant-isolation shape as
+  submission-packs") backs `narrative_documents`, which has its own full-block RESTRICTIVE policy
+  (0087 itself, "narrative_documents: employee has no access") - cover letters and methodology
+  statements, content 0087's own header comment says "an employee (CV-only access) has no business
+  reading or writing." Confirmed the identical shape by reading the policy directly; **not yet
+  reproduced red/green this pass** - left for a future pass, named explicitly below.
+- `onboarding-documents` (`0063_onboarding_document_scan.sql`, path keys the company id as the first
+  segment) backs `onboarding_uploads`/`onboarding_document_results`, both full-block RESTRICTIVE
+  (0077 lines 453/459). Confirmed the identical shape by reading the policy directly; **not yet
+  reproduced red/green this pass.**
+- `submission-packs` (`0017_pack_generation_jobs.sql`, reused by `0018_general_tender_preparation.sql`,
+  path `"<company_id>/tenders/<tender_id>/<job_id>/<file>"`) backs `pack_generation_jobs` (full-block
+  RESTRICTIVE, 0077 line 314) and the generated-document family (`generated_documents`, full-block,
+  0077 line 308). Confirmed the identical shape by reading the policy directly; **not yet reproduced
+  red/green this pass.**
+
+Confirmed reachability for all 4 the same way PR #188/#189/#190 already established for their own
+buckets: every one of these buckets has a real client-side call site using the browser's own
+RLS-bound `supabase.storage` client (`createSignedUrl()` reads in `app/app/experience/page.tsx`,
+`app/app/experience/[id]/page.tsx`, `app/app/tenders/[id]/narrative-documents.tsx`, `app/app/tenders/
+[id]/submission-pack.tsx`; direct upload/remove calls in `app/app/experience/actions.ts`), confirmed
+by `grep -rn "<bucket-name>" app/app app/lib` for each - this is not a theoretical, server-only
+surface for any of the 4.
+
+**This pass picked `experience-documents` to actually fix, per this review family's own "one
+finding, one PR" convention** (the same convention PR #188/#189/#190 each followed in turn) - the
+other 3 are genuine, confirmed-by-migration-reading findings, NOT genuine negatives, simply not yet
+independently red/green-verified in a scratch Postgres. Full detail, the exact red/green transcript,
+and the fix itself are in `docs/specs/QA-Edge-Case-Findings.md` Finding 209.
+
+**Independently verified red-then-green in a real scratch Postgres (not from code-reading alone).**
+Started the local Postgres 16 cluster (`service postgresql start`), built two scratch databases via
+`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d <db>` - one through migration
+`0123` only (113 migrations, "red"), one through `0130` (114 migrations, "green"). Seeded one
+company, one `owner`-role member, one `employee`-role member, one real `experience_items` row with a
+real storage object inserted the legitimate way (as the owner) in each. As the employee: confirmed
+the table-level control already holds (`select count(*) from experience_items` - 0 rows, both
+databases); on the RED database, `select`/`insert`/`update`/`delete` on the real `storage.objects`
+row all **succeeded** (readable, plantable, tamperable, deletable - confirmed gone by a superuser
+read afterward); on the GREEN database, the identical 4 operations all **failed** or matched 0 rows,
+with the real object confirmed completely untouched afterward by a superuser read, and the owner's
+own full access to the bucket confirmed completely unaffected. Added this as permanent, repeatable
+coverage: new `part2_storage_experience_documents_employee_gap()` in `engine/security/
+test_tenant_isolation.py`, printed as `[20]`. Ran the whole suite against both databases via
+`TENANT_PSQL`: **RED gave `6 FAILED`** (the 5 direct exploit assertions plus one knock-on whose own
+precondition the employee's earlier delete had destroyed within the same run - every other check
+`[1]`-`[19]` still passing); **GREEN gave `ALL PASSED`**. Ran a final, independent third scratch
+database (also through `0130`) fresh at the end, purely to re-confirm `ALL PASSED` was not an
+artifact of database state carried over from the fix-development database - it was not.
+
+**Ran the full real verification suite, not just the Python security test.** `cd app && npm run
+typecheck` - clean. `npx eslint .` - 0 errors, 3 pre-existing warnings (`Logo.tsx`'s `<img>`
+advisories, `analytics/page.tsx`'s unused `STAGE_META`), unchanged from the known baseline. `npx
+vitest run` - 71/71 files, 532/532 tests pass. The full `node --experimental-strip-types <file>.
+test.ts` loop across all 28 `*.test.ts` files repo-wide - every file `# fail 0`. `npx next build` -
+completed clean, every route listed with its expected rendering mode, no build errors. This fix
+touches only a new migration file and the Python security test file - no app code changed - so this
+clean result is expected, not incidental.
+
+**Cleanup.** All 3 scratch databases (`scratch_exp`, `scratch_exp_green`, `scratch_final`) dropped;
+the Postgres service stopped (`service postgresql stop`, confirmed `down` via `pg_lsclusters`
+afterward). No `git worktree` or temporary branch was created in this session (the fix was built and
+verified in the working tree, then pushed as a single commit on a dedicated branch for the PR, per
+the guardrail that any authorization-bypass finding goes through a PR, never a direct push).
+
+**Backlog status.** Finding 168 (the `start_payfast_checkout()` revenue-integrity gap) and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill remain exactly as left, untouched, per
+the standing guardrails. All 17 pre-existing open PRs remain open and unmerged - re-confirmed via the
+GitHub REST API before opening this pass's own PR; nothing merged, closed, or rebased by anyone,
+including this session; nothing merged by this session, and this pass's own new PR was opened, not
+merged, per the binding guardrail.
+
+**Is the storage-bucket angle exhausted? No - 3 of the 4 named buckets remain.** `narrative-documents`,
+`onboarding-documents` and `submission-packs` are genuine, confirmed-by-migration-and-0077-reading
+findings sharing the identical shape as this pass's own Finding 209 and PR #188/#189/#190's - NOT
+genuine negatives. **Concrete next lead for the next pass:** reproduce each of these 3 red/green the
+same mechanical way this pass did for `experience-documents` (each needs its own scratch-Postgres
+transcript before being folded into its own migration/PR, per this family's "one finding, one PR"
+convention) - `submission-packs` is the next-widest surface (backs both `pack_generation_jobs` and
+`generated_documents`) and is a reasonable next pick, but any of the 3 would close out this angle
+once all 4 are done. Once all 4 are fixed, re-run the exact `select ... from pg_policies where
+schemaname='storage' and tablename='objects'` catalog query PR #188 first used and confirm literally
+every bucket's own policy set now either has no backing-table employee restriction to mirror, already
+mirrors one, or has the finer person-level shape `cv-documents`/PR #189 already covers - only then is
+this angle genuinely, provably exhausted, not just "the 4 named buckets are done."
+
+To verify independently: `grep -rln "experience-documents\|narrative-documents\|onboarding-documents\|
+submission-packs" app/supabase/migrations/*.sql` and confirm the file set named above; read each
+bucket's own storage policy and confirm it checks only `is_company_member(...)`, never role; read
+`0077_company_invites_and_employee_role.sql` lines 314, 332, 453, 459 (and `0087_narrative_documents.
+sql`'s own "employee has no access" policy) and confirm each backing table's full-block RESTRICTIVE
+policy. Build two scratch databases from `engine/security/replay_schema.sh`, one through `0123` and
+one through `0130`; seed as described; confirm the employee's `select`/`insert`/`update`/`delete` on
+a real `experience-documents` object succeed pre-fix, fail post-fix. Run `TENANT_PSQL="psql -h
+127.0.0.1 -p 5432 -U postgres -d <db>" PGPASSWORD=postgres python3 engine/security/
+test_tenant_isolation.py` from inside `engine/security/` against both and confirm `6 FAILED`/`ALL
+PASSED`. Confirm via the GitHub API that all 18 PRs (17 pre-existing plus this pass's own) are open
+and unmerged, and that `main`'s own `QA-Edge-Case-Findings.md` still tops out at Finding 203 (this
+pass's own Finding 209 lives only on its own branch until Sarel merges it).
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
