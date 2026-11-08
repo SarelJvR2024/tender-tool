@@ -1060,6 +1060,63 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_storage_submission_packs_employee_gap(db):
+    """Standing review, 2026-11-08, Finding 210: the 'submission-packs'
+    bucket's own storage.objects RLS ("submission-packs: tenant isolation
+    by path prefix", 0017) checks only is_company_member(...) on the
+    company-id path segment, never role - even though BOTH real tables this
+    bucket backs (pack_generation_jobs, generated_documents) already give
+    'employee' a COMPLETE BLOCK at the table level (0077's own "... employee
+    has no access" RESTRICTIVE policies). Same storage-schema shape PR
+    #188/#189/#190/#191 already found and fixed for tender-documents/
+    cv-documents/company-documents/experience-documents - this is that same
+    reproduction and fix for submission-packs (migration 0131), one of the
+    3 buckets PR #191's own write-up explicitly left open."""
+    print("\n[20] Storage: submission-packs bucket's own RLS vs. pack_generation_jobs/generated_documents' employee-has-no-access block")
+    i = {k: str(uuid.uuid4()) for k in ("uOwner", "uEmp", "c", "t", "pack", "job")}
+    c, uOwner, uEmp, t, pack, job = i["c"], i["uOwner"], i["uEmp"], i["t"], i["pack"], i["job"]
+    db.one(f"""
+insert into auth.users (id, email) values ('{uOwner}', 'iso20spowner@example.test'), ('{uEmp}', 'iso20spemp@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso20 Submission Packs Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uOwner}', 'owner'), ('{c}', '{uEmp}', 'employee');
+insert into tenders (id, slug, title, status) values ('{t}', 'iso20-sp-{t[:8]}', 'Iso20 SP tender', 'open');
+insert into tender_packs (id, company_id, tender_id, status) values ('{pack}', '{c}', '{t}', 'confirmed');
+insert into pack_generation_jobs (id, company_id, tender_id, tender_pack_id, engine, status, storage_path_pdf) values
+  ('{job}', '{c}', '{t}', '{pack}', 'sanral', 'ready', '{c}/tenders/{t}/{job}/submission_pack.pdf');
+select 1;""")
+    path = f"{c}/tenders/{t}/{job}/submission_pack.pdf"
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('submission-packs', '{path}')", uOwner)
+    check(ok, f"owner uploads the real submission-pack object the legitimate way ({err.splitlines()[0] if err else 'ok'})")
+
+    print("  -- control: the table-level block already holds, on BOTH tables this bucket backs --")
+    check(db.one(f"select count(*) from pack_generation_jobs where company_id = '{c}'", uEmp) == "0",
+          "employee sees 0 pack_generation_jobs rows (0077's own RESTRICTIVE policy)")
+    check(db.one(f"select count(*) from generated_documents where company_id = '{c}'", uEmp) == "0",
+          "employee sees 0 generated_documents rows (0077's own RESTRICTIVE policy)")
+
+    print("  -- storage.objects itself must mirror that same block --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'submission-packs' and name = '{path}'", uEmp) == "0",
+          "employee can't SELECT the real submission-pack object")
+    bad, _ = refused(db, f"insert into storage.objects (bucket_id, name) values ('submission-packs', '{c}/tenders/{t}/{job}/planted-by-employee.pdf')", uEmp)
+    check(bad, "employee can't plant a new object under the company's own tenders/ prefix")
+    check(db.one(f"with u as (update storage.objects set metadata = '{{\"tampered\":true}}'::jsonb where name = '{path}' returning 1) select count(*) from u", uEmp) == "0",
+          "employee can't tamper with the real object's metadata")
+    check(db.one(f"with d as (delete from storage.objects where name = '{path}' returning 1) select count(*) from d", uEmp) == "0",
+          "employee can't delete the real object")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'submission-packs' and name = '{path}'") == "1",
+          "the real object is still present afterward (superuser read)")
+
+    print("  -- owner/admin/member access is completely unaffected --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'submission-packs' and name = '{path}'", uOwner) == "1",
+          "owner can still see the real object")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('submission-packs', '{c}/tenders/{t}/{job}/owner-new.pdf')", uOwner)
+    check(ok, f"owner can still upload a new object ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"with d as (delete from storage.objects where name = '{c}/tenders/{t}/{job}/owner-new.pdf' returning 1) select count(*) from d", uOwner) == "1",
+          "owner can still delete their own new object")
+    check(db.one(f"select count(*) from storage.objects where name = '{c}/tenders/{t}/{job}/owner-new.pdf'") == "0",
+          "owner's delete of their own new object actually took effect (superuser read)")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1069,6 +1126,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_storage_submission_packs_employee_gap(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
