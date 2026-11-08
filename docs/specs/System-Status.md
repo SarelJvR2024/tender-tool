@@ -1,5 +1,231 @@
 # System Status
 
+## This pass (2026-11-08xlviii, standing solution-architect review, background worker): continued the PR-by-PR fresh-eyes line-by-line read on four backlog PRs that had not yet had it this segment - `#178` ("'Fix item' submission-pack gate was UI-only, never enforced server-side"), `#183`/`#184` (the two onboarding-document-scan/retry RPCs, both already flagged for the standing `0124` three-way migration-number collision but not yet read character-by-character), and `#193` (the last two storage-bucket employee-gap migrations, `narrative-documents`/`onboarding-documents`, part of the family that had the role-matrix re-test but not this specific technique). Found one real, reproduced issue, a NEW instance of the cross-open-PR-collision shape already established three times this segment (PR `#186`'s NULL bug, the `#187`/`#195` merge-order collision, PR `#176`'s lock regression) - this time spanning two TypeScript files rather than SQL migrations: `#178`'s own brand-new server-side hard-stop gate (`requestSubmissionPack()`/`requestJob()`, built on top of `computeTenderReadiness()`) fails OPEN, not closed as its own comments explicitly claim, on a per-section Pack-Review read failure, because the one primitive that would tell it apart from "genuinely nothing to fix" (`hasUnreadSection`) is added by a DIFFERENT, independent, still-open PR (`#180`) that `#178` neither depends on nor was rebased against. Reproduced live via a real vitest run against `main`'s own current `computeTenderReadiness()` (not inferred from reading alone) - full transcript below. `#183`, `#184` and `#193` were each read in full and are clean - no new issue, no overlap with the already-documented `0124` collision beyond re-confirming it. Nothing pushed to either PR's branch, no competing PR opened, no new `QA-Edge-Case-Findings.md` Finding number consumed (the one real issue found lives only on `#178`'s own open, unmerged branch in combination with `#180`'s own open, unmerged branch - neither of which this review may alter).
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`5d95fbe5` (the immediately preceding pass's own `#176`/`#182` entry, matching the standing
+brief's stated known HEAD). Re-fetched again immediately before writing this entry - still
+`5d95fbe5`, no sibling commit landed in between. Re-checked the open-PR backlog via the GitHub
+REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q '.[].number' |
+sort -n`) at the start and the end of this pass: 23 open, exactly `#164`/`#165`/`#176`-`#196` -
+nothing merged, closed, or rebased by anyone, including this session. `docs/specs/
+QA-Edge-Case-Findings.md` on `main` still tops out at Finding 204 (grepped every `### Finding <n>`
+heading and sorted numerically, not assumed) - the next unclaimed number remains 216 (not needed
+this pass, since nothing here was fixed on `main` or on a review-opened PR).
+
+**Why these four.** The brief's own backlog split the untreated PRs into "the older backlog"
+(`#177`-`#181`, `#183`, `#184`) and "the storage-bucket family" (`#188`-`#193`). Checked every
+backlog PR's own merge-base against `main` first, specifically to find which ones predate real
+migrations the way `#176`/`#182` did (the exact signal that caught the preceding pass's own
+finding), rather than guessing: `git merge-base origin/main origin/pr/<n>` for `#177`-`#181`,
+`#183`, `#184`, `#188`-`#193`, then `git ls-tree <base> app/supabase/migrations/` to read off each
+base's own highest migration file. Result: `#177`-`#181` (none of which touch any migration at
+all - confirmed by `git diff --name-status <base> origin/pr/<n> -- app/supabase/migrations/`
+coming back empty for all five) branch after `0120`, missing `0121`/`0122`/`0123`; `#183`, `#184`,
+and all six of `#188`-`#193` branch after `0123` - `main`'s own current real tip - so the specific
+"branch point predates a later same-function fix on `main`" signal that caught `#176`/`#182`
+structurally CANNOT fire for any of those nine (there is nothing on `main` after their own branch
+points for them to have missed). That ruled out a pure migration-redefinition hunt for this pass's
+picks. Picked `#178` instead because, although it adds no migration, its own diff explicitly
+imports and calls `computeTenderReadiness()` (a plain, shared TypeScript function, not SQL, but
+the exact same "built on a shared primitive that a DIFFERENT PR is independently also touching"
+shape the brief's technique targets) - and a grep of `git diff --stat` across the whole open-PR
+set for every PR that also touches `tender-readiness.ts` turned up exactly one other hit: `#180`.
+Added `#183`/`#184` (both single, self-contained onboarding-RPC migrations, already named for the
+standing `0124` collision but never read line-by-line this segment) and `#193` (the literal "last
+two buckets" of the storage family the brief named as under-treated) to round out the four.
+
+**Method for `#178`/`#180`.** Fetched both read-only into disposable local refs (`git fetch origin
++refs/pull/178/head:refs/remotes/origin/pr/178`, same for `180`) - never checked out as a working
+tree, never built on. `#178`'s own diff (`git diff $(git merge-base origin/main origin/pr/178)
+origin/pr/178`) touches `app/app/tenders/[id]/actions.ts`, `general-actions.ts`,
+`general-workspace.tsx` and `submission-pack.tsx` - no migration, no test file. Read every changed
+line. `requestSubmissionPack()` (`actions.ts`) and `requestJob()` (`general-actions.ts`) each gain
+a brand-new server-side hard stop: `const snapshot = await load...PackReviewSnapshot(tenderId); if
+(!snapshot.mapped) fail(...); const fixCount = computeTenderReadiness(snapshot.sections).fix.
+length; if (fixCount > 0) fail(...)`. Both call sites' own comments explicitly frame this as a
+fail-closed fix for exactly this review loop's own named bug class ("Fail closed (deny on
+uncertain, same as every other read-failure fix in this review loop), not open - a transient blip
+here must never be able to skip the Fix check below entirely"). Read `loadPackReviewSnapshot()`/
+`loadGeneralPackReviewSnapshot()` (`pack-review-data.ts`/`general-pack-review-data.ts`) in full to
+check that claim against what `.mapped` actually means: `mapped: boolean` is set `false` ONLY when
+the overall `loadTenderCompliance()`/`document_requirements` read fails or the tender's family
+isn't mapped (one single top-level flag) - but EVERY one of `pack-review-data.ts`'s 7 (SANRAL) and
+`general-pack-review-data.ts`'s 5 (general) individual sections (`company`, `key_positions`,
+`general_answers`, `general_documents`, etc.) is wrapped in its OWN separate `try/catch`, and a
+failure there pushes a `failedSection(...)` (`error` set, `mapped` untouched - confirmed by direct
+read of both files' own `catch (err) { sections.push(failedSection(...)) }` blocks, one failure per
+section, `mapped` only ever read or set by the ONE top-level check above all of them). So
+`snapshot.mapped === true` is fully compatible with one or more individual sections having failed
+to load this render - exactly the scenario `#178`'s own `!snapshot.mapped` check does not catch.
+
+**The issue: `computeTenderReadiness()`, the function BOTH new hard stops are built on, silently
+drops a failed section's items instead of flagging them - and `#178` never checks the one flag
+that would tell it apart from "genuinely clean".** Read `tender-readiness.ts` as it stands on
+`main` today (`#178`'s own base, branched after `0120` but this file has no migration dependency so
+the relevant base is simply current `main`, re-confirmed identical): its own doc comment says
+outright, "A section whose own data failed to load (`section.error`) contributes nothing... and
+silently treating a read failure as '0 items, fully ready' would be worse than leaving it out of
+the count" - and the code does exactly that: `if (section.error) continue;`, no flag, no record
+that anything was skipped. `TenderReadiness` (the return type) has no field at all that could tell
+a caller "a section didn't load" apart from "every section loaded and nothing's wrong" - both read
+as `fix.length === 0`. A grep of `#178`'s own full diff for `hasUnreadSection`/`section.error`
+(`git diff $(git merge-base origin/main origin/pr/178) origin/pr/178 | grep -i
+"hasUnreadSection\|section.error"`) returns nothing - `#178` never references either, consistent
+with neither existing on the `main` it branched from. This means: if the ONE section holding a
+real, disqualifying Fix item (say, "Company master data" - a mandatory CIDB/B-BBEE field) happens
+to be the section that fails to read on a given render (a transient Supabase blip, the exact
+failure mode Findings 174/176/177/180 already found repeatedly on this same screen family), every
+OTHER section still loads fine, `computeTenderReadiness()` sees zero sections with a real Fix item
+among the ones that loaded, `fixCount` comes back `0`, and `#178`'s own brand-new `if (fixCount > 0)
+fail(...)` gate does not fire - `requestSubmissionPack()`/`requestJob()` proceed to actually queue
+the pack, despite the real Fix item being hidden, not resolved. `#178`'s UI-side diff
+(`submission-pack.tsx`/`general-workspace.tsx`) independently confirms the author's OWN mental
+model only covered the top-level case: both files add an explicit `!snapshot.mapped -> "Couldn't
+check compliance readiness just now"` disabled-button branch (correctly fixing the "old `: 0`
+fallback could re-enable the button on a top-level read failure" bug, with its own comment calling
+that out by name) - but neither file adds any equivalent branch for a per-section failure, because
+nothing in their own `main` base lets them tell one apart from a clean render.
+
+**Why this isn't `main`'s own bug today, and why it is `#178`'s.** `computeTenderReadiness()`'s
+own "silently drop a failed section" behavior has lived on `main` since this file was written, but
+until `#178`, NOTHING called it for enforcement - the only existing caller was the Submit/Request
+button's own `disabled` HTML attribute (cosmetic, bypassable by any direct POST, which is the exact
+gap `#178`'s whole stated purpose is to close). `#178` is the first thing to build a real,
+server-side, money/pack-generation-adjacent hard stop on top of this primitive - and in doing so,
+inherits a flaw in that primitic that a SEPARATE, independent, also-still-open PR (`#180`,
+"a Pack Review section read failure masked as 'nothing to fix'") happens to be fixing at the exact
+same layer, with neither PR aware of or dependent on the other. `#180`'s own diff
+(`git show origin/pr/180:app/app/tenders/[id]/tender-readiness.ts`) adds exactly the missing
+primitive: a new `hasUnreadSection: boolean` field, set `true` instead of silently skipped whenever
+`section.error` is hit, with `#180`'s own doc comment stating the exact rule `#178` would need to
+follow: "any hard-stop gate built on this function MUST treat `hasUnreadSection` the same as 'can't
+tell, fail closed,' not as 'nothing to fix.'" `#178` predates this field entirely (it doesn't exist
+on the `main` `#178` branched from, and `#178`'s own diff never adds or references it) - so even
+though `#180`'s fix, if merged first, WOULD hand `#178` everything it needs, `#178` as currently
+written would still not read it, because `#178`'s own code has no line that checks it. Whichever of
+the two merges first, the other would need an explicit rebase (`#178` to add the
+`hasUnreadSection` check; or, if `#178` merges first, `#180`'s own fix alone would not protect
+`#178`'s two new hard stops without `#178` itself being touched) - this is the same "two open PRs,
+same shared surface, neither aware of the other, no dependency connects them" shape as the standing
+`#187`/`#195` collision, just TypeScript instead of SQL and "fails open on a read error" instead of
+"reverts a lock".
+
+**Reproduced live, not concluded from reading alone - a real vitest run against `main`'s own
+current `computeTenderReadiness()`.** Wrote a disposable spec file (deleted immediately after,
+`app/app/tenders/[id]/_pr178_pr180_scratch.spec.ts` - never committed) importing the REAL,
+unmodified `./tender-readiness` and `./pack-review-data` from this checkout of `main`, fed it one
+`ReviewSection` with `error` set (simulating exactly the per-section failure
+`pack-review-data.ts`'s own `catch` blocks produce) and asserted: `readiness.fix.length === 0` and
+`readiness.totalCount === 0` (the exact state `#178`'s own `if (fixCount > 0) fail(...)` gate would
+see - too low to fire, regardless of what the section would have contained) and
+`(readiness as Record<string, unknown>).hasUnreadSection === undefined` (confirming `main`'s own
+current return type has no such field for a caller to check at all). `npx vitest run
+"app/tenders/[id]/_pr178_pr180_scratch.spec.ts"` (run from `app/`): **`1 passed (1)`** - confirming
+live, against real code, not just the doc-comment's own claim, that `main`'s current
+`computeTenderReadiness()` really does silently zero out a failed section's Fix count with no flag
+raised. Separately extracted `#180`'s own `tender-readiness.ts` body via `git show
+origin/pr/180:app/app/tenders/[id]/tender-readiness.ts` and read its `for (const section of
+sections) { if (section.error) { hasUnreadSection = true; continue; } ... }` loop directly,
+confirming it WOULD set the flag `true` for the identical input - the counterfactual "green" side,
+confirming this is specifically a `#178`-does-not-check-the-fix-`#180`-provides gap, not a
+dead end on `#180`'s side too. No scratch Postgres was needed for this claim - `computeTenderReadiness()`
+is a pure, no-I/O TypeScript function (its own doc comment says so: "Pure - no I/O"), so a real
+`vitest` execution against the actual function is the equivalent live reproduction for this class
+of claim, not an RLS/authorization claim requiring Postgres.
+
+**`#183` (`0124_onboarding_document_scan_confirm_race.sql`, 4 new locked RPCs) - read in full,
+clean, including a self-correction already visible in its own branch history.** `#183` has three
+commits: the original fix (`f0c0aa8`, Finding 185's own confirm-race lock, matching the `0121`/
+`0122`/`0123` pattern exactly - `for update` on `onboarding_document_results`, re-check
+`review_status = 'pending_review'` under the lock, re-implement `is_company_member()`/`not
+is_employee_in_company()` inside each SECURITY DEFINER body since RLS is bypassed, not inherited);
+a docs commit; and a THIRD commit (`24a0153`) that is itself a fresh-eyes catch of the PR's own
+earlier commit - `apply_onboarding_id_document_checked()` originally carried forward
+`confirmIdDocument()`'s own pre-existing `reviewed_by = null` hardcode (matching, at the time, "not
+this finding's bug to fix"), and that third commit's own comment explains it was corrected because
+carrying the `null` forward would have silently reintroduced Finding 185's already-merged
+`reviewed_by` fix (`956701f` on `main`) the moment this PR merged - the exact `#176`-shaped risk
+this whole technique hunts for, except the PR's own author/reviewer already caught and fixed it
+before this pass ever got to it. Confirmed the fix is real and complete: all 4 of this file's own
+new functions (`apply_onboarding_vault_document_checked`, `apply_onboarding_experience_letter_checked`,
+`apply_onboarding_id_document_checked`, `apply_onboarding_cv_handoff_checked`) now stamp
+`reviewed_by = auth.uid()`, not `null`. Checked every one of the 4 function names against every
+OTHER migration on `main` (`grep -rl "function <name>" app/supabase/migrations/*.sql` for each) -
+zero hits beyond `#183`'s own file for all 4 (they're new names, nothing else on `main` redefines
+them) - and `#183`'s own merge-base sits at `main`'s real current tip (`0123`), so the specific
+staleness signal that caught `#176`/`#182` cannot apply here at all. **No bug found.**
+
+**`#184` (`0124_retry_onboarding_upload_checked.sql`, 1 new locked RPC, Finding 201) - read in
+full, clean.** `retry_onboarding_upload_checked()` is new (no other migration touches it), locks
+the `onboarding_uploads` row `for update`, re-checks `is_company_member()`/`not
+is_employee_in_company()` and `status = 'classification_failed'` before writing - same pattern as
+`#183`. Read the paired `actions.ts`/`actions.spec.ts` diff in full: `retryOnboardingUpload()` now
+calls the RPC via `supabase.rpc(...)` instead of its own old, silently-no-op RLS-bound `.update()`
+(Finding 201's own original bug, already fixed on `main`'s docs/tests per this PR's own write-up),
+and both of the PR's own two new test cases (`"does not report success when the RPC raises"` /
+`"reports success when the RPC genuinely re-queues the row"`) assert exactly what their names
+claim - one mocks an RPC error and checks the redirect URL does NOT contain `saved=retrying` and
+DOES contain `?error=`; the other mocks RPC success and checks it DOES contain `saved=retrying` -
+no mismatch between claim and assertion. `#184`'s own merge-base also sits at `main`'s real current
+tip (`0123`) - same as `#183`, no staleness signal possible. **No bug found.**
+
+**`#193` (`0132_narrative_documents_storage_employee_gap.sql` + `0133_onboarding_documents_storage_
+employee_gap.sql`, the last 2 of the original 7-bucket storage family) - read in full, clean.**
+Both migrations add 4 additive RESTRICTIVE policies each (`select`/`insert`/`update`/`delete`)
+scoped to their own `bucket_id`, excluding `is_employee_in_company((storage.foldername(name))[1]::
+uuid)` entirely - the same outright-block shape already confirmed clean for `tender-documents`/
+`company-documents`/`experience-documents`/`submission-packs` in the preceding role-matrix pass,
+not the finer `cv-documents` "own person only" shape, matching both buckets' own backing tables
+having no person-scoped column. `is_employee_in_company()` is a SQL `exists(...)`, never `NULL`, so
+no NULL-handling surface exists in either. Checked the policy names themselves (new, not redefining
+anything) and the migration numbers (`0132`/`0133`) against every other open PR's own claimed
+numbers named so far this segment (`0124` x3 for `#183`/`#184`/`#185`; `0125`-`0131` for
+`#186`-`#192`; `0134`-`0136` for `#194`-`#196`, per the standing brief) - no new collision. Read
+`#193`'s own `test_tenant_isolation.py` addition (`part2_storage_narrative_onboarding_employee_gap`)
+in full: every `check(...)` call's own inline message matches what it actually tests (table-level
+control, then per-bucket select/insert/update/delete for the employee, then the same 4 for the
+owner as a control) - no mismatch. `#193`'s own merge-base also sits at `main`'s real current tip
+(`0123`) - same as `#183`/`#184`, no staleness signal possible. **No bug found.**
+
+**Recommendation for Sarel, documented-only per the standing guardrail (never touch another open
+PR's branch, never open a competing PR for a bug found only there).** Before merging `#178`:
+rebase onto a `main` that already has `#180`'s own `hasUnreadSection` field (or cherry-pick that one
+field), then add `if (snapshot.mapped && computeTenderReadiness(snapshot.sections).hasUnreadSection)
+fail(...)` (or equivalent) to BOTH of `#178`'s own new hard stops (`requestSubmissionPack()` in
+`actions.ts`, `requestJob()` in `general-actions.ts`) and to its own two UI-disabled-reason branches
+(`submission-pack.tsx`, `general-workspace.tsx`) - the top-level `!mapped` case `#178` already
+handles correctly is not enough on its own. Equally, if `#180` merges first, it alone does not
+close this gap for `#178` - whichever PR lands second needs to be the one that adds the
+`hasUnreadSection` check, not assume the other side already did. This is Sarel's own call on
+sequencing; neither PR's branch was touched by this review.
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open, unmerged, and
+untouched beyond read-only reference - reconfirmed via the GitHub REST API at the start and the end
+of this pass. `#178`, `#180`, `#183`, `#184`, and `#193` were fetched read-only into disposable
+local refs (`refs/remotes/origin/pr/<n>`) and never checked out as a working tree, never built on,
+never pushed to; all five deleted via `git update-ref -d` at the end of this pass (confirmed empty
+via `git for-each-ref refs/remotes/origin/pr/` afterward). No new `QA-Edge-Case-Findings.md`
+Finding number consumed (216 remains the next free one) - the one real issue this pass found lives
+only on `#178`'s own open, unmerged branch, in combination with `#180`'s own open, unmerged branch,
+neither of which this review may alter, the same treatment already established for PR `#186`'s NULL
+bug, the `#187`/`#195` collision, and PR `#176`'s lock regression. No scratch Postgres was built
+this pass (the one claim needing live reproduction was a pure-function TypeScript claim, reproduced
+via a real, disposable `vitest` run instead - deleted immediately after, never committed) - `pg_lsclusters`
+confirmed the Postgres service was already `down` both before and after this pass, so none needed
+starting or stopping.
+
+To verify independently: `git fetch origin +refs/pull/178/head:refs/remotes/origin/pr/178 && git
+diff $(git merge-base origin/main origin/pr/178) origin/pr/178 -- "app/app/tenders/[id]/actions.ts"`
+and confirm the new `if (!packReviewSnapshot.mapped) fail(...)` / `if (fixCount > 0) fail(...)`
+gate never references `hasUnreadSection`; `git fetch origin +refs/pull/180/head:refs/remotes/origin/pr/180
+&& git show origin/pr/180:app/app/tenders/[id]/tender-readiness.ts | grep -n hasUnreadSection` to
+see `#180`'s own addition directly; or reproduce the live check by writing a one-off spec file that
+imports `./tender-readiness` from this checkout of `main`, feeds `computeTenderReadiness([{ ...,
+error: "x" }])`, and confirms `fix.length === 0` with no `hasUnreadSection` field on the result.
+
+---
+
 ## This pass (2026-11-08xlvii, standing solution-architect review, background worker): took the brief's own option 1 - a line-by-line, fresh-eyes read of two individual open PRs' own diffs that had NOT yet had this specific treatment (`#176`/"12 SECURITY DEFINER RPCs bypassed employee RLS entirely", `#182`/"pack-quota RPCs bypassed employee RLS entirely" - both predate and are entirely independent of the already-heavily-audited `#185`-`#196`/migrations-`0124`-`0136` family, fixing twelve and two DIFFERENT functions respectively, no overlap), hunting specifically for an off-by-one, a wrong captured variable, a missing `for update` lock, or a test that doesn't test its own claim. Found one real, reproduced issue: PR `#176`'s own redefinition of `set_opportunity_tag()` (its migration `0119_employee_rls_systematic_sweep.sql`, function 10 of 12, line 566) is based on a `main` snapshot from BEFORE migration `0121_opportunity_tag_add_remove_race.sql` landed (Finding 178's already-shipped, already-merged fix for this exact function's own lost-update race), so PR `#176`'s copy of the function has reverted to the pre-fix, unlocked `select * into opp from discovered_opportunities where id = p_opportunity_id;` (no `for update`) while separately, correctly, adding the new employee-role guard on top of that stale body. If `#176` is ever merged as currently written, without being rebased to re-incorporate `0121`'s lock, it would silently REOPEN Finding 178's already-fixed concurrency bug on `main` the moment it merges - not a hypothetical future collision between two open PRs (the `#187`/`#195` precedent's shape), but a live regression risk against `main` itself, today, for anyone who merges `#176` without noticing. Reproduced red and green live, in a real scratch Postgres. Also confirmed, incidentally, two previously-undocumented migration-NUMBER collisions beyond the standing `0124` one: `#176`'s own new file claims `0119`, which main's real `0119_notification_claim_functions_anon_revoke.sql` already uses for something unrelated; `#182`'s own new file claims `0121`, which main's real `0121_opportunity_tag_add_remove_race.sql` (the very fix `#176` would revert) already uses. This is written up below as a documented-only recommendation for Sarel, the same treatment already established twice this segment (PR `#186`'s NULL bug, the `#187`/`#195` collision) - nothing was pushed to either PR's branch, no competing PR was opened, and no new `QA-Edge-Case-Findings.md` Finding number was consumed (nothing was fixed on `main` or on a PR this review itself opened).
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
