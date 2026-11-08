@@ -114,6 +114,21 @@ with tempfile.TemporaryDirectory() as tmp:
                                 {"needs_plan": True})
     check(not e and any("below SANRAL's 30% minimum" in x for x in w), "20% total -> below-minimum warning")
 
+    # QA pass, 2026-11-08: each TE's own percentage was already bounded 0-100
+    # individually, but nothing ever checked the SUM across TEs - two TEs each
+    # individually valid (60% and 55%) totalled 115% of the contract price,
+    # a factually impossible allocation, with no warning anywhere.
+    e, w = sanral_b7.check_plan({"mode": "subcontract", "targeted_enterprises": [
+        te(name="A", pct_excl_provisional=60, pct_of_contract=60),
+        te(name="B", pct_excl_provisional=55, pct_of_contract=55),
+    ]}, {"needs_plan": True})
+    check(not e and any("more than the whole contract has been allocated" in x for x in w),
+          f"115% total -> over-allocation warning, got {w}")
+    e, w = sanral_b7.check_plan({"mode": "subcontract", "targeted_enterprises": [
+        te(name="A", pct_excl_provisional=50, pct_of_contract=50),
+    ]}, {"needs_plan": True})
+    check(not any("more than the whole contract" in x for x in w), f"exactly 50% total -> no over-allocation warning, got {w}")
+
     # Finding 142 (2026-11-07): a NaN/Infinity percentage used to sail straight
     # past check_plan()'s own validation (NaN compares False to every bound
     # check), then got written into the real workbook as a literal <v>nan</v>

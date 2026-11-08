@@ -167,6 +167,15 @@ export function checkPlan(plan: SubcontractingPlan | null, applies?: B7Applicabi
   if (tes.length > 0 && applies?.needsPlan && total < B7_POLICY_MIN_PCT) {
     warnings.push(`Targeted Enterprises total ${fmt(total)}% of the contract price (excl. provisional sums) - below SANRAL's ${B7_POLICY_MIN_PCT}% minimum; the form will show NOT ACCEPTABLE`);
   }
+  // QA pass, 2026-11-08: each TE's own percentage was already bounded 0-100
+  // individually (isPct above), but nothing ever checked the SUM across TEs -
+  // a plan with several TEs each individually valid totalled over 100% of
+  // the contract price with no warning anywhere, a factually impossible
+  // allocation most likely from a data-entry mistake. The engine/sanral_b7.py
+  // pack-build twin has the identical gap - fixed there too, same pass.
+  if (tes.length > 0 && total > 100) {
+    warnings.push(`Targeted Enterprises total ${fmt(total)}% of the contract price (excl. provisional sums) - more than the whole contract has been allocated; check for a data-entry error`);
+  }
   if (tes.length > 0 && total > 0 && local < total / 3) {
     warnings.push(`Local Targeted Enterprises (based in the project's province) carry ${fmt(local)}% of ${fmt(total)}% - SANRAL encourages at least a third`);
   }

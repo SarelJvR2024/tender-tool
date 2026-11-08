@@ -11917,6 +11917,55 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 202, SANRAL Form B7's `check_plan()`/`checkPlan()` (engine + Tender Workspace twin) bounded each Targeted Enterprise's own percentage 0-100 individually but never checked the SUM across TEs - two individually-valid percentages totalled 115% of the contract price with no warning anywhere
+
+Oriented from `6e18290` (own prior pass: Finding 200, `award_outcomes.parse_rand()`'s negative-sign bug).
+`git fetch origin main` found 2 new sibling commits (both "standing solution-architect review" track,
+no collision): the Finding 199 leads closed out as genuine negatives, and Finding 201's own lesson
+applied systematically across the grant map (also a genuine negative, nothing pushed to `main` - that
+pass's own Finding 201 itself lives entirely on an unmerged PR, `#184`). Fast-forward merge was clean.
+Re-checked again immediately before this pass's own push - still the same tip, no new sibling commit
+landed in between.
+
+**This pass's own task**: SANRAL pack rotation. Read through the SANRAL-specific form fillers
+(`fill_a_forms.py`, `sanral_b7.py`, `fill_authority_letter.py`/`company_documents.py`) looking for a
+genuinely adversarial boundary case, after first ruling out two suspected leads as real but
+already-fixed/non-bugs by actually running the code against all 6 real committed tender-family
+templates (`mark_sbd4_no_answers()`'s own `("4.1", "4.1")` tuple turned out to match the real SBD4
+form's own literal duplicated header cell, not a typo - confirmed clean across all 6 families; the
+`professional_indemnity_insurance` partial-dict KeyError risk was already closed by `adapt_company()`'s
+own all-or-nothing construction, confirmed by reading `test_adapt_company.py`).
+
+**Found: Finding 202.** Constructed a plan with two Targeted Enterprises, each individually valid
+(60% and 55% of the contract price excl. provisional sums - both within the existing per-field 0-100%
+bound), and ran it through the real `sanral_b7.check_plan()`: no error, no warning about the 115%
+total - only an unrelated "local share" warning computed off the already-impossible total. Confirmed
+`app/lib/sanralB7.ts`'s own `checkPlan()` - the Tender Workspace's pre-pack-request mirror, which its
+own header comment says to "keep in step" with the Python engine - has the identical gap, so this was
+never a one-sided sibling divergence: both the engine's build-time check and the Workspace's own
+earlier, user-facing check were silent on a factually impossible allocation (more of the contract
+subcontracted than the whole contract is worth), most realistically caused by a data-entry mistake.
+
+**Fix**: both functions now warn (not error, matching the existing below-30%-minimum check's own
+severity - SANRAL's own form has no hard block either) when the TEs' total exceeds 100%. Verified
+red-then-green in both languages: `engine/test_sanral_b7.py` (2 new cases, 115%-total and
+exactly-100%-boundary) and a new, narrowly-scoped `app/lib/sanralB7.spec.ts` (3 tests - no spec file
+existed for this module at all before this pass, confirmed by grep; scoped to just this new check, not
+a retroactive full-coverage rewrite). Reverted both production files via one diff, re-ran both suites -
+predicted failures in both (`ALL PASSED`/`3 passed` -> the 115% case missing its warning in each);
+reapplied, re-ran - green in both. `python3 -m py_compile` and `npx eslint` clean. Broader regression:
+full `npx vitest run` - 68/71 files, 501/506 tests pass; the 5 failures (`lib/properties.spec.ts`,
+`lib/payfast.spec.ts`, `app/company/properties/actions.spec.ts`) are a pre-existing, unrelated
+environment gap (`date-fns` not installed in this container's `node_modules` - confirmed directly),
+not caused by this fix. See `docs/specs/QA-Edge-Case-Findings.md` Finding 202 for the full write-up,
+including the numbering note (201 is already claimed by the sibling track's own unmerged PR #184).
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-07, standing QA/robustness review): fix - Finding 200, `award_outcomes.py`'s `parse_rand()` silently flipped a text-typed negative rand amount positive, or returned `None` entirely for the same amount in accounting parentheses notation, reachable through `boq_extraction.py`'s own BOQ omission/credit line parsing
 
 Oriented from `c8eb357` (own prior pass: Finding 192, the `process_*_jobs.py` `company_id`/narrative-staleness

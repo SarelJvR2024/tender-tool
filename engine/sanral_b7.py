@@ -210,6 +210,16 @@ def check_plan(plan, applies=None):
     if tes and (applies or {}).get("needs_plan") and total < POLICY_MIN_PCT:
         warnings.append(f"Targeted Enterprises total {total:g}% of the contract price (excl. provisional sums) - below "
                         f"SANRAL's {POLICY_MIN_PCT}% minimum; the form will show NOT ACCEPTABLE")
+    # QA pass, 2026-11-08: each TE's own percentage was already bounded 0-100
+    # individually, but nothing ever checked the SUM across TEs - a plan with
+    # several TEs each individually valid (e.g. two at 60%/55%) totalled 115%
+    # of the contract price with no warning anywhere, a factually impossible
+    # allocation (more than the whole contract subcontracted) most likely to
+    # happen from a data-entry mistake, not a real plan. The sanralB7.ts
+    # Workspace-form twin has the identical gap - fixed there too, same pass.
+    if tes and total > 100:
+        warnings.append(f"Targeted Enterprises total {total:g}% of the contract price (excl. provisional sums) - "
+                        "more than the whole contract has been allocated; check for a data-entry error")
     if tes and total > 0 and local < total / 3:
         warnings.append(f"Local Targeted Enterprises (based in the project's province) carry {local:g}% of {total:g}% - "
                         "SANRAL encourages at least a third")
