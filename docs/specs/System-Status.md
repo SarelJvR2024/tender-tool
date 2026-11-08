@@ -1,5 +1,225 @@
 # System Status
 
+## This pass (2026-11-08xliii, standing solution-architect review, background worker): the LAST two buckets of the original 7-bucket `storage.objects` authorization-bypass catalog - `narrative-documents` and `onboarding-documents`, both named-but-unverified by PR #191's own write-up - independently re-confirmed from the real migration SQL and app code, then reproduced red then green in a real scratch Postgres for both; fixed by two new migrations (`0132`, `0133`), **opened as a single PR per the binding guardrail (any authorization-bypass finding goes through a PR, never a direct push), not merged**; this closes the entire 7-bucket storage-authorization-bypass angle - every bucket in PR #188's own original catalog now has a matching employee-role RESTRICTIVE fix, open and awaiting Sarel's review
+
+`git fetch origin main` at the start showed local already matching the known HEAD `8c5bd036f9361c
+dc504fecdb5d3d7a5edbca001e` exactly - no sibling commit from the concurrent "QA/robustness review"
+track landed since the handoff. Re-fetched again immediately before writing this entry and a third
+time immediately before pushing this pass's own branch - still `8c5bd03`, no further sibling commit
+landed in between. Checked the open-PR backlog via the GitHub API (`gh api repos/SarelJvR2024/
+tender-tool/pulls?state=open`) at the start: confirmed exactly the 19 open PRs expected
+(`#164`/`#165`/`#176`-`#192`), matching the handoff brief precisely - nothing merged, closed or
+rebased by anyone, including this session. Per the binding guardrails, `#164`/`#165`/`#183`/`#184`
+were not touched at all this pass. `#185` through `#192` were read **read-only** (`gh pr diff`) -
+specifically every PR's own migration filenames and `Finding [0-9]+` text, to confirm the next
+genuinely unclaimed migration number and Finding number (see below), and `#188`'s/`#192`'s own fix
+migrations, to confirm the exact "4 RESTRICTIVE policies, select/insert/update/delete, full-block
+shape" convention this pass's own fix reuses verbatim - never built on, merged, or pushed to.
+
+**Migration-number check, done fresh rather than assumed.** `ls app/supabase/migrations/` on `main`
+tops out at `0123`. Read every open PR's own migration filenames via `gh pr diff <n>` for every PR
+`#176`-`#192`: highest claimed anywhere is `0131` (PR #192, `submission-packs`, confirmed directly
+from its own diff) - also reconfirmed the known `0124` three-way collision across `#183`/`#184`/`#185`
+and that `#186`-`#192` each claim one new number in strict sequence (`0125`-`0131`). This pass's own
+two migrations are `0132` (`narrative-documents`) and `0133` (`onboarding-documents`), genuinely
+unclaimed by anyone.
+
+**Finding-number check, done fresh rather than assumed.** `docs/specs/QA-Edge-Case-Findings.md` on
+`main` itself tops out at Finding 203 (the sibling track's own fix, `8c5bd03`). Reading every open
+PR's own diff for `Finding [0-9]+` text found the highest genuinely NEW number claimed anywhere is
+**210** (PR #192). This pass's own two findings are **211** (`narrative-documents`) and **212**
+(`onboarding-documents`), confirmed the next unclaimed pair by reading the findings doc itself fresh
+at the start of this pass, not assumed from the brief's own prediction of "211 onward" (which was
+right, but re-checked rather than trusted).
+
+**The primary task: the 2 buckets PR #191's own write-up explicitly left open, independently
+re-confirmed from the real source, not trusted from any prior pass's own line numbers.** Read each
+bucket's own migration directly:
+
+- `narrative-documents` (`app/supabase/migrations/0087_narrative_documents.sql`) - the storage
+  policy (line 132, `"narrative-documents: tenant isolation by path prefix"`) checks only
+  `is_company_member((storage.foldername(name))[1]::uuid)`, never role; `narrative_documents` itself
+  has its own full-block `"narrative_documents: employee has no access"` RESTRICTIVE policy at line
+  122, in the SAME migration file. Path convention, confirmed from the migration's own comment:
+  `"<company_id>/tenders/<tender_id>/<job_id>/<file>"`. Confirmed no later migration touches this
+  bucket's storage policy (`grep -rln "narrative-documents" app/supabase/migrations/*.sql` - only
+  `0087` itself, before this pass's own `0132`).
+- `onboarding-documents` (`app/supabase/migrations/0063_onboarding_document_scan.sql`) - the storage
+  policy (line 58) checks only `is_company_member(...)`, never role. Backs BOTH
+  `onboarding_uploads` and `onboarding_document_results`, each given its own full-block RESTRICTIVE
+  policy by `0077_company_invites_and_employee_role.sql` (lines 452 and 458 respectively, read
+  directly, not assumed from the brief's own "~453/459" estimate). Path convention: `"<company_id>/
+  <uuid>-<filename>"` (no batch subfolder - `batch_id` is a plain column). Confirmed no later
+  migration touches this bucket's storage policy.
+
+Confirmed genuine client-side reachability for both, reading the actual app code rather than
+assuming from the bucket's existence: `app/app/tenders/[id]/narrative-documents.tsx` imports
+`createClient()` from `@/lib/supabase/server` (the ordinary cookie-session RLS-bound client, not
+service-role - no `SUPABASE_SERVICE_ROLE_KEY` reference anywhere in the file) and calls
+`supabase.storage.from("narrative-documents").createSignedUrl(p, 600)` directly from the Tender
+Workspace card, no RPC or table read gating it first. `app/app/company/document-scan/
+upload-form.tsx` uploads straight from the browser into the `onboarding-documents` bucket via
+`uploadBatch()` (the plain anon-key + user-JWT client, `app/lib/supabase/client.ts`) BEFORE any
+`onboarding_uploads` row is even inserted, and `actions.ts`'s own `createClient()` calls
+`.storage.from(ONBOARDING_BUCKET).download(...)`/`.upload(...)`/`.remove(...)` directly for the
+review/copy-to-vault flow. Both pages are reachable by any signed-in company member regardless of
+role - this review family's own 0119/systematic-sweep finding already established `AppShell.tsx`'s
+`isEmployee` only swaps the nav list, never gates page content.
+
+**Independently verified red-then-green in a real scratch Postgres for BOTH, never concluded from
+code-reading alone - per the binding guardrail that the two prior passes' own claims about these
+buckets had to be reproduced, not trusted.** Started the local Postgres 16 cluster (`service
+postgresql start`). Built a scratch database via `engine/security/replay_schema.sh -h 127.0.0.1 -p
+5432 -U postgres -d tt_scratch_storage` through migration `0123` only (113 migrations, no fix).
+Seeded one company, one `owner`-role member, one `employee`-role member, one real `tenders` row, one
+real `narrative_documents` row (`status='ready'`) with a real `storage.objects` row at
+`<company>/tenders/<tender>/<job>/cover_letter.docx`, and one real `onboarding_uploads` row
+(`status='classified'`) with a real `storage.objects` row at `<company>/<uuid>-cidb.pdf` - both
+storage rows inserted as the owner (the superuser stand-in for the service-role worker/a legitimate
+upload). As the employee (`begin; set local role authenticated; select set_config('test.uid',
+'<employee uuid>', true); ...; rollback;`):
+- Table-level controls (confirm the existing blocks are real, not assumed): `select count(*) from
+  narrative_documents where company_id = '<company>'` -> `0`; `select count(*) from
+  onboarding_uploads where company_id = '<company>'` -> `0`.
+- **RED** (migrations through `0123` only): on BOTH buckets, `select` on the real object returned it
+  (1 row each - readable/downloadable); `insert` of a brand-new, planted object under the employee's
+  own company prefix succeeded (`INSERT 0 1` each); `update` of the real `onboarding-documents`
+  object's own `metadata` succeeded (`UPDATE 1`); `delete` of the real object succeeded on both
+  (`DELETE 1` each - the real cover-letter draft and the real CIDB certificate were both genuinely
+  destroyable).
+- Applied `0132_narrative_documents_storage_employee_gap.sql` and
+  `0133_onboarding_documents_storage_employee_gap.sql`, rebuilt a completely fresh scratch database
+  from scratch (115 migrations total), reseeded identically.
+- **GREEN**: on BOTH buckets, the identical `select` returned `0` rows; the identical `insert` failed
+  with `ERROR: new row violates row-level security policy "<bucket>: employee excluded, insert" for
+  table "objects"`; the identical `update`/`delete` matched `0` rows each.
+- Control, same fresh database: as the OWNER, `select` on both buckets still returns the row, a fresh
+  `insert` still succeeds (`INSERT 0 1`), its own `update` still succeeds (`UPDATE 1`), and its own
+  `delete` still succeeds (`DELETE 1`) - owner/admin/member access is completely unaffected by either
+  fix.
+- Broader regression: ran `engine/security/test_tenant_isolation.py` against this same fresh,
+  115-migration scratch database (`TENANT_PSQL="psql -h 127.0.0.1 -p 5432 -U postgres -d
+  tt_scratch_tenant_iso" PGPASSWORD=postgres python3 test_tenant_isolation.py`, from inside
+  `engine/security/`) - **`ALL PASSED`**, including its own `[18]` employee-role and `[19]`
+  team/billing RPC suites, confirming neither fix regresses any existing isolation guarantee.
+- Added this as permanent, repeatable coverage, not just a one-off manual transcript: new
+  `part2_storage_narrative_onboarding_employee_gap()` in `engine/security/test_tenant_isolation.py`,
+  printed as `[20]` (builds its own owner/employee/company fixture with real rows in both
+  `narrative_documents` and `onboarding_uploads` plus real `storage.objects` rows in both buckets,
+  same pattern as `part2_employee_role`'s own self-contained fixture). Ran the whole suite against
+  a SEPARATE, independently-built RED database (113 migrations, `0132`/`0133` excluded by copying
+  every other migration file into a scratch directory and replaying that, not by editing the real
+  migrations folder) - **`12 FAILED`** (the 10 real exploit assertions for both buckets, plus 2
+  knock-on "owner still reads" failures whose own precondition the employee's earlier same-run
+  delete had already destroyed - the identical knock-on shape PR #192's own write-up noted for
+  `submission-packs`). Re-ran against the real 115-migration GREEN database - **`ALL PASSED`**,
+  confirming `[20]` itself, not just this pass's own ad-hoc psql transcript, correctly distinguishes
+  red from green.
+
+**Fix, both migrations.** Four new, additive RESTRICTIVE policies on `storage.objects` each, scoped
+to the one bucket, excluding `employee` entirely via `is_employee_in_company((storage.foldername
+(name))[1]::uuid)` - the identical "full block" shape PR #188/#190/#191/#192 already used
+(`narrative_documents` and `onboarding_uploads`/`onboarding_document_results` all give `employee`
+zero access at the table level, not a finer "own record only" restriction the way `cv_uploads`/PR
+#189 needed). Nothing existing dropped or edited - the pre-existing PERMISSIVE policies from `0087`/
+`0063` are untouched; these narrow what they grant. `is_employee_in_company()` evaluates false for
+owner/admin/member, so every new policy ANDs away to a no-op for them.
+
+**Ran the full real verification suite, not just the Python security test.** `cd app && npm run
+typecheck` - clean (`✓ Types generated successfully`, `tsc --noEmit` clean). `npx eslint .` - 0
+errors, the same 3 pre-existing warnings as every prior pass's own baseline (`Logo.tsx`'s `<img>`
+advisories, `analytics/page.tsx`'s unused `STAGE_META`). `npx vitest run` - 71/71 files, 532/532
+tests pass. The full `node --experimental-strip-types <file>.test.ts` loop across all 28 `*.test.ts`
+files repo-wide - every file exits 0, 0 failures. `npx next build` - compiled successfully, every
+route listed with its expected rendering mode, no build errors, exit code 0. This fix touches only
+two new migration files (plus this doc and the findings doc) - no app code changed - so this clean
+result is expected, not incidental.
+
+**Why one PR for both, not two.** This review family's own established convention is "one finding,
+one PR" (`#188`-`#192` each did exactly that). Judged it cleaner to combine these final two into a
+single PR instead, per the standing brief's own explicit allowance to use judgment here: both
+findings share the identical root cause, the identical fix shape, and the identical verification
+method; both were found and verified together in one continuous pass; and combining them is what
+lets this entry declare the ENTIRE 7-bucket angle exhausted in one place rather than leaving a
+one-bucket gap between two sequential, unmerged PRs. The diff is still small (two short, additive
+migration files) and is, per the binding guardrail, going through a PR rather than a direct push
+regardless of its size, because it is a genuine authorization-bypass finding.
+
+**Cleanup.** Both scratch databases (`tt_scratch_storage`, the 113-migration RED database; a fresh
+115-migration GREEN database; and the separate `tt_scratch_tenant_iso` database the Python suite ran
+against) were dropped (confirmed via `\l` showing none of the three names remaining); the Postgres
+service was stopped (`service postgresql stop`, confirmed `down` via `pg_lsclusters` afterward). No
+`git worktree` was created - the fix was built and verified in the working tree, then pushed as a
+single commit on one dedicated branch for the PR, per the guardrail that any authorization-bypass
+finding goes through a PR, never a direct push; that branch exists only as the PR's own head ref,
+same as every prior PR in this family.
+
+**Backlog status.** Finding 168 (the `start_payfast_checkout()` revenue-integrity gap) and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill remain exactly as left, untouched, per
+the standing guardrails. All 19 pre-existing open PRs remain open and unmerged - re-confirmed via the
+GitHub API before opening this pass's own PR; nothing merged, closed, or rebased by anyone, including
+this session; nothing merged by this session, and this pass's own new PR was opened, not merged, per
+the binding guardrail.
+
+**The entire 7-bucket storage-authorization-bypass angle is now exhausted.** Every bucket in PR
+#188's own original `select schemaname, tablename, policyname, permissive, cmd, qual, with_check from
+pg_policies where schemaname='storage' and tablename='objects'` catalog query -
+`tender-documents` (PR #188), `cv-documents` (PR #189), `company-documents` (PR #190),
+`experience-documents` (PR #191), `submission-packs` (PR #192), `narrative-documents` (this pass,
+`0132`), `onboarding-documents` (this pass, `0133`) - now has an open, unmerged PR adding the
+matching employee-role RESTRICTIVE exclusion, each independently reproduced red-then-green in a real
+scratch Postgres by the pass that found it (the two closed out here were re-reproduced from scratch
+by THIS pass specifically, not just re-asserted from the prior two passes' own code-reading claims,
+per the binding guardrail). This does not mean `storage.objects`' RLS is now bug-free in general - it
+means this ONE specific bug class (a storage-level tenant-isolation policy that forgot a role
+exclusion its own backing table already enforces) has been swept across literally every bucket that
+exists in this schema, confirmed by the catalog query itself, not by assumption.
+
+**Recommended next angle for a future pass.** Two concrete, genuinely fresh candidates, both already
+named by name in this doc's own prior entries rather than invented fresh for this hand-off:
+1. **Re-verify PR #187's own `public`-schema SECURITY DEFINER sweep.** PR #187 (migration `0126`,
+   Finding 205, `record_tender_document()`) was itself found by a sweep of `security definer`
+   functions on `public`-schema tables for the "bypasses an employee RESTRICTIVE policy" shape - the
+   same bug class this pass's own `storage` schema work just exhausted, but on a DIFFERENT schema.
+   That sweep has not been independently re-run or re-verified by any pass since PR #187 itself
+   opened it - a natural, directly analogous next step: re-run the catalog query (`select p.proname
+   from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and
+   p.prosecdef`) fresh, cross-reference every result against every `public`-schema table's own
+   RESTRICTIVE employee-exclusion policies, and confirm PR #176/#182/#185/#186/#187 between them
+   really did catch every instance, the same discipline this pass just applied to `storage.objects`.
+2. **The still-untouched 11-PR backlog from before this storage-bucket arc** (`#176`-`#184`, named by
+   number in the very first entry of this track's own storage-bucket arc) - every one of those is a
+   real, independently-verified finding of its own, open and unmerged, that this track has not
+   revisited since opening it. Re-reading each one's own current diff against the LATEST `main` (to
+   catch any drift - a later migration renumbering, a sibling fix touching the same file, etc. - since
+   `main` has moved many times since some of these were opened) before assuming any of them still
+   applies cleanly would be real, valuable, not-yet-done work, distinct from hunting a brand new bug.
+
+Of the two, **(1) is the stronger recommendation** - it continues the exact same lens (SECURITY
+DEFINER / RESTRICTIVE-policy bypass, the single most productive bug class this whole arc has found,
+repeatedly, across two different schemas now) into the one place it has been named as open but never
+re-swept, rather than switching to a different kind of check entirely.
+
+**Confirmed per the standing brief: PRs `#164`/`#165`/`#176`-`#192` were read-only referenced where
+needed (never built on, merged, or pushed to) and remain open and unmerged; this pass merged nothing;
+`#185`/`#203`'s own numbering collision (the concurrent sibling track's commit `8c5bd03`) was not
+touched, per the standing guardrail that it is Sarel's own call, not this pass's to fix.**
+
+To verify independently: read `app/supabase/migrations/0087_narrative_documents.sql` lines ~122-141
+and `app/supabase/migrations/0063_onboarding_document_scan.sql` lines ~58-67, plus
+`app/supabase/migrations/0077_company_invites_and_employee_role.sql` lines 452/458, and confirm each
+storage policy checks only `is_company_member(...)`, never role, while each backing table has its own
+full-block RESTRICTIVE policy. Build a scratch Postgres with `engine/security/replay_schema.sh`, seed
+as described above, and reproduce the RED/GREEN transcript for both buckets exactly (`set local role
+authenticated; select set_config('test.uid', ..., true)`). Run `TENANT_PSQL="psql -h 127.0.0.1 -p
+5432 -U postgres -d <db>" PGPASSWORD=postgres python3 engine/security/test_tenant_isolation.py` from
+inside `engine/security/` against a database with both `0132` and `0133` applied and confirm `ALL
+PASSED`. Confirm via the GitHub API that all 20 PRs (19 pre-existing plus this pass's own) are open
+and unmerged, and that `main`'s own `QA-Edge-Case-Findings.md` still tops out at Finding 203 (this
+pass's own Findings 211/212 live only on its own branch until Sarel merges it).
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -

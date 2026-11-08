@@ -1060,6 +1060,69 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_storage_narrative_onboarding_employee_gap(db):
+    """Standing review, 2026-11-08, Findings 211/212: the 'narrative-documents'
+    (0087) and 'onboarding-documents' (0063) buckets' own storage.objects RLS
+    policies ("...: tenant isolation by path prefix") check only
+    is_company_member(...) on the company-id path segment, never role - even
+    though BOTH backing table families (narrative_documents, 0087; and
+    onboarding_uploads/onboarding_document_results, 0077) already give
+    'employee' a COMPLETE BLOCK at the table level. The identical shape
+    PR #188/#189/#190/#191/#192 (migrations 0127-0131) already found and
+    fixed for the other 5 buckets in this same storage schema - this closes
+    out the last 2 of the original 7-bucket catalog (migrations 0132/0133).
+    Builds its own fixture (own company, owner, employee) rather than
+    reusing seed_db's A/B, same reasoning as part2_employee_role."""
+    print("\n[20] Storage: 'narrative-documents'/'onboarding-documents' - employee excluded, owner unaffected")
+    i = {k: str(uuid.uuid4()) for k in ("uOwner", "uEmp", "c", "t", "job")}
+    uOwner, uEmp, c, t, job = i["uOwner"], i["uEmp"], i["c"], i["t"], i["job"]
+    narrative_path = f"{c}/tenders/{t}/{job}/cover_letter.docx"
+    onboarding_path = f"{c}/{job}-cidb.pdf"
+    db.one(f"""
+insert into auth.users (id, email) values ('{uOwner}', 'iso20owner@example.test'), ('{uEmp}', 'iso20emp@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso20 Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uOwner}', 'owner'), ('{c}', '{uEmp}', 'employee');
+insert into tenders (id, slug, title, closing_date, family) values
+  ('{t}', 'iso20-{t[:8]}', 'Iso20 tender', now() + interval '30 days', 'Conventional Consultant Tender');
+insert into narrative_documents (company_id, tender_id, kind, status, generated_storage_path) values
+  ('{c}', '{t}', 'cover_letter', 'ready', '{narrative_path}');
+insert into onboarding_uploads (company_id, batch_id, storage_path, original_filename, status) values
+  ('{c}', '{job}', '{onboarding_path}', 'cidb.pdf', 'classified');
+insert into storage.buckets (id, name) values ('narrative-documents','narrative-documents'),
+  ('onboarding-documents','onboarding-documents') on conflict do nothing;
+insert into storage.objects (bucket_id, name, owner) values
+  ('narrative-documents', '{narrative_path}', '{uOwner}'), ('onboarding-documents', '{onboarding_path}', '{uOwner}');
+select 1;""")
+
+    print("  -- table-level control: both already fully blocked for employee --")
+    check(db.one(f"select count(*) from narrative_documents where company_id = '{c}'", uEmp) == "0",
+          "employee sees 0 narrative_documents rows")
+    check(db.one(f"select count(*) from onboarding_uploads where company_id = '{c}'", uEmp) == "0",
+          "employee sees 0 onboarding_uploads rows")
+
+    for bkt, path in (("narrative-documents", narrative_path), ("onboarding-documents", onboarding_path)):
+        check(db.one(f"select count(*) from storage.objects where bucket_id = '{bkt}' and name = '{path}'", uEmp) == "0",
+              f"{bkt}: employee can't read the real object")
+        bad, why = refused(db, f"insert into storage.objects (bucket_id, name, owner) values ('{bkt}', '{path}.planted', '{uEmp}')", uEmp)
+        check(bad, f"{bkt}: employee can't plant an object under their own company prefix ({why[:70]})")
+        n = db.one(f"with u as (update storage.objects set metadata = '{{\"tampered\": true}}'::jsonb "
+                    f"where bucket_id = '{bkt}' and name = '{path}' returning 1) select count(*) from u", uEmp)
+        check(n == "0", f"{bkt}: employee's update matches 0 rows")
+        n = db.one(f"with d as (delete from storage.objects where bucket_id = '{bkt}' and name = '{path}' returning 1) select count(*) from d", uEmp)
+        check(n == "0", f"{bkt}: employee's delete matches 0 rows")
+        check(db.one(f"select count(*) from storage.objects where bucket_id = '{bkt}' and name = '{path}'") == "1",
+              f"{bkt}: the real object is still there afterward")
+
+    print("  -- owner's own access to both buckets is completely unaffected --")
+    for bkt, path in (("narrative-documents", narrative_path), ("onboarding-documents", onboarding_path)):
+        check(db.one(f"select count(*) from storage.objects where bucket_id = '{bkt}' and name = '{path}'", uOwner) == "1",
+              f"{bkt}: owner still reads the real object")
+        ok, _, err = db.run(f"insert into storage.objects (bucket_id, name, owner) values ('{bkt}', '{path}.by-owner', '{uOwner}')", uOwner)
+        check(ok, f"{bkt}: owner can still insert ({err.splitlines()[0] if err else 'ok'})")
+        ok, _, err = db.run(f"delete from storage.objects where bucket_id = '{bkt}' and name = '{path}.by-owner'", uOwner)
+        check(ok, f"{bkt}: owner can still delete its own insert ({err.splitlines()[0] if err else 'ok'})")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1069,6 +1132,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_storage_narrative_onboarding_employee_gap(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
