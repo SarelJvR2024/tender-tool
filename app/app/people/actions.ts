@@ -8,6 +8,7 @@ import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtrac
 import { safeFileName } from "@/lib/safeFileName";
 import { sastToday } from "@/lib/publicHolidays";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
+import { isValidSaId } from "@/lib/principals";
 
 /**
  * Every write here goes through the signed-in user's own Supabase client, so
@@ -54,10 +55,27 @@ export async function savePerson(formData: FormData) {
     redirect(`/people/${id ?? "new"}?error=name_required`);
   }
 
+  // people.id_number is, per its own column comment (0001_init_schema.sql),
+  // "a South African ID number" - the same real-world field
+  // company_principals.id_number is (0050), whose own save path,
+  // savePrincipal() (app/company/principals/actions.ts), already hard-gates
+  // it with isValidSaId(). This one had no validation at all until now
+  // (Finding 218, standing review 2026-11-08, generalizing Finding 217's "a
+  // same-purpose sibling was hardened and this one wasn't told" shape) -
+  // whatever was typed here was written straight through to a column read
+  // verbatim onto real government tender forms (engine/fill_tender.py,
+  // engine/fill_conventional.py, engine/general/fill_flat_pdf.py's SBD4
+  // "representative_id_number") and onto the person's generated CV
+  // (engine/cv/generate_cv.py's "ID Number:" line).
+  const idNumber = str(formData, "id_number")?.replace(/\s+/g, "") ?? null;
+  if (idNumber && !isValidSaId(idNumber)) {
+    redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("That ID number isn't a valid 13-digit South African ID number.")}`);
+  }
+
   const row = {
     company_id: companyId,
     name,
-    id_number: str(formData, "id_number"),
+    id_number: idNumber,
     description: str(formData, "description"),
     role: str(formData, "role"),
     signatory_capacity: str(formData, "signatory_capacity"),

@@ -215,6 +215,77 @@ describe("savePerson - edit path, real update still succeeds", () => {
   });
 });
 
+// Finding 218 (standing review, 2026-11-08) - generalizing Finding 217's shape
+// ("a hard-validation gate checks only PART of what it should, because a
+// same-purpose sibling was hardened and this one wasn't told") across every
+// "is this a real X" validator in the codebase. people.id_number is, per
+// 0001_init_schema.sql's own column comment, "a South African ID number" -
+// the exact same real-world field company_principals.id_number is (0050),
+// whose own save path, savePrincipal() (app/company/principals/actions.ts),
+// already hard-gates with isValidSaId() ("That ID number isn't a valid
+// 13-digit South African ID number."). savePerson() had NO validation on
+// id_number at all - not a digit-count check, not isValidSaId(), nothing -
+// so a value the sibling gate already correctly refuses sailed straight onto
+// people.id_number, from which it is later printed verbatim onto real
+// government tender forms (engine/fill_tender.py, engine/fill_conventional.py,
+// engine/general/fill_flat_pdf.py's SBD4 "representative_id_number") and onto
+// the person's generated CV (engine/cv/generate_cv.py's "ID Number:" line).
+describe("savePerson - id_number is validated the same way its sibling savePrincipal() already does (Finding 218)", () => {
+  it("refuses to save a person whose id_number isn't a real South African ID number", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    // "abc123def0123" is not 13 digits at all; isValidSaId() (run live, see
+    // this finding's own write-up) correctly returns false for it.
+    const fd = formDataWith({ id: "new", name: "Jane Doe", id_number: "abc123def0123" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent("valid 13-digit South African ID number"));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("still saves normally when id_number is a genuinely valid South African ID number", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    // "8601205135087" is genuinely valid per isValidSaId() (Luhn-correct,
+    // plausible 1986-01-20 birth date, citizenship digit 0) - the same
+    // fixture engine/cv/process_cv_jobs.py already uses as its own "Test
+    // Person".
+    const fd = formDataWith({ id: "new", name: "Jane Doe", id_number: "8601205135087" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+
+  it("still allows leaving id_number blank (not every person needs one on file)", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+});
+
 // applyCvExtraction()'s own people-update/projects-insert/mark-applied
 // sequence used to be three separate, unlocked writes, the last of which
 // never re-checked review_status in its own .eq() chain - a genuine two-
