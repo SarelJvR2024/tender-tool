@@ -1,5 +1,221 @@
 # System Status
 
+## This pass (2026-11-08xlii, standing solution-architect review, background worker): the 11-PR backlog staleness/drift audit (`#164`/`#165`/`#176`-`#184`) the standing brief named as long-untouched - re-checked all 11 against CURRENT `main` by reading each PR's actual diff, not any prior summary; found `#164`/`#165` substantially stale (a direct-push commit to `main` already rewrote the exact file both branches touch, with a different model), one real code-conflict on `#179` (not touched), one wrong-prose-but-harmless comment baked into `#176`'s own migration file (contradicted by `#185`'s later finding), and confirmed `#176`-`#178`/`#180`-`#182` remain clean, current and still-needed; no new Finding opened, nothing pushed to any PR branch, `main` untouched except this docs entry
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `c19b9f1`
+(unchanged from the immediately preceding pass's own HEAD; no sibling commit landed since). Re-fetched
+again immediately before writing this entry - still `c19b9f1`. Re-checked the open-PR backlog via the
+GitHub REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate`) at the start and
+the end: 21 open, exactly `#164`/`#165`/`#176`-`#194` - nothing merged, closed, or rebased by anyone,
+including this session. `docs/specs/QA-Edge-Case-Findings.md` still tops out at Finding 203, confirmed
+by grepping every `### Finding <n>` heading and sorting numerically, not assumed from memory.
+
+**Method, per the standing brief.** Fetched all 11 backlog PR heads read-only into disposable local
+refs (`git fetch origin +refs/pull/<n>/head:refs/remotes/origin/pr/<n>` for each of `164 165 176 177
+178 179 180 181 182 183 184`) - never checked out as a working tree, never built on, deleted again at
+the end of this pass. For each, ran `git merge-tree <merge-base> origin/main origin/pr/<n>` to get a
+REAL three-way-merge conflict answer against current `main` (not the GitHub API's own `mergeable`
+field, which came back `null`/"unknown" for all 11 when queried directly - GitHub hadn't computed it
+yet and polling for it would have meant waiting, so a local merge-tree was both faster and more
+authoritative). Read every PR's actual diff with `gh pr diff <n>` (never a prior pass's summary),
+cross-referenced against current `main`'s own file history (`git log -- <path>`) wherever a conflict
+or an overlap suggested something on `main` itself had moved since the PR branched. Per the binding
+guardrails, `#164`/`#165`/`#183`/`#184` were read-only referenced exactly as this pass's own task
+requires (diff + merge-tree, nothing else) - no push, no rebase, no conflict resolution attempted on
+any of the 11, even where a conflict turned out to be in a docs-only file (see `#184` below).
+
+**Per-PR mergeability/relevance/staleness, in numeric order:**
+
+- **`#164`** (`savings-counter: Capacity Unlocked copy, calculation and breakdown rework`, opened
+  2026-10-26, OFF-LIMITS for writes). **Real conflict against current `main`**, and NOT a trivial one
+  - multiple hunks across `app/components/tt/savings-calculator.tsx`, `app/app/page.tsx`, and
+  `app/app/dashboard/page.tsx`. Root cause, traced by hand rather than left as "conflicts, don't know
+  why": `git log --oneline origin/main -- app/components/tt/savings-calculator.tsx` shows `bab5c5b`
+  ("Fix contradictory savings-calculator numbers (+11/mo vs no annual figure)"), a DIRECT PUSH TO
+  `main` by the concurrent sibling QA/robustness track, landed 2026-10-27 09:04 UTC - roughly 13 hours
+  AFTER `#164`'s own last push (2026-10-26 20:14 UTC per `gh api .../pulls/164 -q .head.sha,.updated_at`)
+  - `git merge-base --is-ancestor bab5c5b origin/pr/164` confirms it is genuinely NOT an ancestor of
+  `#164`'s branch, i.e. `#164` was never rebased past it. `bab5c5b`'s own commit message explicitly
+  names `#164` ("that's mid-rework in open draft PR #164 with a different model for a different
+  surface; this fix is scoped to the marketing calculator only") and believed it was staying out of
+  `#164`'s way by leaving `lib/savingsCounter.ts` (the real per-tender counter) untouched - true as far
+  as it goes, but `bab5c5b` ALSO rewrote `app/components/tt/savings-calculator.tsx` (the marketing
+  "estimate your own savings" widget) wholesale, introducing a brand-new `lib/savingsEstimateCalculator.ts`
+  model (`calculateSavingsEstimate()`, `ADMIN_TIME_SAVED_FRACTION`) to replace the old
+  `extraCapacity()`/`SAVINGS_STEP_HOURS` formula - and `#164`'s own diff independently edits that exact
+  same file (confirmed via `gh api repos/.../pulls/164/files`, which lists
+  `app/components/tt/savings-calculator.tsx` among its 13 touched files). A 2026-11-07 pass's own entry
+  (line ~8670 in this doc's history) checked for a `#164` collision before adding
+  `savingsEstimateCalculator.ts` as a NEW file and correctly found none for that specific question (new
+  file, no existing owner) - but that check never asked, and so never caught, that `bab5c5b`'s
+  SEPARATE edit to the shared `savings-calculator.tsx` component would itself conflict with `#164`'s own
+  edit to the same file once both existed. **Also found a second, independent staleness issue on
+  `#164`, unrelated to the conflict above**: its own migration file, `app/supabase/migrations/
+  0099_savings_baseline_range_limits.sql`, reuses migration number `0099` - but `main` already has
+  `app/supabase/migrations/0099_workflow_heartbeats.sql` (confirmed via `ls app/supabase/migrations/
+  0099*` - both exist as genuinely different files, so `git merge-tree` does not flag this as a file
+  conflict; the migration file itself was reported "added in remote" cleanly). This is a numbering, not
+  a filename, collision: `engine/security/replay_schema.sh` applies every file in `app/supabase/
+  migrations/*.sql` in plain filename-sorted order, and Supabase's own migration-history tooling tracks
+  applied migrations by the numeric prefix before the first underscore - a real deployed database that
+  has already run `0099_workflow_heartbeats.sql` (which, given `main` is 123 migrations deep and `#164`
+  was branched when `0099` was still the next free number back on 2026-10-26, it certainly has) would
+  see `#164`'s own `0099_savings_baseline_range_limits.sql` try to record a SECOND `schema_migrations`
+  row for version `0099`, not a new one at the end - a likely hard failure on deploy, not merely stale
+  prose. **Recommendation for Sarel:** `#164` needs substantive rework before it can merge, not just a
+  conflict click-through - the marketing-calculator portion of its diff should likely be dropped
+  entirely in favour of `bab5c5b`'s already-merged, already-tested replacement (same bug, already
+  fixed, differently), and its migration file renumbered to the next free number past `main`'s current
+  highest (see the migration-numbering note below) regardless of what happens to the rest of the PR.
+  The non-calculator parts of `#164` (the real per-tender `savingsCounter.ts`/`savingsCounterData.ts`
+  rework, `dashboard/page.tsx`, `analytics/page.tsx`, `EditForm.tsx`) were not independently re-assessed
+  for correctness this pass - out of scope for a staleness audit - only for whether they still apply
+  cleanly, which they do not, for the reason above.
+
+- **`#165`** (`4 pre-demo production defects`, opened 2026-10-26, OFF-LIMITS for writes). **Real
+  conflict against current `main`**, same root cause as `#164`: `#165` also edits
+  `app/components/tt/savings-calculator.tsx` (one of its 4 named defects is a "calculator label" fix),
+  and `bab5c5b`'s wholesale rewrite of that same file (above) now conflicts with it too - confirmed by
+  `git merge-tree`, all conflicting hunks isolated to that one file's old `formatRand`/`calculateSavingsEstimate`-adjacent
+  lines. Its other 3 defects (WhatsApp crash, mailto, demo badge - touching
+  `app/components/public/whatsapp-contact-button.tsx`, `app/lib/whatsappMessages.ts`,
+  `app/app/billing/page.tsx`, `app/app/privacy/page.tsx`, `app/app/tenders/[id]/position-person-select.tsx`)
+  are untouched by `bab5c5b` and were not otherwise checked against current `main` for a separate
+  conflict - none showed up in the merge-tree run, so they remain mergeable as written. **Recommendation
+  for Sarel:** same as `#164` - the calculator-label hunk should be dropped or manually re-applied
+  against `bab5c5b`'s new component, the other 3 defect fixes look to still apply cleanly on their own.
+
+- **`#176`** (`12 SECURITY DEFINER RPCs bypassed employee RLS entirely`, migration `0119`). **Clean,
+  no conflict, and still genuinely needed** - `git merge-tree` reports a clean three-way merge against
+  current `main`. Directly confirms the immediately preceding pass's own finding that one of its 12
+  fixed functions, `company_member_labels()`, remains unguarded on real `main` today. **One stale, but
+  harmless, piece of this PR's own prose, worth flagging for Sarel rather than silently living with
+  it**: `0119`'s own header comment, discussing a candidate table it checked and ruled out, says
+  "`savings_counted_steps`: already investigated by 0118's own pass and correctly left alone... no
+  change [needed]." PR `#185` (opened two days later, 2026-11-08, Finding 203) directly contradicts
+  this with a reproduced, independently-verified red/green authorization bypass on that exact table -
+  `savings_counted_steps` DID need a RESTRICTIVE policy (0124, on `#185`'s own branch), and `#176`'s own
+  comment is simply wrong, not a difference of judgment. This does not make `#176` itself unsafe to
+  merge - `0119` never touches `savings_counted_steps`, so the incorrect comment is inert prose, not a
+  logic bug - but if `#176` merges as currently written, that incorrect claim becomes permanent in
+  `main`'s own migration history. Recommend Sarel either amend that one comment before merging `#176`,
+  or accept it with this entry as the on-the-record correction.
+
+- **`#177`** (`company_members read had no error capture`, `app/proxy.ts` only). Clean, no conflict.
+  Read in full - still a real, needed fix (a failed `company_members` read on every guarded request
+  currently force-redirects a legitimate member to `/onboarding`); nothing on `main` has touched
+  `proxy.ts` since this branched.
+
+- **`#178`** (`"Fix item" submission-pack gate was UI-only, never enforced server-side`). Clean, no
+  conflict. Read in full - both server actions (`requestSubmissionPack`/`requestJob`) still lack this
+  check on real `main` today; the fix re-reads the same cached Pack Review snapshot the UI's own
+  disabled-button state already uses, so it can't disagree with what's shown.
+
+- **`#179`** (`"Start from a previous submission" never re-checked the target tender's own stage`).
+  **Real, non-trivial code conflict** - NOT resolved this pass, left exactly as found, per the
+  guardrail against resolving anything beyond an obviously-correct same-file/unrelated-area case. The
+  conflict is in `app/lib/pastSubmissionReuse.ts`: `main` independently grew a "4th sweep" fix
+  (console.error logging on the same `Promise.all` destructure this PR also touches) immediately
+  adjacent to the exact lines `#179` changes (adding `pipeline_stage` to the same select, and inserting
+  a new early-return stage check). Both changes are individually sound, but reconciling them correctly
+  requires deciding the right statement ORDER (does the new early-return happen before or after the
+  error-logging; does the logging still fire on the early-return path) - a judgment call, not a
+  mechanical same-area conflict, so left for a human or a dedicated pass to resolve deliberately.
+
+- **`#180`** (`a Pack Review section read failure masked as "nothing to fix"`). Clean, no conflict.
+  Read in full - still applies against `main`'s current `tender-readiness.ts`/`pipelineCardHelpers.ts`/
+  `ImpersonationBanner.tsx`.
+
+- **`#181`** (`pack-ready email render bridge had no node binary and no app/ in the image`). Clean, no
+  conflict. Falls under the guardrail's "changes what the production worker image installs/copies"
+  category (correctly already a PR, not a direct push). Uniquely among the 11, this PR's own CI
+  actually ran the heavier checks (`gh api .../commits/<sha>/check-runs` shows `smoke-test`,
+  `container-build`, AND `tenant-isolation-db` all `completed`/`success`, where every other PR in the
+  backlog showed only the `Vercel Preview Comments` check) - consistent with it being the one PR that
+  touches `.dockerignore`/`Dockerfile`, which apparently trips a path-filtered CI job the others don't.
+  Still looks correct and current: `git log -- .dockerignore engine/worker/Dockerfile` shows no commit
+  on `main` has touched either file since this branched.
+
+- **`#182`** (`pack-quota RPCs bypassed employee RLS entirely`, migration `0121`). Clean, no conflict.
+  Fixes `company_packs_this_period`/`company_can_request_pack` - confirmed distinct from every function
+  `#176`'s own `0119` touches (no overlap, no duplicate fix, no migration-number collision between the
+  two: `0119` vs `0121`).
+
+- **`#183`** (`document-scan's 6 confirm paths raced an unlocked review_status gate`, migration `0124`,
+  OFF-LIMITS for writes). **Real conflict against current `main`** in actual product code, not just
+  docs: both `app/app/company/document-scan/actions.ts` and its spec file have been independently
+  touched by something else on `main` since this branched (confirmed by `git merge-tree` showing
+  `changed in both` with real overlapping hunks in the RPC-call/comment bodies, not a clean three-way
+  merge) - plus the expected docs-only conflicts in `QA-Edge-Case-Findings.md`/`System-Status.md` any
+  long-lived PR branch would have against this append-heavy pair of files. Not resolved, per the
+  guardrail; this one is genuinely not the trivial case. Also carries the already-known `0124`
+  migration-number collision (see below).
+
+- **`#184`** (`retryOnboardingUpload() never actually requeued anything`, migration `0124`,
+  OFF-LIMITS for writes). **Conflict exists, but isolated entirely to the two append-only docs files**
+  - confirmed by reading the full `git merge-tree` file list: `app/app/company/document-scan/
+  actions.ts` and its spec file both report `merged` (git's own three-way merge driver resolved them
+  cleanly with ZERO conflict markers - the overlapping edits are compatible, not contradictory), and
+  the only two `changed in both` entries with actual `<<<<<<<` markers are `docs/specs/
+  QA-Edge-Case-Findings.md` and `docs/specs/System-Status.md` - exactly the "same file changed in an
+  unrelated area" shape the guardrail describes as potentially trivial. **Not resolved anyway**, since
+  `#184` is on the explicit off-limits list regardless of how trivial its conflict looks - reported
+  here, left untouched, for a human (or a pass this guardrail doesn't bind) to fast-forward the docs
+  append past current `main` when it's actually merged.
+
+**Migration-number collisions, re-confirmed independently rather than taken on the standing brief's own
+word.** `ls app/supabase/migrations | sort -V | tail -1` still shows `0123` as `main`'s own highest.
+Checked every one of the 11 backlog PRs' own migration files via `gh api .../pulls/<n>/files`: only 4
+of the 11 add a migration at all - `#164` (`0099`, the NEW collision this pass found, above), `#176`
+(`0119`, clean), `#182` (`0121`, clean), `#183`/`#184` (both `0124`, the collision the standing brief
+already named and warned about - independently reconfirmed here by filename, not re-derived from the
+brief's own claim). No new `0124`-family collision found beyond the three (`#183`/`#184`/`#185`)
+already on record.
+
+**Did any genuinely new bug turn up while reading these 11 diffs?** No employee-RLS-shaped or other
+authorization bypass - every function/table these 11 PRs touch was independently read and none
+revealed a fresh gap beyond what each PR's own write-up already claims to fix. The two real findings
+this pass surfaced are both STALENESS, not new vulnerabilities: `#164`/`#165`'s conflict with
+`bab5c5b` (a documentation/mergeability problem on an off-limits branch, not a live bug on `main` -
+`main` itself is fine, since `bab5c5b` already fixed the real contradictory-numbers issue), and `#176`'s
+inert incorrect comment (contradicted by `#185`, but `0119` itself makes no code change to
+`savings_counted_steps`, so nothing on `main` or on `#176`'s own branch is actually wrong, just
+mis-described). Neither warrants a new Finding number or a new PR under the standing guardrails' own
+"genuinely new bug" trigger - both are drift/staleness observations about the backlog itself, exactly
+this pass's own chartered task.
+
+**Backlog status.** All 21 open PRs (`#164`/`#165`/`#176`-`#194`) remain open and unmerged -
+reconfirmed via the GitHub REST API at the start and the end of this pass; nothing merged, closed, or
+rebased by anyone, including this session. `#164`/`#165`/`#183`/`#184` were read-only referenced
+(diff + merge-tree only) and otherwise untouched, per the binding guardrails. Finding 168
+(`start_payfast_checkout()`), Finding 190's `field_provenance` backfill, and every other previously
+-named off-limits item remain exactly as left. No Finding number consumed (every result here is either
+a staleness observation about an open PR or a clean confirmation, not a new bug) -
+`QA-Edge-Case-Findings.md` still tops out at 203. All 11 disposable local refs
+(`refs/remotes/origin/pr/164` through `.../pr/184`) deleted at the end of this pass via `git update-ref
+-d`; none was ever checked out as a working tree or built on. No scratch Postgres was needed this
+pass (every question here was answered by `git merge-tree`, `gh pr diff`, `gh api`, and reading real
+source/migration files side by side - no live write site to race). **Nothing pushed to `main` by this
+pass except this docs entry; no PR opened, closed, or merged.**
+
+To verify independently: `gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q
+'.[].number' | sort -n` and confirm the same 21 numbers. For each of `164 165 176 177 178 179 180 181
+182 183 184`, `git fetch origin +refs/pull/<n>/head:refs/remotes/origin/pr/<n>` then `git merge-tree
+$(git merge-base origin/main origin/pr/<n>) origin/main origin/pr/<n>` and confirm the same
+conflict/clean pattern this entry lists. Confirm `bab5c5b1d241459da22190d176b951b39e020f28` is on
+`origin/main`'s own history for `app/components/tt/savings-calculator.tsx`
+(`git log --oneline origin/main -- app/components/tt/savings-calculator.tsx`) and that
+`git merge-base --is-ancestor bab5c5b origin/pr/164` exits non-zero (confirming `#164` was never
+rebased past it). Confirm `app/supabase/migrations/0099_workflow_heartbeats.sql` exists on `main`
+while `#164`'s own `gh api repos/.../pulls/164/files` lists a SEPARATE `0099_savings_baseline_range_
+limits.sql`. Read `#176`'s own `0119_employee_rls_systematic_sweep.sql` header and confirm it claims
+`savings_counted_steps` needs "no change", then read `#185`'s `QA-Edge-Case-Findings.md` Finding 203
+entry and confirm it reproduces a real red/green bypass on that same table. Confirm
+`docs/specs/QA-Edge-Case-Findings.md` still tops out at Finding 203 (`grep -oE "^### Finding
+[0-9]+" docs/specs/QA-Edge-Case-Findings.md | sort -V | tail -1`).
+
+---
+
 ## This pass (2026-11-08xli, standing solution-architect review, background worker): independently re-ran PR #187's own catalog-driven SECURITY DEFINER sweep from scratch against current `main` (not from memory, not trusting the PR's own write-up) - identical 74-function/45-policy result set, confirmed `record_tender_document()` is still the one genuine gap and it is still only fixed on PR #187's own unmerged branch, red/green-reproduced myself independently in a fresh scratch Postgres - exhaustive genuine negative for "is there a NEW, uncovered gap", nothing pushed to `main`, no new PR opened, two minor write-up corrections logged for the record
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `8c5bd03`
