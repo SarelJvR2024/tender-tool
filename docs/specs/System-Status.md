@@ -1,5 +1,149 @@
 # System Status
 
+## This pass (2026-11-08xlii, standing solution-architect review, background worker): continued the orthogonal "is the RLS PREDICATE correct" sweep (the immediately preceding two passes' own named angles) - independently re-verified Finding 203/PR #185's own claims (confirmed correct, including a from-scratch `pg_policies`-based re-derivation that also confirmed `tenders`/`tender_documents`/`tender_requirements` are genuine transitive negatives, not misses), then found a NEW, different authorization bypass in the second named angle's sibling class: `apply_cv_extraction_checked()`/`apply_my_cv_extraction_checked()` (migration 0123, added after PR #176's own systematic SECURITY-DEFINER-RPC sweep) each bypass the "employee restricted to own record/person" RESTRICTIVE policies entirely - Finding 204, fixed via migration 0125, PR opened (not merged) per the binding guardrails
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `097de16`
+(the immediately preceding pass's own route-handler sweep write-up; Finding 203/PR #185 is on its
+own unmerged branch, not on `main`). Re-fetched again immediately before opening this pass's own
+PR - still `097de16`, no sibling commit landed in between. Re-checked the open-PR backlog via the
+GitHub REST API (`gh api repos/sareljvr2024/tender-tool/pulls`) at the start and the end: 12 open
+(`#164`/`#165`/`#176`-`#185`), the same set named in this pass's own brief - nothing merged, closed,
+or rebased by anyone, including this session. `#164`/`#165`/`#183`/`#184` were not touched at all
+this pass (not read, not checked out); `#185` was read **read-only**, once (`gh pr diff 185`), to
+pull its own diff as ground truth for Finding 203's claims before trusting them, per this pass's own
+"verify independently rather than trusting blindly" instruction - never checked out, built on, or
+pushed to.
+
+**Step 1: independently re-verified Finding 203/PR #185's own claims, rather than taking them on
+faith.** Read `185`'s full diff (migration `0124`, the `QA-Edge-Case-Findings.md`/`System-Status.md`
+entries, the `test_tenant_isolation.py` extension). Built a scratch Postgres
+(`engine/security/replay_schema.sh` against all 123 real migrations) and independently re-derived
+the "which company-scoped tables are missing an employee-exclusion RESTRICTIVE policy" answer from
+scratch, via `pg_policies` directly rather than grepping migration SQL text (a stronger method than
+either prior pass used - it reads Postgres's own resolved policy catalog, immune to a migration that
+re-declares a policy differently from how an earlier migration first wrote it): every table with a
+PERMISSIVE policy whose `qual`/`with_check` mentions `is_company_member`, minus every table with a
+RESTRICTIVE policy mentioning `is_employee_in_company`. Result: `savings_counted_steps` (Finding 203,
+confirmed, matches PR #185's own claim exactly), plus `tenders`/`tender_documents`/
+`tender_requirements` as apparent misses. Chased those three down rather than assuming they were
+real: `tenders`' own RESTRICTIVE policy uses a differently-shaped predicate (`not exists (select 1
+from company_members cm where cm.user_id = auth.uid() and cm.role = 'employee')` - blocking a
+`company_members`-wide employee check rather than naming `is_employee_in_company` by name, so it
+doesn't match a textual grep), and `tender_documents`/`tender_requirements`'s own SELECT policies
+each contain a plain, non-security-definer `exists (select 1 from tenders t where ...)` subquery -
+which runs under `tenders`' OWN RLS for the current role, so `tenders`' RESTRICTIVE policy applies
+inside that subquery too, transitively blocking an employee from ever satisfying it. Confirmed this
+by hand in the scratch database (one company, one owner, one employee, one manually-loaded tender
+with `owner_company_id` set, one `tender_documents` row, one `tender_requirements` row): as the
+employee, `select count(*)` against `tenders`/`tender_documents`/`tender_requirements` all returned
+`0`; as the owner, all three returned `1`. **Genuine negative, independently reproduced, not just
+re-read from PR #185's own prior write-up** (which had already found and explained this exact
+shape) - this pass's own `pg_policies`-based method is also now the reusable, mechanically-rerunnable
+check for this specific angle, a notch stronger than the grep-based one two passes running have now
+used.
+
+**Step 2: picked up the second named angle from PR #185's own "suggested next pass" - whether any
+NON-company-scoped table with its own derived-company EXISTS-based policy (named candidates:
+`field_provenance`, `tender_pack_assignments`, `tender_watched_documents`) has the same
+later-migration drift `savings_counted_steps` did.** Confirmed by grep (`exists (select 1 from
+tender_packs tp where tp.id = ... and is_company_member(tp.company_id))` and the `tenders`-via-
+`tender_id` equivalent) that exactly these same three tables use this shape, and all three already
+carry their own `is_employee_in_company`-shaped RESTRICTIVE policy from 0077 - no new table has been
+added with this exact shape since. **Genuine negative for the table-RLS-policy version of this
+angle** - but widening from "is there a missing RESTRICTIVE policy on a TABLE" to the sibling class
+0119/PR #176 already named by name (a SECURITY DEFINER RPC bypassing an employee RESTRICTIVE policy
+on the table it reads/writes, rather than the table's own policy being absent) led to a real finding:
+read every SECURITY DEFINER function added in migrations 0120-0123 (everything created strictly after
+PR #176's own base point, so necessarily never in PR #176's own list of 12 fixed functions) by hand
+for this exact shape. `apply_cv_extraction_checked()`/`apply_my_cv_extraction_checked()` (0123) each
+read/write `people`/`projects`/`cv_extraction_results` - all three covered by an 0077 "employee
+restricted to own record/person" RESTRICTIVE policy - but being SECURITY DEFINER, bypass every one of
+them, checking only `is_company_member()`.
+
+**Confirmed in a disposable scratch Postgres** (same instance as step 1; dropped and the service
+stopped immediately after every use in this pass - nothing left running). One company, one owner, one
+employee (linked to their own person row), one separate "colleague" person, one pending-review
+`cv_extraction_results` row for the colleague. As the employee, pre-fix: `apply_my_cv_extraction_checked()`
+against the colleague's own extraction/person **succeeded**, genuinely overwriting the colleague's real
+`people.phone` and marking their `cv_extraction_results` row `applied` with `reviewed_by` = the
+attacking employee's own uid; `apply_cv_extraction_checked()` (the full People-page RPC) against the
+same colleague **also succeeded**, overwriting more `people` columns AND genuinely inserting a
+fabricated `projects` row for the colleague - a full read/write bypass of a colleague's own record by
+an employee who was never granted any access to it, the same severity class Finding 203 established.
+
+**Fix:** `app/supabase/migrations/0125_cv_extraction_apply_employee_gap.sql` - the identical
+additive-only guard shape 0119/PR #176 established for its 12 functions: `apply_cv_extraction_checked()`
+now blocks an employee caller outright (it's not one of their two allowed pages); `apply_my_cv_extraction_checked()`
+now requires, only for an employee caller, that `p_person_id` equal their own `own_linked_person_id()`
+- owner/admin/member are completely unaffected either way. Re-verified red-then-green in the same
+scratch database: both pre-fix successes now raise role-specific errors with the colleague's row
+genuinely unchanged afterward; the employee acting on their OWN extraction, and the owner acting on
+the colleague's, both still succeed exactly as before.
+
+**Test coverage:** extended `engine/security/test_tenant_isolation.py`'s existing `part2_employee_role()`
+(the same fixture Finding 203/0117/0118's own coverage already lives in) - seeded one pending-review
+`cv_extraction_results` row per person (self and colleague), added assertions for the employee's own
+successful self-apply, both RPCs refused against the colleague (with the colleague's `projects` count
+and `cv_extraction_results.review_status` confirmed unchanged), and the owner's unaffected full-RPC
+access. Ran the full suite against a fresh post-0125 scratch Postgres - `ALL PASSED`, exit 0.
+
+**Full verification suite, all run myself, real exit codes.** `npm run typecheck` (0 errors).
+`npx eslint .` (0 errors, same 3 pre-existing warnings, unrelated files, unchanged). `npx vitest run`
+(532/532, 71 files - unchanged, this fix touches no application TypeScript). The node `*.test.ts` loop
+(28/28, unchanged). `npx next build` (exit 0, same route table). `engine/security/test_tenant_isolation.py`
+against a fresh scratch Postgres with 0125 applied - exit 0, `ALL PASSED`.
+
+**Why a PR, not a direct push.** Per the binding guardrails, an authorization-bypass finding always
+goes through a PR regardless of diff size. Opened PR "fix: Finding 204 - apply_cv_extraction_checked
+/apply_my_cv_extraction_checked employee RLS gap" against `main` from branch
+`fix/cv-extraction-apply-employee-gap`, **not merged**, left open for Sarel's review. The 12
+pre-existing open PRs remain untouched, unmerged, and unaffected by this one's branch.
+
+**On migration numbering: three currently-open PRs (`#183`, `#184`, `#185`) each independently claim
+`0124` under a different filename, on stale/unrebased branches** (confirmed read-only via `gh pr diff`
+for each, not touched) - this fix is numbered `0125`, not `0124`, to avoid becoming a fourth claimant
+of the same number; whoever reconciles those branches at merge time will need to renumber regardless
+of this pass's own choice, same as this track's own prior `0092`/`0093` precedent for exactly this
+situation. Finding numbering: Finding 203 (PR #185) is unmerged, so `main`'s own
+`QA-Edge-Case-Findings.md` still topped out at 202 at the time this entry was written - this finding
+is numbered 204, not 203, for the identical reason 202 skipped 201 for PR #184 previously.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails.
+
+**Is this angle exhausted?** The "missing table-level RESTRICTIVE policy" half of both named angles
+is now genuinely exhausted (independently re-derived via `pg_policies` directly, not just re-read) -
+`savings_counted_steps` (Finding 203) was the only gap, and the three EXISTS-based candidate tables
+all remain correctly covered. The SECURITY-DEFINER-RPC-bypass sibling class is NOT fully exhausted:
+this pass only read the functions added in migrations 0120-0123 (everything after PR #176's own base
+point) - PR #176's own 12-function list and this pass's own 2-function finding together cover every
+SECURITY DEFINER RPC this track has read for this shape so far, but neither pass has done a
+systematic, mechanically-reproducible query-catalog sweep of EVERY SECURITY DEFINER function in the
+schema (the way this pass's own `pg_policies` method did for table policies) - a concrete, fresh angle
+for a future pass: build the equivalent catalog query against `pg_proc`/`information_schema.routines`
+for `security definer` functions that reference `people`/`projects`/`cv_extraction_results`/any other
+0077-covered table, and cross-check each one's body for an `is_employee_in_company()` guard,
+mechanically rather than by eye. Angle 1 from two passes ago (a policy checking `company_id` on the
+WRONG column, or a nullable-FK `using` clause silently failing closed instead of raising) was spot-
+checked this pass on tables with two FK columns to `companies` (`tender_documents`'s `company_id`/
+`uploaded_by_company`, `tenders`/`registration_types`'s `owner_company_id`) and found clean by hand,
+but not swept systematically across every multi-FK table - still open for a future pass.
+
+To verify independently: run the `pg_policies` query in this pass's own
+`QA-Edge-Case-Findings.md` Finding 204 entry (or the equivalent in `engine/security/replay_schema.sh`'s
+own scratch database) and confirm the PERMISSIVE-`is_company_member`-minus-RESTRICTIVE-
+`is_employee_in_company` diff is exactly `{savings_counted_steps, tenders, tender_documents,
+tender_requirements}`, then confirm the latter three are transitive negatives by hand as described
+above. Read `app/supabase/migrations/0123_cv_extraction_apply_race.sql`'s two functions and confirm
+neither checks `is_employee_in_company()`/`own_linked_person_id()` before this pass's own `0125`. Run
+`TENANT_PSQL="psql -U postgres -d <db>" python3 engine/security/test_tenant_isolation.py` against a
+fresh post-0125 replay and confirm `ALL PASSED`, exit 0. Confirm via the GitHub REST API that this
+pass's own PR is open and unmerged, and that all 12 pre-existing PRs (`#164`/`#165`/`#176`-`#185`)
+remain open and untouched.
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
