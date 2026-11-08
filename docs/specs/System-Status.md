@@ -1,5 +1,172 @@
 # System Status
 
+## This pass (2026-11-08xlii, standing solution-architect review, background worker): completed the "predicate correctness" sweep across all 43 `is_employee_in_company()`-shaped RESTRICTIVE-policy tables the preceding pass named as the #1-ranked next lead - genuine negative, live-reproduced, not just read; fell through to the preceding pass's own #2-ranked candidate (`tt_pack_company`'s stray `authenticated` grant) and found it IS real - a genuine, independently red/green-verified cross-tenant metadata leak (Finding 213) - fixed with a one-line grant revoke (migration `0134`) and opened as PR #194 (not merged, per the guardrails)
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `c19b9f1`
+(the immediately preceding pass's own docs-only commit, re-verifying PR #187's SECURITY DEFINER
+sweep). Re-fetched again immediately before creating this pass's own branch and again immediately
+before opening the PR - still `c19b9f1` both times, no sibling commit landed in between. Checked the
+open-PR backlog via the GitHub REST API at the start: 20 open, exactly `#164`/`#165`/`#176`-`#193` -
+nothing merged, closed, or rebased by anyone. Per the binding guardrails, none of `#164`/`#165`/
+`#176`-`#193` were touched, built on, or merged by this pass - this pass's own fix went on a brand
+new branch (`fix/tt-pack-company-grant-revoke`, pushed as PR #194, left open, not merged). No
+disposable local branch other than that one (which stays open as the PR branch, not deleted) was
+created.
+
+**Primary task: the predicate-correctness sweep, done properly rather than re-derived from the
+preceding pass's own prose summary.** Built a fresh scratch Postgres from `main`'s own 113
+migrations (`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d predtest`),
+replayed cleanly (`== Schema replay complete (113 migrations) ==`). Re-ran the catalog query myself:
+
+```sql
+select tablename, policyname, cmd, qual, with_check
+from pg_policies where schemaname='public' and permissive='RESTRICTIVE'
+order by tablename, cmd;
+-- 45 rows, 43 distinct tables - identical set to the preceding pass's own write-up, confirmed by
+-- diffing the table-name list, not assumed.
+```
+
+Read every one of the 45 rows' actual `qual`/`with_check` SQL text directly from the live catalog
+(`psql -x` dump, kept in this pass's own scratchpad). Cross-checked via `information_schema.
+table_constraints`/`key_column_usage`/`constraint_column_usage` that every `company_id`/
+`owner_company_id` column any of the 43 tables' policies reference is a real foreign key to
+`companies.id` on that table's OWN schema - 47 FK rows returned, zero mismatches, so "wrong column"
+(the brief's own named failure shape - checking `tender_id` where it should check `company_id`, or a
+sibling table's column copy-pasted in by mistake) does not occur anywhere in this list. Checked
+nullability of the same columns: two of the 43 are nullable by design - `tenders.owner_company_id`
+(null for every shared SANRAL/eTenders discovery row) and `registration_types.owner_company_id`
+(null for shared catalog rows) - and both are already correctly documented in
+`0077_company_invites_and_employee_role.sql` (lines ~268-278, ~514-522) as deliberately evaluating to
+"don't restrict further" in the null case, which is the SAFE direction (exposes only genuinely
+shared, non-tenant rows, never a specific company's own private data) - not the brief's own named
+risk direction ("wrongly ALLOW an employee through" to PRIVATE company data via an inverted
+null-handling boolean).
+
+**Not satisfied with reading this from the migration file alone - live-reproduced it.** Seeded two
+real companies (A/B, each with a real owner and a real employee via `company_members`), one shared/
+discovery tender (`owner_company_id` null) and one Company-A-private tender, one shared registration
+type and one Company-A-custom registration type, one Company-A bank account. As Company A's
+employee (`set role authenticated; select set_config('test.uid', ..., true)`): `bank_accounts` - 0
+rows, and a direct `insert` attempt raised `new row violates row-level security policy for table
+"bank_accounts"`. `tenders` - 0 rows, confirmed INCLUDING the shared/discovery one (matching
+`tenders`' own documented design: it hides the whole discovery/pipeline feature from any employee
+role in ANY company, deliberately without even referencing `owner_company_id` at all - a different,
+intentional shape from every other table on the list, re-read and confirmed correct, not mistaken for
+a bug). `registration_types` - returned the shared row but correctly excluded Company A's own custom
+one. `company_members` - returned only the employee's own row, not the owner's. As Company A's OWNER
+on the identical seed data (the inverse sanity check the brief itself asked for - "could this wrongly
+BLOCK a legitimate caller"): `bank_accounts` (1), `registration_types` (48, both shared and custom),
+`tenders` (2, both shared and private), `company_members` (2) - all unaffected, confirming the
+RESTRICTIVE policies narrow only the employee role, nothing else, in either direction. Also read and
+confirmed (not merely read-and-assumed) the two `EXISTS`-subquery policies (`field_provenance`/
+`tender_pack_assignments` joining through `tender_packs.company_id`; `tender_watched_documents`
+joining through `tenders.owner_company_id`) reference the structurally correct sibling column via the
+same FK check above, and that `tender_packs`' own two extra RESTRICTIVE policies ("only for visible
+tenders") are an orthogonal referential-integrity check (the pack's `tender_id` must name a real
+tender row) layered on top of - not a replacement for - its own separate PERMISSIVE
+`is_company_member(company_id)` policy and its `tt_check_same_company()` trigger, so their own lack
+of an explicit company check is not a gap.
+
+**Conclusion: genuine negative, exhausted.** All 43 tables' RESTRICTIVE predicates read from the live
+catalog, all FK-checked, both nullable-FK cases individually proven safe by direct seed-and-query
+reproduction (not inferred from the migration comment alone), and the inverse failure mode
+(over-blocking a legitimate owner/admin/member) also checked and ruled out on the same seed data. No
+wrong-column reference, no inverted nullable-FK bypass, found anywhere in this family.
+
+**Fell through to the preceding pass's own #2-ranked candidate per the brief's own explicit
+instruction, and independently re-verified it rather than trusting their write-up: `tt_pack_company`'s
+stray `authenticated` grant is a REAL, confirmed cross-tenant leak.** Traced the actual mechanism
+(not re-derived from first principles, cross-referenced against `0120_security_definer_functions_
+anon_grant_table_cleanup.sql`'s own already-correct explanation): `0043`'s own `revoke all on function
+tt_pack_company(uuid) from public` never touched `authenticated`'s own ability to call it, because
+that revoke only undoes the PUBLIC-pseudo-role default - the real source of the grant is the
+platform-level `alter default privileges in schema public grant all on functions to anon,
+authenticated, service_role` that `engine/security/scratch_supabase_stub.sql` runs once, before any
+migration, so every new function (this one included) is directly granted EXECUTE to `authenticated`
+the moment it's created. `0120` already caught and revoked `anon`'s own copy of this exact default
+grant for `tt_pack_company` and its two boolean-shaped siblings (`tt_person_in_company`,
+`tt_tender_visible_to`), explicitly classifying all three as "no sensitive payload" - correct for the
+two booleans, WRONG for `tt_pack_company`: confirmed directly (`select prorettype::regtype from
+pg_proc where proname='tt_pack_company'` -> `uuid`, not `boolean`) that its return value IS the
+sensitive bit (a real `company_id`), and `0120` left `authenticated`'s own copy of the grant
+untouched for all three, including this one.
+
+**Red, live, before any fix:** seeded one real `tender_packs` row owned by Company A. As Company B's
+employee: `select count(*) from tender_packs where id = '<Company A's pack id>'` -> `0` (direct read
+genuinely blocked by RLS), then `select tt_pack_company('<that same id>')` -> **succeeded**, returned
+Company A's real `company_id` - the exact leak, reproduced live, not inferred from the function body
+alone.
+
+**Fix:** one line, `revoke execute on function tt_pack_company(uuid) from authenticated;`, as a new
+migration, `0134_tt_pack_company_grant_revoke.sql`. Migration number checked for collision first, per
+the standing guardrail: `gh api repos/sareljvr2024/tender-tool/pulls/<n>/files` across all 20 open
+PRs shows the highest migration number any of them claims is `0133` (PR #193's own second file,
+confirmed fresh this pass, not trusted from the preceding pass's own write-up), and `main` itself
+still tops out at `0123` - `0134` is the first genuinely unclaimed number against both. Confirmed via
+`grep -rn "tt_pack_company" app engine` that zero client or engine code anywhere calls it directly -
+every real reference is inside `app/supabase/migrations/*.sql` itself, specifically
+`tt_check_same_company()`'s own trigger body (0043/0065/0066/0097), which is itself `security
+definer` and therefore calls `tt_pack_company()` under its OWN owner's privileges, not the invoking
+client role's.
+
+**Green, live, after the fix:** rebuilt the scratch schema completely fresh from all 114 migrations
+in order (not patched onto the stale database) via `replay_schema.sh` - replayed cleanly (`==
+Schema replay complete (114 migrations) ==`). The identical Company-B-employee call now raises
+`permission denied for function tt_pack_company` before returning anything. **Sanity check (nothing
+legitimate broke):** on the same green database, Company A's own owner inserting a real `people` row
+and a `tender_pack_assignments` row referencing Company A's own pack - the exact path that runs
+`tt_check_same_company()`'s trigger, which internally calls `tt_pack_company()` - still succeeded
+unchanged, confirming the revoke is invisible to every real caller.
+
+**Full verification suite, all run myself, real exit codes.** `npm run typecheck` (0 errors). `npx
+eslint .` (0 errors, same 3 pre-existing warnings, unchanged). `npx vitest run` (**532/532, 71
+files** - unaffected; no application code touched, this is a grant-only migration). The node
+`*.test.ts` loop (28/28). `npx next build` (compiled successfully, exit 0). Because a migration was
+touched: rebuilt a dedicated scratch Postgres (`tenant_iso`) from all 114 migrations and ran
+`engine/security/test_tenant_isolation.py` against it from inside `engine/security/`
+(`TENANT_PSQL="psql -h 127.0.0.1 -p 5432 -U postgres -d tenant_iso" PGPASSWORD=postgres python3
+test_tenant_isolation.py`) - **ALL PASSED**, including its own `[18] Employee role` and `[19]
+Team/billing RPCs` sections, confirming this migration changes nothing about the existing
+employee-RLS or RPC-authorization behavior that suite already covers. All three scratch databases
+(`predtest`, `predtest2`, `tenant_iso`) dropped and the Postgres service stopped at the end of this
+pass.
+
+**Why a PR, not a direct push, despite the brief's own hedge that this might be judgment-call
+eligible for a direct push.** The binding guardrails state "any genuine authorization-bypass finding
+... must go through a PR, never a direct push, regardless of how small the diff looks," and
+separately hedge that this specific candidate - "a hardening fix for an info-leak affecting ALL roles
+equally, not an employee-specific authorization bypass" - is a judgment call, but to "err toward a PR
+if you have any doubt." This pass had doubt: Company B's user obtained Company A's real data despite
+being completely unable to read a single row of it directly, which this pass judges to be a bypass by
+any reasonable reading even though the specific payload's own further exploitability is low (a single
+opaque UUID, not independently actionable without a matching `is_company_member()` check somewhere
+else that would block it anyway). Opened as PR #194 (`fix/tt-pack-company-grant-revoke`), one commit
+(the migration file), not merged, per the guardrails' own "never merge any PR without Sarel's explicit
+go-ahead" rule - this pass did not merge it, and did not touch any of `#164`-`#193`.
+
+**Finding numbering.** `main`'s own `QA-Edge-Case-Findings.md` tops out at `203`, but PR #193's own
+diff already claims up to Finding `212` (confirmed by grepping every open PR's own diff of this file
+for `Finding [0-9]+` before picking a number, not assumed from `main` alone) - numbered this one `213`
+as the first number unclaimed by `main` OR by any open PR's own branch, per the standing guardrail on
+avoiding exactly this kind of collision.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. 21 PRs now open (`#164`/`#165`/`#176`-`#194`) - the 20 handed off plus
+this pass's own new `#194`; none of the 20 pre-existing ones were merged, closed, or rebased by
+anyone, including this session.
+
+To verify independently: rebuild a scratch Postgres from `main`'s own 113 migrations and re-run the
+`pg_policies`/`information_schema` queries above, confirming 45/43 and the FK-target/nullability
+results described. Check out PR #194's branch, rebuild from all 114 migrations, and reproduce the
+Company-B-employee `tt_pack_company()` red/green sequence by hand. Run
+`engine/security/test_tenant_isolation.py` against the rebuilt schema and confirm `ALL PASSED`. Run
+`npm run typecheck`, `npx eslint .`, `npx vitest run` (532/532), the `*.test.ts` loop (28/28), and
+`npx next build` (exit 0). Confirm via the GitHub REST API that PR #194 is open and unmerged, and that
+`#164`/`#165`/`#176`-`#193` remain exactly as they were.
+
+---
+
 ## This pass (2026-11-08xli, standing solution-architect review, background worker): independently re-ran PR #187's own catalog-driven SECURITY DEFINER sweep from scratch against current `main` (not from memory, not trusting the PR's own write-up) - identical 74-function/45-policy result set, confirmed `record_tender_document()` is still the one genuine gap and it is still only fixed on PR #187's own unmerged branch, red/green-reproduced myself independently in a fresh scratch Postgres - exhaustive genuine negative for "is there a NEW, uncovered gap", nothing pushed to `main`, no new PR opened, two minor write-up corrections logged for the record
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `8c5bd03`

@@ -1,0 +1,64 @@
+-- tt_pack_company(uuid)'s stray `authenticated` EXECUTE grant: cross-tenant
+-- info leak (Finding 213, Sarel, standing solution-architect review).
+--
+-- tt_pack_company() (0043) is `security definer`, returns the real
+-- `company_id` for any `tender_packs.id` with ZERO membership check of its
+-- own:
+--
+--   select company_id from tender_packs where id = p_pack;
+--
+-- It is executable `to authenticated` not because 0043 ever wrote a
+-- deliberate `grant execute ... to authenticated` line for it (it didn't -
+-- re-read 0043 in full, there is none), but because of the platform-level
+-- default this whole schema runs under, documented by
+-- `0120_security_definer_functions_anon_grant_table_cleanup.sql`'s own
+-- header and `engine/security/scratch_supabase_stub.sql`'s own stand-in of
+-- it: `alter default privileges in schema public grant all on functions to
+-- anon, authenticated, service_role` runs ONCE, platform-side, before any
+-- migration ever runs, so every NEW function is already directly granted
+-- EXECUTE to `authenticated` (and `anon`) the moment it's created,
+-- independently of 0043's own `revoke all on function tt_pack_company(uuid)
+-- from public` (which only ever undoes the SEPARATE, pre-existing
+-- PUBLIC-pseudo-role default, not this named-role one - the exact mechanism
+-- 0120's own write-up already proved for 46 functions). 0120 revoked
+-- `anon`'s copy of this same default grant for `tt_pack_company` (and its
+-- two boolean-shaped siblings), explicitly as a defense-in-depth hardening
+-- move since `anon` has no real caller for any of the 46 it covered - but
+-- 0120 deliberately did NOT revoke `authenticated`'s copy for any of them,
+-- having classified `tt_pack_company` (incorrectly, per this migration) as
+-- a "bare id-to-id relationship boolean" like its two siblings. It is not:
+-- it returns `uuid`, not `boolean`, and its payload IS the sensitive bit
+-- (the real `company_id` behind an arbitrary pack id) - a materially
+-- different case from `tt_person_in_company`/`tt_tender_visible_to`, which
+-- 0120's own reasoning (and the "no sensitive payload" calibration it
+-- rests on) still correctly applies to and which this migration leaves
+-- untouched.
+--
+-- Every real caller is internal: `tt_check_same_company()` (0043/0065/0066/
+-- 0097), itself `security definer`, calls `tt_pack_company()` from inside
+-- its own trigger body - a SECURITY DEFINER function's own internal calls
+-- run as the function's OWNER, not the invoking client role, so this
+-- revoke changes nothing about those trigger paths (re-verified live below,
+-- not assumed). `grep -rn "tt_pack_company" app engine` (this pass, fresh)
+-- finds zero references outside app/supabase/migrations/*.sql - no
+-- `supabase.rpc("tt_pack_company", ...)` call exists anywhere in the client
+-- or engine code. The `authenticated` grant was never needed by anything
+-- that actually calls this function today.
+--
+-- Severity: a real but low-severity cross-tenant leak, not an
+-- employee-specific RLS bypass - any authenticated user of ANY company
+-- (owner/admin/member/employee alike) could call
+-- `tt_pack_company(<any other company's real tender_packs.id>)` and learn
+-- that company's real `company_id`, a single opaque UUID with no attached
+-- business data (every other SECURITY DEFINER function that accepts a
+-- company id still independently re-checks `is_company_member()`/
+-- `is_employee_in_company()` on it, so the leaked id unlocks nothing
+-- further by itself). Reproduced live in a scratch Postgres before writing
+-- this migration: a second company's authenticated user, who cannot read
+-- the target `tender_packs` row directly (RLS: 0 rows), could still call
+-- `tt_pack_company()` on its id and get back the real owning company_id;
+-- confirmed refused with `permission denied for function tt_pack_company`
+-- after this exact revoke, and confirmed `tt_check_same_company()`'s own
+-- internal use (an ordinary company member inserting a
+-- tender_pack_assignments row) is completely unaffected by the same revoke.
+revoke execute on function tt_pack_company(uuid) from authenticated;
