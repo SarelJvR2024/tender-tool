@@ -1,5 +1,193 @@
 # System Status
 
+## This pass (2026-11-08xlvii, standing solution-architect review, background worker): took the brief's own option 1 - a line-by-line, fresh-eyes read of two individual open PRs' own diffs that had NOT yet had this specific treatment (`#176`/"12 SECURITY DEFINER RPCs bypassed employee RLS entirely", `#182`/"pack-quota RPCs bypassed employee RLS entirely" - both predate and are entirely independent of the already-heavily-audited `#185`-`#196`/migrations-`0124`-`0136` family, fixing twelve and two DIFFERENT functions respectively, no overlap), hunting specifically for an off-by-one, a wrong captured variable, a missing `for update` lock, or a test that doesn't test its own claim. Found one real, reproduced issue: PR `#176`'s own redefinition of `set_opportunity_tag()` (its migration `0119_employee_rls_systematic_sweep.sql`, function 10 of 12, line 566) is based on a `main` snapshot from BEFORE migration `0121_opportunity_tag_add_remove_race.sql` landed (Finding 178's already-shipped, already-merged fix for this exact function's own lost-update race), so PR `#176`'s copy of the function has reverted to the pre-fix, unlocked `select * into opp from discovered_opportunities where id = p_opportunity_id;` (no `for update`) while separately, correctly, adding the new employee-role guard on top of that stale body. If `#176` is ever merged as currently written, without being rebased to re-incorporate `0121`'s lock, it would silently REOPEN Finding 178's already-fixed concurrency bug on `main` the moment it merges - not a hypothetical future collision between two open PRs (the `#187`/`#195` precedent's shape), but a live regression risk against `main` itself, today, for anyone who merges `#176` without noticing. Reproduced red and green live, in a real scratch Postgres. Also confirmed, incidentally, two previously-undocumented migration-NUMBER collisions beyond the standing `0124` one: `#176`'s own new file claims `0119`, which main's real `0119_notification_claim_functions_anon_revoke.sql` already uses for something unrelated; `#182`'s own new file claims `0121`, which main's real `0121_opportunity_tag_add_remove_race.sql` (the very fix `#176` would revert) already uses. This is written up below as a documented-only recommendation for Sarel, the same treatment already established twice this segment (PR `#186`'s NULL bug, the `#187`/`#195` collision) - nothing was pushed to either PR's branch, no competing PR was opened, and no new `QA-Edge-Case-Findings.md` Finding number was consumed (nothing was fixed on `main` or on a PR this review itself opened).
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`9a880852` (the immediately preceding pass's own billing/POPIA re-verification entry, matching
+the standing brief's stated known HEAD). Re-fetched again immediately before writing this entry -
+still `9a880852`, no sibling commit landed in between (the sibling QA/robustness track's own
+`67938a1` calendar-date fix, mentioned in the brief as already landed, is already included in
+`9a880852` - confirmed by `git log --oneline -3 origin/main` showing `9a88085` ->` 67938a1` in the
+same ancestry). Re-checked the open-PR backlog via the GitHub REST API (`gh api
+repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q '.[].number' | sort -n`) at the start
+and the end of this pass: 23 open, exactly `#164`/`#165`/`#176`-`#196` - nothing merged, closed, or
+rebased by anyone, including this session. `docs/specs/QA-Edge-Case-Findings.md` on `main` still
+tops out at Finding 204 (grepped every `### Finding <n>` heading and sorted numerically, not
+assumed) - the next unclaimed number remains 216 per the immediately preceding family's own prior
+accounting (not needed this pass, since nothing here was fixed on `main` or on a review-opened PR).
+
+**Why `#176`/`#182` over the brief's other PR candidates.** The brief's own framing already rules
+out `#186` (already given this exact treatment, finding the NULL bug now on record) and names
+`#188`-`#193` as having had it "to a lesser degree" via the role-matrix pass. Checked this doc's own
+history for the rest of the `#185`-`#196` family before picking: `#187`'s `record_tender_document()`
+got a full, dedicated, line-by-line SECURITY DEFINER body read in the 2026-11-08xliv pass (found
+clean - an outright block, no `own_linked_person_id()` dependency, no NULL surface) and `#194`/
+`#195`/`#196` have each individually been re-verified multiple times already (Finding 213's grant
+revoke, the path-traversal family) - re-reading any of those four without new evidence would repeat
+existing work. `#176` and `#182`, by contrast, are a DIFFERENT, older pair of PRs in the same
+"employee-RLS-gap" tradition (both predate the `#185` numbering - `#176` is titled identically to the
+systematic sweep that `#185`-`#196` were later split out FROM, but checked directly, its own 12 fixed
+functions have ZERO overlap with the 13 the later family covers) that no prior pass's own "every
+open PR" listing in this doc had actually opened and read character-by-character - exactly the gap
+the brief's option 1 describes as unaddressed.
+
+**Method.** Fetched both PRs read-only into disposable local refs (`git fetch origin
++refs/pull/176/head:refs/remotes/origin/pr/176` and the same for `182`, plus `187` as a sanity
+cross-reference that was not otherwise used) - never checked out as a working tree, never built on.
+Extracted each PR's own new migration file directly (`git show origin/pr/<n>:app/supabase/migrations/
+<file>.sql`) rather than trusting `git diff main..origin/pr/<n>`, because both PRs branched long
+enough ago that the plain diff against current `main` is dominated by noise (hundreds of unrelated
+file deletions/renames from everything `main` has done since their branch points, exactly the kind of
+staleness the backlog-staleness sweep already named) - reading each PR's OWN migration file in
+isolation, in full, was the only way to see its real content without that noise. Read every function
+body in both files line by line.
+
+**`#176` (`0119_employee_rls_systematic_sweep.sql`, 718 lines, 12 functions) - 11 of 12 clean, 1 real
+issue.** All 12 functions add exactly one new guard each (either `if is_employee_in_company(...) then
+raise` for the 10 PL/pgSQL ones, or folded into the `where` clause for the 2 SQL-language ones) on top
+of whatever the function's body already was - matching this PR's own stated "additive, narrow-only"
+fix style. `is_employee_in_company()` is a SQL `exists(...)`, never NULL, so none of the 12 guards
+themselves have a NULL-handling surface of the `0125`/PR `#186` shape - checked individually, not
+assumed, same discipline the 2026-11-08xliv pass already applied to the `#185`-`#196` family. One
+function (`tender_document_uploads`, function 3, line 238) uses a DIFFERENT-shaped guard than the
+other 11 - `not exists (select 1 from company_members cm where cm.user_id = auth.uid() and cm.role =
+'employee')`, with no `company_id` scoping at all, rather than `is_employee_in_company(p_tender_id)`'s
+company) - this looked, on first read, exactly like the "wrong variable captured" shape the brief
+named (a multi-company user who is `employee` in company A but `owner`/`member` in company B would be
+wrongly blocked from their OWN company B's tender documents). Chased it down before concluding
+anything: `0116_company_members_one_company_per_user.sql` (confirmed by direct read, lines 46-47) adds
+`alter table company_members add constraint company_members_user_id_key unique (user_id)` - a hard,
+schema-level invariant that a `user_id` can have AT MOST ONE `company_members` row, period, already
+live on `main` since `0116` and already present in `#176`'s own base (its branch point is after
+`0118`, well after `0116`). Under that invariant, "is this user an employee in ANY company" and "is
+this user an employee in THE company that owns this tender" are necessarily the same question - there
+is no multi-company user for the unscoped check to mis-scope. **Not a bug, ruled out on the schema's
+own current invariant, not left as a live risk** - the inconsistent styling (one function out of 12
+written differently from its 11 siblings) is cosmetic, not a correctness gap, given `0116`'s
+constraint. The other 11 functions (`bank_account_summaries`, `company_member_labels`,
+`pursue_discovered_opportunity`, `load_manual_tender`, `add_manual_tender_documents`,
+`request_submission_pack_checked`, `request_general_job_checked`, `set_opportunity_interest`,
+`set_opportunity_tag`, `acknowledge_discovery_downgrade`, `accept_tender_update_date`) were each
+checked for which later `main` migration, if any, redefines the same function name after `#176`'s own
+branch point (`grep -rl "create or replace function <name>" app/supabase/migrations/*.sql` for each of
+the 12): 11 of the 12 last-touched by `main` at or before `0118` (already in `#176`'s own base, no
+divergence possible) or never touched again - except `set_opportunity_tag`, below.
+
+**The issue: `set_opportunity_tag()` - `#176`'s own copy has silently reverted to the PRE-Finding-178
+body.** `main`'s real, current, operative `set_opportunity_tag()` is `0121_opportunity_tag_add_remove_
+race.sql` (read in full: its own header names the exact bug it fixes - two concurrent `add`/`remove`
+calls on the SAME `discovered_opportunities` row, each reading `company_tags` into a plpgsql snapshot
+and writing `array_append`/`array_remove` against that stale snapshot, silently losing whichever call
+commits first - and fixes it with one word, `for update`, on the initial `select * into opp`). `#176`'s
+own `0119` (line 556-590, fetched read-only via `git show origin/pr/176:...`) ALSO redefines
+`set_opportunity_tag()` (adding its own, correct, unrelated employee-role guard) but its own `select *
+into opp from discovered_opportunities where id = p_opportunity_id;` (line 566) has NO `for update` -
+because `#176`'s branch point predates `0121` entirely (confirmed: `#176`'s own diff against current
+`main`, read via `git show origin/pr/176:app/supabase/migrations/...`, never contains a `0121` file at
+all - its own file listing stops needing anything past what its branch had, and grepping `#176`'s own
+`0119` for `for update` finds it in 3 of the 4 functions that lock a row - `request_submission_pack_
+checked`, `request_general_job_checked`, `accept_tender_update_date` - but NOT in `set_opportunity_
+tag`, because at the time `#176` was branched, `main`'s own `set_opportunity_tag` had no lock to carry
+forward). A direct `create or replace function set_opportunity_tag` is a full body replacement, not a
+patch - merging `#176` as currently written would overwrite `0121`'s fixed body with `#176`'s own
+unlocked-plus-employee-guard body, reopening the exact race `0121`/Finding 178 already closed, the
+moment `#176` merges. `#176`'s OWN test suite (`engine/security/test_tenant_isolation.py`'s
+`part2_employee_rpc_bypass()`, read in full) would not catch this either - it tests `set_opportunity_
+tag` exactly once per role (employee refused, owner succeeds), a single-caller functional check with
+no concurrency at all, so the regression would ship clean through `#176`'s own stated red/green tests
+- exactly the brief's named "a test assertion that doesn't actually test what its own comment claims"
+shape, just one level removed: the test's claim (`"owner can still set_opportunity_tag"`) is true and
+tested; the test suite simply never claims to test concurrency at all, so its own passing says nothing
+about this regression either way.
+
+**Reproduced red and green live, in a real scratch Postgres (`tt_pr176`, built via
+`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d tt_pr176` against `main`'s real
+113 migrations, `0121`'s lock included).** Seeded one company, one owner, one `discovered_opportunities`
+row with `company_tags = '{}'`. Rather than overwrite the real function (which would need restoring
+twice), created two throwaway copies side by side with a `pg_sleep(2)` inserted right after each one's
+own read - the identical widening technique `0121`'s own migration comment already used for its own
+demo, applied here to BOTH the current-`main` body and `#176`'s own body, so the only variable between
+the two demos is the presence or absence of `for update`:
+- `set_opportunity_tag_main_widened` (`main`'s current `0121` body, `for update` kept, `pg_sleep(2)`
+  added after the lock): two concurrent calls, `add 'foo'` and `add 'bar'` (started ~0.3s apart, so the
+  second genuinely overlaps the first's sleep), on the SAME opportunity row. Final `company_tags`:
+  **`{foo,bar}`** - both survive, confirming the lock holds and no update is lost.
+- `set_opportunity_tag_pr176_widened` (`#176`'s own body from `0119` line 556-590, no `for update`,
+  identical `pg_sleep(2)` added after the unlocked read): the SAME two concurrent calls, same timing,
+  same starting state (`company_tags` reset to `'{}'` first). Final `company_tags`: **`{bar}`** - `foo`
+  silently vanished, no error on either call, exactly Finding 178's own original symptom, live and
+  reproduced against `#176`'s own actual function body, not inferred from reading the missing keyword
+  alone.
+
+**`#182` (`0121_pack_quota_rpcs_employee_gap.sql`, 106 lines, 2 functions) - read in full, clean.**
+`company_packs_this_period(p_company_id)` and `company_can_request_pack(p_company_id)` each gain
+exactly one additional condition (`and not is_employee_in_company(p_company_id)` /
+`or is_employee_in_company(p_company_id) then return null`) on top of their existing `is_company_
+member()`/non-member-returns-null contract (`0109`) - checked both functions' own later-`main`
+redefinition history the same way as `#176`'s 12 (last touched by `main` at `0115`, well before `#182`'s
+own branch point, so no divergence risk of `#176`'s own shape exists here). The nested call from
+`company_can_request_pack()` into `company_packs_this_period()` (same `p_company_id`, same `auth.uid()`
+context) was checked for a double-NULL-check surprise - both functions' guards agree (the outer
+function already confirmed `is_company_member() and not is_employee_in_company()` before the inner
+call can ever run with a non-null answer), so no divergent-NULL path exists between them. `#182`'s own
+test addition (`engine/security/test_tenant_isolation.py`, read in full) asserts exactly what its own
+comment claims - `coalesce(company_packs_this_period(...)::text, 'null') == 'null'` for the employee,
+`!= 'null'` for the owner - no mismatch between claim and assertion. **No bug found in `#182`.**
+
+**Incidental finding: two more migration-number collisions, beyond the standing `0124` one.** Diffing
+each PR's own file listing against current `main` (not the noisy `git diff`, the plain
+`app/supabase/migrations/` filenames each PR's branch point predates) shows `#176`'s own new file is
+named `0119_employee_rls_systematic_sweep.sql` - but `main`'s own, real, unrelated
+`0119_notification_claim_functions_anon_revoke.sql` already claims that number. Likewise `#182`'s own
+new file is `0121_pack_quota_rpcs_employee_gap.sql` - the exact number `main`'s real
+`0121_opportunity_tag_add_remove_race.sql` (the very fix `#176` would revert, above) already claims.
+Neither collision was previously named anywhere in this doc's own standing "migration-number collision
+warning" (which only ever named `0124` across `#183`/`#184`/`#185`) - recorded here for whoever
+eventually rebases either PR, per the same standing guardrail's own "check the highest number across
+`main` AND every open PR's diff first" instruction.
+
+**Recommendation for Sarel, documented-only per the standing guardrail (never touch another open PR's
+branch, never open a competing PR for a bug found only there).** Before merging `#176`: (1) rebase onto
+current `main` so its own `set_opportunity_tag()` redefinition starts from `0121`'s already-locked
+body (add `for update` back to the read at what is currently its own line 566) rather than the
+pre-Finding-178 body, and (2) rename its own migration past the real, current highest number on `main`
+(`0123` as of this pass) to avoid the `0119` collision with `main`'s own unrelated file - the other 11
+of its 12 functions need no change, confirmed clean above. `#182` needs no code change, only its own
+migration renumbered past the real `0121` collision before merging - its actual function bodies are
+confirmed correct as written. Neither recommendation requires or justifies touching either PR's branch
+from this review; both are Sarel's own call on when and how to action.
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open, unmerged, and untouched
+beyond read-only reference - reconfirmed via the GitHub REST API at the start and the end of this pass;
+nothing merged, closed, or rebased by anyone, including this session. `#176`/`#182`/`#187` were fetched
+read-only into disposable local refs (`refs/remotes/origin/pr/176`, `.../182`, `.../187`) and never
+checked out as a working tree, never built on, never pushed to; all three deleted via `git update-ref
+-d` at the end of this pass (confirmed empty via `git for-each-ref refs/remotes/origin/pr/` afterward).
+No new `QA-Edge-Case-Findings.md` Finding number consumed (216 remains the next free one) - this pass
+found a real issue but it lives only on `#176`'s own open, unmerged branch (which this review may not
+alter), the same treatment already established for PR `#186`'s NULL bug and the `#187`/`#195`
+collision. The scratch database created this pass (`tt_pr176`, built from `main`'s real 113 migrations
+via `replay_schema.sh`, holding the two disposable widened-copy functions and the one seeded
+opportunity row used for both the green and red demos) was dropped (`drop database tt_pr176;`) and
+confirmed gone via a final `\l` listing; the Postgres service, started fresh at the beginning of this
+pass (it was down beforehand per `pg_lsclusters`), was stopped (`pg_ctlcluster 16 main stop`) and
+confirmed `down` via `pg_lsclusters` at the end of this pass.
+
+To verify independently: `git fetch origin +refs/pull/176/head:refs/remotes/origin/pr/176 && git show
+origin/pr/176:app/supabase/migrations/0119_employee_rls_systematic_sweep.sql | sed -n '556,590p'` and
+confirm the `select * into opp` line has no `for update`, then `diff <(git show
+origin/pr/176:app/supabase/migrations/0119_employee_rls_systematic_sweep.sql | grep -A2 "function set_opportunity_tag")
+app/supabase/migrations/0121_opportunity_tag_add_remove_race.sql` by eye to see the missing lock
+directly; `grep -c "0119\|0121" <(ls app/supabase/migrations/)` style checks, or simply `ls
+app/supabase/migrations/ | grep -E "^011[9]|^0121"` against each PR's own `git show
+origin/pr/<n>:app/supabase/migrations/` listing, to reconfirm both number collisions. Build a scratch
+Postgres from `main`'s 113 migrations, create two throwaway copies of `set_opportunity_tag` (one from
+`main`'s own `0121` body, one from `#176`'s own `0119` body) each with a `pg_sleep(2)` after its own
+read, and run two concurrent `add`-tag calls against each on the same seeded row with empty
+`company_tags` - the locked copy should leave both tags present, the unlocked copy should lose one.
+
+---
+
 ## This pass (2026-11-08xlvi, standing solution-architect review, background worker): took the brief's own option 2 - re-verified the two standing money-path judgment-call items (Finding 168's yearly pack-quota reset, `start_payfast_checkout()`'s revenue-integrity gap/2026-11-07e) for continued accuracy against current `main`, then hunted specifically for a THIRD, not-yet-named billing issue adjacent to both, plus a secondary sweep of POPIA data-subject-deletion coverage against everything the schema has grown since migration `0044` and of the one newer (post-POPIA-audit) LLM pipeline (onboarding document-scan) for the same ID-number-redaction discipline the audit only ever checked for CV extraction. Genuine negative: both standing items are confirmed still accurately described and unresolved, no drift found in the pricing/limits SQL-vs-TypeScript mirror, the "no cancel-subscription path" question is confirmed to be a deliberately-documented future-work gap rather than a hidden bug, POPIA's deletion trigger still covers every real jsonb/text leftover that exists today, and the onboarding-scan pipeline correctly reuses (not reimplements) the CV pipeline's own redaction function with no divergence. No code changed, nothing pushed except this docs entry; no PR opened, closed, or merged; no new `QA-Edge-Case-Findings.md` Finding number consumed (no new bug was found AND fixed).
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `e9be375e` (the immediately preceding pass's own role-matrix entry, matching the standing brief's stated known HEAD), and `docs/specs/QA-Edge-Case-Findings.md` topped out at Finding 203 at that point, confirmed by grep, not memory. Re-fetched again immediately before writing this entry: one new sibling commit had landed, `67938a1` (the parallel "standing QA/robustness review" track - Finding 204, a calendar-impossible-date bug in `extract_cv_fields.py`'s `_plausible_sa_id()`, docs-only alongside its own code/test fix). `git merge --ff-only origin/main` was clean - that track's own insertion point is deep in `System-Status.md` (after its own prior entry, ~line 13045) and in a different `extract_cv_fields.py`/`test_extract_cv_fields.py` region, nowhere near this pass's own top-of-file prepend, so there was nothing to reconcile. Re-checked the open-PR backlog via `gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q '.[].number' | sort -n` both before and after that merge: exactly 23 open, `#164`/`#165`/`#176`-`#196` - nothing merged, closed, or rebased by anyone, including this session or the sibling's.
