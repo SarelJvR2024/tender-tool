@@ -1018,6 +1018,60 @@ select 1;""")
     check(db.one(f"select count(*) from companies where id = '{other}'", uEmp) == "0", "employee sees 0 of an unrelated company")
 
 
+def part2_storage_company_documents_employee_gap(db):
+    """0129: the 'company-documents' bucket's own storage.objects RLS
+    (0014) checked only is_company_member(folder[1]) - never role - even
+    though every real table this bucket backs (company_principals,
+    held_registrations, bank_accounts, company_properties,
+    property_documents, company_document_templates, tender_answers) already
+    gives 'employee' a COMPLETE BLOCK at the table level (0077). Builds its
+    own one-company fixture (an owner and an employee in the SAME company)
+    with one real vault document object, the same shape part2_employee_role
+    uses, since this needs an employee-role member reaching the bucket
+    directly, with no table read/write involved at all."""
+    print("\n[20] Storage: 'company-documents' bucket excludes 'employee' entirely, mirroring the table-level block")
+    i = {k: str(uuid.uuid4()) for k in ("uEmp", "uOwner", "c")}
+    uEmp, uOwner, c = i["uEmp"], i["uOwner"], i["c"]
+    real_obj = f"{c}/vault/bbbee/real-bee-certificate.pdf"
+    db.one(f"""
+insert into auth.users (id, email) values ('{uEmp}', 'empcd@example.test'), ('{uOwner}', 'ownercd@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso CompanyDocs Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uOwner}', 'owner'), ('{c}', '{uEmp}', 'employee');
+insert into storage.buckets (id, name) values ('company-documents', 'company-documents') on conflict do nothing;
+insert into storage.objects (bucket_id, name) values ('company-documents', '{real_obj}');
+select 1;""")
+
+    print("  -- control: the table-level block already holds for this employee --")
+    check(db.one(f"select count(*) from company_principals where company_id = '{c}'", uEmp) == "0",
+          "employee sees 0 company_principals rows (table-level block, as expected)")
+
+    print("  -- employee: the real vault file itself is completely unreachable through storage.objects --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'company-documents' and name = '{real_obj}'", uEmp) == "0",
+          "employee can't select the real vault object")
+    bad, why = refused(db, f"insert into storage.objects (bucket_id, name) values ('company-documents', '{c}/vault/bbbee/planted-by-employee.pdf')", uEmp)
+    check(bad, f"employee can't plant a new object under the company's own vault prefix ({why[:90]})")
+    ok, out, err = db.run(
+        f"with u as (update storage.objects set metadata = '{{\"tampered_by\":\"employee\"}}' "
+        f"where bucket_id = 'company-documents' and name = '{real_obj}' returning 1) select count(*) from u", uEmp)
+    check((not ok) or out.splitlines()[-1] == "0", f"employee updates 0 rows of the real vault object ({out or err[:80]})")
+    ok, out, err = db.run(
+        f"with d as (delete from storage.objects where bucket_id = 'company-documents' and name = '{real_obj}' returning 1) "
+        f"select count(*) from d", uEmp)
+    check((not ok) or out.splitlines()[-1] == "0", f"employee deletes 0 rows of the real vault object ({out or err[:80]})")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'company-documents' and name = '{real_obj}'") == "1",
+          "the real vault object is still intact afterward")
+
+    print("  -- owner/admin/member access to this bucket is completely unchanged by the restrictive policies --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'company-documents' and name = '{real_obj}'", uOwner) == "1",
+          "owner still sees the real vault object")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('company-documents', '{c}/vault/bbbee/owner-upload.pdf')", uOwner)
+    check(ok, f"owner can still upload a new vault document ({err[:100]})")
+    ok, _, err = db.run(f"update storage.objects set metadata = '{{\"ok\":true}}' where bucket_id = 'company-documents' and name = '{real_obj}'", uOwner)
+    check(ok, f"owner can still update the real vault object ({err[:100]})")
+    ok, _, err = db.run(f"delete from storage.objects where bucket_id = 'company-documents' and name = '{c}/vault/bbbee/owner-upload.pdf'", uOwner)
+    check(ok, f"owner can still delete its own upload ({err[:100]})")
+
+
 def part2_team_billing_rpcs(db):
     """Standing review, 2026-11-05: 0113-0116 (invite seat cap, last-owner
     race, pack-quota race, one-company-per-user) each added a new SECURITY
@@ -1069,6 +1123,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_storage_company_documents_employee_gap(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
