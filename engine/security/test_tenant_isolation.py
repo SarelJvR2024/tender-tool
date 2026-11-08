@@ -934,7 +934,8 @@ def part2_employee_role(db):
     reusing seed_db's A/B, since this needs an employee-role member who
     doesn't exist in that fixture."""
     print("\n[18] Employee role: restricted to own record, nothing else - even within their own company")
-    i = {k: str(uuid.uuid4()) for k in ("uEmp", "uOwner", "c", "pSelf", "pColleague", "t", "pack")}
+    i = {k: str(uuid.uuid4()) for k in (
+        "uEmp", "uOwner", "c", "pSelf", "pColleague", "t", "pack", "cvuSelf", "cvuColleague", "extSelf", "extColleague")}
     db.one(f"""
 insert into auth.users (id, email) values ('{i['uEmp']}', 'emp@example.test'), ('{i['uOwner']}', 'owner@example.test');
 insert into companies (id, legal_name) values ('{i['c']}', 'Iso Employee Co');
@@ -943,9 +944,17 @@ insert into people (id, company_id, name, linked_user_id) values ('{i['pSelf']}'
   ('{i['pColleague']}', '{i['c']}', 'Colleague', null);
 insert into projects (company_id, person_id, client_and_number) values ('{i['c']}', '{i['pSelf']}', 'Self project'),
   ('{i['c']}', '{i['pColleague']}', 'Colleague project');
-insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values
-  ('{i['c']}', '{i['pSelf']}', '{i['c']}/people/{i['pSelf']}/uploads/self.pdf', 'self.pdf', 'as_is'),
-  ('{i['c']}', '{i['pColleague']}', '{i['c']}/people/{i['pColleague']}/uploads/colleague.pdf', 'colleague.pdf', 'as_is');
+insert into cv_uploads (id, company_id, person_id, storage_path, original_filename, mode) values
+  ('{i['cvuSelf']}', '{i['c']}', '{i['pSelf']}', '{i['c']}/people/{i['pSelf']}/uploads/self.pdf', 'self.pdf', 'as_is'),
+  ('{i['cvuColleague']}', '{i['c']}', '{i['pColleague']}', '{i['c']}/people/{i['pColleague']}/uploads/colleague.pdf', 'colleague.pdf', 'as_is');
+-- Finding (standing review, 2026-11-08): apply_cv_extraction_checked()/
+-- apply_my_cv_extraction_checked() (0123) each bypass "people/projects/
+-- cv_extraction_results: employee restricted to own record/person" (0077)
+-- entirely, being SECURITY DEFINER - one pending_review row per person so
+-- both RPCs can be exercised against the colleague's own record below.
+insert into cv_extraction_results (id, company_id, person_id, cv_upload_id, review_status, proposed) values
+  ('{i['extSelf']}', '{i['c']}', '{i['pSelf']}', '{i['cvuSelf']}', 'pending_review', '{{}}'::jsonb),
+  ('{i['extColleague']}', '{i['c']}', '{i['pColleague']}', '{i['cvuColleague']}', 'pending_review', '{{}}'::jsonb);
 insert into generated_cvs (company_id, person_id, format, detail) values
   ('{i['c']}', '{i['pSelf']}', 'world_bank', 'summary'), ('{i['c']}', '{i['pColleague']}', 'world_bank', 'summary');
 insert into tenders (id, slug, title, closing_date, family) values
@@ -968,6 +977,16 @@ select 1;""")
         f"insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values "
         f"('{c}', '{i['pSelf']}', '{c}/people/{i['pSelf']}/uploads/new.pdf', 'new.pdf', 'as_is')", uEmp)
     check(ok, f"employee uploads a new CV for themselves ({err.splitlines()[0] if err else 'ok'})")
+    # Finding (standing review, 2026-11-08): apply_my_cv_extraction_checked()
+    # (0123/0125) is the ONLY way an employee ever applies their own
+    # extracted CV fields (My CV is one of their two allowed pages) - must
+    # still succeed for their own record after the 0125 employee guard.
+    ok, _, err = db.run(
+        f"select apply_my_cv_extraction_checked('{i['extSelf']}', '{i['pSelf']}', "
+        f"'{{\"phone\": \"0820000001\"}}'::jsonb, '{{}}'::jsonb)", uEmp)
+    check(ok, f"employee applies their own CV extraction via apply_my_cv_extraction_checked ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select phone from people where id = '{i['pSelf']}'", uOwner) == "0820000001",
+          "employee's own apply_my_cv_extraction_checked call genuinely wrote their own phone")
 
     print("  -- a colleague in the SAME company: no access --")
     check(db.one(f"select count(*) from people where id = '{i['pColleague']}'", uEmp) == "0", "employee can't see colleague's person row")
@@ -981,6 +1000,27 @@ select 1;""")
         db, f"insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values "
             f"('{c}', '{i['pColleague']}', '{c}/people/{i['pColleague']}/uploads/x.pdf', 'x.pdf', 'as_is')", uEmp)
     check(bad, "employee can't insert a CV upload for a colleague")
+    # Finding (standing review, 2026-11-08): both apply_cv_extraction_checked()
+    # and apply_my_cv_extraction_checked() (0123) are SECURITY DEFINER and so
+    # bypassed "people/projects/cv_extraction_results: employee restricted to
+    # own record/person" (0077) entirely, pre-0125 - an employee could apply
+    # a COLLEAGUE's own pending CV extraction via either RPC, overwriting the
+    # colleague's people columns and (via the full RPC) inserting fabricated
+    # projects for them. 0125 added a role guard to both; re-run here as a
+    # permanent regression (red proved directly in a scratch Postgres before
+    # the fix, per docs/specs/QA-Edge-Case-Findings.md).
+    bad, _ = refused(
+        db, f"select apply_my_cv_extraction_checked('{i['extColleague']}', '{i['pColleague']}', "
+            f"'{{\"phone\": \"9999999999\"}}'::jsonb, '{{}}'::jsonb)", uEmp)
+    check(bad, "employee can't apply_my_cv_extraction_checked for a colleague's extraction")
+    bad, _ = refused(
+        db, f"select apply_cv_extraction_checked('{i['extColleague']}', '{i['pColleague']}', "
+            f"'{{\"phone\": \"8888888888\"}}'::jsonb, '[{{\"client_and_number\": \"Fabricated\"}}]'::jsonb, '{{}}'::jsonb)", uEmp)
+    check(bad, "employee can't apply_cv_extraction_checked for a colleague's extraction")
+    check(db.one(f"select count(*) from projects where person_id = '{i['pColleague']}'", uOwner) == "1",
+          "colleague's projects unchanged by the employee's refused apply_cv_extraction_checked calls (still only the original seeded project)")
+    check(db.one(f"select review_status from cv_extraction_results where id = '{i['extColleague']}'", uOwner) == "pending_review",
+          "colleague's cv_extraction_results row still pending_review - neither refused RPC call applied it")
 
     print("  -- company-wide business data: no access at all --")
     for q in (f"select count(*) from tenders where id = '{i['t']}'",
@@ -1011,6 +1051,12 @@ select 1;""")
     ok, _, err = db.run(
         f"update company_tender_preferences set hide_sanral_board = true where company_id = '{c}'", uOwner)
     check(ok, f"owner can still change the company's opportunity preferences ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(
+        f"select apply_cv_extraction_checked('{i['extColleague']}', '{i['pColleague']}', "
+        f"'{{\"phone\": \"0730000000\"}}'::jsonb, '[{{\"client_and_number\": \"Legit project\"}}]'::jsonb, '{{}}'::jsonb)", uOwner)
+    check(ok, f"owner can still apply_cv_extraction_checked for any person in the company, 0125 guard unaffected ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select phone from people where id = '{i['pColleague']}'", uOwner) == "0730000000",
+          "owner's apply_cv_extraction_checked call genuinely wrote the colleague's phone")
 
     print("  -- cross-tenant: an employee gets no MORE access to another company than a member would --")
     other = str(uuid.uuid4())
