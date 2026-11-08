@@ -36,7 +36,13 @@ function makeSupabase(companyResp: Resp, rowsResp: Resp) {
   } as unknown as Parameters<typeof fetchSavingsCounterSummary>[0];
 }
 
-const OK_COMPANY: Resp = { data: { savings_baseline_hours_per_tender: 20, savings_baseline_hourly_cost_zar: 450 }, error: null };
+// Deliberately NOT 20/450 (the placeholder default, migration 0085) - a
+// company that has genuinely confirmed its own baseline, so this fixture's
+// own `usingDefaultBaseline: false` assertion below tests a real confirmed
+// company, not the coincidence of a never-touched one's stored value
+// happening to match the default (Finding 216's own fix to resolveBaseline()
+// in savingsCounter.ts now correctly flags THAT case isDefault: true).
+const OK_COMPANY: Resp = { data: { savings_baseline_hours_per_tender: 30, savings_baseline_hourly_cost_zar: 600 }, error: null };
 const OK_ROWS: Resp = { data: [], error: null };
 
 describe("fetchSavingsCounterSummary", () => {

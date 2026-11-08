@@ -96,6 +96,10 @@ describe("resolveBaseline - distinguishing the company's own confirmed baseline 
     expect(resolveBaseline(30, 600)).toEqual({ hoursPerTender: 30, hourlyCostZar: 600, isDefault: false });
   });
 
+  it("flags isDefault true for 20/450 even though NEITHER argument is null - the real-world shape every never-touched company actually has, since companies.savings_baseline_hours_per_tender/savings_baseline_hourly_cost_zar are `not null default 20`/`not null default 450` (migration 0085), so a brand-new company's own real row reads back as the non-null numbers 20/450, never as null. Before this fix, this exact, most-common case (a company that has never visited Company Settings) incorrectly flagged isDefault false - the dead code this test guards against.", () => {
+    expect(resolveBaseline(20, 450)).toEqual({ hoursPerTender: 20, hourlyCostZar: 450, isDefault: true });
+  });
+
   it("falls back to 20h/R450 and flags isDefault true when both are unset (null)", () => {
     expect(resolveBaseline(null, null)).toEqual({ hoursPerTender: 20, hourlyCostZar: 450, isDefault: true });
   });

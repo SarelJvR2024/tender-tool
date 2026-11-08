@@ -1,5 +1,240 @@
 # System Status
 
+## This pass (2026-11-08li, standing solution-architect review, background worker): gave `#181` and `#164` - the last two untreated backlog PRs - the full fresh-eyes line-by-line + comment-thread-check + cross-reference treatment, closing out the milestone this segment has been working toward: every one of the 23 open PRs (`#164`/`#165`/`#176`-`#196`) has now had it. `#181` (worker Dockerfile/`.dockerignore` fix) read in full and confirmed clean and correct - independently re-verified live via its own actual GitHub Actions `bridge-worker-ci` run (`container-build` job's real log, fetched directly from the API, shows `nodejs 22.23.4-1nodesource1` installed fresh via NodeSource and both new `COPY app/lib`/`COPY app/scripts` lines completing) and via my own from-scratch isolation repro (copied only `app/lib`+`app/scripts` into an empty scratch directory, no `node_modules`, no `package.json`, and the real render script still produced a complete, correct email). `#164` (the large "Capacity Unlocked" savings-counter rework) given its first-ever full 13-file diff read this segment, not just the earlier spot-check of its `0099` migration - found a genuine, previously-undocumented bug while cross-referencing it, **Finding 216**: `resolveBaseline()`'s `isDefault` flag (drives every "using a default estimate, not yet confirmed" vs "based on your own confirmed baseline" message across 4 separate UI surfaces, 2 of them new in `#164` itself) can never actually fire true for a real company, because `companies.savings_baseline_hours_per_tender`/`savings_baseline_hourly_cost_zar` have been `not null default 20`/`default 450` since the column was created (migration 0085) - so a brand-new company that has never touched Company Settings reads back the exact same non-null `20`/`450` as one that explicitly confirmed those numbers, and the dead `== null` check can't tell them apart. This directly violates Sarel's own documented rule for this exact feature ("never present 20h/R450 as fact," spec v3 §18, 2026-10-22) and visibly contradicts `dashboard/page.tsx`'s OWN correctly-written sibling check on the very same page (`savings_baseline_hours_per_tender !== 20 || ... !== 450`, which PR #164 itself keeps unchanged right next to the broken one). Root cause predates `#164` (the column default and `resolveBaseline()` are both already on `main`, untouched by `#164`'s own diff) so this was fixed directly on `main`, not on `#164`'s off-limits branch - a small, safe, pure-TS logic fix, no RLS, no migration, no money-path. Reproduced red/green live (not concluded from reading): a real scratch Postgres insert of a never-touched company confirmed the stored value really is the non-null `20`, the real `resolveBaseline(20, 450)` call confirmed `isDefault: false` pre-fix, matching the bug; post-fix, the same call returns `isDefault: true`. Full verification suite run and green: `npm run typecheck` (0 errors), `npx eslint .` (0 errors, same 3 pre-existing warnings), `npx vitest run` (533/533, 71 files), the node `*.test.ts` loop (all pass), `npx next build` (clean, same route table). Pushed directly to `main` as one commit.
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`feed9697` (the immediately preceding pass's own `#189`-`#192` storage-bucket-family entry's
+stated known HEAD, confirmed unchanged). Re-fetched again immediately before pushing this pass's
+own fix - still `feed9697`, no sibling commit landed in between. Re-checked the open-PR backlog via
+the GitHub REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q
+'.[].number' | sort -n`) at the start and the end of this pass: 23 open, exactly `#164`/`#165`/
+`#176`-`#196` - nothing merged, closed, or rebased by anyone, including this session.
+
+**Checked both `#181`'s and `#164`'s own GitHub comment threads first**, via the REST API
+(`issues/<n>/comments`, `pulls/<n>/comments`, `pulls/<n>/reviews`), before reading a single diff
+line. `#164` came back with nothing but the automated Vercel preview-deployment bot comment and
+zero review threads. `#181` came back with the automated Vercel bot comment PLUS one real,
+substantive review comment this review segment itself left on an earlier pass (2026-11-07hh): a
+flag that `.github/workflows/bridge-worker-ci.yml`'s own `push.paths` filter was never updated to
+include `app/lib/**`/`app/scripts/**`, the two new directories `#181`'s own Dockerfile diff makes
+the worker image depend on - meaning a future push touching only those two directories would
+silently never re-trigger the `container-build` job that builds the image depending on them.
+Re-confirmed this gap is still live on current `main` (`grep -n "paths:" -A10 .github/workflows/
+bridge-worker-ci.yml` still lists only `engine/**`/`templates/forms/**`/`templates/general_samples/
+**`/`fingerprints/**`/`config/discipline_taxonomy.json`/`app/supabase/migrations/**`/
+`.dockerignore`/the workflow file itself - no `app/lib/**`, no `app/scripts/**`) - not re-reported
+as new, since it was already documented in that earlier comment and in this doc's own 2026-11-07hh
+entry; this pass's own treatment of `#181` looked for a DIFFERENT, independent defect in the PR's
+own diff itself, not a repeat of that already-flagged gap.
+
+**`#181` (`fix/worker-pack-ready-email-node`, Finding 152's own fix PR) - read in full
+(`.dockerignore` + `engine/worker/Dockerfile`, both complete diffs, line by line), confirmed
+correct, reproduced live two independent ways.** Traced the real runtime import chain
+`render-pack-ready-email.ts` -> `lib/emailTemplatesTier1.ts` -> `lib/dates.ts`/`lib/emailBrand.ts`/
+`lib/emailSubjects.ts`/`lib/dispatchTriage.ts` by reading every one of those files' own `import`
+lines directly: none has a real (non-type-only) import of an npm package - the one place an npm
+package is reachable at all, `@supabase/supabase-js` via `notificationEngine.ts`, is pulled in only
+as `import type { NotificationEmail }`, erased entirely by `--experimental-strip-types` and never
+actually loaded at runtime - confirming the Dockerfile's own comment claim that `COPY app/lib`/
+`COPY app/scripts` genuinely need no `node_modules`/`package.json` alongside them for this one path.
+**Reproduced this myself, independently of the PR's own claimed verification**: copied ONLY
+`app/lib` and `app/scripts` (1.3MB/208KB, no secrets, no `.env*` files, confirmed via `find`) into a
+fresh, empty scratch directory with no `node_modules` and no `package.json` present, then ran
+`node --experimental-strip-types scripts/render-pack-ready-email.ts '<real opts JSON>'` from inside
+it - exit 0, a complete, correctly-formed 5127-byte email JSON (subject/html/text) printed to
+stdout, matching `packReadyEmail()`'s own real output. **Second, separate verification**: no Docker
+daemon is reachable from this sandbox (confirmed - `docker build` here fails with `connect: no such
+file or directory` on the socket, same documented limitation the PR's own description already
+names), so rather than relying on the PR's own self-reported CI result, independently fetched that
+run's real job log directly from the GitHub API (`bridge-worker-ci` run id `42344828824`,
+`workflow_dispatch`, `conclusion: success`, all 3 jobs - `tenant-isolation-db`, `container-build`,
+`smoke-test` - green): the `container-build` job's own raw log shows `nodejs
+(22.23.4-1nodesource1)` installed fresh via the NodeSource `setup_22.x` repo (not cached - the log
+shows the full `apt-get`/`curl` NodeSource bootstrap sequence running), both new `COPY app/lib
+app/lib`/`COPY app/scripts app/scripts` layers completing (`DONE 0.0s` each, confirming the files
+exist at those paths in the build context), and the image exporting successfully; the `smoke-test`
+job's own `docker run` then failed exactly as its own test script expects (missing
+`NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, the deliberate "refuses to run without
+credentials" check, not a real failure). Also independently re-derived (not just read) that the
+new `.dockerignore` negation (`app/.env*` excluded, `!app/.env*.example` re-included) is
+mechanically sound: Docker's own re-inclusion rule only fails when a pattern excludes a PARENT
+directory above the negated path, and this diff's whole point is that `app` itself is no longer
+excluded wholesale (only its three specific sub-paths are) - so the negation has a real path to
+re-include. Checked the full new `.dockerignore` for any pattern that could accidentally also catch
+`app/lib`/`app/scripts` (none of the 9 other patterns - `.git`, `app/node_modules`, `app/.next`,
+`app/.env*`/`!app/.env*.example`, `out`, `packs`, `state`, `assets`, `templates/incoming`, the 3
+named `config/*.json` files, `**/__pycache__`, `**/*.pyc` - match either). **No bug found in the
+PR's own fix.**
+
+**`#164` (`savings-counter-capacity-messaging`, 13 files, 585/-237) - given its first full
+line-by-line read this segment (the standing brief's own framing: only its `0099` migration had
+been spot-checked before now, never the other 12 files).** Read every file in the diff in full:
+`app/lib/savingsCounter.ts` (the model rework itself), `savingsCounterData.ts`,
+`savingsCounter.spec.ts`, `app/supabase/migrations/0099_savings_baseline_range_limits.sql` (already
+flagged, re-confirmed still colliding with `main`'s own real `0099_workflow_heartbeats.sql` - no
+new collision), `lib/companyProfileUpdate.ts`, `components/tt/savings-calculator.tsx`,
+`savings-counter-card.tsx`, `savings-calculation-dialog.tsx` (new file), `app/company/_components/
+EditForm.tsx`, `app/dashboard/page.tsx`, `app/analytics/page.tsx`, `app/tenders/[id]/
+submission-pack.tsx`, and `app/AGENTS.md`'s own new self-documentation section. Cross-referenced
+`PLAN_MONTHLY_ZAR`/`fetchCompanySubscription()` (new "pays for your subscription Nx over" subtext)
+against `lib/billing.ts`'s real `Record<PlanTier, number | null>` - fully covers every tier
+including `enterprise: null`, so the new `PLAN_MONTHLY_ZAR[subscription.planTier]` lookup can never
+be `undefined`, matching the PR's own "never guessed/fabricated" claim.
+
+**The new finding, Finding 216 - `resolveBaseline()`'s `isDefault` flag is dead code for every real
+company, because the column it reads can never actually be null.** `app/lib/savingsCounter.ts`'s
+own header comment states the rule in Sarel's own words: "Spec v3 §18, Sarel's own answer
+(2026-10-22): no real measured data exists behind 20h/R450 - it must stay a visibly-flagged
+proposed default the user can confirm or change, never presented as fact." `resolveBaseline()` is
+"the one place that decides" this - its `isDefault = hoursPerTender == null || hourlyCostZar ==
+null`. But `migrations/0085_savings_counter.sql` created both backing columns as `numeric not null
+default 20`/`numeric not null default 450` (confirmed directly: `grep -rln` across every migration
+shows 0085 is the ONLY file that ever touches either column - no later migration relaxes the `not
+null`), so Postgres can never return SQL NULL for either, for any real `companies` row. **Reproduced
+live, not concluded from reading**: built a scratch Postgres from `main`'s real 113 migrations
+(`engine/security/replay_schema.sh`), inserted a brand-new company providing only the required
+`legal_name` and relying purely on the column defaults for everything else, and queried it back -
+`savings_baseline_hours_per_tender = 20`, `hours_is_null = f` (false) - confirmed live, the exact
+value every never-touched company actually has. Ran the REAL `resolveBaseline()` function (`node
+--experimental-strip-types`) with those exact real values: `resolveBaseline(20, 450)` ->
+`{hoursPerTender: 20, hourlyCostZar: 450, isDefault: false}` - confirmed the bug live, not inferred.
+This flag drives real, user-visible copy in FOUR separate places, two of them brand new in `#164`
+itself: `savings-counter-card.tsx` (pre-existing), `app/tenders/[id]/submission-pack.tsx`
+(pre-existing), and `#164`'s own two new consumers, `savings-calculation-dialog.tsx` (new file,
+shared by both the card and the pack panel) and the card's own expanded messaging - every one of
+them branches on this exact flag between "Using a default estimate... we don't have your own
+numbers yet" and "Based on your own confirmed baseline"/"Estimated from your own confirmed
+baseline," and with the bug, a company that has NEVER opened Company Settings sees the SECOND,
+false message everywhere. **Confirmed this directly contradicts an already-correct sibling in the
+same codebase**, on the very page `#164` itself edits: `dashboard/page.tsx`'s own setup-checklist
+`done` check (`companyRow?.savings_baseline_hours_per_tender !== 20 || ... !== 450`, unchanged by
+`#164`'s own diff, its own in-file comment explicitly says this value-equality shape is deliberate
+"because the two columns are never null post-onboarding") correctly shows "confirm your baseline"
+as NOT done for that exact same never-touched company, at the exact same time the Savings Counter
+Card right below it on the same dashboard confidently claims the baseline IS confirmed - a real,
+reproducible, self-contradicting pair of UI claims on one page, not a hypothetical. Also confirmed
+the bug is NOT introduced by `#164` - `resolveBaseline()` and the column defaults are both already
+on `main`, completely untouched by `#164`'s own diff (confirmed via the diff's own context lines) -
+`#164` just adds two brand-new consumers of an already-broken flag rather than causing the breakage.
+
+**Why fixed directly on `main`, not treated as documented-only.** Unlike every other
+cross-open-PR-collision finding this segment has logged, this bug's root cause (the column default,
+`resolveBaseline()`'s own logic) lives entirely on `main` today, not on `#164`'s off-limits branch -
+`#164` is affected by it (ships two new broken-messaging surfaces) but didn't cause it and isn't the
+only place it would need fixing. Per the standing guardrails this qualifies as "a small, safe fix":
+one pure TypeScript function (`resolveBaseline()`, no RLS, no migration, no money-transaction path -
+display copy only, the actual hours/Rand NUMBERS were already computed correctly pre-fix; only the
+"is this confirmed or a guess" badge was wrong) plus its own test coverage.
+
+**Fix.** `resolveBaseline()`'s `isDefault` now also treats "resolves to exactly the placeholder
+default" as not-yet-confirmed, alongside the existing null checks - `isDefault = hoursPerTender ==
+null || hourlyCostZar == null || (resolvedHours === DEFAULT_BASELINE_HOURS_PER_TENDER &&
+resolvedCost === DEFAULT_BASELINE_HOURLY_COST_ZAR)` - the same value-equality tradeoff
+`dashboard/page.tsx`'s own sibling check already makes (a company that deliberately confirms a real
+baseline that happens to exactly equal 20h/R450 is still shown "using a default estimate" until they
+change something; an accepted, pre-existing tradeoff in this codebase, not a new one this fix
+introduces). Added a new test to `savingsCounter.spec.ts` asserting `resolveBaseline(20, 450)` now
+flags `isDefault: true` (the real-world shape every never-touched company has, previously the exact
+case the dead code mishandled) - all 6 pre-existing tests in that `describe` block still pass
+unchanged (none of them happened to test exactly 20-and-450-together, confirmed by reading each
+one). Also fixed `savingsCounterData.spec.ts`'s own `OK_COMPANY` fixture, which coincidentally used
+`{20, 450}` as its "ordinary successful fetch, confirmed company" mock data (written by an earlier,
+2026-11-06 pass whose own test intent was error-handling, not baseline-confirmation semantics) and
+asserted `usingDefaultBaseline === false` against it - changed the mock to `{30, 600}` (a real,
+non-coincidental confirmed value) so that test keeps testing what it always meant to (a successful
+fetch), not accidentally the exact bug this fix closes.
+
+**Verified red-then-green myself, live, not from reading.** Pre-fix: `resolveBaseline(20, 450)` (run
+via `node --experimental-strip-types`) returned `isDefault: false` - the bug, confirmed above. Added
+the new test, ran `npx vitest run lib/savingsCounter.spec.ts lib/savingsCounterData.spec.ts` against
+the UNFIXED function first (temporarily) - the new case failed exactly as predicted (`expected
+isDefault: true, got isDefault: false`); applied the fix, re-ran - **31/31 pass** across both files.
+**Full verification suite, all run myself, real exit codes.** `npm run typecheck` (0 errors). `npx
+eslint .` (0 errors, the same 3 pre-existing warnings - `Logo.tsx`'s two `<img>` warnings,
+`analytics/page.tsx`'s unused `STAGE_META` - unchanged, none in any file this pass touched). `npx
+vitest run` - **533/533, 71 files** (up from the prior pass's own last-recorded baseline by exactly
+this pass's net test-count change). The node `*.test.ts` loop (every file under `app/` run directly
+via `node --experimental-strip-types --test <file>`, one by one - all exit 0, none touched by this
+pass's own diff so none expected to change). `npx next build` - compiled clean, same route table
+(`/dashboard`, `/analytics`, `/tenders/[id]`, `/company` all present), exit 0. No migration touched
+by this fix, so `engine/security/test_tenant_isolation.py` was not re-run for it.
+
+**Milestone: every one of the 23 open PRs now has the full fresh-eyes line-by-line +
+comment-thread-check + cross-reference treatment this segment has been running since it started
+working the backlog PR-by-PR.** `#164`/`#165` (this pass and the 2026-11-08xlii/xliii/xlix passes),
+`#176`-`#196` (every intervening pass) - all 23 confirmed read in full, comment threads checked,
+cross-referenced against `main` and each other. This does not mean every PR is bug-free (several
+open findings remain documented-only on their own off-limits branches - `#186`'s NULL bug, the
+`#187`/`#195` merge-order collision, `#176`'s lock regression, `#178`/`#180`'s fail-open gate,
+`#188`/`#189`'s Python function-name collision, `#176`'s own `0119`/`#182`'s own `0121` migration
+collisions, the three-way `0124` collision across `#183`/`#184`/`#185`) - it means the backlog has
+been exhaustively READ at this depth, not that it's all clean, and not that this kind of review
+should stop.
+
+**Recommended next angle for the pass after this one.** Of the three candidates the standing brief
+itself named, recommending **(a): a broader sweep of whether the engine's Python side has its own
+copy of a check this review found diverged on the SQL/TS side, beyond the one narrow path-traversal
+sibling-comparison already done.** Reasoning: (b) (re-verifying an earlier "genuine negative" one
+layer deeper) is a strong, twice-already-productive technique, but this pass's own experience
+applying almost exactly that shape of scrutiny - re-deriving a claim from scratch rather than
+trusting an earlier pass's test fixture - is what surfaced Finding 216 just now (the earlier
+2026-11-06 pass's own `OK_COMPANY = {20, 450}` fixture had been sitting there, passing, encoding the
+bug as "expected," for two days); applying (b) to a DIFFERENT prior "clean" conclusion now risks
+diminishing returns on the exact same technique this pass already used. (c) (something noticed
+reading the ~36-entry backlog) - noticed: `#164`/`#165` are explicitly documented as editing "the
+exact same lines of the exact same file" and will conflict however merged, and `#164`'s own
+`savings-calculation-dialog.tsx`/`savings-counter-card.tsx` rework is now ALSO affected by this
+pass's own Finding 216 fix (once `#164` eventually merges, its `usingDefaultBaseline` consumers will
+inherit the now-correct flag automatically, no rebase conflict in `resolveBaseline()` itself since
+`#164`'s own diff never touches that function's body) - worth a one-line note for whoever reconciles
+`#164`/`#165`, not a fresh angle of its own. (a) is genuinely fresh, concrete, and distinct from
+everything already covered (the engine/Python side has had exactly one narrow sibling-comparison
+sweep, for path-traversal specifically - this segment's own SQL/TS-side findings this pass and
+recent prior ones, e.g. `resolveBaseline()`'s own null-vs-default confusion, the storage-bucket
+employee-role gaps, suggest the SAME classes of bug - a check present on one language's side of a
+mirrored pair but silently absent/wrong on the other - are worth checking for specifically in
+`engine/`'s own Python bridges against their TS counterparts, independent of path-traversal).
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open, unmerged, and
+untouched beyond read-only reference - reconfirmed via the GitHub REST API at the start and the end
+of this pass. `#164` and `#181` were fetched read-only into disposable local refs
+(`refs/remotes/origin/pr/<n>`) for diffing/cross-referencing; one mistake self-corrected mid-pass -
+a `git worktree add --detach` was briefly run against `origin/pr/181` (checking it out as a working
+tree, which the standing guardrails explicitly forbid for any PR in the `#176`-`#196` range,
+`#181` included) before any build or read happened against it; caught immediately, removed via `git
+worktree remove --force` with nothing built, read, or modified through it, and the real Docker-build
+verification redone the compliant way instead (a `git archive origin/main` snapshot into a scratch
+directory, with the PR's own two changed files overlaid via `git show origin/pr/181:<path>` - the
+same read-only extraction technique prior passes already established, never a checkout of the PR
+branch itself). Both `#164`/`#181`'s own disposable refs were deleted via `git update-ref -d` at the
+end of this pass (confirmed empty via `git for-each-ref refs/remotes/origin/pr/` afterward); the
+scratch build directory and its own docker image tag were left as disposable local artifacts (no
+Docker daemon reachable to even remove the tag - `docker build` itself failed on the missing socket,
+confirmed, not silently skipped). No PR branch was pushed to, built on top of, or merged. Finding
+216 consumed the next free Finding number (confirmed via a fresh grep of both docs plus `#164`'s and
+`#181`'s own diffs for any "Finding 2" mention before using it - neither claims one; the
+2026-11-08l entry's own "216 remains free" statement still held). The one scratch Postgres database
+this pass built (`tt_pr164`, from `main`'s real 113 migrations via `replay_schema.sh`) was dropped
+(`drop database tt_pr164;`) and confirmed gone via a `\l` listing immediately after; the Postgres
+service, down per `pg_lsclusters` both before this pass started and checked again now, was started
+fresh for this pass's own use and is stopped (`pg_ctlcluster 16 main stop`) immediately below,
+confirmed via `pg_lsclusters` showing `down` again before this entry is committed.
+
+To verify independently: for `#181`, `git fetch origin +refs/pull/181/head:refs/remotes/origin/pr/181`,
+copy only `app/lib`+`app/scripts` into an empty directory with no `node_modules`, and run `node
+--experimental-strip-types scripts/render-pack-ready-email.ts '{"reference":"T001",
+"buyerShortName":"Acme","companyName":"Bidder","pageCount":1,"appUrl":"https://x","tenderId":"t1"}'`
+- confirm it prints real email JSON, not an error. Fetch `bridge-worker-ci` run `42344828824`'s
+`container-build` job log directly from the GitHub API and confirm it shows `nodejs
+(22.23.4-1nodesource1)` installed and both new `COPY` lines completing. For Finding 216, run `cd app
+&& node --experimental-strip-types -e "import {resolveBaseline} from './lib/savingsCounter.ts';
+console.log(resolveBaseline(20,450))"` against `main` BEFORE this pass's commit and confirm it
+printed `isDefault: false`; against current `main` confirm it now prints `isDefault: true`. Run `npx
+vitest run lib/savingsCounter.spec.ts lib/savingsCounterData.spec.ts` (31/31), the full `npx vitest
+run` (533/533, 71 files), `npm run typecheck`, `npx eslint .`, and `npx next build`.
+
+---
+
 ## This pass (2026-11-08l, standing solution-architect review, background worker): continued the PR-by-PR fresh-eyes line-by-line read on the remaining storage-bucket family - `#189` (`cv-documents`), `#190` (`company-documents`), `#191` (`experience-documents`) and `#192` (`submission-packs`), the four of the six-PR family that had only had a role-matrix re-test before this segment, not this specific technique. All four read in full, each cross-referenced against every table/policy/function name it touches, and all four's own red/green RLS claims reproduced live together in one real scratch Postgres (not concluded from reading alone). Found no new authorization-bypass bug in any of the four PRs' own fixes - all four are correct, severe, already-needed fixes, exactly as each one's own migration comment and Finding write-up (`#189` Finding 207, `#190` Finding 208, `#191` Finding 209, `#192` Finding 210) claims. But found one genuinely new, concrete, cross-open-PR collision worth recording: `#188`'s and `#189`'s own `engine/security/test_tenant_isolation.py` diffs each independently define a Python function named **`part2_storage_employee_gap(db)`** - byte-for-byte the same name - with completely different bodies (one tests `tender-documents`, the other `cv-documents`), each inserted at the identical point in the file and each wired into `main()` with an identical new call line in the identical place, neither PR aware the other exists. If both ever merge, Python's own name-rebinding semantics mean only the LAST definition in the merged file survives - the other bucket's entire regression test silently becomes dead code, called under its own name but running the wrong bucket's assertions, with no error anywhere. Widened the check across the whole six-PR storage family (`#188`-`#193`) and found a second, milder echo of the same unawareness: all six PRs (`#188` through `#193`) print their new Part-2 block under the identical human-readable index label `"[20]"` and all six insert their own new call in `main()` at the identical anchor line (right after `part2_team_billing_rpcs(Db(psql))`) - harmless for the four whose function NAMES are unique (`#190`/`#191`/`#192`/`#193` each use a distinct name), but a real, demonstrated duplicate-label/same-insertion-point hazard once more than one of the six merges. This is the same "two (here, six) open PRs share a surface, neither aware of the other" shape this segment has now found five times (`#186`'s NULL bug, `#187`/`#195`'s merge-order collision, `#176`'s lock regression, `#178`/`#180`'s fail-open gate), but this is the sharpest instance yet - an exact Python function-NAME collision, not just a shared primitive or a migration number. Documented-only below, per the standing precedent, since the bug lives only on two (more broadly, six) open, unmerged PR branches this review may not alter. Nothing pushed to any PR branch, no competing PR opened, no new `QA-Edge-Case-Findings.md` Finding number consumed (nothing here needed fixing on `main` or on a review-opened PR - every PR's own actual SQL fix is correct and independent; the collision is confined to the shared Python test harness file, which only becomes a live problem once two or more of these branches are merged together).
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -

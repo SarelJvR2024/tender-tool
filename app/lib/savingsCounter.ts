@@ -112,10 +112,37 @@ export function resolveBaseline(
   hoursPerTender: number | null | undefined,
   hourlyCostZar: number | null | undefined,
 ): ResolvedBaseline {
-  const isDefault = hoursPerTender == null || hourlyCostZar == null;
+  const resolvedHours = hoursPerTender ?? DEFAULT_BASELINE_HOURS_PER_TENDER;
+  const resolvedCost = hourlyCostZar ?? DEFAULT_BASELINE_HOURLY_COST_ZAR;
+  // Standing solution-architect review, Finding 216: `companies.savings_
+  // baseline_hours_per_tender`/`savings_baseline_hourly_cost_zar` have been
+  // `not null default 20`/`not null default 450` since the column was
+  // created (migration 0085) - no later migration ever relaxed that, and
+  // nothing in this app ever writes an explicit NULL into either column.
+  // So for every real company row, both arguments here are ALWAYS non-null
+  // numbers (20/450 for a company that has never touched Company Settings,
+  // same as one that explicitly typed in 20/450 as its own real figure) -
+  // the `== null` checks below can still fire for a caller with no company
+  // row at all (an `undefined`/`null` passed through explicitly), but can
+  // never fire from a real `companies` read, making `isDefault` dead for
+  // the one case Sarel's own rule (§18, 2026-10-22: "never present 20h/R450
+  // as fact") most needs it to catch - a brand-new company that has never
+  // confirmed anything. Also treating "still exactly equal to the
+  // placeholder" as not-yet-confirmed, matching the one place elsewhere in
+  // this codebase that already had to solve the same problem
+  // (`app/dashboard/page.tsx`'s own setup-checklist `done` check, `savings_
+  // baseline_hours_per_tender !== 20 || ... !== 450`, deliberate per that
+  // file's own comment) - the same accepted tradeoff (a company whose own
+  // real, deliberately-confirmed figure happens to equal 20/450 is still
+  // shown as "using a default estimate" until they change something) is
+  // already live and accepted in that other surface, not a new one.
+  const isDefault =
+    hoursPerTender == null ||
+    hourlyCostZar == null ||
+    (resolvedHours === DEFAULT_BASELINE_HOURS_PER_TENDER && resolvedCost === DEFAULT_BASELINE_HOURLY_COST_ZAR);
   return {
-    hoursPerTender: hoursPerTender ?? DEFAULT_BASELINE_HOURS_PER_TENDER,
-    hourlyCostZar: hourlyCostZar ?? DEFAULT_BASELINE_HOURLY_COST_ZAR,
+    hoursPerTender: resolvedHours,
+    hourlyCostZar: resolvedCost,
     isDefault,
   };
 }
