@@ -687,6 +687,16 @@ def main():
         # live-digest wiring the first time around.
         registrations_before_closing = registration_reminders.find_held_registrations_lapsing_before_closing(
             url, key, seen, today, args.doc_lead_days)
+        # The identical "lapses before closing" gap, extended to
+        # property_documents (0050) - QA pass, 2026-11-08. No prior coverage
+        # anywhere (not here, not daily_digest.py's live mode, not even the
+        # reactive app/lib/tenderCompliance.ts) - see
+        # find_property_documents_lapsing_before_closing()'s own docstring.
+        # Wired into both the --out report (here) and daily_digest.py's live
+        # mode at the same time, same discipline as the registrations catalog
+        # fix the pass before this one.
+        property_docs_before_closing = registration_reminders.find_property_documents_lapsing_before_closing(
+            url, key, seen, today, args.doc_lead_days)
         written = save_seen_db(client, seen, loaded)
     except Exception as e:
         system_alerts.record("deadlines", f"The deadline-reminder watch failed: {type(e).__name__}: {e}",
@@ -730,6 +740,12 @@ def main():
         print(f"  {r['company_name']!r:<30} {r['label']:<34} expires {r['expiry_date']} - "
               f"{r['tender_label']} closes {r['closing_date']}")
 
+    print(f"\n{len(property_docs_before_closing)} property document(s) that will have lapsed by the closing date "
+          f"of a tender being prepared:")
+    for r in property_docs_before_closing:
+        print(f"  {r['company_name']!r:<30} {r['label']:<40} expires {r['expiry_date']} - "
+              f"{r['tender_label']} closes {r['closing_date']}")
+
     print(f"\n{len(tasks_due)} tender task(s) newly due for a reminder "
           f"(within {args.task_lead_days} days or already overdue):")
     for t in tasks_due:
@@ -738,7 +754,8 @@ def main():
 
     report = {"documents": documents_due, "person_credentials": credentials_due, "registrations": registrations_due,
               "documents_before_closing": before_closing, "person_credentials_before_closing": person_before_closing,
-              "registrations_before_closing": registrations_before_closing, "tasks": tasks_due}
+              "registrations_before_closing": registrations_before_closing,
+              "property_documents_before_closing": property_docs_before_closing, "tasks": tasks_due}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report, f, indent=2)

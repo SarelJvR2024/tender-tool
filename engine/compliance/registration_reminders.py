@@ -251,3 +251,102 @@ PROPERTY_DOCUMENT_LABELS = {
     "floor_plan": "Floor plan / layout",
     "maintenance_plan": "Building maintenance plan",
 }
+
+
+def find_property_documents_lapsing_before_closing(url, key, seen, today, lead_days):
+    """The identical "lapses before closing" gap find_documents_lapsing_
+    before_closing() (company vault documents), find_person_credentials_
+    lapsing_before_closing() and find_held_registrations_lapsing_before_
+    closing() (company-held registrations catalog) already each cover for
+    their own document family, extended to property_documents (0050) -
+    QA pass, 2026-11-08. A property document (a fire certificate, an
+    electrical COC, a municipal rates clearance...) that is fine today -
+    outside the normal doc-lead-days window - but will have lapsed by the
+    closing date of an open tender the company has a pack for, got NO
+    advance warning anywhere: not in this live reminder system (confirmed
+    by reading watch_deadlines.main() - only find_due_property_documents()'s
+    own in-window check was ever wired in) and not reactively either
+    (confirmed by grep: "property_document" appears nowhere in
+    app/lib/tenderCompliance.ts, which only covers the SANRAL vault-field
+    returnables, never a company's own properties). Company-wide scope,
+    same as find_documents_lapsing_before_closing()/find_held_registrations_
+    lapsing_before_closing() - a property document has no per-tender
+    assignment concept (it isn't tied to a specific position the way a key
+    person's own credential is), so every open tender the company has a
+    pack for is equally affected by the SAME property going non-compliant."""
+    wd = _wd()
+    rows = wd.supabase_request(
+        url, key,
+        "property_documents?select=id,company_id,property_id,document_type,reference_number,valid_until"
+        "&valid_until=not.is.null")
+    if not rows:
+        return []
+    companies = _names(url, key, "companies", "legal_name", {r["company_id"] for r in rows})
+    props = _names(url, key, "company_properties", "label", {r["property_id"] for r in rows})
+    packs = wd.supabase_request(url, key, "tender_packs?select=company_id,tender_id")
+    tender_ids = sorted({p["tender_id"] for p in packs})
+    tenders = {}
+    if tender_ids:
+        trows = wd.supabase_request(url, key, f"tenders?select=id,contract_no,title,closing_date,status&id=in.({','.join(tender_ids)})")
+        tenders = {t["id"]: t for t in trows}
+    rows_by_company = {}
+    for r in rows:
+        rows_by_company.setdefault(r["company_id"], []).append(r)
+
+    due = []
+    for p in packs:
+        company_rows = rows_by_company.get(p["company_id"])
+        if not company_rows:
+            continue
+        tender = tenders.get(p["tender_id"])
+        if not tender or tender.get("status") != "open" or not tender.get("closing_date"):
+            continue
+        # Same SAST closing-day normalisation as find_documents_lapsing_
+        # before_closing() - see that function's own comment for why a
+        # naive +2h shift on an already-SAST-tagged offset double-counts it.
+        try:
+            closing_ts = datetime.datetime.fromisoformat(str(tender["closing_date"]).replace("Z", "+00:00"))
+        except ValueError:
+            wd.system_alerts.record(
+                "deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') is not a valid "
+                "date - its property-document lapsing-before-closing check was skipped.", "warning",
+                context={"tender_id": tender["id"], "closing_date": tender["closing_date"],
+                         "company_id": p["company_id"]})
+            continue
+        closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
+                       if closing_ts.tzinfo else closing_ts.date())
+        to_closing = (closing_day - today).days
+        if to_closing < 0:
+            continue
+        for r in company_rows:
+            expiry = r["valid_until"]
+            left = wd.days_until(expiry, today)  # None (alert recorded) for a malformed date
+            if left is None:
+                continue
+            exp_day = today + datetime.timedelta(days=left)
+            if exp_day >= closing_day or exp_day < today:
+                continue  # covers the closing date / already expired (reported by find_due_property_documents)
+            if left <= lead_days:
+                continue  # already inside the normal window - find_due_property_documents reports this one
+            seen_key = f"propdoc_before_closing::{r['id']}::{expiry}::{p['tender_id']}"
+            if seen_key in seen:
+                continue
+            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "property_document_before_closing",
+                              "company_id": r["company_id"]}
+            label = PROPERTY_DOCUMENT_LABELS.get(r["document_type"], r["document_type"].replace("_", " "))
+            due.append({
+                "type": "property_document_before_closing",
+                "company_id": r["company_id"],
+                "company_name": companies.get(r["company_id"]),
+                "property_document_id": r["id"],
+                "field": f"property_documents:{r['document_type']}",
+                "label": f"{label} - {props.get(r['property_id']) or 'property'}",
+                "expiry_date": expiry,
+                "days_left": (exp_day - today).days,
+                "tender_id": p["tender_id"],
+                "tender_label": tender.get("contract_no") or tender.get("title") or p["tender_id"],
+                "closing_date": closing_day.isoformat(),
+                "days_to_closing": to_closing,
+                "status": "lapses_before_closing",
+            })
+    return due

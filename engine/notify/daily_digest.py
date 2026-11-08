@@ -454,6 +454,15 @@ def document_expiry_signals(url, key, seen, today, lead_days):
             # 132's own documents_before_closing, which went 2 days without
             # this wiring the first time around.
             + watch_deadlines.registration_reminders.find_held_registrations_lapsing_before_closing(
+                url, key, seen, today, lead_days)
+            # QA pass, 2026-11-08: the identical "lapses before closing" check,
+            # extended to property_documents (0050) - no prior coverage
+            # anywhere at all (not this live channel, not watch_deadlines.py's
+            # own --out report, not even the reactive app/lib/tenderCompliance.ts,
+            # confirmed by grep) - wired into this live channel in the same
+            # pass that built it, same discipline as the registrations-catalog
+            # fix the pass before this one.
+            + watch_deadlines.registration_reminders.find_property_documents_lapsing_before_closing(
                 url, key, seen, today, lead_days))
 
 

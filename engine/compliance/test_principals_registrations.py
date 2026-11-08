@@ -102,6 +102,11 @@ def part1():
              "reference_number": "POL-77", "valid_until": D(10)},
             {"id": "pd2", "company_id": "co1", "property_id": "prop1", "document_type": "title_deed",
              "reference_number": "T1234/2011", "valid_until": None},
+            # QA pass, 2026-11-08: the identical "lapses before closing" shape
+            # as h6 (90 days out - outside the normal 60-day window - but the
+            # company's own open tender_pack, t1, closes on day 100).
+            {"id": "pd3", "company_id": "co1", "property_id": "prop1", "document_type": "fire_certificate",
+             "reference_number": "FC-55", "valid_until": D(90)},
         ],
         "tender_packs": [{"company_id": "co1", "tender_id": "t1"}],
         "tenders": [{"id": "t1", "contract_no": "RT-900-2026", "title": "Closes in 100 days", "status": "open",
@@ -149,6 +154,22 @@ def part1():
     check("h8" not in by_bc, "director-held registration with the identical shape is NOT reported by the company-only check")
     again_bc = rr.find_held_registrations_lapsing_before_closing("u", "k", seen, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
     check(not again_bc, "a second run the same day reports nothing new (seen-store de-dup)")
+
+    # QA pass, 2026-11-08: the identical "lapses before closing" gap, extended
+    # to property_documents - pd3 (90 days) is outside the normal window but
+    # lapses before the open tender_pack (t1, closes day 100); pd1 (10 days,
+    # already in the normal window) and pd2 (no date at all) must NOT show up
+    # here (find_due_property_documents already reports pd1; pd2 has nothing
+    # to compare).
+    property_before_closing = rr.find_property_documents_lapsing_before_closing("u", "k", seen, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    by_pbc = {d["property_document_id"]: d for d in property_before_closing}
+    check(by_pbc.get("pd3", {}).get("tender_label") == "RT-900-2026" and by_pbc["pd3"]["status"] == "lapses_before_closing"
+          and by_pbc["pd3"]["label"] == "Fire safety / clearance certificate - Joubertina Main Rd offices",
+          f"fire certificate (90 days) lapses before the open tender (100 days) closes, got {property_before_closing}")
+    check("pd1" not in by_pbc, "a property document already inside the normal window is NOT reported here (find_due_property_documents already does)")
+    check("pd2" not in by_pbc, "a property document with no expiry date at all is never reported")
+    again_pbc = rr.find_property_documents_lapsing_before_closing("u", "k", seen, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    check(not again_pbc, "a second run the same day reports nothing new (seen-store de-dup)")
 
     import daily_digest  # noqa: E402
     signals = {"new_tenders": [], "document_expiry": due + props, "tender_tasks": [], "readiness_changes": [], "submission_due": []}
@@ -426,8 +447,39 @@ def find_held_registrations_lapsing_before_closing_malformed_closing_date_alert_
               f"...and it carries the company_id already in scope there ({alerts[0]})")
 
 
+def find_property_documents_lapsing_before_closing_malformed_closing_date_alert_carries_company_id():
+    """Same shape as find_held_registrations_lapsing_before_closing()'s own
+    identical test, just above - QA pass, 2026-11-08."""
+    print("find_property_documents_lapsing_before_closing(): a malformed tender closing_date's own alert "
+          "carries company_id too")
+    fixture.ROWS.clear()
+    fixture.ROWS.update({
+        "property_documents": [{"id": "pd-malformed", "company_id": "co-malformed", "property_id": "prop-x",
+                                "document_type": "fire_certificate", "reference_number": "X", "valid_until": D(90)}],
+        "company_properties": [{"id": "prop-x", "company_id": "co-malformed", "label": "X"}],
+        "companies": [{"id": "co-malformed", "legal_name": "Malformed Closing Co"}],
+        "tender_packs": [{"company_id": "co-malformed", "tender_id": "t-malformed"}],
+        "tenders": [{"id": "t-malformed", "contract_no": "M.001-2026", "title": "bad closing date", "status": "open",
+                    "closing_date": "not-a-real-timestamp"}],
+    })
+    wd.supabase_request = fixture.fake_request
+    alerts = []
+    real_record = wd.system_alerts.record
+    wd.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        before = rr.find_property_documents_lapsing_before_closing("u", "k", {}, TODAY, wd.DEFAULT_DOC_LEAD_DAYS)
+    finally:
+        wd.system_alerts.record = real_record
+    check(before == [], f"the malformed-closing-date pack is skipped, not crashed on ({before})")
+    check(len(alerts) == 1, f"exactly one alert fired ({alerts})")
+    if alerts:
+        check(alerts[0][1].get("context", {}).get("company_id") == "co-malformed",
+              f"...and it carries the company_id already in scope there ({alerts[0]})")
+
+
 def main():
     find_held_registrations_lapsing_before_closing_malformed_closing_date_alert_carries_company_id()
+    find_property_documents_lapsing_before_closing_malformed_closing_date_alert_carries_company_id()
     part1()
     psql = os.environ.get("REGISTRATION_PSQL")
     if psql:

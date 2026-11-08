@@ -14179,6 +14179,52 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 218, the "lapses before closing" bug class (already found and fixed 3 times - company documents, person credentials, held registrations) had a fourth, previously-unswept instance: `property_documents` had NO such coverage anywhere - not the live `--out` report, not the live digest email, not even reactively
+
+Oriented from `43c7b45` (own prior pass: Finding 205, `compileReadiness.ts`'s `no_baseline` gap).
+`git fetch origin main` found 2 new sibling commits ("standing solution-architect review" track):
+Finding 216 (`savingsCounter.ts`'s `resolveBaseline()` could never flag `isDefault: true`) and Finding
+217 (`principals.ts`'s `isValidSaId()` checked only the Luhn digit, not the date/citizenship digit -
+itself building directly on this same session's own Finding 204 fix from earlier today). Neither
+collided with this pass's own files. Fast-forward merge was clean. Re-checked again immediately before
+this pass's own push - still the same tip, no further sibling commit landed in between.
+
+**This pass's own task**: compliance/reminders rotation. The "lapses before closing" bug class has its
+own established track record in this doc - found and fixed for company vault documents (Finding 132),
+key-person credentials (Finding 139), and the registrations catalog (this session's own 2026-11-07
+pass). Read `registration_reminders.py`'s `find_due_property_documents()` side by side with its
+sibling `find_due_registrations()`, which DOES have a "before closing" counterpart - `property_documents`
+did not.
+
+**Found: Finding 218.** Confirmed by reading `watch_deadlines.main()` in full (only the in-window
+check was ever wired in for property documents) and by `grep -n "property_document"
+app/lib/tenderCompliance.ts` returning nothing - not even the reactive, UI-only fallback this codebase
+uses elsewhere when a live-reminder equivalent is deliberately deferred. A fire certificate, electrical
+COC, or municipal rates clearance expiring in 90 days reads as "current" under the normal 60-day window
+right up to day 60, even though it's already dead for a tender closing on day 100 - and nobody was ever
+told.
+
+**Fix**: added `find_property_documents_lapsing_before_closing()` to `registration_reminders.py`,
+structurally identical to the registrations-catalog sibling (same SAST closing-day normalisation, same
+company_id-carrying malformed-date alert, same seen-store dedup). Wired into both `watch_deadlines.py`'s
+`--out` report and `daily_digest.py`'s live email channel in the same pass that built it - the
+established discipline this doc's own prior fixes name explicitly. The new item type needed no change
+to `daily_digest.py`'s own finance/cv_admin routing filter - confirmed by reading it, not assumed, that
+it correctly falls through to finance's bucket. Verified red-then-green: extended the existing
+`property_documents` test fixture with a 90-days-out row matching the registrations-catalog fix's own
+precedent, plus a malformed-closing-date alert test. **Red:** saved the diff, `git apply -R`, re-ran
+`test_principals_registrations.py` - failed immediately with `AttributeError`, confirming the function
+is genuinely new. **Green:** reapplied, re-ran - `0 failure(s)`. `python3 -m py_compile` clean.
+Broader regression: `test_watch_deadlines_urgency.py`, `test_digest_live.py`, `test_digest_opt_in.py`,
+`test_send_digest_emails.py` all still pass unchanged. See `docs/specs/QA-Edge-Case-Findings.md`
+Finding 218 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between (beyond the 2 already merged in at the start of this pass).
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 205, `compileReadiness.ts`'s `assessCompileConfidence()` silently skipped both its fingerprint bonus AND penalty, with no explanation at all, when `fingerprint_status` was `"no_baseline"` - a genuinely common first-time-seeing-this-family state, not a rare edge case, letting a never-before-verified SANRAL workbook score "high" confidence
 
 Oriented from `67938a1` (own prior pass: Finding 204, `_plausible_sa_id()`'s calendar-impossible-date
