@@ -1,5 +1,44 @@
 import { describe, expect, it } from "vitest";
-import { needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
+import { isValidSaId, needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
+
+// Regression coverage for Finding 217 (2026-11-08): isValidSaId() used to
+// check only the Luhn checksum, so a 13-digit number whose embedded date is
+// impossible (every digit 0; month 13) still passed as "valid" - no warning
+// from idWarnings(), and nothing stopping company/principals/actions.ts's
+// own hard validation gate from saving it. The sibling that solves the same
+// "is this really someone's SA ID number" question,
+// engine/cv/extract_cv_fields.py's _plausible_sa_id(), already required a
+// plausible month/day and a citizenship digit of 0 or 1 (hardened the same
+// day for the exact calendar-date gap) - this brings isValidSaId() to the
+// same three checks: Luhn, a real calendar date (either century), and a
+// valid citizenship digit.
+describe("isValidSaId", () => {
+  // All four of the following are genuinely Luhn-valid (computed, not
+  // guessed) - the bug this covers is specifically that Luhn-validity alone
+  // used to be treated as "valid", regardless of the date/citizenship
+  // digits it encodes.
+  it("rejects a Luhn-valid number whose embedded date is impossible - every digit 0 (month 00)", () => {
+    expect(isValidSaId("0000000000000")).toBe(false);
+  });
+
+  it("rejects a Luhn-valid number with an impossible month (13)", () => {
+    expect(isValidSaId("0013000000003")).toBe(false);
+  });
+
+  it("rejects a Luhn-valid number with a real date but a citizenship digit that is neither 0 nor 1", () => {
+    // YYMMDD=900101 (a real date), sequence 0000, citizenship digit 5 (invalid), Luhn-correct.
+    expect(isValidSaId("9001010000585")).toBe(false);
+  });
+
+  it("accepts a Luhn-valid number with a real date and a valid (0) citizenship digit", () => {
+    expect(isValidSaId("9001010000080")).toBe(true);
+  });
+
+  it("still rejects a number that isn't 13 digits, or fails the Luhn check", () => {
+    expect(isValidSaId("123")).toBe(false);
+    expect(isValidSaId("9001010000081")).toBe(false); // last digit changed, breaks Luhn
+  });
+});
 
 // Regression coverage for the Directors & shareholders register data-loss
 // bug (QA Finding 177, 2026-11-07): the "Also one of your people (CV)?"

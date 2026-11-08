@@ -91,7 +91,38 @@ export const BREAKDOWN_ROWS: { key: keyof OwnershipBreakdown; label: string }[] 
   { key: "hdi_pct", label: "HDI (black, women or disabled)" },
 ];
 
-/** SA ID: 13 digits with a valid Luhn check digit. */
+/**
+ * True when `yy mm dd` (the ID's own embedded birth date, as two-digit
+ * year/month/day) is a real calendar date in EITHER possible century - the
+ * ID has no century digit, so a `yy` of e.g. "90" could be 1990 or 2090
+ * (handles 29 Feb correctly for whichever one is the leap year).
+ */
+function isPlausibleIdDate(yy: number, mm: number, dd: number): boolean {
+  if (!(mm >= 1 && mm <= 12)) return false;
+  const daysInMonth = (year: number, month1to12: number) => new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
+  const maxDay = Math.max(daysInMonth(1900 + yy, mm), daysInMonth(2000 + yy, mm));
+  return dd >= 1 && dd <= maxDay;
+}
+
+/**
+ * SA ID: 13 digits, a valid Luhn check digit, AND a plausible encoded date
+ * (month 1-12, day valid for that month/either century) and citizenship
+ * digit (0 or 1) - same three checks as
+ * `engine/cv/extract_cv_fields.py`'s `_plausible_sa_id()`.
+ *
+ * Found 2026-11-08, standing review (sibling comparison with that exact
+ * Python function, patched the same day for this same gap): this used to
+ * be Luhn-only, so a 13-digit number with an impossible embedded date (e.g.
+ * month 13, or every digit 0 - both still Luhn-valid) passed as "valid"
+ * with no warning here and nothing to stop it being SAVED
+ * (`company/principals/actions.ts`'s own hard validation gate calls this),
+ * while the CV-extraction pipeline - solving the exact same "is this really
+ * someone's SA ID number" question - already refused it. A Luhn-valid
+ * random/placeholder number is a realistic data-entry mistake this
+ * function exists specifically to catch; checking only the arithmetic
+ * checksum and not the date it's supposed to encode let the most obviously
+ * wrong ones straight through.
+ */
 export function isValidSaId(id: string): boolean {
   if (!/^[0-9]{13}$/.test(id)) return false;
   let sum = 0;
@@ -103,7 +134,12 @@ export function isValidSaId(id: string): boolean {
     }
     sum += d;
   }
-  return sum % 10 === 0;
+  if (sum % 10 !== 0) return false;
+  const yy = Number(id.slice(0, 2));
+  const mm = Number(id.slice(2, 4));
+  const dd = Number(id.slice(4, 6));
+  if (!isPlausibleIdDate(yy, mm, dd)) return false;
+  return id[10] === "0" || id[10] === "1";
 }
 
 /** Date of birth / gender / citizenship as encoded in an SA ID (YYMMDD SSSS C A Z). */
@@ -162,7 +198,7 @@ export function certificationStatus(certifiedOn: string | null, hasCopy: boolean
 export function idWarnings(p: Pick<PrincipalRow, "id_number" | "gender" | "sa_citizen">): string[] {
   const out: string[] = [];
   if (!p.id_number) return out;
-  if (!isValidSaId(p.id_number)) out.push("ID number check digit is not valid - check it against the ID document.");
+  if (!isValidSaId(p.id_number)) out.push("ID number is not valid - check it against the ID document.");
   const parsed = parseSaId(p.id_number);
   if (p.gender && parsed.gender && p.gender !== "other" && p.gender !== parsed.gender) {
     out.push(`Gender recorded as ${p.gender}, but the ID number encodes ${parsed.gender}.`);

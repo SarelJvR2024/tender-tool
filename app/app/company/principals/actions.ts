@@ -73,7 +73,7 @@ export async function savePrincipal(formData: FormData) {
   if (!fullName) fail("Enter the full name as on the CIPC record.", anchor);
 
   const idNumber = str(formData, "id_number")?.replace(/\s+/g, "") ?? null;
-  if (idNumber && !isValidSaId(idNumber)) fail("That ID number isn't a valid 13-digit South African ID number (check digit).", anchor);
+  if (idNumber && !isValidSaId(idNumber)) fail("That ID number isn't a valid 13-digit South African ID number.", anchor);
   const race = str(formData, "race");
   if (race && !RACES.some((r) => r.value === race)) fail("Unknown race group.", anchor);
   const gender = str(formData, "gender");
