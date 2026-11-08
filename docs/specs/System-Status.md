@@ -1,5 +1,220 @@
 # System Status
 
+## This pass (2026-11-08xlix, standing solution-architect review, background worker): continued the PR-by-PR fresh-eyes line-by-line read on three backlog PRs that had not yet had it this segment - `#177` (`company_members` read had no error capture in `proxy.ts`), `#179` (`buildReusePlan()` never re-checked the TARGET tender's own pipeline stage) and `#188` (`tender-documents` storage-bucket employee gap, Finding 206, migration `0127`) - plus a fourth, targeted pass on `#165` (`4 pre-demo production defects`) specifically hunting for a bug INDEPENDENT of its already-documented staleness against `main`'s own `bab5c5b` direct push, per the standing brief's own framing of that pair. Found one genuinely new thing worth recording - not a bug, a factual inaccuracy in `#165`'s own code comment that misattributes its calculator-label fix's annual period to `#164`, which in fact keeps that stat monthly - and otherwise confirmed `#177`, `#179` and `#188` are each real, correct, already-needed fixes with no defect of their own, reproduced red/green live rather than concluded from reading (a real vitest run for `#179`'s pure-TS claim, a real scratch Postgres for `#188`'s RLS claim). No new authorization-bypass or data-integrity gap was found in any of the three untreated PRs; `#165`'s other 3 named defects (WhatsApp crash, mailto, demo-badge whitespace) were independently verified correct and current against real `main`. Nothing pushed to any PR branch, no competing PR opened, no new `QA-Edge-Case-Findings.md` Finding number consumed (nothing here needed fixing - every PR checked stands as a correct fix already on its own branch, or, for `#165`'s comment inaccuracy, a documentation nit not worth a Finding).
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`43c7b45b` (the sibling QA/robustness track's own Finding 205 fix, already landed per the standing
+brief and confirmed already included). Re-fetched again immediately before writing this entry -
+still `43c7b45b`, no further sibling commit landed in between. Re-checked the open-PR backlog via
+the GitHub REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q
+'.[].number' | sort -n`) at the start and the end of this pass: 23 open, exactly `#164`/`#165`/
+`#176`-`#196` - nothing merged, closed, or rebased by anyone, including this session.
+`docs/specs/QA-Edge-Case-Findings.md` on `main` still tops out at Finding 204 (this track's own
+numbering - the sibling's Finding 205 lives in its own separate sequence, confirmed by grep finding
+no "Finding 205" heading anywhere in this file) - the next unclaimed number for this track remains
+216, not needed this pass since nothing here was fixed on `main` or on a review-opened PR.
+
+**Why these four.** The standing brief split the remaining untreated backlog into the older
+single-file fixes (`#177`, `#179`, `#181`, `#188`-`#192`) and the `#164`/`#165` pair (already
+flagged stale against an already-merged commit, but never read line-by-line for a bug independent
+of that staleness). Checked every one of `#177`/`#179`/`#188`/`#164`/`#165`'s own GitHub comment
+threads FIRST, both `get_comments` and `get_review_comments`, before reading a single diff line -
+all five came back with nothing but the automated Vercel preview-deployment bot comment and zero
+review threads, so none of this pass's findings were already flagged by an earlier pass in a
+comment this entry would otherwise have duplicated. Picked `#177` and `#179` as two small,
+self-contained, single-file TypeScript fixes (21 and 20 lines respectively) from the untreated
+older backlog - small enough to read genuinely character-by-character inside this pass's own
+budget, matching the technique's own stated rigor rather than skimming a larger one. Picked `#188`
+to extend the storage-bucket family's treatment past the role-matrix-only pass it had already had -
+the standing brief names `#188`-`#192` as exactly this gap, and `#188` is the FIRST of that
+five-PR family (`tender-documents`, the bucket with the most existing policy history - 0017, 0024,
+0025, 0032, 0043, 0045, 0071, 0100 all touch it - so the most other migrations to cross-reference
+against). Added `#165` because the brief explicitly separates "flagged stale" from "read line-by-
+line for a separate bug" for this pair, and `#165`'s 4 named defects are small enough to check
+individually without needing to also re-adjudicate `#164`'s own, already-documented, much larger
+staleness/rework situation.
+
+**`#177` (`app/proxy.ts`, `company_members` read had no error capture) - read in full, clean, no
+new issue.** The fix changes `const { data: membership } = await supabase.from("company_members")...`
+to also capture `error: membershipError`, and changes the redirect-to-`/onboarding` gate from
+`if (!membership && !path.startsWith("/onboarding"))` to `if (membershipError) { console.error(...) }
+else if (!membership && ...) { redirect }` - on a transient read failure, falls through to the
+real destination instead of a misleading `/onboarding` redirect. Checked whether "fall through on
+error" is a fail-OPEN authorization gap (the exact shape this review hunts hardest for) by reading
+every downstream consumer this proxy gate is the only thing standing in front of: `requireCompanyId()`
+(`app/app/tenders/[id]/actions.ts`, confirmed identical pattern exists in all 15 `actions.ts` files
+that define it) already re-reads `company_members` itself and explicitly fails closed on its OWN
+read error (`if (membershipError) throw new Error("Couldn't verify your company - try again.")`,
+confirmed by direct read, line 27) - so a Server Action reached via this fallthrough cannot act on
+stale/wrong company data even if the proxy's own gate let the request through. For a page.tsx that
+reads data directly rather than through an `actions.ts` function (checked `app/app/dashboard/
+page.tsx`, which has zero `company_members`/`requireCompanyId` references of its own at all), the
+actual tenant scoping is enforced by each table's own RLS policy (`is_company_member()`), not by
+this proxy - a genuinely companyless user reaching `/dashboard` on a transient blip sees an empty/
+RLS-scoped page, not another company's data. Concluded: this proxy check is a UX navigation
+convenience, not the tenant-isolation boundary (RLS is), so falling open here on a transient error
+is correct, matches the fix's own stated reasoning, and is NOT the same shape as `#178`'s own fail-
+open bug (a real server-side hard-stop gate silently not firing) found two passes ago. **No bug
+found.**
+
+**`#179` (`app/lib/pastSubmissionReuse.ts`'s `buildReusePlan()`, Finding candidate "never re-checked
+the target tender's own stage") - read in full, confirmed real, reproduced red and green live via a
+real `vitest` run, not concluded from reading.** The fix adds a `pipeline_stage` column to the
+existing `tender_packs` select, finds the TARGET tender's own row by `tender_id`, and returns `null`
+(refusing to build a plan at all) if that stage is in the same `DONE_STAGES` list
+(`["submitted", "briefing_shortlisted", "won", "lost"]`) already used elsewhere in this file to
+decide which tenders are valid *sources*. Cross-checked `DONE_STAGES`/`pipeline_stage` against every
+other place touching them: `pipeline_stage` lives on `tender_packs`, not `tenders` (confirmed via
+`0001_init_schema.sql`'s own `unique (company_id, tender_id)` constraint on `tender_packs`, which
+also rules out the "which of several tender_packs rows for this tender" ambiguity a multi-row
+scenario would otherwise raise, since RLS plus `0116`'s own one-company-per-user constraint means at
+most one row is ever visible for a given `(company, tender_id)` pair). Both real call sites
+(`buildReusePlan()`'s own preview path and `app/app/tenders/[id]/reuse-actions.ts`'s
+`applyPastSubmission()`) call this same function, confirmed by direct `grep`, so the fix covers both
+the preview and the real apply action, not just one. **Reproduced live**: temporarily copied the
+PR's own `pastSubmissionReuse.ts`/`pastSubmissionReuse.spec.ts` content (extracted read-only via
+`git show origin/pr/179:<path>`) over the real working-tree files (never the PR branch itself - no
+checkout, no worktree) and ran `cd app && npx vitest run lib/pastSubmissionReuse.spec.ts`: **6 passed
+(6)**, confirming the fix's own new tests pass against its own new code. Then restored `main`'s real,
+unmodified `pastSubmissionReuse.ts` (via `git checkout --`) and re-ran the SAME new spec file against
+it: **4 failed, 2 passed** - `buildReusePlan()` on real, current `main` genuinely still returns a
+full plan object (not `null`) for a target tender already in `submitted`/`briefing_shortlisted`/
+`won`/`lost`, confirmed by the actual assertion failure output (`expected null, received { answers:
+..., source: ..., targetPackId: "pack-target" }`). Working tree restored to its exact pre-experiment
+state afterward (`git status --porcelain` empty, confirmed). **No bug found in the PR itself - it is
+a correct, needed, already-reproduced fix for a real gap.**
+
+**`#188` (`0127_tender_documents_storage_employee_gap.sql`, Finding 206, 3 new RESTRICTIVE storage
+policies) - read in full, confirmed real and severe, reproduced red and green live in a real scratch
+Postgres.** Claims an employee-role company member can SELECT/INSERT/DELETE under the
+`tender-documents` bucket's `manual/<company_id>/<tender_id>/...` and `private/<company_id>/
+<tender_id>/...` prefixes straight from the browser's own `supabase.storage` client, with no RPC and
+no table read involved, because every existing permissive policy on those prefixes
+(`0024`'s `manual` select/insert/delete, `0032`'s `private` select/insert/delete, `0045`'s final
+select policy) checks only `is_company_member(...)`, never `is_employee_in_company(...)` - confirmed
+by reading all of `0017`, `0024`, `0025`, `0032`, `0043`, `0045`, `0071`, `0100` (every migration
+that touches this bucket) in full, not just the ones the PR's own header names. Checked the new
+file's own migration number (`0127`) against every other open PR's claimed number by fetching and
+diffing `#186` (`0125`), `#187` (`0126`), `#189` (`0128`), `#190` (`0129`), `#191` (`0130`), `#192`
+(`0131`), `#193` (`0132`/`0133`), `#194` (`0134`), `#195` (`0135`), `#196` (`0136`) - no new
+collision beyond the already-documented `0124` three-way one. **Reproduced live**: built a fresh
+scratch Postgres (`tt_pr188`, `engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d
+tt_pr188` against `main`'s real 113 migrations, i.e. WITHOUT this PR's own `0127`), seeded one
+company with an owner and an employee and one real private storage object the owner "uploaded". RED,
+as the employee (`set role authenticated; select set_config('test.uid', '<employee-uuid>', true)`):
+SELECT returned the owner's private file (`1 row`); INSERT of a new file into the company's own
+`private/` prefix succeeded (`INSERT 0 1`); DELETE of the owner's real file succeeded (`DELETE 1`) -
+all three the exact bypass the PR's own header claims, confirmed live against real RLS, not inferred.
+Applied the PR's own `0127` migration (`git show origin/pr/188:<path> | psql ...`) and re-ran the
+identical three operations as the same employee: GREEN - SELECT returned `0 rows`, INSERT raised
+`new row violates row-level security policy "tender-documents: employee excluded, insert"`, DELETE
+affected `0` rows; a parallel control check confirmed the OWNER's own SELECT/INSERT/DELETE access on
+the same file is completely unaffected. Spot-checked the `manual/` prefix (SELECT) the same way -
+also correctly denied post-fix. **No bug found in the PR itself - confirmed real, severe, correctly
+fixed.**
+
+**`#165` (`4 pre-demo production defects`) - the calculator-label fix is ALREADY fully documented as
+stale in this doc's own 2026-11-08xlii entry (conflicts with `main`'s own direct-push `bab5c5b`,
+which already replaced the whole `extraCapacity()`/`SAVINGS_STEP_HOURS` model this hunk depends on)
+- not re-litigated here. Independently checked the OTHER 3 named defects, the gap the brief itself
+named ("not read line-by-line for a SEPARATE bug independent of that staleness"), plus one new,
+genuinely independent observation on the calculator hunk's own comment accuracy:**
+
+1. **WhatsApp footer crash fix** (`lib/whatsappMessages.ts`, new file; `whatsapp-contact-button.tsx`/
+   `app/page.tsx` both import from it instead of the old cross-client-boundary import) - verified the
+   claimed mechanism is real: a Server Component (`app/page.tsx`) importing a named, non-component
+   string export from a `"use client"` module is a genuine Next.js RSC client-boundary violation (the
+   bundler replaces the client module's non-component exports with a server-side reference proxy),
+   and moving the three message constants to a plain, directive-free file is the correct, standard
+   fix. Clean.
+2. **Mailto fix** (`billing/page.tsx`, `privacy/page.tsx`, `app/page.tsx`: `hello@tendertool.co.za`/
+   `privacy@tendertool.co.za` -> `support@tenderready.app`) - cross-checked the replacement address is
+   REAL and already live elsewhere on `main`, not a second unverified guess: `grep -rn
+   "support@tenderready.app" app/lib/emailBrand.ts` confirms it is already the transactional-email
+   footer's own contact address (line 270). Cross-checked the claim that the two OLD addresses are
+   confirmed-fake against this same file's own 2026-10-23 entry (`app/AGENTS.md` lines 1435-1436,
+   1504-1505: "`hello@tendertool.co.za` is confirmed, as of earlier tonight, a non-existent mailbox
+   nobody reads" / "`hello@tendertool.co.za`, `privacy@tendertool.co.za` are both fake") - matches.
+   Clean, no new fake-mailbox substituted for an old one.
+3. **Demo-badge whitespace fix** (`position-person-select.tsx`, adds a `{" "}` text node between the
+   alternative candidate's name span and its match-percent badge span) - read the whole file for every
+   OTHER place the same `{name}{badge}` adjacency pattern appears: the "suggested" candidate's own
+   badge (lines 82-88) sits in a separate `<div>` from the name, not adjacent, so it was never affected
+   by this bug in the first place (not "already fixed", just structurally different, a minor
+   imprecision in the PR's own comment but not a code issue); the `<option>{s.name} {i===0 ? ... :
+   ...}</option>` case (line 162) has a literal space character between the two JSX expressions on the
+   same source line, which JSX preserves as a real text-node space - not glued, no third unfixed
+   instance of this bug exists in the file. Clean.
+
+**The one new observation: `#165`'s own code comment misattributes what `#164` actually does, though
+this changes nothing about whether `#165`'s OWN fix is correct.** `#165`'s comment on the calculator
+hunk says its new `floor(yearlyHours / hoursPerTender)` approach is "the same formula the real Home/
+Analytics savings counter is moving to (PR #164, not yet merged)". Fetched `#164` read-only and read
+its own `savings-calculator.tsx` diff directly: `#164` DOES change `extraCapacity()`'s own formula
+shape to divide by the full baseline only (dropping the `tendersCounted` parameter entirely, matching
+`#165`'s own "divide by full baseline, not remaining capacity" reasoning) - but `#164` does NOT change
+the PERIOD: its own `extraTendersPerMonth` variable name, its own `extraCapacity(hoursSavedPerMonth,
+hoursPerTender)` call (monthly `hoursSavedPerMonth`, not yearly), and its own JSX (unchanged by `#164`'s
+diff) all keep the stat computed and labelled "a month", consistent with the real in-app counter
+(`components/tt/savings-counter-card.tsx`'s own "Room for N more tenders without hiring", confirmed
+still monthly via `lib/savingsCounterData.ts`'s `extraCapacityThisMonth`). So `#165`'s claim is half
+right (the FORMULA shape matches) and half wrong (the PERIOD switch to "a year" is `#165`'s own
+addition, not something `#164` is "moving to"). This doesn't make `#165`'s own annual figure
+incorrect on its own terms - it's an internally consistent, correctly-computed, deliberately
+conservative annual estimate - but the comment could mislead a future reader (or Sarel) into thinking
+the two PRs already agree on more than they do, on top of the already-documented fact that these two
+PRs edit the exact same lines of the exact same file and will conflict however they are eventually
+merged. Not elevated to a new Finding (no behavioural bug, no reproducible claim to red/green - a
+comment-accuracy nit on an off-limits branch), recorded here instead so whoever eventually reconciles
+`#164`/`#165` has it on record rather than re-discovering it. `#164` itself was not otherwise given
+the full line-by-line treatment this pass - its own migration (`0099_savings_baseline_range_limits.sql`,
+already flagged for its NUMBER colliding with `main`'s real `0099`) was spot-read for CONTENT
+correctness independent of that collision and found sound (its `update ... where ... < 10 or ... > 40`
+clamp correctly leaves `NULL` baselines untouched, consistent with `resolveBaseline()`'s own
+"NULL means unconfirmed, use the default" semantics - a Postgres `CHECK` constraint also passes NULL
+by design, so this is not a NULL-handling bug); the rest of `#164`'s own 13-file diff (the real
+per-tender counter rework, `dashboard/page.tsx`, `analytics/page.tsx`, `EditForm.tsx`) was not
+re-read this pass - it is already on record as needing substantive rework before merge regardless,
+per the 2026-11-08xlii entry, and re-reading it in full without new evidence would not change that.
+
+**Recommendation for Sarel, documented-only, nothing pushed to either branch.** No action needed on
+`#177`, `#179`, or `#188` beyond what the standing brief already says (merge-readiness aside, each is
+a correct, already-verified fix). For `#164`/`#165`, nothing new beyond the existing 2026-11-08xlii
+recommendation - when reconciling them, note additionally that `#165`'s own in-PR comment overstates
+how aligned its calculator hunk already is with `#164`'s.
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open, unmerged, and
+untouched beyond read-only reference - reconfirmed via the GitHub REST API at the start and the end
+of this pass. `#164`, `#165`, `#177`, `#179`, `#181`, `#186`, `#187`, `#188`, `#189`, `#190`, `#191`,
+`#192`, `#193`, `#194`, `#195`, `#196` were fetched read-only into disposable local refs
+(`refs/remotes/origin/pr/<n>`) for diffing/cross-referencing and never checked out as a working tree,
+never built on, never pushed to; all were deleted via `git update-ref -d` at the end of this pass
+(confirmed empty via `git for-each-ref refs/remotes/origin/pr/` afterward). The one working-tree
+experiment this pass ran (temporarily overlaying `#179`'s own two files to get a real vitest red/
+green) was fully reverted (`git checkout --`/`rm` back to `main`'s exact tracked state, confirmed via
+`git status --porcelain` returning empty) before this entry was written. No new `QA-Edge-Case-
+Findings.md` Finding number consumed (216 remains the next free one for this track) - nothing found
+this pass needed a fix of its own. The one scratch Postgres database this pass built (`tt_pr188`,
+from `main`'s real 113 migrations via `replay_schema.sh`, holding one seeded company/owner/employee/
+storage-object fixture) was dropped (`drop database tt_pr188;`) and confirmed gone via a `\l` listing
+immediately after; the Postgres service, down per `pg_lsclusters` both before this pass started and
+checked again now, was started fresh for this pass's own use and is stopped (`pg_ctlcluster 16 main
+stop`) immediately below, confirmed via `pg_lsclusters` showing `down` again before this entry is
+committed.
+
+To verify independently: for `#179`, `git fetch origin +refs/pull/179/head:refs/remotes/origin/pr/179
+&& git show origin/pr/179:app/lib/pastSubmissionReuse.spec.ts` then run it against both the PR's own
+`pastSubmissionReuse.ts` and `main`'s real one, exactly as described above. For `#188`, `git fetch
+origin +refs/pull/188/head:refs/remotes/origin/pr/188 && git show origin/pr/188:app/supabase/
+migrations/0127_tender_documents_storage_employee_gap.sql`, replay `main`'s migrations into a scratch
+database, and attempt the three employee operations on a seeded `private/` object before and after
+applying that one file. For `#164`/`#165`'s comment-accuracy point, `git fetch origin
++refs/pull/164/head:refs/remotes/origin/pr/164 && git diff $(git merge-base origin/main
+origin/pr/164) origin/pr/164 -- app/components/tt/savings-calculator.tsx` and confirm its own JSX/
+variable-naming keeps the "a month" period throughout.
+
+---
+
 ## This pass (2026-11-08xlviii, standing solution-architect review, background worker): continued the PR-by-PR fresh-eyes line-by-line read on four backlog PRs that had not yet had it this segment - `#178` ("'Fix item' submission-pack gate was UI-only, never enforced server-side"), `#183`/`#184` (the two onboarding-document-scan/retry RPCs, both already flagged for the standing `0124` three-way migration-number collision but not yet read character-by-character), and `#193` (the last two storage-bucket employee-gap migrations, `narrative-documents`/`onboarding-documents`, part of the family that had the role-matrix re-test but not this specific technique). Found one real, reproduced issue, a NEW instance of the cross-open-PR-collision shape already established three times this segment (PR `#186`'s NULL bug, the `#187`/`#195` merge-order collision, PR `#176`'s lock regression) - this time spanning two TypeScript files rather than SQL migrations: `#178`'s own brand-new server-side hard-stop gate (`requestSubmissionPack()`/`requestJob()`, built on top of `computeTenderReadiness()`) fails OPEN, not closed as its own comments explicitly claim, on a per-section Pack-Review read failure, because the one primitive that would tell it apart from "genuinely nothing to fix" (`hasUnreadSection`) is added by a DIFFERENT, independent, still-open PR (`#180`) that `#178` neither depends on nor was rebased against. Reproduced live via a real vitest run against `main`'s own current `computeTenderReadiness()` (not inferred from reading alone) - full transcript below. `#183`, `#184` and `#193` were each read in full and are clean - no new issue, no overlap with the already-documented `0124` collision beyond re-confirming it. Nothing pushed to either PR's branch, no competing PR opened, no new `QA-Edge-Case-Findings.md` Finding number consumed (the one real issue found lives only on `#178`'s own open, unmerged branch in combination with `#180`'s own open, unmerged branch - neither of which this review may alter).
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
