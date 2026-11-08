@@ -954,6 +954,7 @@ insert into tender_packs (id, company_id, tender_id) values ('{i['pack']}', '{i[
 insert into financial_captures (company_id, tender_id) values ('{i['c']}', '{i['t']}');
 insert into bank_accounts (company_id, bank_name, account_holder, account_number) values ('{i['c']}', 'ABC Bank', 'Iso Employee Co', '123456789');
 insert into company_tender_preferences (company_id, hide_sanral_board, interested_disciplines) values ('{i['c']}', false, '{{}}');
+insert into savings_counted_steps (company_id, tender_id, step_key, hours) values ('{i['c']}', '{i['t']}', 'pack_assembled', 6);
 select 1;""")
     uEmp, uOwner, c = i["uEmp"], i["uOwner"], i["c"]
 
@@ -987,7 +988,8 @@ select 1;""")
               f"select count(*) from tender_packs where company_id = '{c}'",
               f"select count(*) from financial_captures where company_id = '{c}'",
               f"select count(*) from bank_accounts where company_id = '{c}'",
-              f"select count(*) from company_tender_preferences where company_id = '{c}'"):
+              f"select count(*) from company_tender_preferences where company_id = '{c}'",
+              f"select count(*) from savings_counted_steps where company_id = '{c}'"):
         check(db.one(q, uEmp) == "0", f"employee sees 0 via: {q.split('from ')[1][:40]}")
     bad, _ = refused(db, f"insert into tender_packs (company_id, tender_id) values ('{c}', '{i['t']}')", uEmp)
     check(bad, "employee can't open a tender pack")
@@ -1003,6 +1005,22 @@ select 1;""")
             f"set hide_sanral_board = excluded.hide_sanral_board, interested_disciplines = excluded.interested_disciplines",
         uEmp)
     check(bad, "employee can't change the company's opportunity preferences")
+    # Finding 203, standing review 2026-11-08: savings_counted_steps (0085,
+    # 25 migrations after 0077's own sweep) was never covered by an
+    # "employee has no access" RESTRICTIVE policy either, and - unlike
+    # company_subscriptions/company_tender_preferences above - /dashboard
+    # ("Home") IS one of an employee's own two allowed pages, and reads this
+    # table directly. Checks both the insert AND the delete side: the real
+    # scratch-Postgres repro that found this bug showed an employee could
+    # not just read the whole company's figures but fabricate a new row AND
+    # delete the owner's real one.
+    bad, _ = refused(
+        db, f"insert into savings_counted_steps (company_id, tender_id, step_key, hours) "
+            f"values ('{c}', '{i['t']}', 'cvs_tailored', 4)", uEmp)
+    check(bad, "employee can't insert a savings-counted step for the company")
+    bad, _ = refused(db, f"delete from savings_counted_steps where company_id = '{c}'", uEmp)
+    check(bad or db.one(f"select count(*) from savings_counted_steps where company_id = '{c}'", uOwner) == "1",
+          "employee can't delete the owner's real savings-counted step")
 
     print("  -- owner/admin/member access is completely unchanged by the restrictive policies --")
     check(db.one(f"select count(*) from people where company_id = '{c}'", uOwner) == "2", "owner still sees every person in the company")
@@ -1011,6 +1029,8 @@ select 1;""")
     ok, _, err = db.run(
         f"update company_tender_preferences set hide_sanral_board = true where company_id = '{c}'", uOwner)
     check(ok, f"owner can still change the company's opportunity preferences ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select count(*) from savings_counted_steps where company_id = '{c}'", uOwner) == "1",
+          "owner still sees the company's savings-counted steps")
 
     print("  -- cross-tenant: an employee gets no MORE access to another company than a member would --")
     other = str(uuid.uuid4())

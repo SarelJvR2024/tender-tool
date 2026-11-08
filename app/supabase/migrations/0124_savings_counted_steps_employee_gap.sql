@@ -1,0 +1,63 @@
+-- Standing review finding, 2026-11-08: savings_counted_steps (0085, 25
+-- migrations after 0077's own employee-RLS sweep) has only the one
+-- PERMISSIVE "for all" is_company_member(company_id) policy 0085 gave it -
+-- true for every role including 'employee', and never narrowed since. Same
+-- "added after the sweep, never covered" shape 0117 found in
+-- company_subscriptions/company_members and 0118 found in
+-- company_tender_preferences.
+--
+-- Worse than either of those two: /dashboard ("Home") IS in
+-- EMPLOYEE_NAV_ITEMS (app/_components/nav-items.ts - an employee's only two
+-- pages are Home and My CV), and dashboard/page.tsx calls
+-- lib/savingsCounterData.ts's fetchSavingsCounterSummary(), whose own
+-- comment states "RLS already scopes savings_counted_steps to the signed-in
+-- user's own company (0085), so no explicit company_id filter is needed on
+-- the select" - true of tenant isolation, but not of the employee role the
+-- RLS layer was never updated to exclude. An employee visiting their own,
+-- intentionally-reachable Home page gets the WHOLE COMPANY's aggregated
+-- hours-saved/Rand-saved figures (every tender, every teammate's work, built
+-- from the company's own savings_baseline_hourly_cost_zar), not just
+-- something scoped to them - exactly the "company's... pricing... other
+-- people's records" 0077's own header says this role must not see.
+--
+-- And unlike company_subscriptions/company_tender_preferences (select/
+-- upsert-only gaps), this table's policy is `for all`: full insert/update/
+-- delete, not just select. Reproduced directly in a disposable scratch
+-- Postgres (replay_schema.sh against all 123 prior migrations, never the
+-- live DB): one company, one 'owner' member, one 'employee' member, one
+-- real savings_counted_steps row inserted as the owner (6h, step
+-- 'pack_assembled'). Acting as the employee (set role authenticated; set
+-- test.uid = '<employee uuid>'):
+--   * `select count(*) from savings_counted_steps` -> 1 (the owner's row,
+--     full read of company-wide data).
+--   * `insert into savings_counted_steps (...) values (<same company>, ...)`
+--     -> succeeded (1 row) - an employee can fabricate the company's own
+--     savings/ROI figures.
+--   * `delete from savings_counted_steps where step_key = 'pack_assembled'`
+--     -> succeeded, DELETING THE OWNER'S OWN REAL ROW. A follow-up select
+--     as the owner confirmed it: only the employee-inserted row remained,
+--     the owner's genuine 6-hour entry was gone. An employee can destroy
+--     the company's own savings/ROI history, not just read it.
+--
+-- Fixed the same additive-only, narrow-only way 0077/0117/0118 established:
+-- one new RESTRICTIVE policy. For owner/admin/member, is_employee_in_company()
+-- is false, so "not is_employee_in_company(...)" is unconditionally true and
+-- their access (including the real fetchSavingsCounterSummary()/
+-- recordSavingsStep() flow) is completely unchanged - re-verified below in
+-- the same scratch database, not assumed: re-running the exact same three
+-- employee actions above after this policy now returns 0 rows read, and
+-- both the insert and the delete are rejected by RLS (0 rows affected), while
+-- the owner's own real row and read/write access are untouched.
+--
+-- dashboard/page.tsx itself needs no code change: fetchSavingsCounterSummary()
+-- already treats a zero-row result the same safe way a genuine "no steps
+-- counted yet" company does (the ordinary "Finish your first bid to see your
+-- savings" empty state, not an error) - this policy change alone is enough
+-- to make an employee's Home page show that same empty state instead of the
+-- whole company's real figures, with no silent crash.
+
+create policy "savings_counted_steps: employee has no access" on savings_counted_steps
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
