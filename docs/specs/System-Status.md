@@ -1,5 +1,162 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): Finding 208 - the `company-documents` bucket's own `storage.objects` RLS checked only `is_company_member()`, never role, bypassing the already-airtight table-level "employee has no access" block on `bank_accounts`/`company_principals`/`held_registrations`/`company_properties`/`property_documents`/`company_document_templates`/`tender_answers` - independently verified red/green in a scratch Postgres, fixed with 4 additive RESTRICTIVE policies, PR opened per the binding guardrails (authorization bypass, never a direct push)
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`097de16` (the immediately preceding pass's own Route Handler grant-map write-up). Re-fetched again
+immediately before building the fix and a third time immediately before pushing the branch: the
+concurrent sibling "QA/robustness review" track pushed `8c5bd03` (its own Finding 203, `pack-review-
+logic.ts`'s `signatureStatus()`) directly to `main` partway through this pass - fast-forward-merged
+before anything of this pass's own was pushed, confirmed first that it touched no migration and no
+file this pass's own fix touches (it only touched `app/app/tenders/[id]/pack-review-data.ts`/
+`pack-review-logic.ts`/`pack-review-logic.test.ts` plus its own docs entries), so no conflict and no
+re-verification of this pass's own work was needed on account of it. Re-checked the open-PR backlog
+via the GitHub REST API at the start and again before pushing: 16 open, exactly the set the standing
+brief named (`#164`/`#165`/`#176`-`#189`) - nothing merged, closed, or rebased by anyone, including
+this session. Per the binding guardrails, `#164`/`#165`/`#183`/`#184` were not touched at all this
+pass; `#185`-`#189` were read-only (their own diffs, via `gh api .../pulls/<n>/files`, to confirm the
+exact migration numbers already claimed and, for `#188`/`#189`, the exact storage-RLS fix pattern to
+follow) - no branch of any of them was checked out, built on, or pushed to, and none was merged by
+this session. Built two scratch Postgres databases via `engine/security/replay_schema.sh -h 127.0.0.1
+-p 5432 -U postgres -d <db>` (one through migration `0123` only for red, one through the new `0129`
+for green) and dropped both, then stopped the Postgres service, immediately after the verification
+below - nothing left running or on disk. No `git worktree` was created; a short-lived branch (`fix/
+company-documents-storage-employee-gap`) was pushed for the PR and is left exactly as that PR, not
+deleted (the guardrails' "delete any temporary git branches" is about scratch/throwaway branches used
+only to read a reference, like the disposable `pr184-check` a prior pass created and deleted - this
+one IS the PR's own branch, same as `#185`-`#189`'s own branches, left in place for Sarel's review).
+
+**This pass's primary task, per the standing brief: the concrete, already-scoped lead PR #189's own
+write-up (Finding 207) left open - 5 more storage buckets share the identical "checks only
+`is_company_member()`, never role" shape, none yet reproduced red/green (`company-documents`,
+`experience-documents`, `narrative-documents`, `onboarding-documents`, `submission-packs`) -
+starting with `company-documents`, the widest table surface, per the lead's own recommendation.**
+
+Grepped every migration for the literal bucket name `'company-documents'`: the bucket and its one
+storage policy are created exactly once, in `0014_vault_compliance_documents.sql` -
+
+```sql
+create policy "company-documents: tenant isolation by path prefix" on storage.objects
+  for all to authenticated
+  using (bucket_id = 'company-documents' and is_company_member((storage.foldername(name))[1]::uuid))
+  with check (bucket_id = 'company-documents' and is_company_member((storage.foldername(name))[1]::uuid));
+```
+
+- and three later migrations (`0018_general_tender_preparation.sql` for `tender_answers`,
+`0037_company_document_templates.sql` for `company_document_templates`, `0050_principals_
+registrations_properties.sql` for `company_principals`/`held_registrations`/`bank_accounts`/
+`company_properties`/`property_documents`) all reuse this SAME bucket and this SAME one policy, each
+saying so explicitly in its own header comment. `is_employee_in_company()` (0077) is never referenced
+anywhere in any `company-documents` policy at all (confirmed by grep across every migration). Every
+real path convention this bucket actually uses keys the company id as the FIRST path segment and
+nothing finer - `<company_id>/vault/<doc>/<uuid>-<filename>` (0014), `<company_id>/templates/
+<document_type>/...` (0037), `<company_id>/tenders/<tender_id>/<uuid>-<filename>` (0018) - so, unlike
+`cv-documents`/Finding 207 (which needed person-id parsing), one bucket-wide employee exclusion closes
+all three conventions at once.
+
+Read `0077_company_invites_and_employee_role.sql` directly (not assumed from the brief's own framing)
+and confirmed EVERY real table this bucket backs already carries its own "employee has no access"
+RESTRICTIVE policy: `bank_accounts` (line 344), `company_principals` (350), `held_registrations`
+(356), `company_properties` (362), `property_documents` (368), `company_document_templates` (447),
+`tender_answers` (405), and `companies` itself (338, where the vault's own identifying columns -
+`sars_tcs_pin`, `pi_insurance_*`, `iso_9001_*`, `bank_confirmation_letter_*`, `bee_proof_*` - live).
+This is exactly the shape 0077's own header comment names for the `employee` role ("review THEIR OWN
+CV ... not see ... the company's tenders, pricing, **bank details** or other people's records") -
+`bank_accounts` and the bank-confirmation-letter vault document are literally "bank details." The
+table-level control for every one of these was already completely airtight; the storage-level path
+around it, reachable with no table read and no RPC at all, was wide open the entire time.
+
+**Independently verified red-then-green in a real scratch Postgres.** Seeded one company, one
+`owner`-role member and one `employee`-role member, one real vault document object
+(`<company>/vault/bbbee/real-bee-certificate.pdf`) inserted the legitimate way. As the employee: first
+confirmed the table-level control already holds as a control (`select count(*) from company_principals
+where company_id = '<company>'` - 0 rows). **RED** (113 migrations through `0123` only): SELECT on the
+real vault object - returned the row; INSERT a new object under the company's own vault prefix -
+succeeded (plantable); UPDATE the real object's own metadata - `UPDATE 1` (tamperable); DELETE the
+real object - `DELETE 1`, confirmed gone by a superuser read afterward. **GREEN** (114 migrations
+through the new `0129`): the identical SELECT returned 0 rows; the identical INSERT failed with "new
+row violates row-level security policy \"company-documents: employee excluded, insert\""; the
+identical UPDATE/DELETE each matched 0 rows; a superuser read confirmed the object was completely
+untouched throughout. A control on the same green database confirmed the owner's own full
+select/insert/update/delete access to the bucket was completely unaffected.
+
+**Fix.** New migration `app/supabase/migrations/0129_company_documents_storage_employee_gap.sql`: four
+additive RESTRICTIVE policies on `storage.objects`, scoped to `bucket_id = 'company-documents'`,
+excluding `'employee'` entirely - the same "full block" shape PR #188's own fix used for
+`tender-documents`' `manual`/`private` prefixes (not PR #189's finer "own person only" shape, which
+this bucket doesn't need: every table it backs gives `employee` zero access, not "own record only").
+Nothing existing dropped or edited - the pre-existing 0014 PERMISSIVE policy is untouched. UPDATE was
+included (confirmed separately exploitable by the metadata-tampering probe above), closing all four
+operations the existing policy actually grants.
+
+**Test coverage.** New `part2_storage_company_documents_employee_gap(db)` in `engine/security/
+test_tenant_isolation.py`, printed as `[20]`, wired into `main()` after `part2_team_billing_rpcs`. Ran
+the whole file against both scratch databases: without `0129`, the new `[20]` block's 6 assertions
+fail exactly as predicted (`6 FAILED`, every other check `[1]`-`[19]` still passing - a genuinely new,
+isolated gap, not a knock-on of anything already broken); with `0129`, `ALL PASSED`.
+
+**Verified the rest of the real suite too** (this fix is migration-only plus the Python test file, no
+app code touched): `cd app && npm run typecheck` - clean. `npx eslint .` - 0 errors, 3 pre-existing
+warnings in unrelated files (`Logo.tsx`'s `<img>` advisories, `analytics/page.tsx`'s unused
+`STAGE_META`). `npx vitest run` - 71/71 files, 532/532 tests pass. The full `node
+--experimental-strip-types <file>.test.ts` loop across every `*.test.ts` in the repo (27 files) -
+every file reports `# fail 0`. `npx next build` - completed clean, every route listed with its
+expected rendering mode, no build errors.
+
+**Is this angle exhausted?** Not entirely - `experience-documents`, `narrative-documents`,
+`onboarding-documents` and `submission-packs` still show the same no-role-check shape and have not yet
+been reproduced red/green. A concrete next lead for a future pass: sweep those 4 remaining buckets one
+at a time, same method - read each bucket's real path convention and the real tables it backs, confirm
+(or rule out) an `is_employee_in_company()`-shaped table-level policy those tables already carry that
+the storage layer doesn't mirror, then reproduce red/green before writing the fix. None of the 5 were
+ruled out as a genuine negative this pass - `company-documents` alone was a genuine, reachable bug, so
+this pass stopped there per the "one finding, one PR" pattern every prior pass in this family used,
+rather than also attempting the remaining 4 in the same pass.
+
+**A numbering collision worth flagging for Sarel's own PR review, not fixed by this pass.** The
+concurrent sibling commit `8c5bd03` (noted above) used Finding 203 for its own, completely unrelated
+fix - which collides with this track's own open PR #185 (`fix/savings-counted-steps-employee-gap`),
+which independently claimed Finding 203 on its own still-unmerged branch. Neither session could have
+seen this coming (the sibling track doesn't read this track's open-but-unmerged PR branches, and
+`main`'s own `QA-Edge-Case-Findings.md` topped out at 202 when the sibling session picked its number).
+Logged here, not fixed, since fixing it means renumbering someone else's open PR - Sarel's own call
+when #185 comes up for review.
+
+**This pass's own finding is numbered 208** (not 203) - `docs/specs/QA-Edge-Case-Findings.md` on
+`main` itself tops out at 203 (the sibling's own, just landed) but 203 through 207 were already
+claimed-but-unmerged by `#185`-`#189` before this pass started (confirmed by reading each PR's own
+diff), so 208 is the next genuinely unclaimed number across both `main` and every open PR's diff -
+same reasoning applied to the migration number (`0129`: `main` tops out at `0123`, but `0124`-`0128`
+are claimed across `#183`-`#189`, confirmed by reading every open PR's migration file name via the
+GitHub API before naming this pass's own).
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 16 open PRs (the standing 11 plus `#185`-`#189`) remain open and
+unmerged, plus this pass's own new PR (`#190` or whatever number GitHub assigns - see the PR link in
+this pass's own commit/PR description) - re-confirmed via the GitHub REST API at the start and again
+immediately before pushing; nothing merged, closed, or rebased by anyone, including this session.
+**Nothing pushed directly to `main` by this pass** - per the binding guardrails' own explicit
+instruction that any genuine authorization-bypass finding is the most severe class and must go
+through a PR regardless of how small the diff looks, this pass opened a PR and stopped there, same as
+`#185`-`#189`.
+
+To verify independently: run `select policyname, permissive, cmd, qual, with_check from pg_policies
+where schemaname='storage' and tablename='objects' and policyname like 'company-documents%' order by
+policyname;` against a freshly-replayed scratch Postgres and confirm the pre-existing 0014 policy
+checks only `is_company_member(...)`, with the 4 new `0129` policies also present. Build two scratch
+databases via `engine/security/replay_schema.sh`, one through `0123` only and one including `0129`;
+seed one company with an owner and an employee, one real vault object inserted the legitimate way; as
+the employee, confirm select/insert/update/delete on that object all succeed pre-fix and are all
+refused or match 0 rows post-fix. Run `TENANT_PSQL="psql -h 127.0.0.1 -p 5432 -U postgres -d <db>"
+PGPASSWORD=postgres python3 engine/security/test_tenant_isolation.py` from inside `engine/security/`
+against both databases and confirm `6 FAILED` pre-fix / `ALL PASSED` post-fix, specifically for the
+`[20]` block. Run `npm run typecheck`, `npx eslint .`, `npx vitest run` and `npx next build` from
+`app/` and confirm they match the clean results described above. Confirm via the GitHub REST API that
+all prior PRs remain open/unmerged and that this pass's own new PR exists, open, unmerged.
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
