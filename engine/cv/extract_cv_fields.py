@@ -59,6 +59,7 @@ message and the uploads stay 'extraction_requested' (not failed), so they are
 picked up as soon as the key is set - the user never has to re-upload.
 """
 import argparse
+import calendar
 import datetime
 import json
 import os
@@ -352,8 +353,23 @@ def _luhn_ok(digits):
 def _plausible_sa_id(digits):
     if len(digits) != 13 or not _luhn_ok(digits):
         return False
-    mm, dd = int(digits[2:4]), int(digits[4:6])
-    return 1 <= mm <= 12 and 1 <= dd <= 31 and digits[10] in "01"
+    yy, mm, dd = int(digits[0:2]), int(digits[2:4]), int(digits[4:6])
+    if not (1 <= mm <= 12):
+        return False
+    # QA pass, 2026-11-08: this used to accept any dd 1-31 regardless of the
+    # month, so a calendar-impossible "birth date" (30 Feb, 31 Apr, 31 Jun,
+    # 31 Sep, 31 Nov) could still pass as "plausible" - a real risk, not
+    # just a cosmetic one, since the first number this function accepts is
+    # proposed straight into the person's own id_number field (line ~674).
+    # A 13-digit contract/account/registration number from the CV text that
+    # happens to pass the Luhn checksum, have a month 1-12 and citizenship
+    # digit 0/1, but an impossible day for that month, used to be wrongly
+    # offered as someone's ID number. The SA ID has no century digit, so a
+    # YY of e.g. "90" could be 1990 or 2090 - a day valid in EITHER century
+    # (handles 29 Feb correctly for whichever one is the leap year) is
+    # accepted; a day impossible in both (31 Apr, 30 Feb) is not.
+    max_day = max(calendar.monthrange(1900 + yy, mm)[1], calendar.monthrange(2000 + yy, mm)[1])
+    return 1 <= dd <= max_day and digits[10] in "01"
 
 
 def find_and_redact_sa_ids(text, redact_all_13_digit=False):

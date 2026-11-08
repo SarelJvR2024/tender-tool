@@ -155,6 +155,26 @@ def test_failure_modes(tmp):
     expect_fail(lambda: x.read_cv_text(os.path.join(tmp, "cv.pages"), tmp), "can't be read", "unsupported format")
     check(not x._plausible_sa_id("2016999912345"), "a 13-digit non-ID number is not treated as an ID")
 
+    # QA pass, 2026-11-08: a calendar-impossible "birth date" (30 Feb, 31 Apr,
+    # 31 Jun, 31 Sep, 31 Nov) used to still pass as "plausible" - this used
+    # only a bare 1-31 day check with no regard for the month, so a
+    # contract/account/registration number from the CV text that happened to
+    # pass the Luhn checksum, have a month 1-12 and citizenship digit 0/1,
+    # but land on one of these impossible days, could be wrongly proposed as
+    # the person's own id_number.
+    for label, prefix12 in (("30 Feb", "900230000108"), ("31 Apr", "900431000108"),
+                             ("31 Jun", "900631000108"), ("31 Sep", "900931000108"),
+                             ("31 Nov", "901131000108")):
+        bad_id = sa_id(prefix12)
+        check(bad_id is not None, f"{label}: a Luhn-valid completion exists to test against")
+        if bad_id:
+            check(not x._plausible_sa_id(bad_id), f"{label} is a calendar-impossible date, not a plausible SA ID ({bad_id})")
+    # 29 Feb genuinely exists in some years - accepted when EITHER century
+    # (the SA ID carries no century digit) would make that year a leap year.
+    leap_feb29 = sa_id("000229000108")  # 2000 (and 1900 isn't, but 2000 is) -> valid in at least one century
+    check(leap_feb29 is not None and x._plausible_sa_id(leap_feb29),
+          f"29 Feb is accepted when at least one century interpretation is a leap year ({leap_feb29})")
+
     # Finding (2026-10-27): the "docx" branch above already guards docx_text() against a
     # corrupt file - the "doc" branch's own call to the SAME function on LibreOffice's own
     # conversion output didn't. convert_with_soffice() only checks the output path EXISTS,

@@ -13045,6 +13045,48 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 204, `extract_cv_fields.py`'s `_plausible_sa_id()` accepted a calendar-impossible "birth date" (30 Feb, 31 Apr/Jun/Sep/Nov) as a plausible South African ID number, because its own day check never considered which month it was in
+
+Oriented from `8c5bd03` (own prior pass: Finding 203, SANRAL Pack Review's `signatureStatus()`
+wrong-signatory-name bug). `git fetch origin main` found 5 new sibling commits (all "standing
+solution-architect review" track, docs-only, no collision): a backlog staleness audit, independent
+re-verification of PR #187's/#196's own claims (both genuine negatives), the fix's-own-bug angle on PR
+#186's `apply_my_cv_extraction_checked()` NULL-handling, and a role-matrix re-test of migrations
+0124-0136's 12 employee-gap fixes (also a genuine negative). Fast-forward merge was clean. Re-checked
+again immediately before this pass's own push - still the same tip, no new sibling commit landed in
+between.
+
+**This pass's own task**: CV rotation. The three main `engine/cv/*.py` files are each covered 150+
+times across both docs already, so effort went into the actual checksum/date validation logic for
+South African ID numbers - a boundary-input angle not previously tried. `_plausible_sa_id()`'s own day
+check, `1 <= dd <= 31`, takes no account of which month `dd` is in.
+
+**Found: Finding 204.** Constructed a 13-digit candidate with month=February, day=30, and a Luhn-valid
+final digit: `_plausible_sa_id("9002300001085")` returned `True` - a calendar-impossible date accepted
+as a plausible SA ID. Real consequence, not cosmetic: `find_and_redact_sa_ids()` only proposes a found
+run as a genuine ID when this function accepts it, and `extract_cv_fields.py` writes the first accepted
+one straight into `person["id_number"]`, shown to the user as "Found in the CV text." A CV's own
+contract/account/registration number that happens to satisfy the Luhn checksum and the citizenship-digit
+check, but lands on an impossible day for its month, would have been wrongly offered as the person's own
+ID number.
+
+**Fix**: now computes the real max day for that month via `calendar.monthrange()`, checked against both
+possible centuries (the SA ID carries no century digit) and accepted if valid in either - correctly
+handles 29 Feb (leap-year-dependent) while rejecting every day impossible in any year (31 Apr/Jun/Sep/Nov,
+30/31 Feb). Verified red-then-green: added 6 new cases to `test_extract_cv_fields.py` (5 impossible dates
+rejected, one real leap-year 29 Feb accepted, confirming no over-correction). **Red:** saved the diff,
+`git apply -R`, re-ran - exactly the 5 impossible-date cases failed as predicted; **Green:** reapplied,
+re-ran - `ALL PASSED`. The pre-existing `SYNTH_ID` fixture (a real 15 Feb 1990 date) unaffected
+throughout. `python3 -m py_compile` clean. Regression: `engine/onboarding/test_classify_documents.py`
+(the one other caller, via a shared import, not a duplicate) still passes unchanged. See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 204 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 203, the SANRAL Pack Review screen's `signatureStatus()` showed the algorithm's suggested DEFAULT signatory's name whenever anyone had explicitly chosen a DIFFERENT signatory - the display, not the stored choice, showed the wrong person
 
 Oriented from `48d5b10` (own prior pass: Finding 202, SANRAL Form B7's TE-percentage-sum gap).
