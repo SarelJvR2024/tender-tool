@@ -14376,6 +14376,49 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 223, `run_bridges.py`'s `BridgeRunner.run_once()` raised an uncaught `UnicodeDecodeError` out of `p.communicate()` the moment any bridge's output contained one invalid-UTF-8 byte, aborting the whole cycle - a third instance of the exact failure shape (no except clause catches it, the whole cycle aborts, `--loop` mode swallows it silently) already fixed twice before in this same method
+
+Oriented from `b79c697` (own prior pass: notify rotation, no behavioral bug found, one small
+non-behavioral correctness fix pushed). `git fetch origin main` found 3 new sibling commits
+("standing solution-architect review" track): `48265e9` (a structural CI guard against the
+unguarded-`main()` shape), `687dff9` + `a26109f` (Finding 220's exposure-scope addendum and Finding
+222 - a real `company_principals` 100%-ownership-cap TOCTOU race, fixed). None collided with this
+pass's own file. Fast-forward merge was clean. Re-checked again immediately before this pass's own
+push - still the same tip, no further sibling commit landed in between.
+
+**This pass's own task**: worker/job-queue rotation. `run_bridges.py`'s `BridgeRunner.run_once()`
+already carries an extensively documented history of this exact bug class - three prior QA passes
+(2026-10-23, 2026-10-25, 2026-11-03) each closed a different failure channel that used to raise
+uncaught out of this one method and abort the whole multi-bridge cycle. Read the method's own two
+`except` clauses (`OSError` around `Popen()`, `TimeoutExpired` around `communicate()`) against
+everything `communicate()` can actually raise with `text=True`'s default strict decoding.
+
+**Found: Finding 223.** `communicate()` raises `UnicodeDecodeError` the moment a bridge's combined
+stdout+stderr contains a single invalid-UTF-8 byte - neither existing `except` clause guards it.
+Confirmed live: a 5-byte child payload with one `0xFF` byte reliably reproduced it every time, not an
+intermittent failure. Realistically reachable: a buyer's malformed document filename echoed into a
+log line, OCR'd text, or raw byte noise from a shelled-out tool like `soffice` (every pack bridge's
+own docx->pdf step). Same consequence as the already-fixed `Popen()` OSError case: the whole cycle
+aborts mid-loop (every bridge scheduled after the offending one skipped too), and in `--loop` mode -
+what the container actually runs - the exception is swallowed by `poll_loop.poll_forever()`'s own
+generic per-cycle catch with no alert anywhere, since `main()` passes it no `alert_source`.
+
+**Fix**: added `errors="replace"` to the one `subprocess.Popen(...)` call - this output is purely a
+logging/alerting string, never parsed as data, so a malformed byte decoding to U+FFFD rather than
+raising is the correct trade. Verified red-then-green: added a test mirroring the existing
+Popen-failure test's own structure (a two-bridge `BridgeRunner`, first script writes one invalid-UTF-8
+byte then exits 0, second is a normal `print()` script). **Red:** saved the diff, `git apply -R`,
+re-ran `test_poll_loop.py` directly - crashed immediately with the exact predicted
+`UnicodeDecodeError`. **Green:** reapplied, re-ran - all tests pass, including confirming the SECOND
+bridge still ran (the cycle wasn't aborted). `python3 -m py_compile` clean. See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 223 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): notify rotation - no new behavioral bug found after genuinely adversarial effort across `record_heartbeat.py`/`workflowRegistry.ts`'s own staleness math, `send-corrigendum-alerts.ts`'s pipeline-stage filtering and `send_pack_ready_email.py`'s claim-timing, all confirmed already sound; one small, safe, non-behavioral correctness fix made and pushed (a stale comment + a test exercising a retired enum value)
 
 Oriented from `a4d31c9` (own prior pass: Finding 218, `property_documents`'s missing "lapses before

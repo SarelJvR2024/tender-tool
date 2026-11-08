@@ -389,6 +389,43 @@ def test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost():
           "its own source, and the OTHER bridge in the same cycle still runs - not a silent, whole-cycle loss")
 
 
+def test_a_bridge_that_writes_invalid_utf8_does_not_crash_the_whole_cycle():
+    # QA pass, 2026-11-08: the same isolation failure test_a_bridge_that_
+    # fails_to_even_start_is_reported_not_silently_lost() closed for Popen()
+    # itself, for a third channel - a single invalid-UTF-8 byte anywhere in
+    # a bridge's combined stdout+stderr (a malformed buyer document name/
+    # OCR'd text making it into a print(), or raw byte noise from a
+    # shelled-out tool like soffice) used to raise an uncaught
+    # UnicodeDecodeError straight out of p.communicate() in run_once() - not
+    # guarded by the OSError branch (Popen() itself) or the TimeoutExpired
+    # branch, the only two except clauses in that method. That aborted the
+    # whole cycle (every OTHER bridge scheduled after this one in the same
+    # pass skipped too), the identical consequence the Popen-failure fix
+    # above was built to prevent for its own channel.
+    tmp = tempfile.mkdtemp(prefix="bridge_bad_utf8_")
+    bad_script = os.path.join(tmp, "bad_utf8_bridge.py")
+    ok_script = os.path.join(tmp, "ok_bridge.py")
+    with open(bad_script, "w") as f:
+        f.write(
+            "import sys\n"
+            "sys.stdout.buffer.write(b'bridge ran, but this byte is not valid utf-8: \\xff\\xfe\\n')\n"
+            "sys.stdout.buffer.flush()\n"
+        )
+    with open(ok_script, "w") as f:
+        f.write("print('bridge ran fine')\n")
+    runner = run_bridges.BridgeRunner([("bad_utf8", bad_script), ("ok", ok_script)])
+    output = []
+    runner.log = lambda msg: output.append(msg)
+    did_something = runner.run_once()  # must not raise UnicodeDecodeError
+    assert did_something == 2, f"expected both bridges' output to count as activity, got {did_something} ({output})"
+    assert any("bad_utf8" in ln and "bridge ran" in ln for ln in output), \
+        f"expected the malformed bridge's own (replacement-charactered) output to still be logged, got {output}"
+    assert any("ok" in ln and "bridge ran fine" in ln for ln in output), \
+        f"expected the SECOND bridge to still run, not be skipped because the first one's cycle aborted - got {output}"
+    print("PASS run_bridges.py: a bridge writing one invalid-UTF-8 byte to stdout is decoded with a replacement "
+          "character, not a crash - and the OTHER bridge in the same cycle still runs")
+
+
 if __name__ == "__main__":
     test_poll_forever_unit()
     test_max_runtime_uses_an_injectable_clock_not_the_real_one()
@@ -398,4 +435,5 @@ if __name__ == "__main__":
     test_script_flag_is_additive()
     test_timeout_kills_the_whole_process_group()
     test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost()
+    test_a_bridge_that_writes_invalid_utf8_does_not_crash_the_whole_cycle()
     print("All bridge-loop smoke tests passed.")

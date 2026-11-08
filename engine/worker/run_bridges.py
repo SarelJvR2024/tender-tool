@@ -154,10 +154,32 @@ class BridgeRunner:
             # file's main() doesn't pass it an alert_source), so the failure
             # reached neither system_alerts nor anyone watching - a silent
             # loss, not just a missed alert. QA pass, 2026-11-03.
+            #
+            # errors="replace": the identical isolation failure this method
+            # already exists to prevent, for a third channel - a single
+            # invalid-UTF-8 byte anywhere in a bridge's combined stdout+stderr
+            # (a malformed buyer document name/OCR'd text making it into a
+            # print(), or raw byte noise from a shelled-out tool like soffice)
+            # used to raise an uncaught UnicodeDecodeError straight out of the
+            # communicate() call below, which no except clause in this method
+            # catches - not the OSError branch just below (that only guards
+            # Popen() itself), not the TimeoutExpired branch further down.
+            # Confirmed directly: a 5-byte subprocess payload with one 0xFF
+            # byte reliably raised it with Python's own default strict
+            # decoding. The exact same consequence as the OSError bug fixed
+            # 2026-11-03 above - the whole cycle aborts mid-loop (every OTHER
+            # bridge scheduled after this one in the same pass is skipped
+            # too), and in --loop mode the exception is swallowed by
+            # poll_loop.poll_forever()'s own generic per-cycle catch (this
+            # file's main() passes it no alert_source), so nobody would ever
+            # see it. This is purely a logging/alerting string, never parsed
+            # as data, so losing one malformed byte to the U+FFFD replacement
+            # character is the right trade - never a crash for it.
+            # QA pass, 2026-11-08.
             try:
                 p = subprocess.Popen([sys.executable, path, "--once"] + self.extra_args,
                                      cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                     text=True, start_new_session=True)
+                                     text=True, errors="replace", start_new_session=True)
             except OSError as e:
                 broken.append(f"{label} could not even be started: {e}")
                 system_alerts.record(label, f"The {label} bridge pass could not be started: {type(e).__name__}: {e}",
