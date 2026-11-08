@@ -1,5 +1,99 @@
 # System Status
 
+## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
+
+`git fetch origin main` at the start showed local already matching `origin/main` exactly -
+`48d5b10` (Finding 202, the concurrent sibling "QA/robustness review" track's SANRAL B7 fix, landed
+since the prior pass in this track wrote up `0714170`). Re-fetched again at the end of this pass -
+still `48d5b10`, no further sibling commit landed in between. Re-checked the open-PR backlog via the
+GitHub REST API at the start and the end: 11 open, the same set as handed off
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`/`#184`) - nothing merged,
+closed, or rebased by anyone, including this session. Per the binding guardrails, `#164`/`#165`/
+`#183`/`#184` were not touched at all this pass (not even read this time - the prior pass's own
+read of `#184`'s diff as a reference pattern was not repeated, since this pass needed no fresh
+reference). No scratch Postgres database was needed (every check below was answered by reading real
+source and migration SQL side by side - there was no write site to even consider racing); no `git
+worktree` or temporary branch was created - nothing to clean up.
+
+**Lead 1 (this pass's primary task): the full grant-map method against every real Route Handler in
+the repo.** First confirmed the actual file set, rather than assuming the brief's own glob was
+exhaustive: `find app -name 'route.ts*'` (repo-wide, not just under `app/api/`) turns up exactly 4
+files - `app/app/api/billing/checkout/route.ts`, `app/app/api/billing/payfast/itn/route.ts`,
+`app/app/api/unsubscribe/route.ts`, and `app/app/auth/callback/route.ts` (outside `/api/` entirely,
+but still a Route Handler reachable the same way). No `pages/api/` directory and no root
+`middleware.ts` exist in this app (Next.js App Router only) - confirmed by a repo-wide `find`, not
+assumed from the framework choice.
+
+Read all 4 in full. All 4 call the identical RLS-bound `createClient()` (`@/lib/supabase/server`) a
+Server Action does - none uses a service-role client, so all 4 were genuine candidates for this bug
+class, not ruled out by construction. Grepped all 4 for `\.(update|insert|delete)\(` (the exact
+pattern the brief named): **zero hits, repo-wide, across every Route Handler that exists.** Every
+single write any of them performs goes through `supabase.rpc(...)`, never a plain table call:
+- `api/billing/checkout/route.ts` (`GET`) - calls `start_payfast_checkout()` only.
+- `api/billing/payfast/itn/route.ts` (`POST`, PayFast's own webhook, no session) - calls
+  `apply_payfast_itn()` only, after 3 independent signature/IP/server-confirmation checks.
+- `api/unsubscribe/route.ts` (`GET`/`POST`, RFC 8058 one-click unsubscribe, no session) - calls
+  `unsubscribe_lifecycle_email()` only.
+- `auth/callback/route.ts` (`GET`, OAuth PKCE callback) - calls `supabase.auth.exchangeCodeForSession()`
+  only; no table or RPC write of any kind.
+
+Confirmed all three RPCs are genuinely `security definer` (not just named like one) by reading their
+own `create or replace function` blocks directly in the migrations that define them -
+`start_payfast_checkout` (`0078_company_subscriptions.sql` line 107, re-declared unchanged in
+`0081`/`0117`), `apply_payfast_itn` (`0078` line 165, re-declared in `0081`/`0110`/`0112` as its own
+amount-verification logic grew), `unsubscribe_lifecycle_email` (`0093_notification_engine.sql` line
+213) - and that their `grant execute` lines match who actually calls them with no session at all:
+`apply_payfast_itn` and `unsubscribe_lifecycle_email` are both granted `to anon, authenticated`
+(0078 line 193, 0093 line 230), exactly what a PayFast-server/mail-client caller with no Supabase
+session needs; `start_payfast_checkout` is granted only `to authenticated` (0078 line 141), matching
+that it's reached from a route that already checked `supabase.auth.getUser()` first. This closes the
+specific gap the immediately preceding pass's own write-up named by name: `company_subscriptions`/
+PayFast's billing writes, confirmed absent from `app/app` Server Actions in that pass, are now also
+confirmed absent from `app/api` Route Handlers as a *plain write* - every write path into that table's
+family, wherever it lives, is RPC-gated. **This directory is now genuinely exhausted for this bug
+class**, not just "checked once and assumed clean."
+
+**Lead 2 (the brief's own named fallback, checked anyway since Lead 1 came back clean fast): engine
+Python code writing to Supabase via a non-service-role key.** `grep -rl "SUPABASE_SERVICE_ROLE_KEY"
+engine --include='*.py'` found 35 files, every one reading that key from the environment before
+constructing its Supabase client (the full list spans every worker: `pack/`, `cv/`, `onboarding/`,
+`narrative/`, `general/`, `discovery/`, `compliance/`, `notify/`, `alerts/`, plus the seed/admin
+scripts). `grep -rn "ANON_KEY\|anon_key\|SUPABASE_ANON"` across the same tree: **zero hits anywhere
+in `engine/`.** No engine code path constructs a Supabase client with anything other than the service
+role key - there is no RLS-bound write in the engine at all for this bug class to hide behind. A
+clean, repo-wide negative, not merely "the files this pass happened to open."
+
+**Is this angle exhausted?** For Route Handlers specifically - yes, completely: all 4 that exist were
+read in full, and the write-site grep pattern used is the identical one the brief named, applied with
+no narrowing. For "any RLS-bound write anywhere in the app that bypasses a checked RPC" more broadly -
+between this pass, the immediately preceding pass's full `app/app` grant-map sweep, and the several
+prior passes' own named-candidate sweeps, the three places a write can originate (Server Actions,
+Route Handlers, engine workers) have each now had at least one full pass with this exact lens. A
+genuinely fresh angle for a future pass: this lens has so far only asked "does the grant exist for
+this operation at all" - it has not yet asked the ORTHOGONAL question "for a table where the grant
+IS `for all`/full CRUD, is the RLS `using`/`with check` predicate itself still correct for every
+Server Action and Route Handler that touches it" (i.e. not a missing-grant bug, a wrong-predicate
+bug - a different failure shape, never swept systematically by name in this doc so far).
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 11 open PRs remain open and unmerged - re-confirmed via the GitHub
+REST API at the start and the end of this pass; nothing merged, closed, or rebased by anyone,
+including this session. **Nothing pushed to `main` by this pass except this docs entry** - neither
+lead found a write site to fix, so there is no code change, no new Finding number consumed (the
+findings doc's own max is still 202, re-checked at the start of this pass, not assumed), and no PR.
+
+To verify independently: `find app -name 'route.ts*'` and confirm the same 4 files; read each and
+confirm every write is a `supabase.rpc(...)` call, never `.update(`/`.insert(`/`.delete(` on a table
+directly. Read `0078_company_subscriptions.sql` lines ~104-194 and confirm `start_payfast_checkout`/
+`apply_payfast_itn` are both `security definer` with the grants described above; read
+`0093_notification_engine.sql` lines ~210-230 for `unsubscribe_lifecycle_email`. Run
+`grep -rn "ANON_KEY\|anon_key\|SUPABASE_ANON" engine --include='*.py'` and confirm zero hits. Confirm
+via the GitHub REST API that all 11 PRs are still open/unmerged and that `main`'s own
+`docs/specs/QA-Edge-Case-Findings.md` still tops out at Finding 202.
+
+---
+
 ## This pass (2026-11-07xxxix, standing solution-architect review, background worker): applied Finding 201's own lesson ("does the grant exist at ALL, not just is there a race") systematically across every table whose own migration grants authenticated something less than full CRUD - one genuine, previously-undocumented engine/general-vs-sanral grant asymmetry found on `pack_generation_jobs` (0026), but every Server Action that could reach it already goes through a checked RPC, not a plain write - exhaustive genuine negative, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `75d0585`
