@@ -486,7 +486,7 @@ export default async function PersonDetailPage({
           <div className={gridClass}>
             <Field><label className={labelClass}>Full name *</label><input className={fieldClass} name="name" defaultValue={person?.name ?? ""} required /></Field>
             <Field>
-              <label className={labelClass}>ID number (PII - masked)</label>
+              <label className={labelClass}>ID number (PII - not masked, handle with care)</label>
               <input className={fieldClass} type="text" autoComplete="off" name="id_number" defaultValue={person?.id_number ?? ""} />
             </Field>
             <Field><label className={labelClass}>Role / job title</label><input className={fieldClass} name="role" defaultValue={person?.role ?? ""} placeholder="e.g. Contracts Engineer" /></Field>
