@@ -91,6 +91,24 @@ test("confidence: a fingerprint mismatch drags the score down hard, even with a 
   assert.ok(c.level < 50, c.level);
 });
 
+// QA pass, 2026-11-08: "no_baseline" (classify_tender.py's check_fingerprint()
+// return value the first time ANY tender of a given SANRAL family is seen -
+// not a rare case) used to get neither the +20 "ok" bonus nor the -40
+// "mismatch"/"error" penalty, AND no basis line explaining why, silently
+// breaking this function's own "one sentence per signal" contract.
+test("confidence: no stored baseline yet explains itself and is less confident than a confirmed match", () => {
+  const noBaseline = assessCompileConfidence(base, {
+    status: "extracted", route: "sanral", family: "Brand New Buyer Template",
+    fingerprint_status: "no_baseline", missing: [], unreadable_documents: [], failed_downloads: 0,
+  });
+  assert.ok(noBaseline.basis.some((b) => b.includes("no stored baseline")), noBaseline.basis);
+  const ok = assessCompileConfidence(base, {
+    status: "extracted", route: "sanral", family: "Brand New Buyer Template",
+    fingerprint_status: "ok", missing: [], unreadable_documents: [], failed_downloads: 0,
+  });
+  assert.ok(noBaseline.level < ok.level, `no_baseline (${noBaseline.level}) should score below a confirmed ok match (${ok.level})`);
+});
+
 test("confidence: missing required documents reduce the score, capped at -30 total", () => {
   const c1 = assessCompileConfidence(base, {
     status: "extracted", route: "sanral", family: "Conventional Consultant Tender",

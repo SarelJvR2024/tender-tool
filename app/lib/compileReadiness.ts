@@ -258,6 +258,24 @@ export function assessCompileConfidence(
         `-40: the workbook ${requirements.fingerprint_status === "mismatch" ? "does not match" : "could not be checked against"} ` +
           "the stored template baseline - a real pack run would stop here.",
       );
+    } else if (requirements.fingerprint_status === "no_baseline") {
+      // QA pass, 2026-11-08: this branch didn't exist at all - a brand-new
+      // SANRAL workbook family (classify_tender.py's check_fingerprint()
+      // genuinely returns "no_baseline" the first time any tender of this
+      // family is seen, not a rare case) silently got neither the +20 nor
+      // the -40 adjustment AND no basis line explaining why, breaking this
+      // function's own documented contract ("one sentence per signal that
+      // moved the number"). Left as a neutral (0) adjustment deliberately -
+      // this module's job is to report what IS known, not invent a penalty
+      // value nobody has signed off on - but the caveat itself is real and
+      // now said plainly: a family match with no baseline to check against
+      // is exactly the "sanral_fill might not actually run cleanly on this
+      // one" case the fingerprint check exists to catch, and it hasn't been
+      // able to here.
+      basis.push(
+        "+0: no stored baseline exists yet for this workbook family - this will be the first one checked against " +
+          "it, so whether sanral_fill can actually run on it cleanly is still unconfirmed.",
+      );
     }
 
     const missingCount = requirements.missing?.length ?? 0;

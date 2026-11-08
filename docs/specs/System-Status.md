@@ -13483,6 +13483,50 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 205, `compileReadiness.ts`'s `assessCompileConfidence()` silently skipped both its fingerprint bonus AND penalty, with no explanation at all, when `fingerprint_status` was `"no_baseline"` - a genuinely common first-time-seeing-this-family state, not a rare edge case, letting a never-before-verified SANRAL workbook score "high" confidence
+
+Oriented from `67938a1` (own prior pass: Finding 204, `_plausible_sa_id()`'s calendar-impossible-date
+bug). `git fetch origin main` found 3 new sibling commits ("standing solution-architect review" track,
+docs-only, no collision): a re-verification of billing/POPIA/onboarding-scan judgment calls (genuine
+negative), and two PR-by-PR fresh-eyes reads (#176/#182 and #178/#183/#184/#193) - the latter found one
+real issue, but it lives entirely on two still-open, unmerged PRs (#178 x #180), consuming no new
+Finding number per that pass's own write-up. Fast-forward merge was clean. Re-checked again
+immediately before this pass's own push - still the same tip, no new sibling commit landed in between.
+
+**This pass's own task**: intake rotation. `engine/intake/classify_tender.py` is already covered 177
+times across both docs, so effort went to the TypeScript side of the intake chain instead -
+`lib/compileReadiness.ts` (8 prior mentions), the admin-facing "can our engine actually compile this"
+confidence score shown on `/admin/discovered-opportunities`.
+
+**Found: Finding 205.** The function's own weight-table docstring frames the fingerprint signal as
+two-way ("ok" vs "bad/mismatch") but the real `fingerprint_status` type has a third value, `no_baseline`
+- confirmed reachable straight from `engine/intake/classify_tender.py`'s own `check_fingerprint()`,
+which returns exactly this status the first time ANY tender of a given SANRAL family is seen, not a
+rare case. The scoring code's `if (ok) / else if (mismatch || error)` has no `else`, so `no_baseline`
+fell through both branches: confirmed live, `assessCompileConfidence()` with a matched family and
+`fingerprint_status: "no_baseline"` returned `{level: 85, band: "high"}` with a `basis` array that
+never mentions the fingerprint check at all - silently breaking the function's own documented "one
+sentence per signal that moved the number" contract, which every OTHER signal in the same function
+honours even for its own no-op case. Real consequence: a brand-new workbook family - the one case
+where whether `sanral_fill.py` can even run on it cleanly is genuinely unconfirmed - could score "high"
+confidence on the one screen built specifically to help Sarel judge that.
+
+**Fix**: added the missing `else if (fingerprint_status === "no_baseline")` branch - an explicit `+0`
+with its own basis line naming the real caveat. Deliberately left the numeric weight at zero rather
+than inventing a new penalty value; the `effectiveConfidence()` override mechanism already exists for
+the human judgement call this surfaces. Verified red-then-green: added a test asserting the new basis
+line appears and that `no_baseline` scores strictly below the otherwise-identical `"ok"` case. **Red:**
+saved the diff, `git apply -R`, re-ran `node --experimental-strip-types lib/compileReadiness.test.ts` -
+failed exactly as predicted; **Green:** reapplied, re-ran - 15/15 pass. `npx tsc --noEmit`/`npx eslint`
+clean. Broader regression: every other `*.test.ts` file in `app/` run directly, unaffected. See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 205 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 204, `extract_cv_fields.py`'s `_plausible_sa_id()` accepted a calendar-impossible "birth date" (30 Feb, 31 Apr/Jun/Sep/Nov) as a plausible South African ID number, because its own day check never considered which month it was in
 
 Oriented from `8c5bd03` (own prior pass: Finding 203, SANRAL Pack Review's `signatureStatus()`
