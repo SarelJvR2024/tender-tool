@@ -1,5 +1,146 @@
 # System Status
 
+## This pass (2026-11-08xliii, standing solution-architect review, background worker): independently re-derived, from a fresh literal/mechanical sweep (grep over source AND a live `pg_constraint`/`pg_proc`/`pg_policies` catalog query on a scratch Postgres built from `main`'s real 113 migrations), whether PR #196's own claim - that `tender_answers_check2` (Finding 215) was the ONLY sibling PR #195's own "9 true siblings" sweep (Finding 214) missed - itself holds up; it does: genuine negative, no 11th sibling found, nothing pushed to any PR branch, no new Finding opened, `main` untouched except this docs entry
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `b7ed3b9`
+(the immediately preceding pass's own backlog-staleness-audit entry). Re-fetched again immediately
+before writing this entry - still `b7ed3b9`, no sibling commit landed in between. Re-checked the
+open-PR backlog via the GitHub REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open
+--paginate -q '.[].number' | sort -n`) at the start and the end: 23 open, exactly
+`#164`/`#165`/`#176`-`#196` - nothing merged, closed, or rebased by anyone, including this session.
+`docs/specs/QA-Edge-Case-Findings.md` on `main` still tops out at Finding 203 (confirmed by grepping
+every `### Finding <n>` heading and sorting numerically) - expected, since Findings 214/215 (PR
+`#195`/`#196`) only land there once their PR merges, which per the binding guardrails this pass does
+not do. Confirmed `main`'s own highest migration is still `0123` (`ls app/supabase/migrations | sort
+-V | tail -1`), and the real highest claimed anywhere across the whole 23-PR backlog is `0136` (PR
+`#196`'s own fix) - checked every open PR's `gh api .../pulls/<n>/files` output for a `.sql` filename
+under `app/supabase/migrations/`, not assumed from the standing brief's own hint.
+
+**Why this angle, picked over the two other candidates the standing brief named.** The brief's
+candidate 1 (re-verify PR #196's own "only missing sibling" claim) was the most directly checkable
+of the three without needing to read 10+ already-re-read SECURITY DEFINER function bodies a fourth
+time: it reduces to one mechanical question - does ANY check-constraint or function body anywhere in
+`main`'s real schema do a LIKE/ILIKE/`~~`/prefix-regex comparison against a storage path, a
+`company_id`, or a `tender_id`, beyond the 10 sites (9 from Finding 214 + the 1 from Finding 215)
+already named. Candidate 2 (the SECURITY DEFINER catalog one layer down) was checked only for its own
+narrow, brief-suggested sub-question - whether migration `0136` itself introduces a new SECURITY
+DEFINER function - and ruled out in under a minute (see below); the fuller "re-read PR #186/#187's
+own NEW bodies for a fresh bug" angle was not attempted this pass, left as a clean candidate for
+whichever pass picks it up next, since candidate 1 alone, done properly with a live-catalog
+cross-check rather than a second read of the same migration files, filled this pass's own time
+budget.
+
+**The literal, mechanical sweep - full result set, not a paraphrase.**
+
+1. `grep -ni "like" app/supabase/migrations/*.sql` (113 files) - every hit that was not a `--` prose
+   comment (`"TENANT-SCOPED like tender_packs"`, `"unlike"`, `"likely"`, etc., manually triaged one
+   by one) reduced to exactly 7 live code lines: `0018:91` (`tender_answers_check2`, Finding 215's
+   own target), `0024:144` (`_manual_tender_documents()`, a Finding-214 sibling), `0032:68-69`
+   (`tender_private_documents_path`, a Finding-214 sibling), `0043:228` (`tt_own_path()`, a
+   Finding-214 sibling), `0043:298` (an OLD, dead-code body of `record_tender_document()`,
+   superseded by `0045`'s own `create or replace` - confirmed no migration after `0045` redefines
+   `record_tender_document` again, so `0043`'s own copy never executes on real `main`), `0045:195`
+   (the LIVE `record_tender_document()`, a Finding-214 sibling), `0050:103` (`tt_path_in_company()`,
+   a Finding-214 sibling). Zero lines beyond these 7 (2 of which are the same already-dead function).
+2. Re-ran the same grep for every other prefix/substring-comparison operator Postgres actually
+   offers, in case the bug family had been reintroduced under a different spelling rather than
+   `LIKE` itself: `ILIKE` (0 hits), `~~`/`~~*` (0 hits outside the `LIKE` lines themselves, which the
+   catalog renders as `~~`), `position(` (2 hits, both `array_position()` on a severity-ranking
+   array in `0042_system_alerts.sql`, unrelated to any path/id comparison), `starts_with(` (0 hits),
+   `left(` (1 hit, `0024:148`, used only to derive a display `title` from a filename via
+   `regexp_replace`, not a security check), `split_part(` (used by `0025`/`0032`/`0043`/`0045` for
+   exact per-segment equality checks on `record_tender_document()`'s own path format - a DIFFERENT,
+   safe comparison shape from the prefix-`LIKE` bug family: `split_part(path,'/',n) <> expected`
+   checks one whole segment for an exact match, it cannot be fooled by `%`-style wildcard abuse the
+   way a bare `LIKE '<prefix>/%'` can - read each of the 4 call sites' full surrounding `if` block to
+   confirm none of them ALSO relies on a bare prefix `LIKE` for its own traversal guard; `0043`/`0045`
+   do carry a separate `like '%..%'`/`like '%//%'` substring check alongside the segment checks,
+   already counted in sweep 1 above).
+3. Cross-validated sweeps 1-2 (source-text greps, which can miss anything built across multiple
+   `ALTER`/`CREATE OR REPLACE` statements spread over several migration files) against the actual
+   live schema: built a fresh scratch Postgres from `main`'s real 113 migrations only
+   (`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d tt_scratch_sweep`, dropped
+   immediately after use; Postgres service stopped at the end of this pass) and queried the real
+   catalog directly rather than trusting the file-text sweep's own conclusion:
+   ```sql
+   select conrelid::regclass, conname, pg_get_constraintdef(oid)
+   from pg_constraint where contype='c'
+     and pg_get_constraintdef(oid) ~* 'like|~~|position\(';
+   -- 2 rows: tender_answers_check2 (Finding 215's target) and
+   -- tender_private_documents_path (an already-named Finding-214 sibling). Nothing else.
+
+   select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='public' and p.prokind in ('f','p')
+     and (pg_get_functiondef(p.oid) ~* ' like ' or pg_get_functiondef(p.oid) ~ '~~');
+   -- 5 rows: _manual_tender_documents, record_tender_document, tt_own_path, tt_path_in_company
+   -- (all 4 already-named Finding-214 siblings) PLUS one new name not on any prior pass's list:
+   -- pursue_discovered_opportunity.
+
+   select schemaname, tablename, policyname, cmd from pg_policies
+   where qual ~* ' like ' or qual ~ '~~' or with_check ~* ' like ' or with_check ~ '~~';
+   -- 0 rows - no RLS policy anywhere uses a LIKE-style path/id comparison.
+   ```
+   Read `pursue_discovered_opportunity()`'s own full body (`pg_get_functiondef`) by hand rather than
+   assuming relevance from the catalog hit alone: its one `like` is `case when opp.ocid like
+   'ocds-%' then opp.ocid end` - a format check on a government procurement OCID string (is this
+   external identifier shaped like a real OCDS id, for a `case`-conditional insert), with zero
+   relationship to any storage path, `company_id`, or `tender_id` prefix/traversal guard. Ruled out
+   as a genuine false positive from the catalog's own text-matching, not a missed sibling.
+
+**Conclusion: genuine negative.** PR #196's own claim - that `tender_answers_check2` was the ONLY
+sibling Finding 214's own 9-site sweep missed - holds up under an independently re-derived,
+mechanical, source-AND-catalog sweep. The full universe of SQL-level LIKE-style prefix/substring
+path-or-id comparisons in `main`'s real 113-migration schema is exactly the 10 sites across Findings
+214 and 215 (9 + 1), one dead superseded duplicate (`0043`'s old `record_tender_document` body,
+inert), and one unrelated false-positive (`pursue_discovered_opportunity`'s OCID format check) that a
+plain text grep alone could not have ruled out without reading the function body. No 11th sibling
+exists anywhere in `main`'s schema as of `b7ed3b9`. No new Finding number consumed, no new PR opened,
+nothing pushed to `main` beyond this docs entry.
+
+**Candidate 2's own narrow sub-question, checked and closed as the brief itself predicted.** Fetched
+PR `#196`'s own `0136_tender_answers_path_traversal_guard.sql` read-only (`git show
+origin/pr/196:app/supabase/migrations/0136_...sql`, via a disposable `refs/remotes/origin/pr/196` ref
+deleted immediately after use via `git update-ref -d`, never checked out as a working tree) and
+confirmed by direct read: it is a bare `alter table tender_answers drop constraint ... / add
+constraint ...` pair, zero `create function`/`create or replace function` of any kind. Migration
+`0136` introduces no new SECURITY DEFINER function, so it cannot have its own fresh grant-gap bug -
+confirmed directly rather than left as an assumption, per the brief's own "confirm this quickly and
+move on if so" instruction. The fuller candidate-2 angle (re-reading PR #186/#187's own NEW function
+bodies for a bug the FIX ITSELF might have introduced) remains open and unattempted this pass - named
+here as the most promising next angle for whichever pass picks it up, since it has not yet been
+tried by anyone in this family, unlike candidate 1 which this pass now closes out a second time.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, Finding 190's
+own `field_provenance` backfill, and every other previously-named off-limits item remain exactly as
+left, untouched. All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open and unmerged - reconfirmed
+via the GitHub REST API at the start and the end of this pass. `#176`-`#196` were read-only
+referenced (one `gh pr diff`/`gh api .../files` each, plus one `git show` on `#196`'s own migration
+file) where this pass's own task required it, never checked out as a working tree, built on, or
+merged; `#164`/`#165`/`#183`/`#184` were not touched at all this pass. The one disposable local ref
+(`refs/remotes/origin/pr/196`) was deleted at the end via `git update-ref -d`. The one scratch
+Postgres database (`tt_scratch_sweep`) built for the live-catalog cross-check was dropped
+immediately after use (`drop database if exists tt_scratch_sweep;`) and the Postgres service stopped
+at the end of this pass. **Nothing pushed to `main` by this pass except this docs entry; no PR
+opened, closed, or merged.**
+
+To verify independently: `gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q
+'.[].number' | sort -n` and confirm the same 23 numbers. Run `grep -ni "like" app/supabase/migrations/
+*.sql` and triage every non-comment hit by hand, confirming the same 7 live-code lines (2 of them the
+same dead `0043` function body) this entry lists; repeat for `ilike`, `~~`, `position(`,
+`starts_with(`, `left(`. Build a scratch Postgres from `main`'s own 113 migrations
+(`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d <dbname>`) and run the three
+catalog queries above against it, confirming the same 2/5/0-row result set, including that
+`pursue_discovered_opportunity` is the one function-level false positive and its own `like` targets
+`ocid`, not any path/id column. Fetch PR `#196`'s own migration file
+(`gh api repos/sareljvr2024/tender-tool/pulls/196/files -q '.[].filename'` then `git show
+origin/pr/196:app/supabase/migrations/0136_tender_answers_path_traversal_guard.sql` after a disposable
+`git fetch origin +refs/pull/196/head:refs/remotes/origin/pr/196`) and confirm it contains no `create
+function`/`create or replace function` statement. Confirm `docs/specs/QA-Edge-Case-Findings.md` still
+tops out at Finding 203 on `main` (`grep -oE "^### Finding [0-9]+"
+docs/specs/QA-Edge-Case-Findings.md | sort -V | tail -1`).
+
+---
+
 ## This pass (2026-11-08xlii, standing solution-architect review, background worker): the 11-PR backlog staleness/drift audit (`#164`/`#165`/`#176`-`#184`) the standing brief named as long-untouched - re-checked all 11 against CURRENT `main` by reading each PR's actual diff, not any prior summary; found `#164`/`#165` substantially stale (a direct-push commit to `main` already rewrote the exact file both branches touch, with a different model), one real code-conflict on `#179` (not touched), one wrong-prose-but-harmless comment baked into `#176`'s own migration file (contradicted by `#185`'s later finding), and confirmed `#176`-`#178`/`#180`-`#182` remain clean, current and still-needed; no new Finding opened, nothing pushed to any PR branch, `main` untouched except this docs entry
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `c19b9f1`
