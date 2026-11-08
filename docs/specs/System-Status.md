@@ -14376,6 +14376,42 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 224, `opportunityBuyerMatch.ts`'s `sanitizePreferredBuyers()` had a length ceiling but no floor - a 1-character preferred buyer matched 9 of 10 real-shaped buyer names via the module's own bidirectional-substring matching, silently defeating the whole feature
+
+Oriented from `bb2d5ca` (own prior pass: Finding 223, `run_bridges.py`'s `UnicodeDecodeError` crash).
+`git fetch origin main` found no new sibling commits - still at `bb2d5ca` both before and after this
+pass's own push.
+
+**This pass's own task**: discovery rotation (wrapped back around). The three main Python discovery
+files are already covered 150+ times each this session, including Finding 200 earlier today, so
+effort went to the less-examined TypeScript side - `opportunityBuyerMatch.ts` (5 prior mentions). Its
+own header comment is explicit that matching is "a plain case-insensitive substring check in both
+directions" (no canonical buyer list exists to validate against) - and `sanitizePreferredBuyers()`
+already had a length CEILING but no floor, despite substring matching being inherently more dangerous
+the SHORTER the needle, not longer.
+
+**Found: Finding 224.** Ran the real normalisation against 10 realistic SA public-sector buyer names
+("South African National Roads Agency SOC Ltd (SANRAL)", "Eskom Holdings SOC Ltd", "Rand Water", ...):
+a 1-character preferred buyer (`"a"`/`"o"`) matched 9 of the 10; a 2-character one (`"sa"`) matched
+only 2 - confirming the single-character case specifically is the degenerate one. A plausible real
+typo (hitting Enter right after the first keystroke) would silently sort every Discovery tender as a
+"preferred buyer" match, with zero real signal behind it.
+
+**Fix**: added `MIN_BUYER_LENGTH = 2` alongside the existing `MAX_BUYER_LENGTH` guard - the minimal
+floor that removes only the demonstrated degenerate case; a genuine 2+ character abbreviation (e.g.
+`"SA"`) still works exactly as before. Verified red-then-green: added 2 tests (a 1-character entry
+dropped; a real 2-character one kept). **Red:** saved the diff, `git apply -R`, re-ran
+`node --experimental-strip-types lib/opportunityBuyerMatch.test.ts` directly - failed exactly as
+predicted. **Green:** reapplied, re-ran - 15/15 pass. `npx tsc --noEmit`/`npx eslint` clean. Broader
+regression: every other `*.test.ts` file in `app/` run directly, unaffected. See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 224 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 223, `run_bridges.py`'s `BridgeRunner.run_once()` raised an uncaught `UnicodeDecodeError` out of `p.communicate()` the moment any bridge's output contained one invalid-UTF-8 byte, aborting the whole cycle - a third instance of the exact failure shape (no except clause catches it, the whole cycle aborts, `--loop` mode swallows it silently) already fixed twice before in this same method
 
 Oriented from `b79c697` (own prior pass: notify rotation, no behavioral bug found, one small

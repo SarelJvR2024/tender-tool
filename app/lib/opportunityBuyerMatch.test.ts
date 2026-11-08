@@ -25,6 +25,20 @@ test("sanitizePreferredBuyers: drops an absurdly long entry rather than truncati
   assert.deepEqual(sanitizePreferredBuyers([huge, "SANRAL"]), ["SANRAL"]);
 });
 
+// QA pass, 2026-11-08: matching is a bidirectional substring check with no
+// canonical buyer list to validate against - a 1-character preferred buyer
+// confirmed live to match 9 of 10 real-shaped buyer names (essentially
+// everything), silently defeating the whole feature with zero real signal.
+// A 2-character entry (the shortest real abbreviation this file's own
+// header names, "SANRAL" itself included) stays well short of that.
+test("sanitizePreferredBuyers: drops a single-character entry - matches almost everything, zero real signal", () => {
+  assert.deepEqual(sanitizePreferredBuyers(["a", "SANRAL"]), ["SANRAL"]);
+});
+
+test("sanitizePreferredBuyers: a real 2-character abbreviation is kept, not swept up by the same guard", () => {
+  assert.deepEqual(sanitizePreferredBuyers(["SA", "SANRAL"]), ["SA", "SANRAL"]);
+});
+
 test("sanitizePreferredBuyers: caps the list length rather than growing it unbounded", () => {
   const many = Array.from({ length: 40 }, (_, i) => `Buyer ${i}`);
   assert.equal(sanitizePreferredBuyers(many).length, 25);

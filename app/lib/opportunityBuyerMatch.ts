@@ -15,6 +15,18 @@
 
 const MAX_PREFERRED_BUYERS = 25;
 const MAX_BUYER_LENGTH = 120;
+// QA pass, 2026-11-08: matching is a plain bidirectional substring check (no
+// canonical buyer list to validate against, same as MAX_BUYER_LENGTH's own
+// reasoning below) - confirmed live against 10 real-shaped buyer names
+// ("South African National Roads Agency SOC Ltd (SANRAL)", "Eskom Holdings
+// SOC Ltd", "Rand Water", ...) that a 1-character preferred buyer ("a" or
+// "o") matches 9 of 10 of them, silently defeating the whole feature (it
+// sorts nearly every tender to "preferred" with zero real signal). A 2+
+// character entry (the shortest real abbreviation this file's own docstring
+// names, "SANRAL" itself included) stays well short of that - "sa" matches
+// only 2 of the same 10 - so the floor is set just above the single
+// degenerate case, not tightened into the loose-matching design on purpose.
+const MIN_BUYER_LENGTH = 2;
 
 /** Case/whitespace-insensitive key for deduping and matching. */
 function normaliseBuyer(raw: string): string {
@@ -25,8 +37,8 @@ function normaliseBuyer(raw: string): string {
  * Never trust the client's array blindly, same "degrade, don't throw, don't
  * pass through garbage" discipline SLUG_RE validation uses for disciplines -
  * there is no fixed taxonomy to validate a buyer name against, so this caps
- * shape instead: trims, drops empty/oversized entries, dedupes case-
- * insensitively (keeping the first-seen casing), caps the list length.
+ * shape instead: trims, drops empty/oversized/too-short entries, dedupes
+ * case-insensitively (keeping the first-seen casing), caps the list length.
  */
 export function sanitizePreferredBuyers(raw: string[] | null | undefined): string[] {
   const seen = new Set<string>();
@@ -34,7 +46,7 @@ export function sanitizePreferredBuyers(raw: string[] | null | undefined): strin
   for (const entry of raw ?? []) {
     if (typeof entry !== "string") continue;
     const trimmed = entry.trim().replace(/\s+/g, " ");
-    if (!trimmed || trimmed.length > MAX_BUYER_LENGTH) continue;
+    if (!trimmed || trimmed.length < MIN_BUYER_LENGTH || trimmed.length > MAX_BUYER_LENGTH) continue;
     const key = normaliseBuyer(trimmed);
     if (seen.has(key)) continue;
     seen.add(key);
