@@ -47,12 +47,21 @@ export type TenderUpdateNotificationRow = { pipeline_stage: string | null };
 
 /**
  * Submission-suppression for corrigendum alerts: 'won'/'lost' are genuinely
- * terminal, skipped. 'submitted' is deliberately KEPT - an addendum before
- * closing can still require a resubmission or acknowledgement even after a
- * company has submitted (engine/discovery/watch_tender_updates.py's own
- * ACTIVE_STAGES reasoning). This app's real pipeline_stage enum is
- * found/bidding/submitted/won/lost (migration 0021) - there is no
- * dispatched/awarded/declined value to filter against.
+ * terminal, skipped. 'submitted' (and 'briefing_shortlisted', which only
+ * ever follows it) is deliberately KEPT - an addendum before closing can
+ * still require a resubmission or acknowledgement even after a company has
+ * submitted (engine/discovery/watch_tender_updates.py's own ACTIVE_STAGES
+ * reasoning). This app's real pipeline_stage enum is found/assessing/
+ * building/submitted/briefing_shortlisted/won/lost (widened from the
+ * original 5-value found/bidding/submitted/won/lost by migration 0105,
+ * which retired 'bidding' - this comment used to still cite the old
+ * 5-value, migration-0021-only enum; correctness-checked against
+ * scripts/send-corrigendum-alerts.ts's own, already-current comment, and
+ * against the real check constraint in 0105_tender_pipeline_stage_v2.sql.
+ * The `!== "won" && !== "lost"` check below is exclusion-based, so it was
+ * never actually WRONG about any of the newer stages - only this comment
+ * was stale). There is no dispatched/awarded/declined value to filter
+ * against.
  */
 export function isCorrigendumCandidate(row: TenderUpdateNotificationRow): boolean {
   return row.pipeline_stage !== "won" && row.pipeline_stage !== "lost";

@@ -70,9 +70,20 @@ describe("isCorrigendumCandidate - submission-suppression", () => {
     expect(isCorrigendumCandidate({ pipeline_stage: "submitted" })).toBe(true);
   });
 
-  it("keeps 'found' and 'bidding'", () => {
+  it("keeps 'briefing_shortlisted' - the one stage that only ever follows 'submitted', same reasoning", () => {
+    expect(isCorrigendumCandidate({ pipeline_stage: "briefing_shortlisted" })).toBe(true);
+  });
+
+  // QA pass, 2026-11-08: this used to test 'found' and 'bidding' - 'bidding'
+  // is a RETIRED stage value (migration 0105 widened the 5-value enum to 7
+  // and backfilled every 'bidding' row into 'assessing'/'building'; no real
+  // row can hold 'bidding' any more). Replaced with the real, current
+  // intermediate stages, so this test exercises the actual data shape the
+  // function sees in production, not a value it can no longer receive.
+  it("keeps every real, current intermediate stage ('found', 'assessing', 'building')", () => {
     expect(isCorrigendumCandidate({ pipeline_stage: "found" })).toBe(true);
-    expect(isCorrigendumCandidate({ pipeline_stage: "bidding" })).toBe(true);
+    expect(isCorrigendumCandidate({ pipeline_stage: "assessing" })).toBe(true);
+    expect(isCorrigendumCandidate({ pipeline_stage: "building" })).toBe(true);
   });
 
   it("keeps a null stage rather than excluding it by accident", () => {

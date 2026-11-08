@@ -14321,6 +14321,57 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): notify rotation - no new behavioral bug found after genuinely adversarial effort across `record_heartbeat.py`/`workflowRegistry.ts`'s own staleness math, `send-corrigendum-alerts.ts`'s pipeline-stage filtering and `send_pack_ready_email.py`'s claim-timing, all confirmed already sound; one small, safe, non-behavioral correctness fix made and pushed (a stale comment + a test exercising a retired enum value)
+
+Oriented from `a4d31c9` (own prior pass: Finding 218, `property_documents`'s missing "lapses before
+closing" coverage). `git fetch origin main` found 1 new sibling commit (`dde04f7`, a CI-health routine
+pass fixing 6 `scripts/send-*.ts` files' unconditional `main()` call, plus a real GitHub Actions
+`app-ci` red-for-28-runs fix) - no collision with this pass's own files. Fast-forward merge was clean.
+Re-checked again immediately before this pass's own push - still the same tip, no further sibling
+commit landed in between.
+
+**This pass's own task**: notify rotation. Constructed adversarial boundary input against several
+candidates and traced each one to ground rather than stopping at a plausible-looking lead:
+
+- `record_heartbeat.py`: never raises, has its own test sink, no dependencies - clean.
+- `workflowRegistry.ts`'s `heartbeatStatusFor()`/`eligibleElapsedMs()`: a suspected `NaN`-from-
+  malformed-`last_completed_at` path (would silently read as "healthy", the wrong failure direction
+  for a monitoring check) traced back to migration `0099` - both `last_started_at`/`last_completed_at`
+  are always server-side `now()`, never client-supplied, so this is unreachable in practice. A second
+  suspected gap (`cronStepMs()`'s regex-based cron parser not recognising a bare `"*/N"` hour pattern)
+  is real but not yet reachable - none of the 10 registered workflows' real cron strings use that
+  shape today - so left unfixed rather than speculatively hardened against a config that doesn't exist.
+- `send-corrigendum-alerts.ts`/`lib/corrigendumAlerts.ts`: traced a genuine inconsistency between this
+  file's own comment ("pipeline_stage enum is found/bidding/submitted/won/lost, migration 0021") and
+  the sender script's own, already-correct comment (7 values, migration 0105) - confirmed against the
+  real `0105_tender_pipeline_stage_v2.sql` check constraint that the sender script was right and this
+  comment was stale (`'bidding'` was retired and backfilled into `'assessing'`/`'building'` by that
+  migration; `'briefing_shortlisted'` was added). The real function, `isCorrigendumCandidate()`, is
+  exclusion-based (`!== "won" && !== "lost"`) so it was never actually wrong about any newer stage -
+  only the comment was stale, AND the one test exercising the non-terminal case tested against
+  `'bidding'`, a value no real row can hold any more. Fixed both (comment + spec), no behavior change:
+  verified `isCorrigendumCandidate()` still returns `true` for `'found'`/`'assessing'`/`'building'`/
+  `'briefing_shortlisted'` (the real, current enum) and `false` for `'won'`/`'lost'`, 12/12 tests pass.
+- `send_pack_ready_email.py`: a suspected one-claim-per-job-not-per-recipient gap turned out to be
+  correct by design (this function fires exactly once per job's lifetime, triggered directly by the
+  job's own status flip to "ready", never polled/retried - unlike the cron-driven `send-*.ts` scripts
+  that DO need a per-recipient key to track partial sends across repeated runs). Genuine negative.
+- `lib/emailTemplatesTier1.ts`'s `corrigendumAlertEmail()`/`lib/emailBrand.ts`'s `tenderHeader()`: every
+  buyer-sourced field (reference, title, buyer name, quote text) confirmed escaped via `escapeHtml()`
+  before reaching the rendered HTML - no injection gap.
+
+**No new `QA-Edge-Case-Findings.md` Finding opened** - house convention, same as several recent
+solution-architect-track entries: a Finding is for a confirmed behavioral defect with its own red/green
+verification; nothing found this pass changed behavior. The one change made (`lib/corrigendumAlerts.ts`'s
+comment + its own spec's test fixture) is pushed directly to `main` as a small, safe correctness/test-
+currency fix - `npx tsc --noEmit`/`npx eslint` clean, `npx vitest run lib/corrigendumAlerts.spec.ts`
+12/12 pass.
+
+**Backlog status.** No new backlog items opened. `git fetch origin main` immediately before writing
+this entry and again immediately before pushing showed no sibling commits landed in between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 218, the "lapses before closing" bug class (already found and fixed 3 times - company documents, person credentials, held registrations) had a fourth, previously-unswept instance: `property_documents` had NO such coverage anywhere - not the live `--out` report, not the live digest email, not even reactively
 
 Oriented from `43c7b45` (own prior pass: Finding 205, `compileReadiness.ts`'s `no_baseline` gap).
