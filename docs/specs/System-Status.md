@@ -1,5 +1,118 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): swept the orthogonal "is the RLS PREDICATE correct, not just the grant" angle the immediately preceding pass named - found a real authorization bypass, Finding 203: `savings_counted_steps` (0085) was never given the "employee has no access" RESTRICTIVE policy its siblings got in 0077/0117/0118, and unlike those two it's reachable from an employee's own `/dashboard` page, where a real employee-role caller could read the whole company's savings data, insert a fake row, and DELETE another member's real one - confirmed red/green in a scratch Postgres, fixed with migration 0124, PR opened (not merged) per the binding guardrails
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `097de16`
+(the immediately preceding pass's own route-handler sweep write-up). Re-fetched again immediately
+before opening the PR - still `097de16`, no sibling commit landed in between. Re-checked the
+open-PR backlog via the GitHub REST API at the start and the end: 11 open
+(`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`/`#184`), the same set as
+handed off - nothing merged, closed, or rebased by anyone, including this session; `#164`/`#165`/
+`#183`/`#184` were not touched at all this pass (not read, not checked out).
+
+**The angle, and how it was worked.** The immediately preceding pass's own write-up named a fresh,
+never-yet-swept-by-name question: not "is the grant missing" (the question every earlier pass in
+this track already exhausted) but "for a table where the grant IS full CRUD, is the RLS
+`using`/`with check` PREDICATE itself still correct for every real call site" - and specifically
+called out angle 3 as the most promising: a RESTRICTIVE policy added later (0077, then 0117/0118)
+that narrowed access in a way an earlier-OR-later-created table was never checked against.
+`grep -rl "is_company_member(" app/supabase/migrations/*.sql` listed every company-scoped
+PERMISSIVE-policy table across all 123 migrations; cross-referenced by hand, table by table,
+against every table actually covered by an `is_employee_in_company(...)`-shaped RESTRICTIVE
+"employee has no access"/"employee restricted" policy (0077 Parts C/D, 0087, 0109, 0117, 0118,
+0120 - 41 tables covered). Exactly one company-scoped, full-CRUD (`for all`) table had no
+RESTRICTIVE policy of any kind: `savings_counted_steps` (0085, created 25 migrations after 0077's
+own sweep, 32 before 0117 found the identical shape in `company_subscriptions`/`company_members`) -
+the "added after the sweep, never covered" shape 0117/0118 had already each named once, now found a
+third time by re-deriving the covered-table list from scratch rather than re-checking the two
+tables those passes already named.
+
+**Why this one needed the full authorization-bypass treatment, not just a quiet policy add.**
+`company_subscriptions`/`company_tender_preferences` (0117/0118) both sit on pages
+`EMPLOYEE_NAV_ITEMS` never lists - an employee needs a direct URL or RPC call to reach them at all.
+`savings_counted_steps` is read straight off `/dashboard` ("Home"), one of an employee's own ONLY
+two allowed pages - `dashboard/page.tsx` calls `fetchSavingsCounterSummary()` with no role check of
+its own, exactly matching that function's own comment that RLS alone was meant to scope it. And
+unlike 0117/0118's select/upsert-only gaps, this policy is `for all`.
+
+Reproduced directly in a disposable scratch Postgres (`engine/security/replay_schema.sh` against
+all 123 prior migrations, never the live DB - dropped and the service stopped immediately after
+every use, nothing left running; no `git worktree` or temporary branch needed for the investigation
+itself). One company, one `owner`, one `employee`, one real savings row inserted as the owner.
+Acting as the employee, pre-fix: read the owner's row (count 1, full company-wide read from the
+employee's own Home page); inserted a fake row (succeeded); **deleted the owner's own real row
+(succeeded) - confirmed by a follow-up select as the owner that only the employee-fabricated row
+remained.** That last part is the most severe piece of this finding: an employee, acting entirely
+within their own company's allowed page, could destroy another member's real business data, not
+merely see something they shouldn't.
+
+**Fix:** `app/supabase/migrations/0124_savings_counted_steps_employee_gap.sql` - the identical
+additive-only RESTRICTIVE-policy shape 0077/0117/0118 established (`not is_employee_in_company(...)`
+on both `using`/`with check`). For owner/admin/member the clause is unconditionally true, so their
+access is unchanged - re-verified in the same scratch database, not assumed: re-ran the exact same
+three employee actions post-fix - read now returns 0, the insert is rejected by RLS
+(`new row violates row-level security policy`), the delete affects 0 rows - while a separately-added
+admin and member can both still read and insert exactly as before, and the owner's original row is
+intact. No application code change needed: `fetchSavingsCounterSummary()` already renders a
+zero-row result as the same safe "no steps counted yet" empty state a genuine new company gets,
+never an error.
+
+**Test coverage:** extended `engine/security/test_tenant_isolation.py`'s existing
+`part2_employee_role()` (the same fixture 0117/0118's own regression coverage already lives in) -
+one row added to its setup, 4 new assertions (company-wide read-is-zero, insert refused, delete
+refused with the owner's row confirmed still present, owner/admin/member unaffected). Ran the full
+suite against a fresh post-0124 scratch Postgres - `ALL PASSED`, exit 0, including all 4 new
+assertions and every pre-existing one (0117/0118's own siblings included) unchanged.
+
+**Full verification suite, all run myself, real exit codes.** `npm run typecheck` (0 errors).
+`npx eslint .` (0 errors, same 3 pre-existing warnings, unrelated files, unchanged). `npx vitest run`
+(532/532, 71 files - this migration touches no application code, confirmed unchanged from baseline,
+not a regression). The node `*.test.ts` loop (plain `node <file>`, no flags - 28/28, unchanged).
+`npx next build` (exit 0, same route table). `engine/security/test_tenant_isolation.py` against a
+fresh scratch Postgres with 0124 applied - exit 0, `ALL PASSED`.
+
+**Why a PR, not a direct push, for a one-file SQL diff.** Per the binding guardrails, an
+authorization-bypass finding always goes through a PR regardless of diff size. Opened PR
+"fix: Finding 203 - savings_counted_steps employee RLS gap" against `main` from branch
+`fix/savings-counted-steps-employee-gap`, **not merged**, left open for Sarel's review, exactly like
+every other guardrail-governed PR this track has opened. The 11 pre-existing open PRs remain
+untouched, unmerged, and were not affected by this one's branch.
+
+**Backlog status.** Finding 168, Finding 190's own pre-existing-SANRAL-pack `field_provenance`
+backfill, and Finding 168's billing-period semantics all remain exactly as left, untouched, per the
+standing guardrails. The findings doc's own max was re-checked (202) before writing this entry's
+new Finding 203 - not assumed.
+
+**Is this angle exhausted?** For "company-scoped `is_company_member(...)` tables missing the 0077
+employee-exclusion policy" specifically - yes, now genuinely exhausted: every one of the ~45 tables
+with that policy shape across all 123 migrations was individually cross-referenced against the
+covered-table list this pass built from scratch (not reused from a prior pass's own list), and
+`savings_counted_steps` was the only gap. Also checked and ruled out as genuine negatives this
+pass: `payfast_payment_attempts`/`sent_operational_alerts` (RLS enabled, zero policies at all -
+service-role-only by construction, nothing for any authenticated role, employee included, to ever
+reach); `workflow_heartbeats`/`impersonation_audit_logs` (platform-admin-select-only policies,
+`is_platform_admin()` independent of company role, no employee-specific exposure); `company_invites`
+(admin-only via `tt_is_company_admin()`, which already requires `role in ('owner','admin')` - an
+employee fails that check regardless of any RESTRICTIVE policy). A concrete fresh angle for the next
+pass: this sweep only checked PERMISSIVE `is_company_member(...)`-shaped policies for a missing
+employee-exclusion RESTRICTIVE policy - it has not yet checked the OTHER two wrong-predicate shapes
+the preceding pass's own brief named (a policy checking `company_id` on the wrong column; a
+nullable-FK `using` clause that silently fails `is_company_member()` instead of raising) across the
+full table set, nor has it checked whether any NON-company-scoped table (e.g. one keyed by
+`person_id`/`tender_pack_id` with its own derived-company check, like `field_provenance`/
+`tender_pack_assignments`'s EXISTS-based policies) has a similar later-migration drift the way
+`savings_counted_steps` did.
+
+To verify independently: read `app/supabase/migrations/0085_savings_counter.sql` and confirm its
+one policy is PERMISSIVE `for all` with no RESTRICTIVE policy anywhere else naming this table before
+0124. Replay `engine/security/replay_schema.sh` twice (once to 0123, once including 0124) and
+reproduce the three employee actions by hand on each. Run
+`TENANT_PSQL="psql -U postgres -d <db>" python3 engine/security/test_tenant_isolation.py` against a
+fresh post-0124 replay and confirm `ALL PASSED`, exit 0. Confirm via the GitHub REST API that the PR
+for Finding 203 is open and unmerged, and that all 11 pre-existing PRs remain open and untouched.
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
