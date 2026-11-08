@@ -1,5 +1,158 @@
 # System Status
 
+## This pass (2026-11-07xxxix, standing solution-architect review, background worker): applied Finding 201's own lesson ("does the grant exist at ALL, not just is there a race") systematically across every table whose own migration grants authenticated something less than full CRUD - one genuine, previously-undocumented engine/general-vs-sanral grant asymmetry found on `pack_generation_jobs` (0026), but every Server Action that could reach it already goes through a checked RPC, not a plain write - exhaustive genuine negative, no new bug, nothing pushed to `main`, no PR opened
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `75d0585`
+(the immediately preceding pass's own write-up, closing out Finding 199's two named leads). Re-fetched
+again immediately before writing this entry - still `75d0585`, no sibling commit landed in between;
+the concurrent sibling QA/robustness track made no push this pass. Re-checked the open-PR backlog via
+`gh api repos/sareljvr2024/tender-tool/pulls?state=open` at the start and again at the end: 11 open,
+same set as handed off (`#164`/`#165`/`#176`/`#177`/`#178`/`#179`/`#180`/`#181`/`#182`/`#183`/`#184`) -
+nothing merged, closed, or rebased by anyone; none merged by this session either. `#184`
+(`fix/retry-onboarding-upload-rls-rpc`, Finding 201) was read **read-only**, exactly once, to pull its
+own diff as a reference for what a genuine instance of this bug class looks like (confirmed its fix
+lives entirely on that branch - `docs/specs/QA-Edge-Case-Findings.md` on `main` itself still tops out
+at Finding 200, since #184 is unmerged) - a disposable local branch (`pr184-check`) was created to read
+it and deleted again immediately after, never checked out as working tree, built on, or pushed to.
+Per the binding guardrails, `#164`/`#165`/`#183`/`#184` were not otherwise touched, no PR was merged by
+this session, and neither Finding 168, the `start_payfast_checkout()` revenue-integrity gap, nor
+Finding 190's own pre-existing-SANRAL-pack `field_provenance` backfill was implemented. No scratch
+Postgres database was needed this pass (every check below was answered by reading the actual migration
+SQL and the actual Server Action source side by side - no live race to reproduce, since the question
+this pass asked is "does a PERMISSIVE grant for this exact operation exist at all," not "is there a
+race window"); no `git worktree` was created (only the one disposable branch noted above, now deleted)
+- nothing left to clean up.
+
+**This pass's own task, per the standing brief: grep every Server Action's plain `.update(`/`.insert(`/
+`.delete(` through the user's own RLS-bound `createClient()` and, for each target table, confirm
+against the table's OWN migration SQL (never assumed from a sibling) that a real PERMISSIVE policy
+grants that exact operation to `authenticated` - the lesson Finding 201/PR #184 proved: a missing grant
+is a structural bug no race-focused check would ever catch.**
+
+**Method: not just the five named candidate tables - a full, codebase-wide grant map, built once and
+cross-referenced against every write site.** Wrote a small parser (kept in this pass's own scratchpad,
+not committed - it's a throwaway grep aid, not product code) that reads every
+`app/supabase/migrations/*.sql` file in order and extracts every `create policy ... for <op> to <role>
+...` statement (PERMISSIVE and RESTRICTIVE separately; `for all` expands to all four CRUD ops), to get
+one authoritative "which operations does `authenticated` actually hold on this table" answer per table
+- a later migration that drops and re-declares a table's policies (exactly what 0026 did to
+`pack_generation_jobs`, below) is reflected automatically rather than relying on remembering which
+migration is the "current" one for a given table. Cross-referenced that map against
+`grep -rn "\.from(\"<table>\")" app/app --include="*.ts*" | grep -v spec` for every table whose
+authenticated grant was NOT the full `['select','insert','update','delete']` set, reading each actual
+call site to see which operation it performs and whether that operation is in the table's own granted
+set.
+
+**Tables checked this way (beyond the five named candidates) - all genuine negatives, every write site
+read individually, not inferred from the table's shape:**
+- `company_members` (SELECT only) - grepped for any `.insert(`/`.update(`/`.delete(` on this table
+  anywhere in `app/app`: **zero hits**. Every membership change (invite redemption, role change, member
+  removal) already goes through a `security definer` RPC (`redeem_company_invite`,
+  `create_company_and_join`, the team-management RPCs from 0113-0116) - confirmed by their own prior
+  write-ups, not re-derived from scratch this pass.
+- `companies` (SELECT + UPDATE, no INSERT) - every `.update()` site found
+  (`company/actions.ts:42`, `tenders/[id]/general-actions.ts:109`, `tenders/[id]/
+  vault-quick-fix-actions.ts:83`, `company/document-scan/actions.ts:226`) already has the
+  `.select("id").maybeSingle()` zero-row check. `onboarding/actions.ts:57`'s own plain `.update()` (no
+  such check) was already named and ruled out by Finding 199's own write-up (the company was just
+  created by this same request with exactly one member, so the race the check guards against has no
+  second member who could exist yet to trigger it) - not re-litigated, just confirmed still the only
+  bare one and still correctly ruled out.
+- `tender_comments` (INSERT + DELETE + SELECT, no UPDATE) - `comment-actions.ts` has exactly an insert
+  and a delete, no update anywhere; there is no "edit comment" feature, so the missing UPDATE grant
+  omits nothing the app ever tries to do.
+- `discipline_categories` (INSERT + UPDATE + SELECT, no DELETE) / `registration_types` (INSERT + UPDATE
+  + SELECT, no DELETE) - `admin/taxonomy/actions.ts`'s `addCategory`/`updateCategory` and
+  `people/actions.ts`'s/`company/registrations/actions.ts`'s registration-type reads only ever insert or
+  update; grepped for `.delete(` on either table across `app/app` - zero hits. No delete-a-category/
+  delete-a-registration-type feature exists.
+- `system_alerts` (SELECT + UPDATE, no INSERT/DELETE - inserts are `system_alerts.record()`, engine/
+  service-role only) and `admin_harness_runs` (SELECT + UPDATE, no INSERT) - `admin/actions.ts`'s
+  `writeAlertResolution()`/`writeReview()` only ever update the exact columns their own migrations grant
+  (0042/0022, both already narrowed to specific columns + platform-admin/owner-pinned RLS), both already
+  carry the `.select("id")`/zero-row check.
+- `tender_private_documents` (INSERT + DELETE + SELECT, no UPDATE) - `tenders/new/actions.ts`'s insert
+  and `tenders/[id]/general-actions.ts`'s `removePrivateTenderDocument()` delete are the only writes;
+  no update anywhere (a private document is replaced by delete-then-reinsert via the uploader, not
+  edited in place).
+- `discovered_opportunities` (SELECT only) - grepped every `.from("discovered_opportunities")` site
+  (`discovery/page.tsx`, `pipeline/page.tsx`, `tenders/[id]/intake-card.tsx`/`market-context.tsx`,
+  `admin/page.tsx`, `dashboard/page.tsx`): all reads. The one state change this table has
+  (`downgrade_acknowledged_at`) goes through `discovery/actions.ts`'s `acknowledgeDowngrade()` ->
+  `acknowledge_discovery_downgrade()` RPC, whose own comment says outright "discovered_opportunities
+  itself has no client update policy" - this pass's own grant map confirms that comment is exactly
+  right, not aspirational.
+- `discovered_opportunity_documents`, `discovered_opportunity_requirements`, `discovery_seen_releases`,
+  `deadline_reminders_seen`, `digest_readiness_seen`, `company_subscriptions`, `requirement_extraction_
+  reviews`, `impersonation_audit_logs`, `notification_logs`, `tender_documents`, `tender_requirements`,
+  `tender_roles`, `tender_scope_records`, `tender_update_notifications`, `tender_watched_documents`,
+  `tenders`, `workflow_heartbeats` (all SELECT-only, or in `company_subscriptions`'s case not referenced
+  by `app/app` at all) - grepped every `.from(...)` site for each; every single one is a `.select(`,
+  with every real mutation (tender resolution, admin taxonomy, billing/PayFast, requirement-extraction
+  review) already confirmed in prior passes or this one to go through its own checked RPC or the
+  service-role worker, never a plain client write.
+
+**The one genuine, previously-undocumented structural asymmetry found: `pack_generation_jobs`'s own
+engine-split grant (migration 0026) - but every real write site already routes around it correctly, so
+this is a negative, not a new Finding.** 0017's original policy granted `authenticated` members full
+CRUD (`for all ... using (is_company_member(company_id))`). 0026 (introducing the unified `sanral`/
+`general` job queue) **dropped that policy and replaced it with four narrower ones**: members can
+select any of their own company's rows; members can insert a `requested` row of EITHER engine; members
+can update a SANRAL-engine row; members can delete a SANRAL-engine row. **A `general`-engine row -
+every non-SANRAL requirement-extraction/pack job - has only SELECT and INSERT; no authenticated UPDATE
+or DELETE grant exists for it at all** - structurally the same shape as `onboarding_uploads`/Finding
+201, just split by a `engine` column instead of being table-wide. 0026's own migration comment already
+flags half of this ("nothing in the app uses [update/delete on SANRAL rows] today") but does not flag
+the general-engine gap by name.
+
+Read every Server Action that can reach this table to see whether any of them assumes the missing
+grant: `tenders/[id]/actions.ts`'s `requestSubmissionPack()` (SANRAL) inserts via
+`request_submission_pack_checked()`, a `security definer` RPC - never a plain `.insert()`.
+`tenders/[id]/general-actions.ts`'s `requestJob()` (both `requestRequirementsExtraction()` and
+`requestGeneralPack()`, general-engine) inserts via `request_general_job_checked()` - same pattern.
+`removePrivateTenderDocument()`'s own re-queue-after-removing-a-document branch (same file, line ~323)
+also goes through `request_general_job_checked()`, not a direct insert. `admin/requirement-extractions/
+actions.ts`'s `reprocessRequirementExtraction()` goes through `platform_admin_reprocess_requirement_
+extraction()`. Every other reference to this table in `app/app` (`activity-log.tsx`, `submission-
+pack.tsx`, `sanral-schedules/page.tsx`, `intake-card.tsx`'s `tender_engine_jobs` read) is a plain
+`.select()`. **No Server Action anywhere does a bare `.update()`/`.delete()` on this table, SANRAL or
+general** - the gap this pass found in the grant itself has nothing in the app that could ever hit it.
+Logged here, not as a new Finding, precisely so a future pass doesn't need to re-derive this same
+grant-map question for this table - the grant asymmetry is real and worth knowing about structurally,
+but there is no bug to fix behind it today.
+
+**Is this angle exhausted?** Not entirely - this pass covered the full set of tables whose authenticated
+grant is anything less than full CRUD (29 tables total, listed above plus the 5 named candidates), cross-
+referencing their migration SQL against every actual `.from(...)` call site in `app/app/**/*.ts*`
+(excluding `spec`/`test`). Not re-checked this pass: `app/api/**/*.ts` route handlers (the brief's own
+glob was `app/app/**/*.ts*`, and this track's prior passes have consistently scoped "Server Action" to
+that directory) - `company_subscriptions`' own billing/PayFast writes, in particular, are reached only
+from `app/api/billing/**` and the `engine/` worker, never from `app/app`, so they were confirmed absent
+from Server Actions but not read themselves this pass. That is a concrete, narrow candidate for a
+future pass: re-run this exact grant-map method against `app/api/**/route.ts` specifically, since a
+Next.js Route Handler can use the identical RLS-bound `createClient()` a Server Action does, and this
+track has never swept that directory with this lens.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 11 open PRs (the standing 10 plus `#184`) remain open and unmerged -
+re-confirmed via the GitHub REST API at the start and the end of this pass; nothing merged, closed, or
+rebased by anyone, including this session. **Nothing pushed to `main` by this pass** - the one
+structural asymmetry found has no reachable bug behind it, so this docs entry is the only change.
+
+To verify independently: read migration `0026_unified_job_queue.sql`'s own RLS section (lines ~95-108)
+and confirm the "members can update sanral rows"/"members can delete sanral rows" policies both gate on
+`engine = 'sanral'`, with no equivalent policy for `engine = 'general'`. Then read
+`app/app/tenders/[id]/actions.ts`'s `requestSubmissionPack()`, `app/app/tenders/[id]/
+general-actions.ts`'s `requestJob()`/`removePrivateTenderDocument()`, and `app/app/admin/
+requirement-extractions/actions.ts`'s `reprocessRequirementExtraction()` and confirm each one only ever
+calls `supabase.rpc(...)` for its write, never a plain `.insert()`/`.update()`/`.delete()` on
+`pack_generation_jobs` itself. Confirm via the GitHub REST API that all 11 PRs are still open/unmerged
+and that `main`'s own `docs/specs/QA-Edge-Case-Findings.md` still tops out at Finding 200 (Finding 201
+lives only on PR #184's own branch, unmerged).
+
+---
+
 ## This pass (2026-11-07xxxviii, standing solution-architect review, background worker): both of Finding 199's own named leads resolved as genuine negatives - `retryCvExtraction()`/`retryOnboardingUpload()`'s zero-row races have no observable consequence; a from-scratch re-walk of Finding 197's own insert/upsert field-list sibling sweep found one undercounted site (conclusion still holds) and two never-named table families (both already deliberate, in-file-documented splits) - no new bug, nothing pushed to `main`
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `e293f30`
