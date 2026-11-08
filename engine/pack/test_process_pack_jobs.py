@@ -141,6 +141,35 @@ def test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_on
           malformed_alert.get("context", {}).get("company_id") == "co-a", malformed_alert)
 
 
+def test_own_path_accepts_a_legitimate_double_dot_filename_but_still_rejects_real_traversal():
+    print("own_path(): a legitimate filename with two consecutive dots (e.g. 'Report..Final.pdf') "
+          "must be accepted; a real '..' path-traversal segment must still be rejected (Finding 35's "
+          "own false-positive, found in process_onboarding_jobs.py and never swept here)")
+    company = "22222222-2222-2222-2222-222222222222"
+    other = "44444444-4444-4444-4444-444444444444"
+    # The real shape gather()'s own callers produce: own_path(company[path_col], ...)
+    # with a client-written filename safeFileName() left the dots in.
+    legit = f"{company}/people/p1/uploads/abc12345-Report..Final.pdf"
+    try:
+        out = ppj.own_path(legit, company, "Vault document")
+        check("a legitimate double-dot filename is accepted, not rejected", out == legit, out)
+    except ValueError as e:
+        check("a legitimate double-dot filename is accepted, not rejected", False, str(e))
+
+    for traversal in (f"{company}/../{other}/x.pdf", f"{company}/people/p1/..", f"../{company}/x.pdf"):
+        try:
+            ppj.own_path(traversal, company, "Vault document")
+            check(f"a real traversal segment ({traversal!r}) is still rejected", False)
+        except ValueError:
+            check(f"a real traversal segment ({traversal!r}) is still rejected", True)
+
+    try:
+        ppj.own_path(f"{other}/x.pdf", company, "Vault document")
+        check("a path under a different company's prefix entirely is still rejected", False)
+    except ValueError:
+        check("a path under a different company's prefix entirely is still rejected", True)
+
+
 def test_adapt_person_carries_sacnasp_and_sagc_through():
     print("adapt_person(): a person's own SACNASP/SAGC registration (0040) must reach the "
           "SANRAL pack's qualifications dict, same as ECSA/SACPCMP already do")
@@ -511,6 +540,7 @@ def test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id():
 
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
+    test_own_path_accepts_a_legitimate_double_dot_filename_but_still_rejects_real_traversal()
     test_adapt_person_carries_sacnasp_and_sagc_through()
     test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response()

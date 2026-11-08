@@ -540,6 +540,29 @@ def test_queue(docx_path, tmp):
           f"u7's own claim failure is still reported as its own alert, not silently lost ({alerts7})")
 
 
+def test_process_upload_accepts_a_legitimate_double_dot_filename(docx_path, tmp):
+    print("5a. process_upload()'s own folder-ownership guard: a legitimate filename with two "
+          "consecutive dots (e.g. 'Report..Final.pdf') must be accepted, and a real '..' "
+          "path-traversal segment must still be rejected - Finding 35 (2026-10-20) found and "
+          "fixed this exact false positive in this file's true sibling, "
+          "engine/onboarding/process_onboarding_jobs.py, but it was never swept here")
+    legit_path = "c1/people/p1/uploads/a-naledi_cv..final.docx"
+    db = MemoryDb({legit_path: docx_path})
+    x.supabase_request, x.storage_download = db.request, db.download
+    base = {"company_id": "c1", "person_id": "p1", "mode": "ai_extract", "status": "extraction_requested"}
+    db.tables["cv_uploads"] = [dict(base, id="dd1", storage_path=legit_path, created_at="1"),
+                               # a real traversal attempt must still be refused
+                               dict(base, id="dd2", storage_path="c1/../c2/x.docx", created_at="2")]
+    stub = StubClient(StubResponse(json.dumps(GOOD_ANSWER)))
+    x.poll_once("u", "k", client_factory=lambda: stub)
+    st = {r["id"]: r for r in db.tables["cv_uploads"]}
+    check(st["dd1"]["status"] == "extracted",
+          f"a legitimate double-dot filename is read, not rejected as outside the company's folder "
+          f"(got status {st['dd1']['status']!r}, error {st['dd1'].get('extraction_error')!r})")
+    check(st["dd2"]["status"] == "extraction_failed" and "own storage folder" in (st["dd2"].get("extraction_error") or ""),
+          f"a real '..' traversal segment is still refused (got {st['dd2']})")
+
+
 def test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written():
     print("5b. fail_stale_uploads(): a stale row whose cv_extraction_results row already exists "
           "is recovered to extracted, not wrongly marked failed")
@@ -748,6 +771,7 @@ def main():
         test_validation(docx_path, tmp)
         test_llm_call()
         test_queue(docx_path, tmp)
+        test_process_upload_accepts_a_legitimate_double_dot_filename(docx_path, tmp)
         test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
         test_fail_stale_uploads_alerts_carry_company_id()
         test_safe_update_alert_carries_company_id()

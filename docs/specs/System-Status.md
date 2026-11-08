@@ -1,5 +1,180 @@
 # System Status
 
+## This pass (2026-11-08xliii, standing solution-architect review, background worker): Finding 214 - a fresh engine-Python-side sibling-comparison sweep (the standing brief's own first-ranked, not-yet-tried-this-segment candidate) found Finding 35's own ".." path-traversal substring-vs-segment fix was never swept from its one site to four true Python siblings, a TypeScript sibling, or - the actually-live failure point - five SQL CHECK constraints/RPCs spanning 10+ columns across 10 tables; fixed (migration `0135`), opened as PR `#195`, not merged
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `b7ed3b9`
+(unchanged from the immediately preceding pass's own HEAD). Re-fetched again immediately before
+pushing this pass's branch - still `b7ed3b9`, no sibling commit landed in between. Re-checked the
+open-PR backlog via the GitHub REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open
+--paginate`) at the start: 21 open, exactly `#164`/`#165`/`#176`-`#194` - nothing merged, closed, or
+rebased by anyone, including this session, matching the immediately preceding pass's own closing
+count exactly. `docs/specs/QA-Edge-Case-Findings.md` topped out at Finding 213 (PR `#194`'s own
+claim) at the start, confirmed by grepping every `Finding [0-9]+` mention across both docs and
+sorting numerically, not assumed from the standing brief's own prose - so this pass's own finding is
+numbered 214, the next genuinely unclaimed number.
+
+**Why this angle, over the other two the standing brief named.** The brief's three candidates were:
+(1) a fresh sibling-comparison sweep against the engine's Python side, explicitly flagged as not yet
+re-run this segment (the last ~12 passes were all RLS/employee-gap-shaped, `#176`-`#194`); (2) a
+from-scratch re-verification of one of this segment's own "genuine negative" conclusions (the
+SECURITY DEFINER sweep or the 43-table predicate-correctness sweep); (3) something self-noticed while
+reading the docs. Ruled out (2) as lower expected value right now specifically because both of its
+named candidates were THEMSELVES only just re-verified: the SECURITY DEFINER sweep was independently
+re-derived from scratch in the immediately-preceding-but-one pass (entry `xli`, 2026-11-08), and the
+43-table predicate-correctness sweep was run for the very first time, as a genuine negative, in PR
+`#194` (Finding 213) - re-re-verifying either immediately would be the lowest-novelty use of this
+pass's own time among the three options. Chose (1): the sibling-comparison method is this review
+family's single most productive technique by its own track record (Findings 185-200ish, per the
+standing brief), and the brief named a concrete, genuinely unswept sub-area (`engine/pack/`,
+`engine/cv/`, `engine/general/`, `engine/compliance/`, etc.) rather than asking this pass to invent
+one. Did not pursue (3) as a separate angle since (1) itself surfaced a real finding before any
+need arose to fall back to "something self-noticed."
+
+**Method.** Read `engine/pack/process_pack_jobs.py`, `engine/general/process_general_jobs.py`,
+`engine/cv/process_cv_jobs.py` and `engine/cv/extract_cv_fields.py` side by side, focused on the one
+shared sink every `process_*_jobs.py` bridge needs: a client-written `storage_path`, downloaded by the
+service role (which bypasses Storage RLS), MUST be checked against the row's own `company_id` before
+the download - the exact "own_path()"-shaped guard these bridges already carry (POPIA-Security-Audit.md).
+Confirmed by reading `engine/general/process_general_jobs.py`'s own `download_tender_documents()` (no
+`own_path()` call) that this was deliberate, not a gap: `tenders.document_urls`'s own `storage_path` is
+validated server-side, at RPC time (`_manual_tender_documents()`, migration 0024), to already sit
+under the row's own `owner_company_id` prefix before it is ever written - traced all the way through
+`load_manual_tender()`/`add_manual_tender_documents()` and `job_tender()`'s own
+`owner_company_id`-matches-`job["company_id"]` check to confirm no cross-tenant path could reach that
+call site, a genuine negative on its own terms, not assumed. Comparing every OTHER `own_path()`-shaped
+call site that DOES exist (`grep -rn '"\.\." in\|\.\. in sp\|\.\. in p\b' engine --include="*.py"`)
+surfaced the real divergence: `process_pack_jobs.py`'s `own_path()`, `process_general_jobs.py`'s
+`own_path()` AND its separate `private_documents_for()`, and `extract_cv_fields.py`'s inline check all
+use a bare substring match (`".." in sp`); only `process_onboarding_jobs.py`'s own inline check uses a
+path-SEGMENT match (`".." in sp.split("/")`) - traced to Finding 35 (2026-10-20), which found and fixed
+this exact false positive there and only there. Grepped `app/supabase/migrations/*.sql` for the
+identical substring pattern (`'%\.\.%'`) next, on the theory that a Python-level check this
+inconsistent likely has a SQL-level twin somewhere too (this review's own house style for "does the
+check exist at the RIGHT layer, not just somewhere") - found five more copies: `tt_own_path()`
+(migration 0043, a shared function backing seven tables' worth of CHECK constraints),
+`tt_path_in_company()` (migration 0050, the identical function under a different name, backing three
+more tables PLUS `onboarding_uploads` itself via migration 0063), `record_tender_document()`'s own
+inline check (current body: migration 0045), `_manual_tender_documents()`'s own inline check
+(migration 0024), and `tender_private_documents_path`'s own literal CHECK constraint (migration 0032).
+Traced each SQL constraint's real table to its actual browser-side insert path
+(`app/app/company/document-scan/actions.ts`, `app/app/people/actions.ts`, `app/app/tenders/new/actions.ts`
+and others) to confirm it is reachable by an ordinary signed-in member's own INSERT, not just by the
+service role - true for 6 of the 10 covered tables (`cv_uploads`, `onboarding_uploads`,
+`company_principals`, `held_registrations`, `property_documents`, the `companies` vault columns),
+meaning Finding 35's own fix, which only touched the Python classification step, was never actually
+reachable for the exact table its own write-up is about: the DB-level CHECK on `onboarding_uploads`
+itself would already reject the INSERT before `process_onboarding_jobs.py` ever claims the row.
+
+**Reproduced red in a real scratch Postgres, independently, before writing any fix.** Built one
+scratch database from `main`'s own 113 migrations (`engine/security/replay_schema.sh -h 127.0.0.1 -p
+5432 -U postgres -d path_check_red`), seeded one company/person/tender/pack. `insert into cv_uploads
+(company_id, person_id, storage_path, original_filename, mode) values (..., '<company>/people/<person>/
+uploads/abc12345-Report..Final.pdf', 'Report..Final.pdf', 'as_is')` - the exact shape
+`process_cv_jobs.py`'s own path convention plus `app/lib/safeFileName.ts` (the one shared sanitizer
+every upload path in this app uses, which keeps `.` in its allowed character set on purpose) produce
+for a real file named "Report..Final.pdf" - raised `ERROR: ... violates check constraint
+"cv_uploads_path_own_folder"` and inserted nothing. Confirmed the identical shape against
+`tt_path_in_company()` directly (`select tt_path_in_company(...)` -> `false` for the legitimate path)
+and against `load_manual_tender()`'s own RPC (`ERROR: Document path ... is outside this tender's
+upload folder.`) with a document titled "Report..Final.pdf". Confirmed, as a sanity check on the SAME
+pre-fix database, that a genuine traversal attempt (`'<company>/../<other>/x.pdf'`) is correctly
+rejected too - establishing this is a false-positive bug, never a missing check, before touching
+anything.
+
+**Fix: one new migration (`0135`) + the matching Python/TypeScript sweep, same technique everywhere -
+substring match replaced with a path-SEGMENT match.** SQL: a POSIX regex, `!~ '(^|/)\.\.(/|$)'`,
+requiring the `..` to be an entire path segment bounded by `/` or the string's own start/end - the
+exact equivalent of the already-shipped Python fix's `".." in sp.split("/")`. Redefining
+`tt_own_path()`/`tt_path_in_company()` fixes every CHECK constraint that calls either with no DDL
+needed on any of the ten tables they cover; `tender_private_documents_path` (a literal CHECK, not a
+function call) needs its own drop+add; `record_tender_document()`/`_manual_tender_documents()` get
+their current bodies back with only the one check line changed. Python:
+`extract_cv_fields.py`/`process_general_jobs.py` (both its own call sites)/`process_pack_jobs.py` each
+get the identical one-line fix `process_onboarding_jobs.py` already had. TypeScript:
+`cleanDocuments()` (`app/app/tenders/new/actions.ts`'s own helper for
+`registerManualTender()`/`addManualTenderDocuments()`/`addPrivateTenderDocuments()`) gets the matching
+`.split("/").includes("..")` fix - moved into `app/lib/manualTender.ts` to make the fix unit-testable
+at all, since `npx next build` (Turbopack) refused `export function cleanDocuments(...)` directly from
+a `"use server"` file with "Server Actions must be async functions," a real build-time catch, not a
+style nit. The `//` double-slash check is untouched everywhere, per Finding 35's own "fix only what's
+actually reproduced" discipline.
+
+**Verified green in the same scratch-Postgres pattern, then independently sanity-checked that nothing
+was weakened.** Rebuilt a second scratch database (114 migrations, `0135` applied). The identical
+`cv_uploads`/`load_manual_tender()`/`onboarding_uploads`/`tender_private_documents` inserts with the
+same double-dot shape now succeed; `tt_path_in_company()` now returns `true` for the legitimate path.
+On the SAME post-fix database, the genuine traversal attempt from the red run is STILL rejected
+(`cv_uploads_path_own_folder` violation, unchanged) and `record_tender_document()`'s own traversal case
+is still refused with its own "must be stored under your company's own ... folder" message - no
+authorization check anywhere was loosened, only the false positive was removed. Ran
+`engine/security/test_tenant_isolation.py` against the post-fix database
+(`TENANT_PSQL="psql -h 127.0.0.1 -p 5432 -U postgres -d path_check_green" python3
+engine/security/test_tenant_isolation.py`) - **ALL PASSED**, including `[18]` (employee role) and
+`[19]` (team/billing RPCs), confirming the migration touched nothing else.
+
+**Test coverage, each proved to catch the regression (reverted, confirmed the predicted failure,
+reapplied, confirmed clean) before being counted as done.** New tests in
+`engine/pack/test_process_pack_jobs.py`, `engine/general/test_process_general_jobs.py` (two new tests:
+`own_path()` and `private_documents_for()`), `engine/cv/test_extract_cv_fields.py` (run through the
+REAL `poll_once()`/`process_upload()` pipeline against its existing in-memory Supabase/Storage
+stand-in, not a reimplementation of the check), and a new `app/app/tenders/new/actions.spec.ts` (4
+tests, vitest) for `cleanDocuments()`. Full detail, exact revert/reapply transcripts and exact psql
+output: `docs/specs/QA-Edge-Case-Findings.md` Finding 214.
+
+**Full verification suite, all green:** `npm run typecheck` (0 errors), `npx eslint .` (0 errors, the
+same 3 pre-existing unrelated warnings), `npx vitest run` (72/72 files, 536/536 tests), the full `node
+--experimental-strip-types *.test.ts` loop (28/28 files), `npx next build` (compiled successfully),
+`python3 -m py_compile` clean on every touched Python file, and
+`engine/pack/test_process_pack_jobs.py`/`engine/general/test_process_general_jobs.py`/
+`engine/general/test_general_bridge.py`/`engine/cv/test_extract_cv_fields.py` all `ALL PASSED`/`0
+failure(s)`.
+
+**Why a PR, not a direct push, per the binding guardrails.** Not an authorization-bypass finding (the
+opposite shape - an overly strict check wrongly REJECTING legitimate data, never granting unintended
+access) - but independently qualifies as "a multi-RPC-across-multiple-tables schema surface": one
+migration touches five SQL definitions covering ten tables' worth of CHECK constraints via two shared
+functions, two RPCs, and one standalone table constraint. Opened as PR `#195`
+(`fix/own-path-double-dot-false-positive`, migration `0135`) - **not merged**, per the standing
+instruction that this review never self-merges.
+
+**Migration-number collision check, done fresh, not assumed.** `ls app/supabase/migrations | sort -V
+| tail -1` showed `main`'s own highest as `0123`. Checked every one of the 21 open PRs' own migration
+files via `gh api repos/.../pulls/<n>/files` before naming `0135`: `#164` claims `0099` (already-known
+collision with `main`'s own `0099_workflow_heartbeats.sql`, not this pass's concern), `#176` claims
+`0119`, `#182` claims `0121`, `#183`/`#184`/`#185` each claim `0124`, `#186`-`#194` claim
+`0125`-`0134` (one each, except `#193` which claims both `0132` and `0133`) - `0135` is the first
+number past all of those, on every branch, not just `main`.
+
+**Known integration note for Sarel, logged so it isn't rediscovered.** PR `#187` (Finding 205,
+`record_tender_document()`'s own employee-RLS gap, migration `0126`, still open/unmerged) also
+redefines `record_tender_document()` - both PRs' own diffs are additive `create or replace function`
+bodies on the identical function, so this is a merge-ORDER concern (whichever migration applies last
+wins; merging both means the later one's body must carry both fixes), not a blocking conflict found
+yet. Not resolved here, per the guardrail against touching another open PR's own branch.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 21 pre-existing open PRs (`#164`/`#165`/`#176`-`#194`) remain open and
+unmerged, confirmed via the GitHub REST API at the start of this pass and again immediately before
+opening `#195` - nothing merged, closed, or rebased by anyone, including this session. This pass adds
+one new open PR, `#195`, not merged. No scratch Postgres database was left running: both
+`path_check_red` and `path_check_green` were dropped and the Postgres service stopped at the end of
+this pass. No `git worktree` or disposable branch was created beyond this pass's own feature branch
+(`fix/own-path-double-dot-false-positive`), pushed to `origin` for the PR and otherwise untouched.
+
+To verify independently: `gh pr view 195` and confirm migration `0135` and the file list above.
+`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d verify214` against `main`'s own
+113 migrations, then the same `cv_uploads` insert from this entry's own "Reproduced red" paragraph -
+confirm the check-violation error. Apply `0135`, rebuild fresh, confirm the identical insert succeeds
+and the traversal-attempt insert still fails. Run `python3 engine/pack/test_process_pack_jobs.py`,
+`python3 engine/general/test_process_general_jobs.py`, `python3 engine/cv/test_extract_cv_fields.py`
+(all `ALL PASSED`/`0 failure(s)`) and `cd app && npx vitest run tenders/new/actions.spec.ts` (4
+passed). Confirm `docs/specs/QA-Edge-Case-Findings.md` tops out at Finding 214
+(`grep -oE "Finding [0-9]+" docs/specs/QA-Edge-Case-Findings.md docs/specs/System-Status.md | awk
+-F' ' '{print $NF}' | sort -n | uniq | tail -1`).
+
+---
+
 ## This pass (2026-11-08xlii, standing solution-architect review, background worker): the 11-PR backlog staleness/drift audit (`#164`/`#165`/`#176`-`#184`) the standing brief named as long-untouched - re-checked all 11 against CURRENT `main` by reading each PR's actual diff, not any prior summary; found `#164`/`#165` substantially stale (a direct-push commit to `main` already rewrote the exact file both branches touch, with a different model), one real code-conflict on `#179` (not touched), one wrong-prose-but-harmless comment baked into `#176`'s own migration file (contradicted by `#185`'s later finding), and confirmed `#176`-`#178`/`#180`-`#182` remain clean, current and still-needed; no new Finding opened, nothing pushed to any PR branch, `main` untouched except this docs entry
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `c19b9f1`

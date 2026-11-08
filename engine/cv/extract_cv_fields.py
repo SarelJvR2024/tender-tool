@@ -890,7 +890,15 @@ def process_upload(url, key, upload, client_factory=default_llm_client):
         # or another company's CV would be read, sent to the AI and shown
         # here (POPIA-Security-Audit.md; migration 0043 adds the same CHECK).
         sp = upload.get("storage_path") or ""
-        if not sp.startswith(f"{upload['company_id']}/") or ".." in sp or "//" in sp:
+        # ".." as a whole path SEGMENT, not as a bare substring (Finding 35,
+        # 2026-10-20, found and fixed this exact false positive in this
+        # file's true sibling, engine/onboarding/process_onboarding_jobs.py,
+        # but never swept here): safeFileName() keeps dots in a filename
+        # unchanged, so an entirely ordinary CV named e.g. "CV..Final.pdf"
+        # produced a storage_path containing the substring ".." and was
+        # rejected here with this exact message, even though it WAS under
+        # this company's own folder. Standing review, 2026-11-08.
+        if not sp.startswith(f"{upload['company_id']}/") or ".." in sp.split("/") or "//" in sp:
             raise ExtractionFailed("This upload's file isn't in your company's own storage folder, so it wasn't read. "
                                    "Upload the CV again from the person's page.")
         client = client_factory()  # SetupError here leaves the job queued
