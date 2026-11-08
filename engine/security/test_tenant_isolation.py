@@ -951,9 +951,12 @@ insert into generated_cvs (company_id, person_id, format, detail) values
 insert into tenders (id, slug, title, closing_date, family) values
   ('{i['t']}', 'iso-emp-{i['t'][:8]}', 'Employee-role tender', now() + interval '30 days', 'Conventional Consultant Tender');
 insert into tender_packs (id, company_id, tender_id) values ('{i['pack']}', '{i['c']}', '{i['t']}');
+insert into tender_requirements (tender_id, company_id, position_code) values ('{i['t']}', '{i['c']}', 'PL');
 insert into financial_captures (company_id, tender_id) values ('{i['c']}', '{i['t']}');
 insert into bank_accounts (company_id, bank_name, account_holder, account_number) values ('{i['c']}', 'ABC Bank', 'Iso Employee Co', '123456789');
 insert into company_tender_preferences (company_id, hide_sanral_board, interested_disciplines) values ('{i['c']}', false, '{{}}');
+insert into storage.objects (bucket_id, name) values
+  ('tender-documents', 'private/{i['c']}/{i['t']}/templates/technical_xlsm/{i['pack']}.xlsm');
 select 1;""")
     uEmp, uOwner, c = i["uEmp"], i["uOwner"], i["c"]
 
@@ -1003,6 +1006,20 @@ select 1;""")
             f"set hide_sanral_board = excluded.hide_sanral_board, interested_disciplines = excluded.interested_disciplines",
         uEmp)
     check(bad, "employee can't change the company's opportunity preferences")
+    # 0126: record_tender_document() (0025/0045) is SECURITY DEFINER and
+    # writes tender_documents/tender_requirements by company id, never
+    # reading either back through a policy that could hide the row first -
+    # it checked only is_company_member(), never role, so it bypassed
+    # "tenders"/"tender_packs: employee has no access" entirely (standing
+    # review, catalog-driven SECURITY DEFINER sweep, 2026-11-08).
+    emp_path = f"private/{c}/{i['t']}/templates/technical_xlsm/{i['pack']}.xlsm"
+    bad, _ = refused(
+        db, f"select record_tender_document('{i['t']}', 'technical_xlsm', '{emp_path}', 'evil.xlsm')", uEmp)
+    check(bad, "employee can't register a tender template via record_tender_document")
+    check(db.one(f"select count(*) from tender_documents where tender_id = '{i['t']}'") == "0",
+          "...and no tender_documents row was created by the refused call")
+    check(db.one(f"select count(*) from tender_requirements where tender_id = '{i['t']}'") == "1",
+          "...and the real tender_requirements row (PL) was not deleted by the refused call")
 
     print("  -- owner/admin/member access is completely unchanged by the restrictive policies --")
     check(db.one(f"select count(*) from people where company_id = '{c}'", uOwner) == "2", "owner still sees every person in the company")
@@ -1011,6 +1028,11 @@ select 1;""")
     ok, _, err = db.run(
         f"update company_tender_preferences set hide_sanral_board = true where company_id = '{c}'", uOwner)
     check(ok, f"owner can still change the company's opportunity preferences ({err.splitlines()[0] if err else 'ok'})")
+    ok, _, err = db.run(
+        f"select record_tender_document('{i['t']}', 'technical_xlsm', '{emp_path}', 'legit.xlsm')", uOwner)
+    check(ok, f"owner's identical record_tender_document call still succeeds ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select count(*) from tender_documents where tender_id = '{i['t']}'") == "1",
+          "...and this time a real tender_documents row was created")
 
     print("  -- cross-tenant: an employee gets no MORE access to another company than a member would --")
     other = str(uuid.uuid4())
