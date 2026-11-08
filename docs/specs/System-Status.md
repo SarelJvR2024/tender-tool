@@ -1,5 +1,186 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): the catalog-driven SECURITY DEFINER sweep the two immediately preceding passes each named as the next angle - one genuine, independently red/green-verified authorization bypass found (`record_tender_document()`), fixed via PR, migration `0126` - every other candidate exhausted as a genuine negative, with the exact catalog query and full result set recorded below for the next pass
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `097de16`
+(the immediately preceding pass's own write-up). Re-fetched again immediately before opening this
+pass's PR - still `097de16`, no sibling commit landed in between; the concurrent sibling QA/
+robustness track made no push this pass. Re-checked the open-PR backlog via the GitHub REST API at
+the start and the end: 13 open, the same set as handed off (`#164`/`#165`/`#176`-`#186`) - nothing
+merged, closed, or rebased by anyone, including this session. Per the binding guardrails, `#164`/
+`#165`/`#183`/`#184`/`#185`/`#186` were read only where the brief itself required it
+(`#176`/`#182`/`#185`/`#186`'s own diffs, read-only via `gh pr diff`, to build the "already fixed"
+list below without duplicating any of their work) - none was otherwise touched, built on, or
+merged. Finding/migration numbering checked fresh rather than trusted from the brief: `main`'s own
+`QA-Edge-Case-Findings.md` tops out at 202 (203/`#185` and 204/`#186` are both claimed but unmerged,
+so this pass's own finding is numbered 205); `main`'s own migrations top out at `0123`, with `0124`
+independently claimed by three different stale/unrebased open-PR branches (`#183`/`#184`/`#185`) and
+`0125` claimed by `#186` - this pass's own fix is numbered `0126` to avoid becoming a fifth claimant.
+
+**This pass's own task, per the standing brief: a systematic, mechanically-reproducible catalog
+sweep of every `security definer` function in `public`, cross-checked against whether it touches a
+table carrying an `is_employee_in_company()`-shaped RESTRICTIVE policy, and whether the function's
+own body re-checks role before writing/reading - not just the functions a prior pass happened to
+read by hand.**
+
+**The exact catalog query and its full result set**, run against a disposable scratch Postgres
+(`engine/security/replay_schema.sh` against all 113 real migrations on `main` at the time - `0124`/
+`0125` from the two open, unmerged PRs deliberately NOT included, so this sweep's own baseline
+matches what's actually on `main` today, not a hoped-for future state):
+
+```sql
+select p.proname, pg_get_function_identity_arguments(p.oid)
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.prosecdef = true
+order by p.proname;
+```
+-> 74 rows (the full list: `accept_tender_update_date`, `acknowledge_discovery_downgrade`,
+`add_manual_tender_documents`, `apply_cv_extraction_checked`, `apply_my_cv_extraction_checked`,
+`apply_payfast_itn`, `bank_account_summaries`, `claim_notification`, `company_can_request_pack`,
+`company_member_labels`, `company_notification_recipients`, `company_packs_this_period`,
+`create_company_and_join`, `create_company_invite_checked`,
+`discipline_category_suggestions_guard`, `invite_preview`, `is_company_member`,
+`is_employee_in_company`, `is_platform_admin`, `lifecycle_unsubscribe_token_for`,
+`load_manual_tender`, `own_linked_person_id`, `platform_admin_alert_counts_24h`,
+`platform_admin_billing_overview`, `platform_admin_companies`, `platform_admin_company_members`,
+`platform_admin_company_readiness_data`, `platform_admin_cv_document_stats`,
+`platform_admin_discovered_opportunities`, `platform_admin_end_impersonation`,
+`platform_admin_engine_telemetry`, `platform_admin_low_confidence_requirement_items`,
+`platform_admin_override_opportunity_confidence`,
+`platform_admin_reprocess_requirement_extraction`, `platform_admin_set_setting`,
+`platform_admin_set_test_company`, `platform_admin_settings`, `platform_admin_start_impersonation`,
+`platform_admin_tender_catalog`, `pursue_discovered_opportunity`, `record_deadline_reminder_sent`,
+`record_notification_sent`, `record_operational_alert_sent`, `record_tender_document`,
+`record_workflow_heartbeat_finish`, `record_workflow_heartbeat_start`, `redeem_company_invite`,
+`remove_member_checked`, `request_general_job_checked`, `request_submission_pack_checked`,
+`set_member_role_checked`, `set_my_daily_digest_opt_in`, `set_opportunity_interest`,
+`set_opportunity_tag`, `signups_enabled`, `start_company_trial`, `start_payfast_checkout`,
+`submit_requirement_extraction_review`, `tender_document_uploads`, `tender_folder_readable`,
+`tt_bank_accounts_check`, `tt_check_same_company`, `tt_forget_person`, `tt_has_own_requirements`,
+`tt_held_registrations_check`, `tt_is_company_admin`, `tt_pack_company`, `tt_person_in_company`,
+`tt_principals_check`, `tt_property_rows_check`, `tt_subcontracting_plan_tender_visible`,
+`tt_template_object_readable`, `tt_tender_visible_to`, `unsubscribe_lifecycle_email`).
+
+```sql
+select tablename, policyname, cmd, qual, with_check
+from pg_policies
+where schemaname = 'public' and permissive = 'RESTRICTIVE'
+order by tablename, cmd;
+```
+-> 45 rows on 42 distinct tables, every single one `is_employee_in_company()`- or
+`own_linked_person_id()`-shaped (0077/0117/0118): `bank_accounts`, `companies`,
+`company_document_templates`, `company_members`, `company_offices`, `company_principals`,
+`company_properties`, `company_subscriptions`, `company_tender_preferences`,
+`cv_extraction_results`, `cv_uploads`, `deadline_reminders_seen`, `digest_readiness_seen`,
+`discipline_category_suggestions`, `discovered_opportunities`, `discovery_seen_releases`,
+`experience_items`, `field_provenance`, `financial_captures`, `generated_cvs`,
+`generated_documents`, `held_registrations`, `narrative_documents`, `onboarding_document_results`,
+`onboarding_uploads`, `pack_generation_jobs`, `pack_review_confirmations`, `people`,
+`person_role_eligibility`, `projects`, `property_documents`, `registration_types`,
+`signatory_scopes`, `tender_answers`, `tender_comments`, `tender_pack_assignments`,
+`tender_packs`, `tender_private_documents`, `tender_subcontracting_plans`, `tender_tasks`,
+`tender_update_notifications`, `tender_watched_documents`, `tenders`.
+
+Pulled every one of the 74 functions' own body with `pg_get_functiondef(p.oid)` (kept in this
+pass's own scratchpad, not committed), then for each, checked which of the 42 RESTRICTIVE-covered
+tables it actually SELECTs/INSERTs/UPDATEs/DELETEs, and whether the body itself re-checks role
+(`is_employee_in_company(...)`, `own_linked_person_id(...)`, or an equivalent `role = 'employee'`
+comparison). **73 of 74 came back clean - genuine negatives, not assumed:**
+- 12 already fixed by 0119/PR #176 (`bank_account_summaries`, `company_member_labels`,
+  `tender_document_uploads`, `pursue_discovered_opportunity`, `load_manual_tender`,
+  `add_manual_tender_documents`, `request_submission_pack_checked`,
+  `request_general_job_checked`, `set_opportunity_interest`, `set_opportunity_tag`,
+  `acknowledge_discovery_downgrade`, `accept_tender_update_date` - confirmed by reading `#176`'s own
+  diff read-only, not re-deriving the fix).
+- 2 already fixed by 0121/PR #182 (`company_packs_this_period`, `company_can_request_pack`).
+- `apply_cv_extraction_checked`/`apply_my_cv_extraction_checked` are the already-open, unmerged
+  Finding 204/PR #186 - left completely untouched this pass, confirmed read-only via `gh pr diff
+  186`, not re-fixed or re-derived.
+- `is_company_member`, `is_employee_in_company`, `own_linked_person_id`, and the `tt_*` family
+  (`tt_bank_accounts_check`, `tt_check_same_company`, `tt_forget_person`,
+  `tt_has_own_requirements`, `tt_held_registrations_check`, `tt_is_company_admin`,
+  `tt_pack_company`, `tt_person_in_company`, `tt_principals_check`, `tt_property_rows_check`,
+  `tt_subcontracting_plan_tender_visible`, `tt_template_object_readable`, `tt_tender_visible_to`)
+  are RLS-predicate/trigger helpers that only ever return a boolean or enforce a same-company
+  invariant - never an independent write surface a caller could exploit for data exposure beyond
+  true/false, confirmed by reading `RETURNS` (`boolean`/`trigger`) and each one's own body.
+- Every `platform_admin_*` function (13 of them) calls `is_platform_admin()` itself - confirmed by
+  grepping each one's own body text, not assumed from the name - a deliberately broader-than-"not
+  employee" gate, by design, not a gap.
+- `company_notification_recipients()` and `lifecycle_unsubscribe_token_for()` each read/write an
+  employee-restricted table with no role check of their own, but neither is reachable by an
+  authenticated session at all - confirmed via `information_schema.routine_privileges`, both are
+  granted `service_role` (+`postgres`) only, used internally by the notification engine's own
+  service-role workers, never exposed to a client `supabase.rpc()` call.
+- The remaining handful (`apply_payfast_itn`, `claim_notification`, `create_company_and_join`,
+  `create_company_invite_checked`, `invite_preview`, `record_deadline_reminder_sent`,
+  `record_notification_sent`, `record_operational_alert_sent`, `record_workflow_heartbeat_finish`,
+  `record_workflow_heartbeat_start`, `redeem_company_invite`, `remove_member_checked`,
+  `set_member_role_checked`, `set_my_daily_digest_opt_in`, `signups_enabled`,
+  `start_company_trial`, `start_payfast_checkout`, `submit_requirement_extraction_review`,
+  `tender_folder_readable`, `unsubscribe_lifecycle_email`) were each read individually and are
+  either gated by `tt_is_company_admin()`/`is_platform_admin()` (invite/member-management RPCs
+  correctly require owner/admin, not just membership), self-scoped to the caller's own row
+  (`where user_id = auth.uid()`), anon-reachable-by-design token flows with minimal, non-tenant
+  data exposure (`invite_preview`, `unsubscribe_lifecycle_email`), or already carry their own
+  `role = 'employee'` guard (`start_payfast_checkout`, 0117).
+
+**Finding 205 (the one genuine gap): `record_tender_document()`** (0025, narrowed 0032/0043/0045 -
+never once for 0077's employee role). Reads `tenders`/`tender_packs` (both "employee has no
+access", ALL operations), writes `tender_documents`, and conditionally DELETEs
+`tender_requirements` - checked only `is_company_member(v_company)`, never role. Reproduced
+red (an employee with `select count(*) from tenders`/`tender_packs` both `0` via direct RLS could
+still call the RPC successfully, inserting a `tender_documents` row AND deleting the company's real
+`tender_requirements` row) and green (identical call now raises 42501, both tables confirmed
+unchanged; the owner's identical call unaffected) in a disposable scratch Postgres, dropped
+immediately after use. Fixed the same additive-only "block outright" shape 0119's own 12 functions
+use (Tender Workspace is not one of an employee's two allowed pages at all). Full detail, the exact
+pre/post-fix SQL, and the full verification-suite output: `docs/specs/QA-Edge-Case-Findings.md`
+Finding 205. Opened as PR `fix/record-tender-document-employee-gap` against `main` (RLS/
+authorization finding - per the binding guardrails, this always goes through a PR regardless of
+diff size), **not merged**, left open for Sarel's review.
+
+**Is the sweep exhausted?** Yes, for the specific question asked - every one of the 74 SECURITY
+DEFINER functions that exist on `main` today was read against the full 42-table RESTRICTIVE-policy
+catalog, not a hand-picked subset. Two concrete, narrower angles remain open for a future pass,
+named here so the next pass doesn't need to rediscover them:
+1. **`storage.objects`' own RLS is a different schema this sweep never touched.** Its "members
+   upload/remove private documents" policies (0032) check only `is_company_member()`, never
+   `is_employee_in_company()` - an employee CAN upload/delete files under their own company's
+   `private/<company>/...` storage prefix (confirmed by reading the policy SQL directly), even
+   though the equivalent `public`-schema tables are locked down. Whether this is a real gap or a
+   deliberate "storage access control is coarser than table RLS by design" choice was not resolved
+   this pass, only logged - the real-world exploit path it enables (uploading a file is harmless
+   without `record_tender_document()` to register it, which Finding 205 now blocks for an employee)
+   is closed for this specific RPC, but the storage policy itself is unchanged and worth a dedicated
+   look.
+2. **The orthogonal "is the predicate itself correct" angle PR #185's own write-up named** (a
+   policy checking `company_id` on the wrong column, or a nullable-FK `using` clause silently
+   failing closed instead of raising) remains open - this pass's own sweep checked ROLE only
+   (employee vs. not), not predicate correctness for owner/admin/member paths.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left,
+untouched, per the standing guardrails. All 13 open PRs remain open and unmerged, now 14 with this
+pass's own - re-confirmed via the GitHub REST API at the start and the end of this pass; nothing
+merged, closed, or rebased by anyone, including this session. All scratch Postgres databases used
+this pass (the catalog survey, the red run, the green run, the pre-fix red-via-test-suite run, the
+final full-suite run) were dropped immediately after use; the Postgres service itself was stopped
+at the end of this pass. No `git worktree` was created; one working branch
+(`fix/record-tender-document-employee-gap`) for this finding's own PR.
+
+To verify independently: re-run both catalog queries above against a fresh
+`engine/security/replay_schema.sh` replay of `main`'s own 113 migrations and confirm the same 74/45
+row counts and the same table/function lists. Read `app/supabase/migrations/0045_company_template_copies.sql`'s
+`record_tender_document()` and confirm it checks only `is_company_member(v_company)`, never
+`is_employee_in_company()`, before this pass's own `0126`. Run
+`TENANT_PSQL="psql -U postgres -d <db>" python3 engine/security/test_tenant_isolation.py` against a
+fresh replay including `0126` and confirm `ALL PASSED`. Confirm via the GitHub REST API that this
+pass's own PR is open and unmerged, and that all 13 pre-existing PRs (`#164`/`#165`/`#176`-`#186`)
+remain open and untouched.
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
