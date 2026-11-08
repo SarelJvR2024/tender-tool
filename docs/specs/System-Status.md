@@ -1,5 +1,208 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): independently re-ran PR #187's own catalog-driven SECURITY DEFINER sweep from scratch against current `main` (not from memory, not trusting the PR's own write-up) - identical 74-function/45-policy result set, confirmed `record_tender_document()` is still the one genuine gap and it is still only fixed on PR #187's own unmerged branch, red/green-reproduced myself independently in a fresh scratch Postgres - exhaustive genuine negative for "is there a NEW, uncovered gap", nothing pushed to `main`, no new PR opened, two minor write-up corrections logged for the record
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `8c5bd03`
+(the concurrent sibling "QA/robustness review" track's Finding-203 fix, already confirmed safe and
+unrelated to this RLS work per the handover). Re-fetched again immediately before writing this
+entry - still `8c5bd03`, no sibling commit landed in between. Re-checked the open-PR backlog via
+the GitHub REST API at the start and the end: 20 open, exactly `#164`/`#165`/`#176`-`#193` - nothing
+merged, closed, or rebased by anyone, including this session. Per the binding guardrails, `#176`-
+`#193` were read-only referenced where this pass's own task required it (`gh pr diff` against
+`#183`/`#184`/`#185`/`#186`/`#187`, to confirm migration-number claims and to pull `#187`'s own
+`0126` migration file for the green half of this pass's verification) - none was otherwise touched,
+built on, checked out as a working tree, or merged. `#164`/`#165` were not touched at all. One
+disposable local branch (`pr187-readonly-check`, fetched from `refs/pull/187/head` purely to `git
+show` its own migration file) was created and deleted again immediately after use via `git branch
+-D` - never checked out, built on, or pushed to. No other `git worktree` was created.
+
+**This pass's own task, per the standing brief: re-run PR #187's own `pg_proc`/`pg_policies`
+catalog sweep fresh against CURRENT `main`, not trusting the prior pass's own list from memory, on
+the theory that the function count "has likely grown" since new migrations may have landed.** First
+checked that theory directly rather than assuming it: `ls app/supabase/migrations | sort -V | tail`
+shows `main`'s own highest migration is still `0123` - identical to what PR #187's own write-up
+says it replayed. None of the candidate new migrations the brief named (`0124`-`0133`) are actually
+on `main` - they exist only on the 9 still-open, unmerged branches (`#183`/`#184`/`#185` each
+independently claim `0124`; `#186` claims `0125`; `#187` claims `0126`; `#188`-`#193` claim
+`0127`-`0133` for the storage-bucket family) - confirmed by `gh api
+repos/sareljvr2024/tender-tool/pulls/<n>/files` for each. So the premise that the catalog "has
+likely grown" does not hold for `main` as it actually stands today; re-running the sweep against
+real `main` was always going to reproduce PR #187's own baseline, not surpass it. Ran it anyway, in
+full, from a freshly built scratch Postgres (`engine/security/replay_schema.sh` against all 113 real
+migrations on `main`, dropped immediately after use) rather than trusting that conclusion from
+reading migration filenames alone:
+
+```sql
+select p.proname, pg_get_function_identity_arguments(p.oid)
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.prosecdef = true
+order by p.proname;
+-- 74 rows, byte-for-byte the same 74 names PR #187's own write-up lists (accept_tender_update_date
+-- through unsubscribe_lifecycle_email) - diffed programmatically against their list, zero
+-- additions, zero removals.
+
+select tablename, policyname, cmd, qual, with_check
+from pg_policies
+where schemaname = 'public' and permissive = 'RESTRICTIVE'
+order by tablename, cmd;
+-- 45 rows. select count(*), count(distinct tablename) from the same query ->
+-- 45 | 43 (PR #187's own write-up says "42 distinct tables" in its prose, but the 43-name list it
+-- actually prints in the same paragraph has 43 entries, matching this pass's own count exactly -
+-- a cosmetic off-by-one in their SUMMARY SENTENCE, not a missing table or a wrong list; re-counted
+-- their own printed list by hand to confirm. Logged here so a future pass doesn't re-trip on it.)
+```
+
+**Read every one of the 74 functions' own body with `pg_get_functiondef(oid)` myself** (not re-used
+from PR #187's own scratchpad, which no longer exists), cross-referenced against the 43-table
+RESTRICTIVE list via a throwaway Python regex pass (kept in this pass's own scratchpad, not
+committed) that flags, per function, which of the 43 tables its body text mentions - then read each
+flagged function's actual logic by hand, since a text mention is not proof of an unguarded read or
+write. Independently confirmed, by category, matching PR #187's own classification:
+- **The two RESTRICTIVE-policy predicates themselves** (`is_employee_in_company`,
+  `own_linked_person_id`) - their own body IS the role check; nothing to re-check.
+- **5 functions genuinely unreachable by any session with a role to bypass** - confirmed via
+  `information_schema.routine_privileges` myself, not assumed from PR #187's list (which named only
+  2 of these 5 by name): `company_notification_recipients`, `lifecycle_unsubscribe_token_for`,
+  `record_workflow_heartbeat_finish`, `record_workflow_heartbeat_start` (all four granted
+  `service_role`/`postgres` only, zero grant to `anon` or `authenticated`), plus
+  `discipline_category_suggestions_guard` (`returns trigger`, so not independently callable by
+  anyone regardless of grant - confirmed category, not counted among PR #187's "service-role-only"
+  pair since it's a different reason entirely).
+- **`start_company_trial`** - also `returns trigger`; confirmed directly by trying to call it
+  (`select start_company_trial();` on the scratch database raised `trigger functions can only be
+  called as triggers`, exit 1) rather than inferring this from the return type alone.
+- **17 `platform_admin_*` functions, not 13 as PR #187's own prose says** - grepped every one of
+  the 17 function bodies (not a sample) for a literal `is_platform_admin()` call: all 17 have it.
+  Another cosmetic undercount in their write-up's prose, not a missed function - their own itemized
+  bullet list actually names all 17, the "13" in the summary sentence is just wrong.
+- **12 `tt_*` RLS-predicate/trigger helpers** - 8 are `returns trigger` (uncallable directly, same
+  proof as `start_company_trial`), 4 are `returns boolean`. One correction to PR #187's own
+  classification, logged for the record but NOT actionable (see below): `tt_pack_company` is
+  grouped in their write-up with `tt_person_in_company`/`tt_tender_visible_to` as "bare id-to-id
+  relationship booleans" - it is not. `select p.proname, p.prorettype::regtype::text ... where
+  p.proname = 'tt_pack_company'` returns `uuid`, not `boolean`; its body is `select company_id from
+  tender_packs where id = p_pack` with zero membership check, granted to `authenticated`. This means
+  ANY authenticated user (not employee-specific - every role, including a member of a completely
+  unrelated company) can look up the `company_id` behind an arbitrary `tender_packs.id`, bypassing
+  that table's own tenant-isolation `using (is_company_member(company_id))` policy. **Not pursued as
+  a fix this pass**, for three reasons worth recording rather than re-deriving later: (1) it is not
+  an `is_employee_in_company()`-shaped bug at all - it is a base-tenant-isolation leak affecting
+  every role equally, a different bug class from this pass's own chartered angle; (2) the payload is
+  a single opaque UUID with no attached business data, and knowing it unlocks nothing further (any
+  SECURITY DEFINER function that accepts a company id still independently checks
+  `is_company_member()`/`is_employee_in_company()` on it) - the same "boolean-shaped, no real
+  severity" calibration this doc has already used for `tt_person_in_company`/`tt_tender_visible_to`
+  themselves; (3) it is almost certainly an internal helper (used inside `tt_check_same_company`'s
+  own trigger body and similar) that was never meant to be independently callable and would need its
+  `authenticated` grant simply revoked, not a logic change - a one-line, near-zero-risk fix, but
+  still a grant change on a function other trigger bodies call internally, so it is named here as a
+  candidate for a future pass to pick up deliberately rather than folded into this one's own
+  unrelated verification pass.
+- **The remaining ~29 non-helper, non-admin functions** - each read individually, not inferred from
+  shape: 12 already fixed only on PR #176's own unmerged branch (confirmed one of them,
+  `company_member_labels()`, is STILL unguarded on real `main` today - `pg_get_functiondef` shows
+  only `where is_company_member(cm.company_id) or ... = 'service_role'`, no role check at all - by
+  direct read, not assumed from the PR's own diff); 2 only on PR #182's branch; 2 are the open,
+  untouched Finding 204/PR #186 (`apply_cv_extraction_checked`/`apply_my_cv_extraction_checked`);
+  `record_tender_document` is PR #187's own fix (below); the other ~12
+  (`apply_payfast_itn`/`create_company_and_join`/`create_company_invite_checked`/`invite_preview`/
+  `redeem_company_invite`/`remove_member_checked`/`set_member_role_checked`/
+  `set_my_daily_digest_opt_in`/`submit_requirement_extraction_review`/`tender_folder_readable`/
+  `unsubscribe_lifecycle_email` plus the 4 idempotency/logging inserts
+  `claim_notification`/`record_deadline_reminder_sent`/`record_notification_sent`/
+  `record_operational_alert_sent`/`signups_enabled`) were each read in full and confirmed benign:
+  gated by `tt_is_company_admin()`/`is_platform_admin()`, self-scoped to the caller's own row,
+  insert-only logging with no sensitive read, or a deliberate unguessable-bearer-token design
+  (confirmed directly in `0077_company_invites_and_employee_role.sql`'s own `company_invites` table:
+  `token text ... default encode(gen_random_bytes(24), 'hex')`, with an explicit comment "email...
+  never validated... the link itself is what's shared" - this is `redeem_company_invite`'s and
+  `invite_preview`'s own design, not a gap, and the identical pattern `unsubscribe_lifecycle_email`
+  uses). `apply_payfast_itn` is reachable by `anon` AND `authenticated` with no role check at all,
+  but that is Finding 168's own already-named revenue-integrity territory (any caller, employee or
+  not, who can forge a matching-amount ITN call), explicitly off-limits to touch per the standing
+  guardrails - not a new, employee-specific finding, so left exactly as found.
+
+**Confirmed red and green myself, independently, in a fresh scratch Postgres - not trusting PR
+#187's own claimed reproduction.** Built one scratch database from `main`'s own 113 migrations only
+(no PR content), seeded one company with an 'owner' and an 'employee' member, one tender it owns,
+one `tender_packs` row, one real `tender_requirements` row, and a matching `storage.objects` row.
+Acting as the employee (`set role authenticated; select set_config('test.uid', '<employee uuid>',
+true)`): `select count(*) from tenders`/`tender_packs` both `0` (RLS genuinely blocks direct
+access), then `select record_tender_document(...)` **succeeded**, returned a new id, and a follow-up
+superuser read showed a real `tender_documents` row created AND the real `tender_requirements` row
+(`position_code = 'PL'`) **deleted** - independently reproducing PR #187's own red finding on `main`
+exactly as described. Then fetched PR #187's own `0126_record_tender_document_employee_gap.sql` from
+`refs/pull/187/head` read-only (`git show`, into this pass's own scratchpad, never checked out as a
+working tree), applied it to a second, separately-built scratch database on top of the same 113
+migrations, and re-ran the identical employee call: **refused**, raising the exact `42501` message
+PR #187's own write-up quotes, before touching either table - a follow-up superuser read confirmed 0
+`tender_documents` rows and the real `tender_requirements` row still present (count 1, unchanged).
+The owner's identical call on the same green database still succeeded unchanged (new
+`tender_documents` row, real resync). Both scratch databases dropped immediately after use; the
+Postgres service stopped at the end of this pass; the disposable `pr187-readonly-check` branch
+deleted.
+
+**Conclusion: genuine negative for this pass's own specific question ("is there a NEW gap PR #187's
+own sweep missed, or did `main` grow a new one since").** `main` has not grown a single new
+`security definer` function since PR #187 ran its own sweep (same 113 migrations, same 74/45/43
+catalog), and this pass's own full, independent re-read of all 74 function bodies found no gap PR
+#187's write-up missed, beyond the two cosmetic prose-count corrections and the one real-but-
+out-of-scope-and-low-severity `tt_pack_company` grant observation, all logged above so a future pass
+doesn't need to re-derive them. `record_tender_document()` remains the one genuine, real,
+independently-confirmed gap, and it remains fixed ONLY on PR #187's own still-open, unmerged branch -
+nothing for this pass to push or re-fix.
+
+**Is the SECURITY DEFINER catalog sweep exhausted?** Yes, re-confirmed independently rather than
+taken on faith - for both "does the function set include anything new" (no, `main`'s migrations
+haven't moved) and "did the prior pass's own read of each function hold up to a second, independent
+read" (yes, with the two cosmetic corrections and one logged-but-out-of-scope grant observation
+above). This angle stays exhausted until one of the 9 open PRs in this family actually merges and
+changes what's really on `main`.
+
+**Recommended next concrete angle, in order of how fast each would likely pay off:**
+1. **The orthogonal "predicate correctness" angle PR #185's own write-up named and PR #187's own
+   write-up re-named as still open** - this family of sweeps (0117/0118/0119/0121/0125/0126) has so
+   far only asked "does an employee get blocked" (a RESTRICTIVE policy's EXISTENCE). It has not yet
+   asked, systematically, whether every owner/admin/member-facing `using`/`with check` predicate on
+   the 43-table RESTRICTIVE list (or the ~29 non-admin SECURITY DEFINER functions above) checks
+   `company_id` against the right column, or whether a nullable-FK `using` clause silently evaluates
+   to `false` (quietly hiding rows) instead of ever raising - a different failure shape than
+   "missing grant entirely," never sat down and swept by name across this specific 43-table set.
+2. **`tt_pack_company`'s own grant** - revoke `authenticated` EXECUTE on this one function (it looks
+   like an internal-only helper never meant to be called directly by a client) - cheap, well-scoped,
+   but genuinely a different, lower-severity bug class than the employee-RLS family, so named as its
+   own candidate rather than folded into a future employee-RLS pass by mistake.
+3. **Re-check the still-untouched 2-PR backlog (`#164`/`#165`) for drift against current `main`** -
+   neither is an RLS/authorization PR (a UI copy/calculation rework and a 4-defect UI fix batch per
+   their own titles), so lower priority for a "standing solution-architect review" session than (1),
+   but the oldest open PRs in the whole backlog and never re-checked for staleness since they were
+   opened.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap (and its
+`apply_payfast_itn()` sibling, confirmed again this pass to share the identical no-role-check shape -
+still explicitly off-limits), and Finding 190's own pre-existing-SANRAL-pack `field_provenance`
+backfill all remain exactly as left, untouched, per the standing guardrails. All 20 open PRs
+(`#164`/`#165`/`#176`-`#193`) remain open and unmerged - re-confirmed via the GitHub REST API at the
+start and the end of this pass; nothing merged, closed, or rebased by anyone, including this
+session. No Finding number consumed (this is a negative result, not a new Finding, per the standing
+guardrail) - `main`'s own `QA-Edge-Case-Findings.md` still tops out at Finding 203 (the sibling
+track's own Finding-203/PR-#185 numbering collision, already flagged for Sarel, not re-litigated
+here). **Nothing pushed to `main` by this pass except this docs entry.**
+
+To verify independently: confirm `ls app/supabase/migrations | sort -V | tail` still shows `0123` as
+`main`'s highest migration. Build a scratch Postgres via `engine/security/replay_schema.sh` against
+`main`'s own 113 migrations and re-run both catalog queries above, confirming 74/45/43. Read
+`company_member_labels()` via `pg_get_functiondef('company_member_labels'::regproc)` and confirm it
+checks only `is_company_member()`/`service_role`, never `is_employee_in_company()`, on real `main`
+today. Read `tt_pack_company` the same way and confirm its return type is `uuid` and its grant
+includes `authenticated` with no membership check in its body. Reproduce the employee-vs-
+`record_tender_document()` red/green sequence above by hand (pre- and post- PR #187's own `0126`,
+fetched read-only via `git show refs/pull/187/head:app/supabase/migrations/
+0126_record_tender_document_employee_gap.sql`). Confirm via the GitHub REST API that all 20 PRs
+remain open/unmerged and that `main`'s own `QA-Edge-Case-Findings.md` still tops out at 203.
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
