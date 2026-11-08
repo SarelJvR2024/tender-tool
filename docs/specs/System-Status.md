@@ -1,5 +1,167 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): storage.objects - a whole DIFFERENT schema's own RLS, never swept by PRs #185/#186/#187's public-schema SECURITY DEFINER catalog - had the exact same employee-RLS-bypass shape on the 'tender-documents' bucket's manual/private company prefixes; genuine, independently red/green-verified authorization bypass (Finding 206), fixed in migration 0127, **opened as PR #188 per the binding guardrail (never a direct push for an auth-bypass finding), not merged**
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`097de16` (the immediately preceding pass's own exhaustive Route-Handler/engine grant-map negative).
+Re-fetched again immediately before pushing this pass's branch - still `097de16`, no sibling commit
+landed in between; the concurrent sibling "QA/robustness review" track made no push this pass either.
+Re-checked the open-PR backlog via `gh api repos/sareljvr2024/tender-tool/pulls?state=open` at the
+start and again at the end: 14 open, the same set handed off (`#164`/`#165`/`#176`-`#187`) - nothing
+merged, closed, or rebased by anyone, including this session. Per the binding guardrails, `#164`/
+`#165`/`#183`/`#184`/`#185`/`#186`/`#187` were read **read-only** where needed (their migration
+numbers and, for `#176`/`#187`, their own diffs, to confirm scope and avoid a migration-number
+collision - see below) and never touched, built on, or merged; nothing was merged by this session.
+A real scratch Postgres (built fresh from `engine/security/replay_schema.sh`, three separate
+databases across this pass's own red/green/owner-unaffected checks) was used throughout and dropped
+again at the end (`drop database` x3, confirmed via `\l` showing only `postgres`/`template0`/
+`template1` left); the Postgres service itself was started for this pass (it was down beforehand)
+and is left running only insofar as the container's own baseline state - no extra service was left
+newly enabled beyond what replaying migrations needed. No `git worktree` or temporary branch exists
+locally beyond the one pushed and left open as `fix/tender-documents-storage-employee-gap` (PR #188
+itself, intentionally not deleted - it's the open PR).
+
+**This pass's primary task, per the standing brief: the immediately preceding three passes' own
+named next lead - `storage.objects` is a DIFFERENT schema than `public`, never walked by PR #187's
+own systematic SECURITY DEFINER catalog sweep (which only ever enumerated
+`pg_policies where schemaname='public'`) - specifically the "members upload/remove private
+documents" policy (migration 0032) on the `tender-documents` bucket, flagged by name as checking
+only `is_company_member()`, never `is_employee_in_company()`.**
+
+**Read every real RLS policy on `storage.objects` in a scratch Postgres built from all 113
+migrations through `0123` (the literal query, reproducible exactly):**
+
+```sql
+select schemaname, tablename, policyname, permissive, cmd, qual, with_check
+from pg_policies where schemaname='storage' and tablename='objects' order by policyname;
+```
+
+**Full result: 13 policies across 9 buckets.** `admin-harness-artifacts` (SELECT, platform-admin
+only - no employee relevance). `discovered-tender-documents` (SELECT, bucket-wide, no auth beyond
+signed-in - read-only, no employee relevance). `tender-documents` (5 policies - the brief's own
+named target): SELECT's own `manual`/`private` CASE branch, plus the INSERT/DELETE pair for each of
+`manual`/`private`, ALL check `is_company_member(folder[2])` alone; the SELECT's `else` branch for
+every other folder (shared-tender template boilerplate) uses `tender_folder_readable()` +
+`tt_template_object_readable()`, a deliberately company-INDEPENDENT visibility rule (any authenticated
+user of any company may read a SHARED tender's own published documents) - confirmed by reading
+`tender_folder_readable()`'s own body, not assumed, and correctly left untouched by this pass's fix.
+Six more buckets - `company-documents`, `cv-documents`, `experience-documents`, `narrative-documents`,
+`onboarding-documents`, `submission-packs` - are each a single `for all to authenticated using/with
+check (is_company_member(folder[...]))` policy, same shape, **not fixed this pass** (see "Is this
+angle exhausted?" below).
+
+**Confirmed the `tender-documents` gap is genuinely reachable, not theoretical, by tracing a real call
+path an employee can actually invoke today - not just reading the policy text.** `manual/` backs
+`load_manual_tender()`/`add_manual_tender_documents()` (0024); `private/` backs
+`tender_private_documents` (0032, "your private documents" on a shared tender). Both upload straight
+from the browser, deliberately bypassing the 4.5 MB Server Action body cap (0024's own header
+comment) - `app/app/tenders/new/manual-tender-form.tsx`'s `uploadAll()`, used by `ManualTenderForm`/
+`AddTenderDocumentsForm` (manual/) and `AddPrivateDocumentsForm` (private/, embedded in
+`app/app/tenders/[id]/private-documents.tsx`, part of `/tenders/[id]`). PR #176's own (unmerged)
+write-up already independently established that `/tenders/[id]` genuinely renders in full for an
+employee who follows a link into it (`AppShell.tsx`'s employee check only swaps the nav, never gates
+page content) - and `storage.objects` has no foreign key to `tenders` at all, so even a MADE-UP
+tender id works exactly as well as a real one. No RPC and no table read/write of
+`tender_private_documents`/`tenders`/`tender_packs` is needed anywhere in this path - it's a client
+call straight to Supabase's own Storage REST endpoint, governed only by `storage.objects`' own RLS.
+
+**Independently reproduced red-then-green in a real scratch Postgres (never concluded from
+code-reading alone), full transcript in `docs/specs/QA-Edge-Case-Findings.md` Finding 206:** seeded
+one company/owner/employee as superuser; as the employee (`set local role authenticated; select
+set_config('test.uid', '<uuid>', true)`), confirmed the table-level control already holds (`tenders`/
+`tender_packs` both return 0 rows), then, **pre-fix**, successfully `insert`ed into both
+`manual/<company>/<made-up-tender>/evil.pdf` and `private/<company>/<made-up-tender>/evil2.pdf`, and
+- after the owner uploaded a REAL `private/.../real-bid-document.pdf` - successfully `select`ed
+(read) and then `delete`d it outright, confirmed gone by a final superuser read. **Post-fix
+(migration `0127` applied):** the identical employee inserts both failed with `ERROR: new row
+violates row-level security policy "tender-documents: employee excluded, insert"`; the employee's
+`select` on the owner's real file returned 0 rows; the employee's `delete` matched 0 rows; the file
+was confirmed still present afterward. A separate check on the same post-fix database confirmed the
+owner's own select/insert/delete on the same bucket/paths were completely unaffected
+(`is_employee_in_company()` is false for `owner`, so every new RESTRICTIVE policy ANDs away to `true`
+- 0077's own convention, verified live here, not assumed).
+
+**Fix: migration `0127_tender_documents_storage_employee_gap.sql` - three new, additive RESTRICTIVE
+policies** on `storage.objects`, scoped to `bucket_id = 'tender-documents'` and
+`(storage.foldername(name))[1] in ('manual', 'private')` only (SELECT/INSERT/DELETE, one each), each
+`not (... and is_employee_in_company(folder[2]::uuid))`. Nothing existing was dropped or edited - the
+pre-existing 0024/0032 PERMISSIVE policies are untouched; these three narrow what they already grant,
+same shape every other employee-RESTRICTIVE policy in this codebase uses.
+
+**Test coverage: new `part2_storage_employee_gap(db)` in `engine/security/test_tenant_isolation.py`,
+printed as `[20]`, wired into `main()`.** Reproduces the exact red/green sequence above as a
+permanent, repeatable check. Re-ran the whole suite against a freshly-replayed scratch database both
+WITHOUT migration `0127` (confirmed `7 FAILED`, exactly the 5 exploit assertions plus 2 knock-on
+assertions whose own precondition the exploit had already destroyed) and WITH it (`ALL PASSED`,
+every pre-existing check `[1]`-`[19]` plus the new `[20]`, nothing regressed). Also ran, from `app/`:
+`npm run typecheck` (clean), `npx eslint .` (0 errors, 3 pre-existing unrelated warnings), `npx
+vitest run` (71/71 files, 532/532 tests), the full `node --experimental-strip-types <file>.test.ts`
+loop across every `*.test.ts` in the repo (every file `# fail 0`), and `npx next build` (clean,
+every route listed with its expected rendering mode) - this fix is migration-only plus the Python
+test file, so none of these were expected to move, and none did.
+
+**Migration-number collision check, per the standing guardrail.** Read every open PR's own diff for
+a migration file (`gh api repos/.../pulls/<n>/files`): `#176`→`0119`, `#182`→`0121`, `#183`→`0124`,
+`#184`→`0124`, `#185`→`0124`, `#186`→`0125`, `#187`→`0126` (confirming the three-way `0124` collision
+the standing brief already named, and that `0126` is the highest any open PR currently claims).
+`main`'s own highest is `0123`. Used `0127` - unclaimed by `main` or any open PR as of this check.
+
+**Opened as a PR, per the binding guardrail - NOT a direct push, and NOT merged.** Branch
+`fix/tender-documents-storage-employee-gap`, PR **#188** ("fix(rls): storage.objects' own RLS on the
+tender-documents bucket bypassed the employee role entirely"). Per the guardrail, "any genuine
+authorization-bypass finding is the most severe class in this entire review and must go through a
+PR, never a direct push, regardless of how small the diff looks" - this is exactly that class, so it
+was never a direct-push candidate even though the diff is small (one migration, one test-file
+addition). Not merged by this session; Sarel's own review is still required, same as `#176`-`#187`.
+
+**Is this angle exhausted? No - six more buckets share the identical shape, confirmed by the same
+query, not yet reproduced red/green.** `company-documents` (backs `held_registrations`/
+`company_properties`/`property_documents`/`bank_accounts`/`company_principals`/
+`company_document_templates` - all "employee has no access", 0077), `experience-documents`
+(`experience_items`, "employee has no access"), `narrative-documents` (`narrative_documents`,
+"employee has no access", 0087), `onboarding-documents` (`onboarding_uploads`/
+`onboarding_document_results`, "employee has no access"), `submission-packs` (`generated_documents`,
+"employee has no access") are all almost certainly the same "full block" bug, by the same
+`for all ... is_company_member(...)` shape, on tables this review has already made fully
+employee-RESTRICTED. **`cv-documents` is the one genuinely different, highest-severity candidate**:
+its own backing tables (`cv_uploads`/`generated_cvs`/`cv_extraction_results`) give an employee "own
+person only" access, not a full block, and the real app flow (`app/app/my-cv/actions.ts`) already
+resolves the employee's own `personId` SERVER-SIDE before building the storage path - so the intended
+flow is safe - but the storage RLS itself has no "own person" scoping at all, only
+`is_company_member(folder[1])` where `folder[1]` is the COMPANY id, not the person id - meaning an
+employee could, via a direct client call naming a COLLEAGUE's person id in the path
+(`<company>/people/<OTHER-person>/uploads/...`), read/upload/delete a colleague's real CV documents
+directly through Storage - the single most on-the-nose violation of what the 'employee' role (0077's
+own header: "review THEIR OWN CV ... not see ... other people's records") exists to prevent, and not
+yet reproduced red/green. **Concrete next lead for a future pass:** reproduce `cv-documents` first
+(highest severity, the employee role's own headline feature), then sweep the other 5 "full block"
+buckets the same mechanical way this pass did for `tender-documents` - each is a narrow, additive,
+same-shape RESTRICTIVE-policy fix, but each needs its own red/green scratch-Postgres repro (and its
+own PR, per the same binding guardrail) before being folded into a migration, exactly as this pass
+did. Keeping this PR scoped to the one already-reproduced, already-reachable `tender-documents`
+finding rather than a six-bucket migration in one go, per this review's own established "one finding,
+one PR" pattern (`#176`/`#182`/`#185`/`#186`/`#187`).
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left, untouched,
+per the standing guardrails. All 14 open PRs remain open and unmerged, PLUS this pass's own new
+**PR #188**, also open and unmerged - re-confirmed via the GitHub REST API at the start and the end
+of this pass; nothing merged, closed, or rebased by anyone, including this session.
+
+To verify independently: run the `pg_policies` query above against a freshly-replayed scratch
+Postgres and confirm the 13-policy/9-bucket result described. Build two scratch databases from
+`engine/security/replay_schema.sh`, one through migration `0123` only and one including `0127`; as an
+employee-role member of a seeded company, confirm `insert into storage.objects (bucket_id, name)
+values ('tender-documents', 'manual/<company>/<any-uuid>/x.pdf')` succeeds pre-fix and fails post-fix
+quoting policy `"tender-documents: employee excluded, insert"`. Run `TENANT_PSQL="psql -h 127.0.0.1
+-p 5432 -U postgres -d <db>" PGPASSWORD=postgres python3 engine/security/test_tenant_isolation.py`
+from inside `engine/security/` against both databases and confirm `7 FAILED` pre-fix / `ALL PASSED`
+post-fix. Confirm via the GitHub REST API that PR #188 and all 14 prior PRs remain open/unmerged, and
+that `main`'s own highest migration is still `0123` (Finding 206 and migration `0127` live only on
+PR #188's own branch, unmerged).
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -

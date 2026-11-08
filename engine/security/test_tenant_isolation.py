@@ -1060,6 +1060,58 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_storage_employee_gap(db):
+    """Finding 206 (standing review, 2026-11-08), migration 0127: the
+    'tender-documents' bucket's own storage.objects RLS for its
+    manual/<company>/<tender>/... (0024) and private/<company>/<tender>/...
+    (0032) prefixes checked only is_company_member(...), never
+    is_employee_in_company(...) - a client-reachable write path
+    (supabase.storage.from(...).upload/.remove(), no RPC or table write
+    involved at all) that completely bypassed the employee-RESTRICTIVE
+    policies 0077/0032 already put on tenders/tender_packs/
+    tender_private_documents for this exact feature. storage.objects has no
+    FK to tenders, so even a made-up tender id works. Own two-company-free
+    fixture (one company, one owner, one employee), since this needs no
+    cross-tenant angle - it's an employee bypassing their OWN company's
+    role boundary via a different schema's RLS entirely."""
+    print("\n[20] Storage: 'tender-documents' manual/private paths - employee gets no more than table RLS already gives them")
+    i = {k: str(uuid.uuid4()) for k in ("uEmp", "uOwner", "c", "t")}
+    c, t, uEmp, uOwner = i["c"], i["t"], i["uEmp"], i["uOwner"]
+    db.one(f"""
+insert into auth.users (id, email) values ('{uEmp}', 'storage-emp@example.test'), ('{uOwner}', 'storage-owner@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso Storage Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uOwner}', 'owner'), ('{c}', '{uEmp}', 'employee');
+select 1;""")
+
+    print("  -- employee can't write into their own company's manual/ or private/ prefix at all --")
+    bad, _ = refused(db, f"insert into storage.objects (bucket_id, name) values ('tender-documents', 'manual/{c}/{t}/evil.pdf')", uEmp)
+    check(bad, "employee insert into manual/<company>/<any-tender-id>/... refused")
+    bad, _ = refused(db, f"insert into storage.objects (bucket_id, name) values ('tender-documents', 'private/{c}/{t}/evil.pdf')", uEmp)
+    check(bad, "employee insert into private/<company>/<any-tender-id>/... refused")
+
+    print("  -- a real file the owner uploaded: employee can't see it or delete it directly via storage --")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('tender-documents', 'private/{c}/{t}/real-bid-document.pdf')", uOwner)
+    check(ok, f"owner uploads a real private document ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = 'private/{c}/{t}/real-bid-document.pdf'", uEmp) == "0",
+          "employee can't SELECT the owner's real private document")
+    ok, out, err = db.run(
+        f"with d as (delete from storage.objects where bucket_id = 'tender-documents' "
+        f"and name = 'private/{c}/{t}/real-bid-document.pdf' returning 1) select count(*) from d", uEmp)
+    check((not ok) or out.splitlines()[-1] == "0", f"employee deletes 0 rows attempting to remove it ({out if ok else 'refused'})")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = 'private/{c}/{t}/real-bid-document.pdf'") == "1",
+          "the real file is still in storage afterwards (superuser read)")
+
+    print("  -- owner/admin/member access is completely unchanged by the new restrictive policies --")
+    check(db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = 'private/{c}/{t}/real-bid-document.pdf'", uOwner) == "1",
+          "owner still sees their own real private document")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('tender-documents', 'manual/{c}/{t}/owner-upload.pdf')", uOwner)
+    check(ok, f"owner can still upload into manual/ ({err.splitlines()[0] if err else 'ok'})")
+    ok, out, err = db.run(
+        f"with d as (delete from storage.objects where bucket_id = 'tender-documents' "
+        f"and name = 'private/{c}/{t}/real-bid-document.pdf' returning 1) select count(*) from d", uOwner)
+    check(ok and out.splitlines()[-1] == "1", f"owner can still delete their own real private document ({err.splitlines()[0] if err else out})")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1069,6 +1121,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_storage_employee_gap(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
