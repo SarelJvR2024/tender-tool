@@ -1,5 +1,243 @@
 # System Status
 
+## This pass (2026-11-08xlv, standing solution-architect review, background worker): the specific untested edge case the immediately preceding pass flagged but ran out of time to chase - systematically re-tested all 12 of migrations 0124-0136's own employee-role fixes against EVERY real `company_members.role` value (not just the two roles each PR's own red/green write-up already tried), in a real scratch Postgres per fix, and separately, directly verified (rather than trusted) the preceding pass's own "RLS predicate NULL-handling is fail-closed, unlike a PL/pgSQL IF-raise guard" reasoning; no NEW bug found anywhere - `admin` and `member` behave identically to `owner` in every one of the 12 fixes, confirmed live, not assumed - and the RLS fail-closed reasoning holds up under direct, live testing on both an original (main) RESTRICTIVE policy and a PR's own storage policy; the two already-known findings (PR #186's `apply_my_cv_extraction_checked()` NULL bug, and the PR #187/#195 `record_tender_document()` merge-order collision) were independently reconfirmed live rather than re-derived from reading alone, with admin/member now added to #186's own role coverage. Nothing pushed to `main` except this docs entry; no PR opened, closed, or merged; no new `QA-Edge-Case-Findings.md` Finding number consumed (no new bug was found AND fixed - the one bug this pass's testing touches, #186's own, still lives only on that PR's off-limits branch, already documented as a recommendation by the immediately preceding pass).
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`4d832fb0` (the immediately preceding pass's own NULL-bug-finding entry). Re-fetched again
+immediately before writing this entry - still `4d832fb0`, no sibling commit landed in between.
+Re-checked the open-PR backlog via the GitHub REST API (`gh api
+repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q '.[].number' | sort -n`) at the start
+and the end: 23 open, exactly `#164`/`#165`/`#176`-`#196` - nothing merged, closed, or rebased by
+anyone, including this session. `docs/specs/QA-Edge-Case-Findings.md` on `main` still tops out at
+Finding 203, confirmed by grepping every `### Finding <n>` heading and sorting numerically, not
+assumed from memory.
+
+**Step 1 - the authoritative `company_members.role` enum, confirmed by reading the constraint, not
+assumed.** `0001_init_schema.sql:68` originally defines `role text not null default 'member' check
+(role in ('owner', 'admin', 'member'))`. `0077_company_invites_and_employee_role.sql:165-167` (the
+migration that adds the employee role) does `alter table company_members drop constraint
+company_members_role_check; alter table company_members add constraint
+company_members_role_check check (role in ('owner', 'admin', 'member', 'employee'));`. Grepped every
+migration file for any later `alter table company_members ... role` or a second `role in (...)`
+check touching this table (`0010`/`0050` each add a DIFFERENT, unrelated `role`-named column -
+`company_members.tender_role` (0010, the per-tender workflow role) and `company_principals.role`
+(0050, director/shareholder/both) - confirmed by reading both files' own `role` lines; neither
+touches `company_members_role_check`). No migration after `0077` changes this constraint again. **The
+real, current, authoritative enum is exactly four values: `owner`, `admin`, `member`, `employee`.**
+Also confirmed `is_employee_in_company(p_company_id)` (0077) is `select exists (select 1 from
+company_members where company_id = p_company_id and user_id = auth.uid() and role = 'employee')` -
+a SQL `EXISTS`, which can only ever be `true`/`false`, never `null` - by direct read, matching the
+preceding pass's own finding and re-confirmed live below (sanity-checked against all 5 seeded test
+users, never returned null for any of them).
+
+**Step 2 - method: one real scratch Postgres per fix, not 12 kept open at once.** Built ONE base
+scratch database from `main`'s real 113 migrations (`engine/security/replay_schema.sh -h 127.0.0.1
+-p 5432 -U postgres -d tt_scratch_base`), then marked it `datistemplate = true` so each of the 12
+per-PR test runs could `create database tt_pr<n> template tt_scratch_base` in under a second instead
+of re-replaying 113 migrations every time - the per-PR migration file (fetched read-only exactly the
+way the preceding pass did, via a disposable `refs/remotes/origin/pr/<n>` ref, never a working-tree
+checkout) was then applied on top of that fresh clone, a common 5-role seed (one company; one
+`owner`; one `admin`; one `member`; one `employee` LINKED to their own `people` row; a second
+`employee` with NO `people` row linking to them at all - the exact reachable state `create_company_
+invite_checked(p_linked_person_id := null)` produces) was loaded, the role-specific test queries ran
+(`begin; set local role authenticated; select set_config('test.uid', '<uid>', true); <op>;
+rollback;` - note `true` as set_config's third arg per the standing brief), and the database was
+dropped immediately after. All 12 disposable PR refs and all scratch databases were deleted/dropped
+at the end of this pass (full accounting at the bottom).
+
+**Step 3 - the 12 fixes, each tested against the full 4-role enum (plus, for the two fixes that
+depend on `own_linked_person_id()`, both employee sub-states - linked and unlinked), with REAL
+success/failure observed from REAL `psql` output, not inferred:**
+
+- **`0124` (PR #185, `savings_counted_steps`, table-level RESTRICTIVE `for all` policy).** Seeded one
+  baseline row as superuser. `owner-select`/`admin-select`/`member-select` each saw `count = 1`;
+  `employee-select` saw `count = 0`. `owner-insert`/`admin-insert`/`member-insert` each succeeded
+  (new row returned); `employee-insert` raised `new row violates row-level security policy
+  "savings_counted_steps: employee has no access"`. `owner-delete`/`admin-delete`/`member-delete`
+  each matched and returned the baseline row's id; `employee-delete` matched 0 rows. **Clean across
+  all 4 roles - `admin` and `member` behave identically to `owner`, confirmed live, not assumed.**
+- **`0125` (PR #186, `cv_extraction_apply_employee_gap` - the already-known bug).** Seeded a
+  `pending_review` `cv_extraction_results` row for a "colleague" person (not linked to any account).
+  `apply_cv_extraction_checked()` against the colleague's row: `owner`/`admin`/`member` each
+  SUCCEEDED (no error); `employee_linked` AND `employee_nolink` both raised "Reviewing CV extractions
+  from the People page is managed by your company's owner, admin or member - not the employee role."
+  (42501) - this function has no `own_linked_person_id()` dependency at all (outright employee
+  block), so no NULL surface, and this pass's own live test now also closes the
+  "was admin/member actually tried, not just owner" gap the standing brief named: **yes, both now
+  directly confirmed unaffected.** `apply_my_cv_extraction_checked()` against the SAME colleague row:
+  `owner`/`admin`/`member` each SUCCEEDED (full access to any person in their company, by design);
+  `employee_linked` correctly raised "That extraction result wasn't found for you." (42501);
+  **`employee_nolink` SUCCEEDED with no error** - the bug, independently reproduced by this pass's
+  own fresh test (not reused from the preceding pass's run), on this pass's own freshly seeded data.
+  A same-person control (`employee_linked` calling it for THEIR OWN extraction/person) also
+  succeeded, confirming the guard (when it fires at all) narrows nothing beyond the one bad case.
+  Unchanged conclusion from the preceding pass; `admin`/`member` coverage is the genuinely new
+  evidence this pass adds.
+- **`0126` (PR #187, `record_tender_document_employee_gap`).** Seeded a confirmed `tender_packs` row
+  and the matching `storage.objects` row. `owner`/`admin`/`member` each SUCCEEDED (returned a new
+  `tender_documents` id); `employee_linked` AND `employee_nolink` both raised "Tender Workspace
+  templates are managed by your company's owner, admin or member - not the employee role." (42501).
+  No `own_linked_person_id()` dependency (outright block), confirmed clean for all 4 roles including
+  both employee sub-states.
+- **`0127`-`0133` (PRs #188-#193, the 7 storage-bucket employee-gap migrations across `tender-
+  documents`, `cv-documents`, `company-documents`, `experience-documents`, `submission-packs`,
+  `narrative-documents`, `onboarding-documents`).** For the 6 outright-exclude buckets
+  (`tender-documents`/`company-documents`/`experience-documents`/`submission-packs`/`narrative-
+  documents`/`onboarding-documents`), ran the identical SELECT/INSERT/DELETE role matrix against
+  real `storage.objects` rows in each bucket: in every one of the 6, `owner-select`/`admin-select`/
+  `member-select` each saw `count = 1` and `employee_linked-select`/`employee_nolink-select` each saw
+  `count = 0`; `owner-insert`/`admin-insert`/`member-insert` each succeeded and
+  `employee_linked-insert`/`employee_nolink-insert` each raised the bucket's own named RLS violation;
+  `owner-delete`/`admin-delete`/`member-delete` each matched the baseline row and
+  `employee_linked-delete`/`employee_nolink-delete` each matched 0 rows. **All 6 clean across all 4
+  roles and both employee sub-states - identical in shape and identical in live result.** The 7th,
+  `0128`'s `cv-documents` (the ONE bucket that narrows to "own person only" via the NULL-safe `IS
+  DISTINCT FROM cv_documents_path_person_id(...)`/`own_linked_person_id(...)` comparison), got a
+  FINER role matrix instead: seeded one object under the self person's own path and one under the
+  colleague's path. `owner-select`/`admin-select`/`member-select` each saw `count = 2` (both
+  objects, full company access); `employee_linked-select` saw `count = 1` (only their own);
+  `employee_nolink-select-TOTAL` saw `count = 0` - **this is the direct, live confirmation that the
+  correct `IS DISTINCT FROM` version denies an employee with no linked person EVERY real object in
+  the bucket, not just the malformed-path edge case, closing the loop the preceding pass's own
+  write-up left as "verified by hand" rather than freshly re-run.** A direct by-name select for the
+  colleague's object came back 0 rows (not an error) for `employee_nolink`. INSERT attempts under the
+  colleague's own path were tried for both `employee_linked` and `employee_nolink`: both raised `new
+  row violates row-level security policy "cv-documents: employee restricted to own person, insert"` -
+  the fail-closed direction holds on the WRITE side too, for both employee sub-states, not only read.
+- **`0134` (PR #194, `tt_pack_company_grant_revoke`).** Not a role-differentiated fix at all - a
+  blanket `revoke execute ... from authenticated`. Tested anyway, per the standing brief's own "test
+  against every role" instruction: `owner`/`admin`/`member`/`employee_linked` each got `permission
+  denied for function tt_pack_company` calling it directly. **Confirmed role-NEUTRAL, as the fix
+  itself intends - every role is blocked equally, not just `employee` - no gap, nothing further to
+  check here per-role.**
+- **`0135` (PR #195, `own_path_double_dot_false_positive`) - the already-known `#187`/`#195` merge-
+  order collision, reconfirmed LIVE, not just via `grep`.** Applied `0135` ALONE on top of `main`
+  (i.e., simulating the exact state `main` would be in if `#195` merged without `#187`'s own
+  `0126` fix already present, or if `#195` merged AFTER `#187` and silently reverted it via its own
+  `create or replace function record_tender_document`): seeded the same `tender_packs`/
+  `storage.objects` rows as the `0126` test above, then called `record_tender_document()` as
+  `employee_linked`. **It SUCCEEDED** (returned a new `tender_documents` id) - live proof, not a
+  grep-only inference, that `0135`'s own copy of this function genuinely has no employee guard and
+  genuinely does reopen the bypass if it ever becomes the operative version on `main` without
+  `0126`'s fix layered on top. `owner` also succeeded (sanity control). This does not change the
+  already-documented risk or its status (still a known, named, not-yet-resolved merge-order risk for
+  whoever merges `#187`/`#195` to watch for - not a new finding, not this pass's call to fix on
+  someone else's open branch) - it only upgrades the EVIDENCE for it from code-reading to a live
+  reproduction, per the standing brief's "never conclude from code-reading alone for RLS/
+  authorization" rule.
+- **`0136` (PR #196, `tender_answers_path_traversal_guard`).** A bare CHECK constraint
+  (`tender_answers_check2`), which Postgres applies to every writer regardless of role - there is no
+  role-exemption clause a CHECK constraint could even have. Tested anyway: `owner` inserting a
+  traversal payload (`.../../co2/secret.pdf`) got `new row for relation "tender_answers" violates
+  check constraint "tender_answers_check2"`; the SAME `owner` inserting a legitimate path whose
+  FILENAME merely contains a literal `..` (`Report..Final.pdf`, matching `app/lib/safeFileName.ts`'s
+  allowed character set) SUCCEEDED - confirming no false-positive regression. `employee` inserting
+  anything at all got `new row violates row-level security policy "tender_answers: employee has no
+  access"` - that table-level block is `0077`'s own, pre-existing, and totally independent of this
+  constraint fix. **Confirmed role-neutral; no gap.**
+
+**Step 4 - the standing brief's own specific unresolved item: does the preceding pass's "RLS
+predicate NULL means fail-CLOSED, unlike a PL/pgSQL IF-raise guard which means fail-OPEN" reasoning
+actually hold, verified directly rather than trusted?** Built the same scratch database from `main`'s
+113 migrations alone (no PR migration layered on top - this tests the ORIGINAL, already-shipped
+`0077` RESTRICTIVE policies, not anything from the 12-PR family), seeded the same 5-role roster plus
+a real `people` row and a real `cv_uploads` row for the "colleague" person (not linked to any
+account), and acted as `employee_nolink` (confirmed first, live, that `own_linked_person_id(company)`
+really does return NULL for them, not assumed from the schema comment alone - `select
+own_linked_person_id(...)` came back empty). Results:
+- `select count(*) from people` as `employee_nolink` -> **`0`** (not `2`) - the RESTRICTIVE predicate
+  `not is_employee_in_company(company_id) or id = own_linked_person_id(company_id)` evaluates to
+  `false or NULL` = SQL `NULL` for every row (since `is_employee_in_company` is `true` for them, and
+  `id = NULL` is always `NULL`, never `true` or `false`), and Postgres RLS requires the predicate to
+  evaluate to exactly `true` for a row to be visible - `NULL` excludes the row, the same as `false`
+  would. **Fail-closed, confirmed live.**
+- `update people set phone = 'PWNED-BY-NOLINK-EMPLOYEE' where id = '<colleague>'` as the same
+  `employee_nolink` -> **0 rows returned/affected** - the identical NULL predicate on the `with
+  check`/`using` side of the write path, same fail-closed result, not an unrestricted write.
+- `select count(*) from cv_uploads` as the same `employee_nolink`, with a REAL, non-trivial row
+  present (not an empty-table false-positive) -> **`0`** - same shape, second table, same result.
+- Sanity controls on the SAME seeded data, same scratch database: `employee_linked` (who DOES have a
+  real `own_linked_person_id()`) saw exactly `1` row in `people` (their own, not `0`, not `2` -
+  proving the policy is a genuine narrowing, not a blanket deny-everyone bug masquerading as
+  "fail-closed"); `owner`/`admin`/`member` each saw all `2` rows (the RESTRICTIVE predicate's first
+  disjunct, `not is_employee_in_company(...)`, is unconditionally `true` for them, so the whole
+  predicate is `true` regardless of the second disjunct - no NULL surface reaches them at all).
+- **Independently cross-checked by the `0128`/PR #189 `cv-documents` storage-RLS result in Step 3
+  above (a DIFFERENT RESTRICTIVE policy, a DIFFERENT table, written by a DIFFERENT PR, using `IS
+  DISTINCT FROM` instead of a bare `=`) - same fail-closed direction, same live result shape
+  (`employee_nolink` -> 0 of 2 real objects visible, write refused).** Two independent RLS policies,
+  on two different tables/schemas, both confirm the same direction.
+
+**Conclusion on Step 4: the preceding pass's own reasoning holds. RLS predicate NULL-handling is
+genuinely, verifiably fail-CLOSED** (a `NULL` `using`/`with check` result denies the row/write, same
+as `false` would) **- the OPPOSITE of the PL/pgSQL `IF <condition> THEN RAISE` fail-OPEN direction**
+that made `0125`'s own `<>` a genuine bug (there, a `NULL` condition means the `RAISE` is skipped,
+which is the one branch that was supposed to DENY access - so `NULL` there means "allowed through",
+not "denied"). This is not a smaller version of the same risk living somewhere else; it is the
+reason the SAME nullable helper (`own_linked_person_id()`) is safe to compare with a bare `=` in six
+places (the original `0077` RESTRICTIVE policies on `people`/`projects`/`cv_uploads`/
+`generated_cvs`/`cv_extraction_results`/`person_role_eligibility`) and unsafe to compare with a bare
+`<>` in exactly one place (`0125`'s own PL/pgSQL guard) - confirmed live in both directions this
+pass, not re-derived from the operator alone.
+
+**Grep sweep: does the `<>`/`=`-against-a-nullable-helper pattern exist anywhere else in `0124`-
+`0136`, or in the original codebase, beyond the two already-known sites?** `grep -n
+"own_linked_person_id" app/supabase/migrations/*.sql` (main's real 113 migrations) returns exactly
+the six `0077` RESTRICTIVE-policy call sites (all plain `=`, all RLS-predicate context, all confirmed
+fail-closed-safe above), plus one unrelated comment (`0109`) and one `anon`-grant revoke (`0120`) -
+no PL/pgSQL `IF`-guard use of this function exists anywhere in `main` outside `0077` itself. The same
+grep against all 12 fetched PR migration files returns exactly two NEW call sites: `0125`'s own
+`<>` (the bug) and `0128`'s own `IS DISTINCT FROM` (correct) - nothing else. **No third site, no new
+instance of this bug shape, anywhere.** (The other 10 of the 12 fixes depend only on
+`is_employee_in_company()`, which is a `select exists(...)` - always `true`/`false`, never `null` -
+so they have no NULL surface of this kind to mishandle in the first place, confirmed both by reading
+every one of their bodies, per Step 3 above, and by this pass's own live `is_employee_in_company()`
+sanity check against all 5 seeded users, which never returned anything but `t`/`f`.)
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open and unmerged -
+reconfirmed via the GitHub REST API at the start and the end of this pass; nothing merged, closed, or
+rebased by anyone, including this session. `#185`-`#196` were read-only referenced (each PR's own
+migration file fetched via a disposable `refs/remotes/origin/pr/<n>` ref and applied to a throwaway
+scratch database, never checked out as a working tree, never built on, never pushed to); `#164`/
+`#165`/`#176`-`#184` were not touched at all this pass beyond being recounted in the open-PR listing.
+Finding 168, Finding 190's own `field_provenance` backfill, and every other previously-named
+off-limits item remain exactly as left. No new `QA-Edge-Case-Findings.md` Finding number consumed
+(216 remains the next free one) - this pass found no NEW bug to fix; the one bug its own testing
+touches (`0125`/PR `#186`) still lives only on that PR's own off-limits branch, already documented as
+a recommendation for Sarel by the immediately preceding pass, with no change to that recommendation's
+substance (admin/member coverage added as corroborating evidence, not a new finding). All 12
+disposable local refs (`refs/remotes/origin/pr/185` through `.../pr/196`) were deleted at the end of
+this pass via `git update-ref -d` (confirmed empty via `git for-each-ref refs/remotes/origin/pr/`
+afterward); none was ever checked out as a working tree, and `git worktree list` shows only the one
+real working tree on `main` throughout. Every scratch database created this pass (`tt_scratch_base`,
+used as a template for twelve `tt_pr<n>` clones plus one `tt_rls_nullcheck` clone for Step 4, each
+dropped immediately after its own test per the driver script's own `drop database` call) was
+confirmed gone via a final `\l` listing showing no `tt_*` database remaining, and the Postgres
+service (`pg_ctlcluster 16 main stop`) was confirmed `down` via `pg_lsclusters` at the end of this
+pass. **Nothing pushed to `main` by this pass except this docs entry; no PR opened, closed, or
+merged.**
+
+To verify independently: `gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q
+'.[].number' | sort -n` and confirm the same 23 numbers. Confirm the role enum with `grep -n
+"company_members_role_check" -A2 app/supabase/migrations/0077_company_invites_and_employee_role.sql`.
+Build a scratch Postgres from `main`'s own 113 migrations
+(`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d <dbname>`), seed a company with
+an `owner`, `admin`, `member`, an `employee` linked to their own `people` row, and a second `employee`
+with NO `people` row linking to them, plus a second, unlinked "colleague" `people` row with a real
+`cv_uploads` row; acting as the unlinked employee (`begin; set local role authenticated; select
+set_config('test.uid', '<uid>', true);`), confirm `select count(*) from people` and `select count(*)
+from cv_uploads` both return `0`, and that the same employee linked to their own person sees exactly
+`1` row in `people` - confirming the fail-closed direction holds for the ORIGINAL RESTRICTIVE
+policies, independent of any of the 12 PRs. Fetch any of PRs `#185`/`#187`/`#188`/`#190`-`#193`/`#194`/
+`#196` read-only (`git fetch origin +refs/pull/<n>/head:refs/remotes/origin/pr/<n>`), apply that one
+migration on the same scratch database, and re-run the same role matrix (owner/admin/member succeed,
+employee is blocked) to confirm each is clean; fetch `#186` and `#189` the same way to re-confirm the
+one known bug (`0125`) and the one known-correct comparison (`0128`) respectively, per the
+immediately preceding pass's own verification steps, which this pass's own independent run
+reproduced identically.
+
+---
+
 ## This pass (2026-11-08xliv, standing solution-architect review, background worker): picked up the one candidate the two immediately preceding passes both named and left unattempted - re-read every NEW or MODIFIED `security definer` function body that migrations 0124-0136 (across the 12 open PRs #185-#196) introduced, looking specifically for a bug the FIX ITSELF introduced, not the original gap each PR already closes - and found one, real and reproduced red/green: PR #186's own `apply_my_cv_extraction_checked()` (migration 0125) uses `p_person_id <> own_linked_person_id(v_company_id)` instead of `IS DISTINCT FROM`, so an employee-role member with NO linked `people` row at all (a real, reachable state, not a theoretical one - `create_company_invite_checked()` accepts `p_linked_person_id = null` for an 'employee'-role invite, and `redeem_company_invite()` happily joins `company_members` with that role regardless) gets a NULL guard condition, which PL/pgSQL's `IF` treats as false, and sails straight through the brand-new employee restriction into a full read/write bypass of a COLLEAGUE's own CV record - the exact same-shaped bypass 0125 itself was written to close, just for one specific employee subpopulation the fix's own red/green testing never tried. This bug lives ONLY on PR #186's own still-open, unmerged branch (not on `main`), and per the binding guardrails that branch is read-only reference for this review - so nothing was pushed and no competing PR was opened; this is written up in full below as a "recommendation for Sarel" finding (the same treatment this doc has already given other open-PR-only defects, e.g. `#176`'s stale comment), not as a numbered `QA-Edge-Case-Findings.md` entry, since that file's own house style is reserved for bugs found AND fixed - no new Finding number consumed. All 23 open PRs reconfirmed open/unmerged; nothing pushed to `main` by this pass except this docs entry.
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `898e083`
