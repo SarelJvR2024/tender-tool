@@ -1,5 +1,240 @@
 # System Status
 
+## This pass (2026-11-08l, standing solution-architect review, background worker): continued the PR-by-PR fresh-eyes line-by-line read on the remaining storage-bucket family - `#189` (`cv-documents`), `#190` (`company-documents`), `#191` (`experience-documents`) and `#192` (`submission-packs`), the four of the six-PR family that had only had a role-matrix re-test before this segment, not this specific technique. All four read in full, each cross-referenced against every table/policy/function name it touches, and all four's own red/green RLS claims reproduced live together in one real scratch Postgres (not concluded from reading alone). Found no new authorization-bypass bug in any of the four PRs' own fixes - all four are correct, severe, already-needed fixes, exactly as each one's own migration comment and Finding write-up (`#189` Finding 207, `#190` Finding 208, `#191` Finding 209, `#192` Finding 210) claims. But found one genuinely new, concrete, cross-open-PR collision worth recording: `#188`'s and `#189`'s own `engine/security/test_tenant_isolation.py` diffs each independently define a Python function named **`part2_storage_employee_gap(db)`** - byte-for-byte the same name - with completely different bodies (one tests `tender-documents`, the other `cv-documents`), each inserted at the identical point in the file and each wired into `main()` with an identical new call line in the identical place, neither PR aware the other exists. If both ever merge, Python's own name-rebinding semantics mean only the LAST definition in the merged file survives - the other bucket's entire regression test silently becomes dead code, called under its own name but running the wrong bucket's assertions, with no error anywhere. Widened the check across the whole six-PR storage family (`#188`-`#193`) and found a second, milder echo of the same unawareness: all six PRs (`#188` through `#193`) print their new Part-2 block under the identical human-readable index label `"[20]"` and all six insert their own new call in `main()` at the identical anchor line (right after `part2_team_billing_rpcs(Db(psql))`) - harmless for the four whose function NAMES are unique (`#190`/`#191`/`#192`/`#193` each use a distinct name), but a real, demonstrated duplicate-label/same-insertion-point hazard once more than one of the six merges. This is the same "two (here, six) open PRs share a surface, neither aware of the other" shape this segment has now found five times (`#186`'s NULL bug, `#187`/`#195`'s merge-order collision, `#176`'s lock regression, `#178`/`#180`'s fail-open gate), but this is the sharpest instance yet - an exact Python function-NAME collision, not just a shared primitive or a migration number. Documented-only below, per the standing precedent, since the bug lives only on two (more broadly, six) open, unmerged PR branches this review may not alter. Nothing pushed to any PR branch, no competing PR opened, no new `QA-Edge-Case-Findings.md` Finding number consumed (nothing here needed fixing on `main` or on a review-opened PR - every PR's own actual SQL fix is correct and independent; the collision is confined to the shared Python test harness file, which only becomes a live problem once two or more of these branches are merged together).
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`77db53b2` (the immediately preceding pass's own `#177`/`#179`/`#188`/`#165` entry's stated known
+HEAD, confirmed unchanged). Re-fetched again immediately before writing this entry - still
+`77db53b2`, no sibling commit landed in between. Re-checked the open-PR backlog via the GitHub
+REST API (`gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q '.[].number' |
+sort -n`) at the start and the end of this pass: 23 open, exactly `#164`/`#165`/`#176`-`#196` -
+nothing merged, closed, or rebased by anyone, including this session. `docs/specs/
+QA-Edge-Case-Findings.md` on `main` still tops out at Finding 205 (the sibling QA/robustness
+track's own Finding) - this track's own numbering (`#188` through `#196`'s own in-PR Findings
+206-215, each still living only on its own open branch, confirmed by reading each PR's own diff
+of this file directly: `#188`=206, `#189`=207, `#190`=208, `#191`=209, `#192`=210, `#193`=211+212,
+`#194`=213, `#195`=214, `#196`=215) means the next unclaimed number for this track is 216, not
+needed this pass since nothing here was fixed on `main` or on a review-opened PR.
+
+**Why these four.** The standing brief named `#181`, `#189`, `#190`, `#191`, `#192` as the
+remaining untreated backlog, with `#189`-`#192` specifically called out as "the remaining
+storage-bucket family - each got a role-matrix re-test earlier this segment but not this specific
+character-by-character + comment-thread-check + cross-reference-every-touched-name treatment."
+Checked `#181` first and set it aside for a future pass instead of this one: reading its own diff
+showed it is NOT a storage-bucket PR at all (despite the brief's grouping) - it is the worker
+Dockerfile/`.dockerignore` fix for the pack-ready email render bridge, a completely different
+shape (container build surface, not RLS) that deserves its own dedicated pass rather than being
+folded in alongside four RLS PRs under time pressure. Picked all four of `#189`-`#192` together,
+rather than splitting across two passes, because treating the whole remaining bucket family in one
+pass makes the cross-PR comparison (same shape, same author reasoning, same `[20]` index label)
+directly visible within a single pass's own context - which is exactly what surfaced the
+`part2_storage_employee_gap` name collision below; treating them one at a time across separate
+passes (as the preceding four passes did for `#188`/`#193`) would have made that collision much
+harder to spot.
+
+**Checked every one of `#189`/`#190`/`#191`/`#192`'s own GitHub comment threads first**, both
+`get_comments` and `get_review_comments`, before reading a single diff line. All four came back
+with nothing but the automated Vercel preview-deployment bot comment (build/deploy status only) and
+zero review threads for all four - so none of this pass's findings were already flagged by an
+earlier pass in a PR comment this entry would otherwise duplicate.
+
+**`#189` (`0128_cv_documents_storage_employee_gap.sql`, Finding 207) - read in full, confirmed real
+and severe, reproduced red and green live.** Claims the `cv-documents` bucket's own
+`storage.objects` RLS (0008) checks only `is_company_member((storage.foldername(name))[1]::uuid)` -
+the COMPANY id - and never the PERSON id one segment deeper in the real
+`"<company_id>/people/<person_id>/uploads-or-generated/<filename>"` convention (confirmed by
+reading `0008_cv_uploads.sql`'s own header and `app/app/people/actions.ts`'s `uploadCv()`/
+`app/app/my-cv/actions.ts`'s `uploadMyCv()` directly) - the finer-grained "own person only" shape,
+distinct from `#188`'s/`#190`'s/`#191`'s/`#192`'s "full block" shape, since `cv_uploads`'s own
+0077 RESTRICTIVE policy gives 'employee' "own person" access, not zero access. Added a new
+`cv_documents_path_person_id()` helper (returns `null`, never raises, for anything that doesn't
+match the convention exactly) plus four new RESTRICTIVE policies (SELECT/INSERT/UPDATE/DELETE,
+narrower than `#188`'s own three-policy SELECT/INSERT/DELETE shape for `tender-documents` - `#189`
+separately confirmed by direct test that a plain `UPDATE` on an existing row, not just INSERT/
+DELETE, was also unrestricted and exploitable, the metadata-tampering case, and closed it too).
+**No bug found in the PR's own SQL fix.**
+
+**`#190` (`0129_company_documents_storage_employee_gap.sql`, Finding 208) - read in full, confirmed
+real and severe, reproduced red and green live.** Claims the `company-documents` bucket's own
+`storage.objects` RLS (0014) checks only `is_company_member(...)`, never role, even though every
+real table this bucket backs (`company_principals`, `held_registrations`, `bank_accounts`,
+`company_properties`, `property_documents`, `company_document_templates`, `tender_answers`, and
+`companies` itself via its vault columns) already gives 'employee' a COMPLETE BLOCK at the table
+level. **Independently verified this "every table is a full block" premise is actually true**,
+rather than trusting the PR's own write-up, by grepping `0077_company_invites_and_employee_role.sql`
+directly for each of those seven names: `bank_accounts: employee has no access` (line 344),
+`company_principals: employee has no access` (350), `held_registrations: employee has no access`
+(356), `company_properties: employee has no access` (362), `property_documents: employee has no
+access` (368), `company_document_templates: employee has no access` (447), `tender_answers:
+employee has no access` (405), `companies: employee has no access` (338) - all eight confirmed
+present, all eight a genuine full block, not a finer-grained one the "exclude entirely" fix below
+would wrongly over-restrict. Fix: four new RESTRICTIVE policies, the same "full block" shape as
+`#188`. **No bug found in the PR's own SQL fix.**
+
+**`#191` (`0130_experience_documents_storage_employee_gap.sql`, Finding 209) - read in full,
+confirmed real, reproduced red and green live, PLUS one specific functional cross-check the brief's
+own technique calls for.** Claims the `experience-documents` bucket's own `storage.objects` RLS
+(0012) checks only `is_company_member(...)`, never role, even though `experience_items` already
+gives 'employee' a complete block (0077, confirmed by direct grep). The PR's own comment names
+`app/app/company/document-scan/actions.ts`'s `copyBetweenBuckets()` as one of the real call sites
+that reaches this bucket - read that whole function and its caller
+(`confirmExperienceReferenceLetter()`) directly to check whether blocking 'employee' from this
+bucket entirely could break a LEGITIMATE employee workflow (a functional regression, not a security
+finding, but exactly the kind of knock-on effect this technique is meant to catch): confirmed
+`copyBetweenBuckets()` runs on the ordinary RLS-bound `createClient()` (not a service-role client),
+and `confirmExperienceReferenceLetter()` has no role gate of its own - it relies entirely on
+`experience_items`'s own table-level RLS, which ALREADY blocks 'employee' completely (0077). Since
+`copyBetweenBuckets()`'s own storage upload happens before the `experience_items` insert in this
+function's own code order, an employee attempting this flow today (before `#191`) already fails at
+the table-insert step; after `#191`, the identical attempt fails one step earlier, at the
+storage-upload step - same end result (action fails for an employee either way), so `#191`
+introduces no new functional regression for any real user. **No bug found in the PR's own SQL fix.**
+
+**`#192` (`0131_submission_packs_storage_employee_gap.sql`, Finding 210) - read in full, confirmed
+real, reproduced red and green live, PLUS the same functional cross-check applied to its own named
+call site.** Claims `submission-packs`' own `storage.objects` RLS (0017) checks only
+`is_company_member(...)`, never role, even though BOTH tables this bucket backs
+(`pack_generation_jobs`, `generated_documents`) already give 'employee' a complete block (0077,
+confirmed by direct grep: lines 308 and 314). The PR's own comment names
+`app/app/tenders/[id]/submission-pack.tsx`'s `createSignedUrl()` read as reachable by an employee
+who navigates to `/tenders/[id]` (citing this review's own earlier `0119`/systematic-sweep finding
+that `AppShell.tsx`'s `isEmployee` only swaps the nav list, never gates page content) - read that
+file directly and confirmed the real `storage_path` passed to `createSignedUrl()` comes from a
+`.from("pack_generation_jobs")` select (line 95) that an employee already cannot read at the table
+level (0077's own block) - so an employee could never have reached a real path to sign in the first
+place, even before this fix; the storage gap this PR closes was reachable only via a direct,
+hand-crafted `supabase.storage` client call with a known/guessed path, exactly as the PR's own
+write-up claims, not via any legitimate UI flow. **No bug found in the PR's own SQL fix.**
+
+**Reproduced all four PRs' own red/green RLS claims live, together, in one real scratch
+Postgres - not concluded from reading alone.** Built `tt_red`
+(`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d tt_red` against `main`'s
+real 113 migrations, through `0123`, no PR fixes) and seeded one company, one owner, one employee,
+and one real storage object in each of the four buckets (`cv-documents` under the owner's own
+linked-person path, `company-documents` under `vault/`, `experience-documents` under `experience/`,
+`submission-packs` under `tenders/<tender>/<job>/`). As the employee (`begin; set local role
+authenticated; select set_config('test.uid', '<uuid>', true); ...; rollback;` per probe, every
+probe run inside its own savepoint and rolled back): **RED** - SELECT on all four real objects
+returned the row every time; INSERT of a new object under each bucket's own real prefix succeeded
+every time; DELETE of each real object returned `DELETE 1` every time - the exact four-way bypass
+all four PRs' own write-ups claim, reproduced live against real RLS, not inferred. Temporarily
+copied all four PRs' own migration files (`git show origin/pr/<n>:<path>`) into
+`app/supabase/migrations/` (confirmed via `git status --porcelain` showing exactly the four new,
+untracked files, nothing else touched), built `tt_green` from the resulting 117-migration set via
+the same `replay_schema.sh` (completed clean, no SQL error, logged every filename including all
+four new ones in order), then immediately removed all four files again and confirmed
+`git status --porcelain` on `app/supabase/migrations/` was empty before running a single query
+against `tt_green` - the real tracked working tree was never left in a modified state while testing
+proceeded. **GREEN** (same four probes, same employee, against `tt_green`): every SELECT returned
+`0` rows; every INSERT raised exactly the policy-named error each PR's own migration predicts
+(`"cv-documents: employee restricted to own person, insert"`, `"company-documents: employee
+excluded, insert"`, `"experience-documents: employee excluded, insert"`, `"submission-packs:
+employee excluded, insert"`); every DELETE matched `0` rows. **Owner control**: the same owner's
+own SELECT (all four buckets, `count` = 1 each), INSERT (all four, `INSERT 0 1`, no error) against
+`tt_green` confirmed completely unaffected. **Employee-own-access control for `#189`'s finer
+shape**: seeded a SECOND employee linked to their OWN person and confirmed, against `tt_green`,
+that uploading under their own person's path in `cv-documents` still succeeds (`INSERT 0 1`, row
+visible afterward) - `#189`'s "own person only" carve-out (as opposed to the other three PRs' "full
+block") works exactly as designed, not accidentally over-restrictive.
+
+**The new finding: `#188` and `#189` define the byte-for-byte identical Python function name in
+`engine/security/test_tenant_isolation.py`, each unaware the other exists - a sharper instance of
+the cross-open-PR-collision shape than any found so far this segment.** Grepped every one of
+`#188`-`#193`'s own diffs to this one file for `^\+def part2` and `print("\n\[`: `#188`'s own diff
+defines `def part2_storage_employee_gap(db):` (testing `tender-documents`); `#189`'s own diff
+ALSO defines `def part2_storage_employee_gap(db):` (testing `cv-documents`) - the identical name,
+confirmed character-for-character by direct diff read of both, not a typo in this entry. Both
+functions are inserted at the identical point in the file (immediately before `def main():`) and
+both PRs' own `main()` diffs insert an identical new call line, `part2_storage_employee_gap(Db(psql))`,
+in the identical place (immediately after the existing `part2_team_billing_rpcs(Db(psql))` line).
+Neither PR's diff references the other PR at all - each was clearly written against the SAME
+pre-`#188`/pre-`#189` `main`, independently, by an author (or review pass) choosing the same obvious
+name for the same shape of test. **Why this matters, mechanically, if both ever merge**: Python
+resolves a `def` by rebinding the module-level name at execution time - whichever of the two
+`part2_storage_employee_gap` definitions appears LATER in the final merged file is the only one
+that ever runs, under that name, for the rest of the file's life. The earlier one's own body
+becomes syntactically present but semantically dead - never called, even though `main()` would then
+contain the call line TWICE (once from each PR's own diff), both of which would simply invoke the
+SAME surviving function, twice in a row. Concretely: whichever of `#188`/`#189` merges SECOND would
+silently and permanently delete the OTHER PR's own regression coverage for its own bucket, with
+`main()` reporting success (both calls return normally, both run the surviving function's
+assertions, which all pass) and giving no indication anything is missing - the single most silent
+failure mode this review's own technique exists to catch, here living in the TEST HARNESS itself
+rather than in application code. This does not affect `main` today (neither PR is merged) and does
+not affect the correctness of either PR's own actual SQL migration (`0127` vs `0128` are different,
+non-colliding file numbers, and the underlying RLS fixes are fully independent and both individually
+correct, as reproduced above) - it is confined entirely to a shared Python test file, and only
+becomes a live problem the moment both branches are merged.
+
+**A second, milder echo of the same unawareness across the WHOLE six-PR bucket family.** Widened
+the same grep to all six storage-bucket PRs (`#188` through `#193`): every one of them - not just
+`#188`/`#189` - prints its own new Part-2 block under the identical human-readable index label
+`"[20]"` (`#188`: `tender-documents`; `#189`: `cv-documents`; `#190`: `company-documents`; `#191`:
+`experience-documents`; `#192`: `submission-packs`; `#193`: `narrative-documents`/
+`onboarding-documents`), and every one of them inserts its own new call in `main()` at the
+identical anchor line, right after `part2_team_billing_rpcs(Db(psql))`. The other four
+(`#190`/`#191`/`#192`/`#193`) each use a distinct, unique Python function NAME, so merging any
+combination of those four (without `#188`/`#189`) would not silently drop any test - Python would
+simply end up with six distinct functions, all genuinely called, all genuinely passing - but the
+printed output would show up to six different, unrelated blocks all labelled `"[20]"`, a cosmetic
+but real "whoever merges these should renumber the index labels by hand" hazard, and a second,
+separate thing the eventual merger of this family needs to know regardless of the `#188`/`#189`
+name collision.
+
+**Recommendation for Sarel, documented-only, nothing pushed to any PR branch.** When merging any
+two or more of `#188`-`#193`: (1) `#188` and `#189` specifically need one of their two
+`part2_storage_employee_gap` functions renamed before or during the merge, or one's own test
+coverage silently vanishes - this is not optional, it is a correctness requirement for the test
+suite's own integrity, not a style nit; (2) whichever of the six merges in whatever order, the
+survivor's own `"[20]"` print labels should be renumbered sequentially (`[20]`, `[21]`, `[22]`, ...)
+for readable output, though this part is cosmetic only. No action needed on the four SQL fixes
+themselves beyond the standing backlog note (merge-readiness aside, `#189`/`#190`/`#191`/`#192` are
+each a correct, already-verified fix, same as `#188`/`#193` before them).
+
+**Why `#181` was set aside rather than folded in.** Read its own diff far enough to confirm it is
+the worker-image Dockerfile/`.dockerignore` fix (pack-ready email render bridge missing `node` and
+`app/`), not a storage-bucket PR at all, despite the standing brief's own grouping of it alongside
+`#189`-`#192`. Left it fully untouched and unread beyond that one confirming check, for a future
+pass with its own dedicated budget, rather than giving it a rushed partial read squeezed in beside
+four unrelated RLS PRs.
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open, unmerged, and
+untouched beyond read-only reference - reconfirmed via the GitHub REST API at the start and the end
+of this pass. `#188`-`#193` were fetched read-only into disposable local refs
+(`refs/remotes/origin/pr/<n>`) for diffing/cross-referencing (plus `#164`, `#165`, `#176`-`#187`,
+`#194`-`#196` briefly, to check migration-number collisions and the `#195`/`#196` CHECK-constraint
+family for any overlap with this pass's own storage-RLS layer - confirmed no overlap, different
+layer entirely: CHECK constraints on table columns vs. RESTRICTIVE policies on `storage.objects`)
+and never checked out as a working tree, never built on, never pushed to, never merged; all were
+deleted via `git update-ref -d` at the end of this pass (confirmed empty via `git for-each-ref
+refs/remotes/origin/pr/` afterward). Migration numbers `0127`-`0133` (`#188`-`#193`) re-confirmed
+sequential and collision-free against `0134`-`0136` (`#194`-`#196`) and the standing `0124`
+three-way collision (`#183`/`#184`/`#185`) - no new collision found. The one working-tree
+modification this pass made (temporarily copying `#189`-`#192`'s own four migration files into
+`app/supabase/migrations/` to build `tt_green`) was fully reverted (`rm` back to `main`'s exact
+tracked state, confirmed via `git status --porcelain` returning empty) before any query ran against
+that database, and reconfirmed empty again after. No new `QA-Edge-Case-Findings.md` Finding number
+consumed (216 remains the next free one for this track) - nothing found this pass needed a fix of
+its own; the one real finding lives on two (more broadly, six) open PRs' own branches, which this
+review may not alter. The two scratch Postgres databases this pass built (`tt_red`, `tt_green`,
+both from `main`'s real migrations via `replay_schema.sh`, `tt_green` with the four PR migrations
+added back temporarily) were dropped (`drop database tt_red; drop database tt_green;`) and
+confirmed gone via a `\l` listing immediately after; the Postgres service, down per `pg_lsclusters`
+both before this pass started and checked again now, was started fresh for this pass's own use and
+is stopped (`pg_ctlcluster 16 main stop`) immediately below, confirmed via `pg_lsclusters` showing
+`down` again before this entry is committed.
+
+To verify independently: `git fetch origin +refs/pull/188/head:refs/remotes/origin/pr/188
++refs/pull/189/head:refs/remotes/origin/pr/189 && git diff $(git merge-base origin/main
+origin/pr/188) origin/pr/188 -- engine/security/test_tenant_isolation.py | grep "^+def part2"` and
+the same for `189` - confirm both print `def part2_storage_employee_gap(db):`. For the four SQL
+fixes, `git fetch origin +refs/pull/<n>/head:refs/remotes/origin/pr/<n>` for `189`-`192`, replay
+`main`'s migrations into a scratch database, then apply each PR's own new migration file in turn
+and attempt SELECT/INSERT/DELETE as a seeded employee against a real object in the matching bucket
+before and after, exactly as described above.
+
+---
+
 ## This pass (2026-11-08xlix, standing solution-architect review, background worker): continued the PR-by-PR fresh-eyes line-by-line read on three backlog PRs that had not yet had it this segment - `#177` (`company_members` read had no error capture in `proxy.ts`), `#179` (`buildReusePlan()` never re-checked the TARGET tender's own pipeline stage) and `#188` (`tender-documents` storage-bucket employee gap, Finding 206, migration `0127`) - plus a fourth, targeted pass on `#165` (`4 pre-demo production defects`) specifically hunting for a bug INDEPENDENT of its already-documented staleness against `main`'s own `bab5c5b` direct push, per the standing brief's own framing of that pair. Found one genuinely new thing worth recording - not a bug, a factual inaccuracy in `#165`'s own code comment that misattributes its calculator-label fix's annual period to `#164`, which in fact keeps that stat monthly - and otherwise confirmed `#177`, `#179` and `#188` are each real, correct, already-needed fixes with no defect of their own, reproduced red/green live rather than concluded from reading (a real vitest run for `#179`'s pure-TS claim, a real scratch Postgres for `#188`'s RLS claim). No new authorization-bypass or data-integrity gap was found in any of the three untreated PRs; `#165`'s other 3 named defects (WhatsApp crash, mailto, demo-badge whitespace) were independently verified correct and current against real `main`. Nothing pushed to any PR branch, no competing PR opened, no new `QA-Edge-Case-Findings.md` Finding number consumed (nothing here needed fixing - every PR checked stands as a correct fix already on its own branch, or, for `#165`'s comment inaccuracy, a documentation nit not worth a Finding).
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly -
