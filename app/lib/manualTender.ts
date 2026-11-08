@@ -33,6 +33,41 @@ export function privatePrefix(companyId: string, tenderId: string): string {
 
 export { safeFileName } from "./safeFileName.ts";
 
+/**
+ * Validates a batch of already-uploaded documents against the prefix they
+ * must sit under, for registerManualTender()/addManualTenderDocuments()/
+ * addPrivateTenderDocuments() (app/tenders/new/actions.ts): every
+ * storage_path must start with `prefix` and must not contain a real ".."
+ * path-traversal SEGMENT. null means at least one document failed - the
+ * whole batch is rejected, never a partial list (its own caller then cleans
+ * up every file this batch actually uploaded).
+ *
+ * ".." is checked as a whole path segment (`storage_path.split("/")`), not
+ * as a bare substring: safeFileName() (this module's own re-export) keeps
+ * '.' in its allowed character set, so an entirely ordinary document named
+ * e.g. "Tender Notice..pdf" produces a storage_path containing the
+ * substring ".." without being a traversal attempt at all - a bare
+ * substring check used to reject the WHOLE batch for this one, perfectly
+ * legitimate file. Finding 35 (2026-10-20) found and fixed the identical
+ * false positive in engine/onboarding/process_onboarding_jobs.py's own
+ * inline check; this one, and its matching SQL-level checks (migration
+ * 0043 tt_own_path(), 0050 tt_path_in_company(), 0045
+ * record_tender_document(), 0024 _manual_tender_documents(), 0032
+ * tender_private_documents_path), were never swept the same way until the
+ * standing review's own 0135 migration. Kept here, not inline in
+ * actions.ts, so it can be unit-tested directly - a "use server" file's
+ * own exports must all be async Server Actions.
+ */
+export function cleanDocuments(docs: UploadedTenderDocument[], prefix: string): UploadedTenderDocument[] | null {
+  if (!Array.isArray(docs) || docs.length === 0) return null;
+  const out: UploadedTenderDocument[] = [];
+  for (const d of docs) {
+    if (typeof d?.storage_path !== "string" || !d.storage_path.startsWith(prefix) || d.storage_path.split("/").includes("..")) return null;
+    out.push({ title: String(d.title ?? "").slice(0, 200), storage_path: d.storage_path });
+  }
+  return out;
+}
+
 export function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
   return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));

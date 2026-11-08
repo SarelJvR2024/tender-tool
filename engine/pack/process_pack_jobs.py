@@ -395,9 +395,19 @@ def own_path(path, company_id, what):
     ("<company_id>/..."). The service-role key bypasses Storage RLS, so
     without this a row pointing at another company's file would copy that
     file into this company's pack (POPIA-Security-Audit.md; migration 0043
-    adds the same rule as a CHECK on every such column)."""
+    adds the same rule as a CHECK on every such column).
+
+    ".." is checked as a whole path SEGMENT (`p.split("/")`), not as a bare
+    substring: Finding 35 (2026-10-20) found and fixed the identical
+    false-positive in this function's true sibling,
+    engine/onboarding/process_onboarding_jobs.py's own inline check
+    ("Report..final.pdf", an entirely ordinary filename, was rejected as
+    outside the company's folder) - but the fix was never swept here, to
+    migration 0043/0045/0024's own identical SQL-level checks, or to
+    engine/general/process_general_jobs.py's own copy of this exact
+    function. Standing review, 2026-11-08 - see migration 0135."""
     p = path or ""
-    if not p.startswith(f"{company_id}/") or ".." in p or "//" in p:
+    if not p.startswith(f"{company_id}/") or ".." in p.split("/") or "//" in p:
         raise ValueError(f"{what}: the stored file path is not under this company's own folder - refusing to read it. "
                          "Upload the document again on its page.")
     return p

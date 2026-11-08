@@ -345,7 +345,9 @@ def private_documents_for(client, company_id, tender):
     for r in client.select("tender_private_documents", {"company_id": company_id, "tender_id": tender["id"]},
                            order="created_at.asc"):
         sp = r.get("storage_path") or ""
-        if not sp.startswith(prefix) or ".." in sp:
+        # ".." as a whole path SEGMENT, not a bare substring - see own_path()'s
+        # own comment below for why (Finding 35's fix, never swept here).
+        if not sp.startswith(prefix) or ".." in sp.split("/"):
             raise RuntimeError(f"private document {r.get('id')} is not under this company's own folder - refusing to read it")
         out.append({"id": r["id"], "title": r.get("title") or os.path.basename(sp), "storage_path": sp,
                     "bucket": TENDER_DOCS_BUCKET})
@@ -605,9 +607,19 @@ def own_path(path, company_id, what):
     """A client-written storage path, checked before the service role
     downloads it (no Storage RLS for the service key): it must sit under the
     job company's own folder, else another company's file would end up in
-    this pack (POPIA-Security-Audit.md; migration 0043 has the same CHECK)."""
+    this pack (POPIA-Security-Audit.md; migration 0043 has the same CHECK).
+
+    ".." is checked as a whole path SEGMENT (`p.split("/")`), not as a bare
+    substring: Finding 35 (2026-10-20) found and fixed the identical
+    false-positive in this function's true sibling,
+    engine/onboarding/process_onboarding_jobs.py's own inline check
+    ("Report..final.pdf", an entirely ordinary filename, was rejected as
+    outside the company's folder) - but the fix was never swept here, to
+    migration 0043/0045/0024's own identical SQL-level checks, or to
+    engine/pack/process_pack_jobs.py's own copy of this exact function.
+    Standing review, 2026-11-08 - see migration 0135."""
     p = path or ""
-    if not p.startswith(f"{company_id}/") or ".." in p or "//" in p:
+    if not p.startswith(f"{company_id}/") or ".." in p.split("/") or "//" in p:
         raise RuntimeError(f"{what}: the stored file path is not under this company's own folder - refusing to read it. "
                            "Upload the document again on its page.")
     return p

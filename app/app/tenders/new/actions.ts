@@ -3,7 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { TENDER_DOCS_BUCKET, manualPrefix, privatePrefix, type UploadedTenderDocument } from "@/lib/manualTender";
+import { TENDER_DOCS_BUCKET, manualPrefix, privatePrefix, cleanDocuments } from "@/lib/manualTender";
+import type { UploadedTenderDocument } from "@/lib/manualTender";
 import { GENERAL_ENGINE, JOBS_TABLE } from "@/lib/generalTender";
 
 /**
@@ -31,15 +32,11 @@ async function requireMember() {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function cleanDocuments(docs: UploadedTenderDocument[], prefix: string): UploadedTenderDocument[] | null {
-  if (!Array.isArray(docs) || docs.length === 0) return null;
-  const out: UploadedTenderDocument[] = [];
-  for (const d of docs) {
-    if (typeof d?.storage_path !== "string" || !d.storage_path.startsWith(prefix) || d.storage_path.includes("..")) return null;
-    out.push({ title: String(d.title ?? "").slice(0, 200), storage_path: d.storage_path });
-  }
-  return out;
-}
+// cleanDocuments() itself now lives in @/lib/manualTender - a "use server"
+// file's own exports must all be async Server Actions, so a plain sync
+// helper can't be exported (and therefore unit-tested) from here directly.
+// See that module's own comment for the false-positive bug this fixes
+// (Finding 35's own ".." substring-vs-segment gap, swept here too - 0135).
 
 export async function registerManualTender(input: {
   tenderId: string;

@@ -212,6 +212,48 @@ def test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id():
           nested is not None and nested["context"].get("company_id") == "c-nested", alerts)
 
 
+def test_own_path_accepts_a_legitimate_double_dot_filename_but_still_rejects_real_traversal():
+    print("own_path(): a legitimate filename with two consecutive dots (e.g. 'Report..Final.pdf') "
+          "must be accepted; a real '..' path-traversal segment must still be rejected (Finding 35's "
+          "own false-positive, found in process_onboarding_jobs.py and never swept here)")
+    company = "22222222-2222-2222-2222-222222222222"
+    other = "44444444-4444-4444-4444-444444444444"
+    legit = f"{company}/vault/Report..Final.pdf"
+    try:
+        out = pgj.own_path(legit, company, "Vault document")
+        check("a legitimate double-dot filename is accepted, not rejected", out == legit, out)
+    except RuntimeError as e:
+        check("a legitimate double-dot filename is accepted, not rejected", False, str(e))
+
+    for traversal in (f"{company}/../{other}/x.pdf", f"{company}/vault/..", f"../{company}/x.pdf"):
+        try:
+            pgj.own_path(traversal, company, "Vault document")
+            check(f"a real traversal segment ({traversal!r}) is still rejected", False)
+        except RuntimeError:
+            check(f"a real traversal segment ({traversal!r}) is still rejected", True)
+
+
+def test_private_documents_for_accepts_a_legitimate_double_dot_filename():
+    print("private_documents_for(): the same false-positive, in its own inline '..' check")
+    company = "22222222-2222-2222-2222-222222222222"
+    prefix = f"private/{company}/t-1/"
+    legit_path = f"{prefix}Report..Final.pdf"
+    client = FakeClient([{"id": "pd1", "company_id": company, "tender_id": "t-1",
+                          "title": "Report..Final.pdf", "storage_path": legit_path, "created_at": "1"}])
+    out = pgj.private_documents_for(client, company, {"owner_company_id": None, "id": "t-1"})
+    check("a legitimate double-dot filename is kept, not raised on as outside the company's folder",
+          len(out) == 1 and out[0]["storage_path"] == legit_path, out)
+
+    # a real traversal attempt must still be refused
+    bad_client = FakeClient([{"id": "pd2", "company_id": company, "tender_id": "t-1",
+                              "title": "x", "storage_path": f"private/{company}/../other/t-1/x.pdf", "created_at": "1"}])
+    try:
+        pgj.private_documents_for(bad_client, company, {"owner_company_id": None, "id": "t-1"})
+        check("a real traversal segment is still rejected", False)
+    except RuntimeError:
+        check("a real traversal segment is still rejected", True)
+
+
 def test_gather_pack_inputs_signatory_fallback():
     print("gather_pack_inputs(): signatory falls back to the company's own designated signatory")
     job = {"company_id": "co-a", "tender_id": "t-a"}
@@ -326,6 +368,8 @@ def main():
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
     test_within_malformed_completion_date_alert_carries_company_id()
     test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()
+    test_own_path_accepts_a_legitimate_double_dot_filename_but_still_rejects_real_traversal()
+    test_private_documents_for_accepts_a_legitimate_double_dot_filename()
     test_gather_pack_inputs_signatory_fallback()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 
