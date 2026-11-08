@@ -279,7 +279,9 @@ async function main() {
   console.log(`Trial expired: ${expired.sent} sent, out of ${expired.candidates} candidate company(ies).`);
 }
 
-main().catch((e) => {
-  console.error("send-onboarding-nudges failed", e);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error("send-onboarding-nudges failed", e);
+    process.exit(1);
+  });
+}

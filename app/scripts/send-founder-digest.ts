@@ -186,7 +186,9 @@ async function main() {
   console.log(`Founder daily digest (${sastDateLabel}): ${result.outcome}.`);
 }
 
-main().catch((e) => {
-  console.error("send-founder-digest failed", e);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error("send-founder-digest failed", e);
+    process.exit(1);
+  });
+}

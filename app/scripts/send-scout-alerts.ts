@@ -146,7 +146,9 @@ async function main() {
   );
 }
 
-main().catch((e) => {
-  console.error("send-scout-alerts failed", e);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error("send-scout-alerts failed", e);
+    process.exit(1);
+  });
+}

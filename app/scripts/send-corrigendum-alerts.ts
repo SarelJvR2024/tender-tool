@@ -192,4 +192,6 @@ async function main() {
   console.log(`Corrigendum alerts: ${sent} sent, ${skippedAlreadySent} already sent before, ${skippedNoRecipients} skipped (no recipients).`);
 }
 
-main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
