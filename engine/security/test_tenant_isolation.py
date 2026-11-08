@@ -1060,6 +1060,63 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_storage_employee_gap(db):
+    """Finding 207 (standing solution-architect review, 2026-11-08): the
+    'cv-documents' bucket's own storage.objects RLS (0008_cv_uploads.sql)
+    checked only is_company_member((storage.foldername(name))[1]::uuid) -
+    the COMPANY id - never the PERSON id in the very next path segment
+    ("<company_id>/people/<person_id>/uploads-or-generated/..."). [18]'s
+    own employee-role matrix ([18] above) only ever exercises the TABLE
+    rows (cv_uploads/generated_cvs); it never touches storage.objects
+    itself, so it never caught this. An employee may only use their own
+    linked person's rows at the table level (0077's own RESTRICTIVE
+    policies) - but, before migration 0128, could still reach a
+    COLLEAGUE's real CV file directly via storage.objects: readable,
+    plantable (a new file under the colleague's own path), overwritable
+    (UPDATE of an existing row's metadata) and deletable - all with no
+    RPC and no table read/write at all, straight to the Storage REST API
+    the real supabase.storage client uses. Builds its own two-employee
+    fixture (one company, two DIFFERENT employee-role members, each
+    linked to their own person) rather than reusing seed_db's A/B, since
+    this needs two employees in the SAME company, not two companies."""
+    print("\n[20] Storage (cv-documents): an employee can't reach a COLLEAGUE's real CV file, even though they share a company")
+    i = {k: str(uuid.uuid4()) for k in ("uEmpA", "uEmpB", "c", "pA", "pB")}
+    uEmpA, uEmpB, c, pA, pB = i["uEmpA"], i["uEmpB"], i["c"], i["pA"], i["pB"]
+    pathA = f"{c}/people/{pA}/uploads/a.pdf"
+    pathB = f"{c}/people/{pB}/uploads/colleague-real-cv.pdf"
+    db.one(f"""
+insert into auth.users (id, email) values ('{uEmpA}', 'iso20a@example.test'), ('{uEmpB}', 'iso20b@example.test');
+insert into companies (id, legal_name) values ('{c}', 'Iso20 Co');
+insert into company_members (company_id, user_id, role) values ('{c}', '{uEmpA}', 'employee'), ('{c}', '{uEmpB}', 'employee');
+insert into people (id, company_id, name, linked_user_id) values ('{pA}', '{c}', 'Employee A', '{uEmpA}'),
+  ('{pB}', '{c}', 'Employee B', '{uEmpB}');
+insert into storage.buckets (id, name) values ('cv-documents', 'cv-documents') on conflict do nothing;
+insert into storage.objects (bucket_id, name, metadata) values ('cv-documents', '{pathB}', '{{}}');
+select 1;""")
+
+    print("  -- B's real CV, via a colleague (A) who shares B's company but is NOT B --")
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'cv-documents' and name = '{pathB}'", uEmpA)
+    check(n == "0", f"A can't SELECT B's real CV object ({n})")
+    bad, why = refused(db, f"insert into storage.objects (bucket_id, name) values ('cv-documents', '{pathB}')", uEmpA)
+    check(bad, f"A can't INSERT a new object under B's own person path ({why[:90]})")
+    ok, out, err = db.run(
+        f"with u as (update storage.objects set metadata = '{{\"tampered\":true}}' where bucket_id = 'cv-documents' "
+        f"and name = '{pathB}' returning 1) select count(*) from u", uEmpA)
+    check((not ok) or out.splitlines()[-1] == "0", f"A updates 0 of B's real CV object ({(out.splitlines() or [''])[-1] if ok else 'refused'})")
+    ok, out, err = db.run(
+        f"with d as (delete from storage.objects where bucket_id = 'cv-documents' "
+        f"and name = '{pathB}' returning 1) select count(*) from d", uEmpA)
+    check((not ok) or out.splitlines()[-1] == "0", f"A deletes 0 of B's real CV object ({(out.splitlines() or [''])[-1] if ok else 'refused'})")
+    n_after = db.one(f"select count(*) from storage.objects where bucket_id = 'cv-documents' and name = '{pathB}'")
+    check(n_after == "1", f"B's real CV object is still intact afterward ({n_after})")
+
+    print("  -- each employee's access to their OWN person's path is completely unaffected --")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('cv-documents', '{pathA}')", uEmpA)
+    check(ok, f"A can still upload under their own person path ({err.splitlines()[0] if err else 'ok'})")
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'cv-documents' and name = '{pathB}'", uEmpB)
+    check(n == "1", "B can still see their OWN real CV object")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1069,6 +1126,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_storage_employee_gap(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")

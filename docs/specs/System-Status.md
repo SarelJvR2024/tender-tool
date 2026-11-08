@@ -1,5 +1,162 @@
 # System Status
 
+## This pass (2026-11-08xli, standing solution-architect review, background worker): the `cv-documents` bucket's own `storage.objects` RLS - PR #188's own named single highest-severity leftover lead - had the identical employee-RLS-bypass shape as PR #188's own `tender-documents` fix, but one level finer-grained (company AND person, not just company); genuine, independently red/green-verified authorization bypass (Finding 207), fixed in migration 0128, **opened as PR per the binding guardrail (never a direct push for an auth-bypass finding), not merged**
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly -
+`097de16` (the immediately preceding pass's own exhaustive Route-Handler/engine grant-map
+negative). Re-fetched again immediately before writing this entry and again immediately before
+pushing - still `097de16` both times, no sibling commit landed in between; the concurrent sibling
+"QA/robustness review" track made no push this pass either. Re-checked the open-PR backlog via
+`gh api repos/sareljvr2024/tender-tool/pulls?state=open` at the start: 15 open, exactly
+`#164`/`#165`/`#176`-`#188` as the brief itself named - confirmed by listing every PR's own added
+migration filename (not just the count), which also doubled as the migration-number-collision
+check the guardrails require: `#183`/`#184`/`#185` each independently claim `0124` under different
+filenames (as already documented), `#186` claims `0125`, `#187` claims `0126`, `#188` claims
+`0127` - so this pass's own new migration is numbered `0128`, the first number no open PR has
+claimed. Per the binding guardrails, `#164`/`#165`/`#183`/`#184`/`#185`/`#186`/`#187`/`#188` were
+only ever read via the GitHub REST API's own file-listing and `gh api .../pulls/188` (title/body)
+and `gh pr diff 188` (read-only diff, to confirm PR #188's own fix pattern before mirroring its
+style for this bucket) - none was checked out, built on, or merged, and none was touched on its own
+branch. A real scratch Postgres was used throughout (`engine/security/replay_schema.sh`, started
+fresh since the service was down at the start of this pass) - five scratch databases in total
+across this pass's own red/green/control/full-suite-red/full-suite-green checks
+(`cvdoc_scratch`, `cvdoc_green`, `tt_red`, `tt_green`, plus the one-off fixture reuse on
+`cvdoc_green`) - all dropped at the end of this pass (confirmed via `\l` showing only
+`postgres`/`template0`/`template1` left) and the Postgres service stopped. No `git worktree` or
+temporary branch exists locally - this pass pushed directly to a new branch and opened the PR via
+the GitHub API, nothing left to clean up beyond that open PR itself.
+
+**This pass's primary task, per the standing brief: the four immediately preceding passes' own
+named next lead, narrowed by PR #188's own write-up to a single concrete target - confirm or
+refute, red/green in a real scratch Postgres, PR #188's own theory that the `cv-documents`
+bucket's `storage.objects` RLS has no person-level scoping at all, only company-level, even though
+the backing tables (`cv_uploads`/`generated_cvs`/`cv_extraction_results`) already restrict an
+employee to "own person only" at the table level (0077).**
+
+Read the real path convention directly off `0008_cv_uploads.sql`'s own header comment and its one
+storage policy ("cv-documents: tenant isolation by path prefix"): `"<company_id>/people/
+<person_id>/uploads-or-generated/<uuid>-<filename>"`. Read the policy itself -
+`using/with check (bucket_id = 'cv-documents' and is_company_member((storage.foldername(name))
+[1]::uuid))` - confirming PR #188's own characterization exactly: `folder[1]` (company id) is
+checked, `folder[3]` (person id, one segment deeper) and `is_employee_in_company()`/
+`own_linked_person_id()` (0077) are referenced nowhere in this bucket's policy set at all. Read
+the real app-layer upload code (`app/app/people/actions.ts`'s `uploadCv()`, `app/app/my-cv/
+actions.ts`'s `uploadMyCv()`) and confirmed both resolve `personId` server-side (the already-
+permission-checked People-page route param, or `own_linked_person_id()` for the My-CV self-service
+page) before building the storage path - the intended flow genuinely never names a colleague's
+person id, exactly as PR #188's own write-up said. Also confirmed, as a control, that the
+0077-era table-level RESTRICTIVE policy on `cv_uploads` is itself working correctly: an
+`insert into cv_uploads (..., person_id => a colleague's person, ...)` as the employee is refused
+with the RLS policy's own name quoted in the error - so any bypass found could only be living in
+`storage.objects` itself, not a regression of the table-level control.
+
+**Independently verified red-then-green, from scratch, exactly the way the guardrails require -
+not from code-reading alone.** Built a scratch Postgres via `replay_schema.sh` (113 migrations
+through `0123`, matching `main`'s own current top), seeded one company with two DIFFERENT
+`employee`-role members (A linked to their own person A, B linked to their own person B), then
+inserted B's real CV object the legitimate way (as B, under `set local role authenticated;
+select set_config('test.uid', ..., true)`) - `<company>/people/<B>/uploads/colleague-real-cv.pdf`.
+As employee A, straight against `storage.objects` (no RPC, no table read/write):
+- **RED:** `select ... where name = '.../colleague-real-cv.pdf'` - **returned the row** (readable).
+  `insert into storage.objects (...) values ('cv-documents', '.../uploads/planted-by-employee-A.pdf', ...)`
+  under B's own person prefix - **succeeded** (plantable). `update storage.objects set metadata =
+  '{"tampered_by":"employee-A"}' where name = '.../colleague-real-cv.pdf'` - **`UPDATE 1`**, a
+  follow-up read confirmed the tampered metadata was genuinely written. `delete ... where name =
+  '.../colleague-real-cv.pdf'` - **`DELETE 1`**, confirmed gone by a superuser read afterward. All
+  four succeeded even though the identical operation's table-level sibling (a plain `.insert()` on
+  `cv_uploads` for person B) is correctly already refused, confirming the table-level control was
+  never what was protecting the actual file.
+- Wrote the fix (`0128_cv_documents_storage_employee_gap.sql`): a small `cv_documents_path_
+  person_id(name text)` helper (parses the real path convention, returns `null` rather than
+  raising for anything that doesn't match exactly, so a malformed path is denied for an employee
+  without ever throwing an evaluation error on an unrelated row in the same query) plus four new,
+  additive RESTRICTIVE policies on `storage.objects`, scoped to `bucket_id = 'cv-documents'`,
+  narrowing SELECT/INSERT/UPDATE/DELETE for `'employee'` to their own linked person's path only.
+  UPDATE was included (PR #188's own fix for `tender-documents` added only SELECT/INSERT/DELETE)
+  after separately confirming by direct test that a plain `UPDATE` on an existing object row (not
+  just INSERT/DELETE) is also unrestricted by the pre-existing `for all` policy and independently
+  exploitable (the metadata-tampering case above) - this fix closes all four operations the
+  pre-existing policy actually grants, not just three of them.
+- **GREEN (fresh scratch Postgres, 114 migrations through `0128`):** the identical SELECT returned
+  **0 rows**; the identical INSERT failed with `"new row violates row-level security policy
+  \"cv-documents: employee restricted to own person, insert\""`; the identical UPDATE matched **0
+  rows**; the identical DELETE matched **0 rows**; a superuser read afterward confirmed B's real
+  object was completely untouched throughout. Separately confirmed on the same green database: (a)
+  employee A's own uploads under their own person path are completely unaffected (insert/select/
+  update/delete all still succeed); (b) employee B's own read/manage access to her own file is
+  completely unaffected; (c) an owner-role member's select/insert/delete anywhere in the bucket,
+  including under a made-up person id, is completely unaffected (`is_employee_in_company()` is
+  false for owner/admin/member, so every new RESTRICTIVE check ANDs away to "true" for them, a
+  no-op, exactly 0077's/0127's own convention).
+
+**Added permanent test coverage, not just a one-off manual repro.** New `part2_storage_employee_
+gap(db)` in `engine/security/test_tenant_isolation.py`, printed as `[20]`, wired into `main()`
+after `part2_team_billing_rpcs`. To prove it actually catches the bug (not just passes trivially),
+temporarily moved `0128_cv_documents_storage_employee_gap.sql` OUT of `app/supabase/migrations/`,
+rebuilt a fresh scratch database from the remaining 113 files, and ran the whole suite against it:
+the new `[20]` block's 6 assertions failed exactly as predicted (`6 FAILED` overall; every other
+check `[1]`-`[19]` still passed, confirming this is a genuinely new, isolated gap rather than a
+knock-on of something already broken). Moved the migration file back, rebuilt a fresh scratch
+database with all 114 files including `0128`, re-ran the full suite: `ALL PASSED` (255 PASS, 0
+FAIL).
+
+**Ran the full real verification suite, not just the Python security tests, since this touches
+both a migration and the shared `test_tenant_isolation.py` file.** `cd app && npm run typecheck` -
+clean (`next typegen` + `tsc --noEmit`, no errors). `npx eslint .` - 0 errors (3 pre-existing
+warnings, same as every recent pass's own report: `Logo.tsx`'s `<img>` advisories,
+`analytics/page.tsx`'s unused `STAGE_META`). `npx vitest run` - 71/71 files, 532/532 tests pass.
+The full `node --experimental-strip-types <file>.test.ts` loop across every one of the 27
+`*.test.ts` files in the repo (outside `node_modules`) - every file reports `# fail 0`.
+`npx next build` - completed clean, every route listed with its expected rendering mode, no
+build errors.
+
+**Pushed a new branch and opened a PR - never a direct push, per the binding guardrail that ANY
+genuine authorization-bypass finding goes through a PR regardless of how small the diff looks.**
+The diff is migration-only (`0128_cv_documents_storage_employee_gap.sql`) plus the Python test
+file addition plus the two docs entries - no app code touched. This pass did **not** merge the PR,
+per the standing guardrails, and did not touch `#164`/`#165`/`#176`-`#188` beyond the read-only
+reference reads named above.
+
+**Is this angle exhausted?** Not entirely - re-running the same `pg_policies where
+schemaname='storage'` query PR #188's own write-up used, and reading the resulting policy SQL
+directly, confirms 4 more buckets still share the identical no-role-check shape:
+`company-documents`, `experience-documents`, `narrative-documents`, `onboarding-documents`,
+`submission-packs` named 6 originally by PR #188; `tender-documents` (PR #188 itself) and now
+`cv-documents` (this pass) are fixed, leaving 4. All 4 back tables where the 'employee' role has
+NO access at all (a full block, not "own record only" the way `cv-documents` and its person-level
+scoping needed) - almost certainly the same bug shape, and structurally SIMPLER to fix than this
+pass's own work (no person-id parsing needed, just "deny the whole bucket prefix for every
+employee," the same 3-policy shape PR #188's own fix already uses for `tender-documents`) - but
+each still needs its own red/green scratch-Postgres repro before being folded into a migration,
+exactly as this Finding and Finding 206 both were, rather than assumed clean from the policy SQL
+alone. **Concrete next lead for a future pass:** sweep those remaining 4 buckets one at a time,
+same method - `company-documents` first, since it backs the widest set of real tables
+(`held_registrations`/`company_properties`/`property_documents`/`bank_accounts`/
+`company_principals`/`company_document_templates`), i.e. the biggest surface still unverified.
+
+**Backlog status.** Finding 168, the `start_payfast_checkout()` revenue-integrity gap, and Finding
+190's own pre-existing-SANRAL-pack `field_provenance` backfill all remain exactly as left,
+untouched, per the standing guardrails. All 15 PRs that existed at the start of this pass remain
+open and unmerged, plus this pass's own new PR - re-confirmed via the GitHub REST API immediately
+before pushing; nothing merged, closed, or rebased by anyone, including this session.
+
+To verify independently: read `app/supabase/migrations/0008_cv_uploads.sql`'s own storage policy
+and confirm it checks only `is_company_member((storage.foldername(name))[1]::uuid)`, never a
+person-level check. Read `app/supabase/migrations/0128_cv_documents_storage_employee_gap.sql` and
+confirm its four new RESTRICTIVE policies and the `cv_documents_path_person_id()` helper. Build two
+scratch databases from `engine/security/replay_schema.sh` - one with `0128` temporarily moved out
+of `app/supabase/migrations/`, one with all files present - seed two employee-role members in one
+company as described above, and confirm the same red/green SELECT/INSERT/UPDATE/DELETE results.
+Run `TENANT_PSQL="psql -h 127.0.0.1 -p 5432 -U postgres -d <db>" PGPASSWORD=postgres python3
+engine/security/test_tenant_isolation.py` from inside `engine/security/` against both databases
+and confirm `6 FAILED` pre-fix / `ALL PASSED` post-fix, specifically for the new `[20]` block. Run
+`npm run typecheck`, `npx eslint .`, `npx vitest run`, the `node --experimental-strip-types`
+loop over every `*.test.ts` file, and `npx next build` from `app/` and confirm they match the
+clean results described above. Confirm via the GitHub REST API that this pass's own new PR is
+open and that `#164`/`#165`/`#176`-`#188` are all still open and unmerged.
+
+---
+
 ## This pass (2026-11-08xl, standing solution-architect review, background worker): applied the grant-map method to `app/api/**/route.ts` Route Handlers - the immediately preceding pass's own named next lead - swept all 4 Route Handlers that exist in this repo (3 under `app/api/`, 1 `auth/callback`) plus confirmed none are reachable from the engine's own Python workers via a non-service-role key - exhaustive genuine negative on both fronts, no new bug, nothing pushed to `main`, no PR opened
 
 `git fetch origin main` at the start showed local already matching `origin/main` exactly -
