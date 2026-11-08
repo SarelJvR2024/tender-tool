@@ -130,23 +130,45 @@ export function b7Status(input: {
  * signatory on file when there's no scope data or no match; before 0061 it
  * was always "first signatory on file". Either way this function doesn't
  * care which kind of fallback it was given - only that a choice exists.
+ *
+ * QA pass, 2026-11-08: when `chosenId` IS set, this used to show the
+ * FALLBACK's own name/capacity as `value` - never the actually-chosen
+ * person's, because this function was never given the chosen person's
+ * details at all, only their bare id. `pickDefaultSignatory()` has no idea
+ * what was chosen either (by design - it only picks the scope-matched
+ * suggestion for when nobody has), so `fallback` and the real choice
+ * routinely differ: any company with more than one signatory where someone
+ * explicitly picked a DIFFERENT person than the algorithm's own suggestion
+ * had this card show the wrong name on the Pack Review screen, confirmed by
+ * reading the one real caller (pack-review-data.ts) side by side with this
+ * function - the existing test for "an explicit choice is confirmed" never
+ * caught it because its own fixture reused the same name for both the
+ * chosen id and the fallback, so a wrong-person bug and a right-person
+ * result were indistinguishable in that test. Same fix shape as
+ * general-pack-review-logic.ts's own signatureAnswerStatus(), which already
+ * threads the real chosenPerson through (people.find()) and already has its
+ * own "can no longer be found" branch - sanral's own version never had it.
  */
 export function signatureStatus(input: {
   chosenId: string | null;
+  chosenPerson: { name: string; signatory_capacity: string } | null;
   fallback: { name: string; signatory_capacity: string } | null;
 }): { reviewStatus: ReviewStatus; checklistStatus: ChecklistStatus; value: string | null; note: string | null } {
+  if (input.chosenId) {
+    if (!input.chosenPerson) {
+      return { reviewStatus: "missing", checklistStatus: "not_included", value: null, note: "The chosen signatory can no longer be found - choose again." };
+    }
+    return { reviewStatus: "confirmed", checklistStatus: "included", value: `${input.chosenPerson.name} - ${input.chosenPerson.signatory_capacity}`, note: null };
+  }
   if (!input.fallback) {
     return { reviewStatus: "missing", checklistStatus: "not_included", value: null, note: "No one on your People page has a signatory capacity set." };
   }
-  if (!input.chosenId) {
-    return {
-      reviewStatus: "needs_input",
-      checklistStatus: "included_warning",
-      value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`,
-      note: `Not chosen - will default to ${input.fallback.name} (suggested signatory for this tender).`,
-    };
-  }
-  return { reviewStatus: "confirmed", checklistStatus: "included", value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`, note: null };
+  return {
+    reviewStatus: "needs_input",
+    checklistStatus: "included_warning",
+    value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`,
+    note: `Not chosen - will default to ${input.fallback.name} (suggested signatory for this tender).`,
+  };
 }
 
 // field_key is a dotted path like "a_forms.A8.litigation" (0002_field_provenance.sql)

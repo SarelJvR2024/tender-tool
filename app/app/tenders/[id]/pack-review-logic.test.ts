@@ -87,21 +87,45 @@ test("positionStatus: a role-fit warning overrides CV status", () => {
 });
 
 test("signatureStatus: no one eligible at all is missing", () => {
-  const r = signatureStatus({ chosenId: null, fallback: null });
+  const r = signatureStatus({ chosenId: null, chosenPerson: null, fallback: null });
   assert.equal(r.reviewStatus, "missing");
   assert.equal(r.checklistStatus, "not_included");
 });
 
 test("signatureStatus: nobody chosen but a fallback exists needs input, still included with a warning", () => {
-  const r = signatureStatus({ chosenId: null, fallback: { name: "Jane Soap", signatory_capacity: "Director" } });
+  const r = signatureStatus({ chosenId: null, chosenPerson: null, fallback: { name: "Jane Soap", signatory_capacity: "Director" } });
   assert.equal(r.reviewStatus, "needs_input");
   assert.equal(r.checklistStatus, "included_warning");
   assert.match(r.note ?? "", /default to Jane Soap/);
 });
 
-test("signatureStatus: an explicit choice is confirmed", () => {
-  const r = signatureStatus({ chosenId: "person-1", fallback: { name: "Jane Soap", signatory_capacity: "Director" } });
+test("signatureStatus: an explicit choice matching the fallback is confirmed", () => {
+  const r = signatureStatus({
+    chosenId: "person-1",
+    chosenPerson: { name: "Jane Soap", signatory_capacity: "Director" },
+    fallback: { name: "Jane Soap", signatory_capacity: "Director" },
+  });
   assert.deepEqual(r, { reviewStatus: "confirmed", checklistStatus: "included", value: "Jane Soap - Director", note: null });
+});
+
+// QA pass, 2026-11-08: signatureStatus() used to show the FALLBACK's own
+// name/capacity for `value` whenever ANY chosenId was set, never the
+// actually-chosen person's - this is the one scenario that distinguishes
+// the two (chosen and fallback are different people), which the previous
+// version of this test file never constructed (its own fixture reused the
+// same name for both, masking the bug).
+test("signatureStatus: an explicit choice DIFFERENT from the suggested fallback shows the chosen person, not the fallback", () => {
+  const r = signatureStatus({
+    chosenId: "person-2",
+    chosenPerson: { name: "Henning Botha", signatory_capacity: "Managing Director" },
+    fallback: { name: "Jane Soap", signatory_capacity: "Director" },
+  });
+  assert.deepEqual(r, { reviewStatus: "confirmed", checklistStatus: "included", value: "Henning Botha - Managing Director", note: null });
+});
+
+test("signatureStatus: a chosenId that no longer resolves to a real person (deleted, or lost their signatory capacity) is missing, not a stale fallback name", () => {
+  const r = signatureStatus({ chosenId: "deleted-person", chosenPerson: null, fallback: { name: "Jane Soap", signatory_capacity: "Director" } });
+  assert.deepEqual(r, { reviewStatus: "missing", checklistStatus: "not_included", value: null, note: "The chosen signatory can no longer be found - choose again." });
 });
 
 test("b7Status: does not apply", () => {
@@ -151,7 +175,7 @@ test("reviewStatusToBidTask: confirmed and assumed_default are Verify, missing i
 
 test("scenario: everything confirmed renders all-green across every classifier", () => {
   const position = positionStatus({ hasConfirmedPerson: true, hasCv: true, fitWarning: null });
-  const signature = signatureStatus({ chosenId: "p1", fallback: { name: "Jane Soap", signatory_capacity: "Director" } });
+  const signature = signatureStatus({ chosenId: "p1", chosenPerson: { name: "Jane Soap", signatory_capacity: "Director" }, fallback: { name: "Jane Soap", signatory_capacity: "Director" } });
   const doc = docItemStatus("have");
   // Form B7 doesn't apply to this (hypothetical) tender at all - that's a
   // "confirmed, nothing to do" state, correctly rendered "not_included" on
@@ -177,7 +201,7 @@ test("scenario: missing CV / missing signatory / a B7 warning shows the right mi
   assert.equal(position.checklistStatus, "included_warning");
 
   // No one at all with a signatory capacity on file.
-  const signature = signatureStatus({ chosenId: null, fallback: null });
+  const signature = signatureStatus({ chosenId: null, chosenPerson: null, fallback: null });
   assert.equal(signature.reviewStatus, "missing");
   assert.equal(signature.checklistStatus, "not_included");
 

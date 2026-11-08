@@ -285,7 +285,8 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
       ? { region: (tenderRow.region as string | null) ?? null, industryTags: (tenderRow.industry_tags as string[] | null) ?? [], disciplineTags: (tenderRow.discipline_tags as string[] | null) ?? [] }
       : NO_TENDER_SCOPE;
     const fallback = pickDefaultSignatory({ signers: signerList, scopes, tender: tenderScope });
-    const { reviewStatus, checklistStatus, value, note } = signatureStatus({ chosenId, fallback });
+    const chosenPerson = chosenId ? signerList.find((p) => p.id === chosenId) ?? null : null;
+    const { reviewStatus, checklistStatus, value, note } = signatureStatus({ chosenId, chosenPerson, fallback });
     pushChecklist({ title: "Signature", envelope: "Technical", status: checklistStatus, pages: null, note });
     sections.push(section("signature", "Signature", "#submission-pack", "Choose signatory", [{ key: "signatory", label: "Who signs this bid", value, status: reviewStatus, note }]));
   } catch (err) {

@@ -12011,6 +12011,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-08, standing QA/robustness review): fix - Finding 203, the SANRAL Pack Review screen's `signatureStatus()` showed the algorithm's suggested DEFAULT signatory's name whenever anyone had explicitly chosen a DIFFERENT signatory - the display, not the stored choice, showed the wrong person
+
+Oriented from `48d5b10` (own prior pass: Finding 202, SANRAL Form B7's TE-percentage-sum gap).
+`git fetch origin main` found 1 new sibling commit ("standing solution-architect review" track, no
+collision): the grant-map method applied to `app/api` Route Handlers, a genuine negative. Fast-forward
+merge was clean. Re-checked again immediately before this pass's own push - still the same tip, no new
+sibling commit landed in between.
+
+**This pass's own task**: non-SANRAL pack rotation. First ruled out `engine/general/submission_plan.py`'s
+own `compile_plan()` as the wrong target entirely - its own TypeScript port's header comment confirms
+it is deliberately CLI-only reference tooling, never called from the real app (the architecture decision
+is already recorded, 2026-10-21). Redirected to the real production classifier files and read
+`general-pack-review-logic.ts` side by side with the SANRAL sibling it explicitly says it reuses
+vocabulary from, `pack-review-logic.ts` - the finding turned up on the SANRAL side.
+
+**Found: Finding 203.** `pack-review-logic.ts`'s `signatureStatus()` took `{chosenId, fallback}` only -
+no information about who `chosenId` actually resolves to. `fallback` comes from `pickDefaultSignatory()`
+(`signatory-logic.ts`), which by its own docstring only picks "the default to pre-select when NOBODY has
+chosen... yet" - it has no idea what was actually chosen, by design. Confirmed via the one real caller,
+`pack-review-data.ts`: `fallback` is computed completely independently of `chosenId`, yet the OLD
+`signatureStatus()` unconditionally showed `fallback`'s own name/capacity as `value` the moment `chosenId`
+was truthy - never the actually-chosen person's name. Any company with 2+ signatories where the explicit
+choice differs from the algorithm's own scope-matched suggestion (a routine scenario) had the Pack Review
+"Who signs this bid" line show the wrong person's name on a live compliance checklist. The real stored
+value (`tender_answers.signatory_person_id`) was unaffected - display-only, but on the one screen whose
+whole job is confirming the submission is right before it's generated. The existing test never caught it
+because its own fixture reused the same name for the chosen person and the fallback, making a wrong-person
+bug and a right-person result indistinguishable.
+
+**Fix**: `signatureStatus()` now takes `chosenPerson` too and uses it (or a new "can no longer be found"
+state, mirroring the general-tender sibling `signatureAnswerStatus()`'s own already-correct branch) when
+`chosenId` is set. `pack-review-data.ts` resolves `chosenPerson` from the same `signerList` already
+fetched for `fallback` - no new query. Verified red-then-green: rewrote the misleading existing test,
+added 2 new adversarial cases (chosen differs from fallback; chosen no longer resolves). **Red:** saved
+the diff, `git apply -R`, re-ran `node --experimental-strip-types` directly on the test file (node's own
+`--test` flag doesn't glob-match this bracketed directory) - exactly 2 of 22 failed, the two new cases.
+**Green:** reapplied, re-ran - 22/22 pass. `npx tsc --noEmit`/`npx eslint` clean. Broader regression: full
+`npx vitest run` (68/71 files - the 5 failures are the same pre-existing, unrelated `date-fns`-not-installed
+environment gap as last pass, confirmed again, not this fix) and every other `*.test.ts` file run directly
+(28/28 unaffected). See `docs/specs/QA-Edge-Case-Findings.md` Finding 203 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 202, SANRAL Form B7's `check_plan()`/`checkPlan()` (engine + Tender Workspace twin) bounded each Targeted Enterprise's own percentage 0-100 individually but never checked the SUM across TEs - two individually-valid percentages totalled 115% of the contract price with no warning anywhere
 
 Oriented from `6e18290` (own prior pass: Finding 200, `award_outcomes.parse_rand()`'s negative-sign bug).
