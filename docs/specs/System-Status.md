@@ -1,5 +1,241 @@
 # System Status
 
+## This pass (2026-11-08xliv, standing solution-architect review, background worker): picked up the one candidate the two immediately preceding passes both named and left unattempted - re-read every NEW or MODIFIED `security definer` function body that migrations 0124-0136 (across the 12 open PRs #185-#196) introduced, looking specifically for a bug the FIX ITSELF introduced, not the original gap each PR already closes - and found one, real and reproduced red/green: PR #186's own `apply_my_cv_extraction_checked()` (migration 0125) uses `p_person_id <> own_linked_person_id(v_company_id)` instead of `IS DISTINCT FROM`, so an employee-role member with NO linked `people` row at all (a real, reachable state, not a theoretical one - `create_company_invite_checked()` accepts `p_linked_person_id = null` for an 'employee'-role invite, and `redeem_company_invite()` happily joins `company_members` with that role regardless) gets a NULL guard condition, which PL/pgSQL's `IF` treats as false, and sails straight through the brand-new employee restriction into a full read/write bypass of a COLLEAGUE's own CV record - the exact same-shaped bypass 0125 itself was written to close, just for one specific employee subpopulation the fix's own red/green testing never tried. This bug lives ONLY on PR #186's own still-open, unmerged branch (not on `main`), and per the binding guardrails that branch is read-only reference for this review - so nothing was pushed and no competing PR was opened; this is written up in full below as a "recommendation for Sarel" finding (the same treatment this doc has already given other open-PR-only defects, e.g. `#176`'s stale comment), not as a numbered `QA-Edge-Case-Findings.md` entry, since that file's own house style is reserved for bugs found AND fixed - no new Finding number consumed. All 23 open PRs reconfirmed open/unmerged; nothing pushed to `main` by this pass except this docs entry.
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `898e083`
+(the immediately preceding pass's own "only missing sibling" re-verification). Re-fetched again
+immediately before writing this entry - still `898e083`, no sibling commit landed in between.
+Re-checked the open-PR backlog via the GitHub REST API (`gh api
+repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q '.[].number' | sort -n`) at the start
+and the end: 23 open, exactly `#164`/`#165`/`#176`-`#196` - nothing merged, closed, or rebased by
+anyone, including this session. `docs/specs/QA-Edge-Case-Findings.md` on `main` still tops out at
+Finding 203 (grepped every `### Finding <n>` heading and sorted numerically) - and, checked fresh
+rather than assumed, the highest Finding number claimed anywhere across the 12-PR `#185`-`#196`
+family's own (unmerged) copies of that file is 215 (PR `#196`'s own Finding), confirmed by fetching
+each PR's own `docs/specs/QA-Edge-Case-Findings.md` read-only (`git show
+origin/pr/<n>:docs/specs/QA-Edge-Case-Findings.md`) and taking the max `### Finding <n>` heading per
+PR: `#185`->203, `#186`->204, `#187`->205, `#188`->206, `#189`->207, `#190`->208, `#191`->209,
+`#192`->210, `#193`->212, `#194`->213, `#195`->214, `#196`->215. The next unclaimed number is 216 -
+not needed this pass (see above), but recorded here per the standing brief's own "confirm the next
+unclaimed Finding number by reading every open PR's own diff" instruction, for whichever pass next
+needs one.
+
+**Method - every NEW or MODIFIED `security definer` function body across the 12 migrations, read in
+full, not sampled.** Fetched all 12 PRs' heads read-only into disposable local refs (`git fetch
+origin +refs/pull/<n>/head:refs/remotes/origin/pr/<n>` for `185 186 187 188 189 190 191 192 193 194
+195 196`) and extracted each PR's own new migration file with `git show
+origin/pr/<n>:app/supabase/migrations/<file>.sql` - never checked out as a working tree, never built
+on; all 12 refs deleted via `git update-ref -d` at the end of this pass. Read every function/policy
+body line by line:
+
+- **`0124` (PR #185, `savings_counted_steps`)** - one new RESTRICTIVE policy, `using (not
+  is_employee_in_company(company_id))`. `is_employee_in_company()` is `select exists(...)`, which
+  can never itself return `null` (the SQL `EXISTS` operator is always `true`/`false`), so `not
+  <boolean, never null>` has no NULL-handling surface at all. Clean.
+- **`0125` (PR #186, `cv_extraction_apply_employee_gap`)** - **the bug** (full detail below).
+  `apply_cv_extraction_checked()` itself is clean: it blocks EVERY employee outright
+  (`if is_employee_in_company(v_company_id) then raise`), with no dependency on
+  `own_linked_person_id()` at all, so there is no NULL surface to mishandle.
+  `apply_my_cv_extraction_checked()` is the one with the new, narrower, own-person-only guard, and
+  that is where the bug sits.
+- **`0126` (PR #187, `record_tender_document_employee_gap`)** - `record_tender_document()`'s new
+  guard is `if is_employee_in_company(v_company) then raise` - an outright block, same shape as
+  `apply_cv_extraction_checked()`, no `own_linked_person_id()` dependency, no NULL surface. Clean.
+  (Confirms, independently, that this function - unlike `apply_my_cv_extraction_checked()` - never
+  needed the narrower per-person check at all: Tender Workspace is not one of an employee's two
+  allowed pages, same reasoning the PR's own header gives.)
+- **`0127`-`0133` (PRs #188-#193, the 7 storage-bucket employee-gap migrations: tender-documents,
+  cv-documents, company-documents, experience-documents, submission-packs, narrative-documents,
+  onboarding-documents)** - 6 of the 7 (`tender-documents`/`company-documents`/
+  `experience-documents`/`submission-packs`/`narrative-documents`/`onboarding-documents`) use the
+  same outright-exclude shape (`is_employee_in_company((storage.foldername(name))[1]::uuid)` ANDed
+  into a RESTRICTIVE `not (...)`, no dependency on any value that can be NULL for a real row). The
+  7th, `0128`'s `cv-documents` policies, is the ONLY other site in the whole family that narrows to
+  "own person only" the same way `0125` does - and it gets this exact NULL case **right**: its own
+  new helper, `cv_documents_path_person_id(name)`, is written to `return null` (never raise) for an
+  unparseable path, and the policy compares it with `cv_documents_path_person_id(name) IS DISTINCT
+  FROM own_linked_person_id(...)` - the NULL-safe operator. Verified by hand: if the caller is an
+  employee with no linked person (`own_linked_person_id()` = `null`) and the path names ANY real
+  person (`cv_documents_path_person_id()` = that person's real, non-null id), `<real-uuid> IS
+  DISTINCT FROM null` evaluates to `true` (not `null`) regardless of which side is null, so the
+  RESTRICTIVE policy correctly denies them for every person, not just colleagues - exactly the
+  behavior `0125`'s own guard should have had. This is strong corroborating evidence that the `<>`
+  in `0125` is a genuine mistake, not a deliberate, differently-reasoned choice: the identical
+  problem was solved correctly, with the NULL-safe operator, by a different PR in the exact same
+  family on the exact same day.
+- **`0134` (PR #194, `tt_pack_company_grant_revoke`)** - a bare `revoke execute ... from
+  authenticated`, no function/policy body at all (Finding 213, already independently reproduced by
+  an earlier pass per this doc's own history). No new logic, nothing to re-check here.
+- **`0135` (PR #195, `own_path_double_dot_false_positive`)** - redefines `tt_own_path()`,
+  `tt_path_in_company()`, `record_tender_document()` (again - see collision note below),
+  `_manual_tender_documents()`, and `tender_private_documents_path`'s own CHECK constraint, purely
+  to replace a substring `LIKE '%..%'` traversal check with a path-segment regex
+  (`'(^|/)\.\.(/|$)'`). None of these touch `is_employee_in_company()`/`own_linked_person_id()` or
+  any other role/identity check at all - a different bug family entirely (path traversal, not
+  authorization), already independently re-verified genuine by the immediately preceding two passes.
+  No fresh role-check bug possible here since none of this migration's own new code evaluates a
+  role or an identity.
+- **`0136` (PR #196, `tender_answers_path_traversal_guard`)** - a bare `alter table tender_answers
+  drop constraint ... / add constraint ...` pair (re-confirmed directly, again, by `git show`; same
+  conclusion the immediately preceding pass already reached). No function body of any kind, so no
+  SECURITY DEFINER surface to re-check.
+
+**The bug, in full - `apply_my_cv_extraction_checked()` (PR #186's own `0125`):**
+
+```sql
+if is_employee_in_company(v_company_id) and p_person_id <> own_linked_person_id(v_company_id) then
+  raise exception 'That extraction result wasn''t found for you.' using errcode = '42501';
+end if;
+```
+
+`own_linked_person_id(p_company_id)` (0077) is `select id from people where company_id =
+p_company_id and linked_user_id = auth.uid()` - it returns `null`, not an error, when the signed-in
+user has no linked `people` row in this company at all. Its own 0077 comment says outright: "or
+null if they have none (e.g. an owner/admin/member who was never linked to a person...)" - but an
+`employee`-role member can be in exactly this state too, and nothing in the schema prevents it:
+`create_company_invite_checked(p_company_id, p_email, p_role, p_linked_person_id)` (0113) takes
+`p_linked_person_id` as a plain, nullable parameter with no constraint tying it to `p_role`, and
+`redeem_company_invite()` (0077) joins `company_members` with the invite's own `role` unconditionally
+- it only attempts the `people.linked_user_id` link `if v_invite.linked_person_id is not null`,
+skipping that step entirely otherwise. So inviting someone as `role = 'employee'` with
+`p_linked_person_id = null` - a completely ordinary admin action, needing no special tooling - leaves
+that employee with `own_linked_person_id()` permanently `null` until someone links a person to them
+by hand.
+
+When that happens, `p_person_id <> null` evaluates to SQL `NULL` (not `true`/`false`) for ANY
+`p_person_id`, so `is_employee_in_company(...) and NULL` is `NULL` whenever the employee check is
+true. PL/pgSQL's `IF <condition> THEN` treats a `NULL` condition exactly like `false` - the `raise
+exception` branch is silently skipped, not entered - and execution falls straight through to the
+function's own pre-existing checks (`v_row_person_id <> p_person_id`, `v_status <> 'pending_review'`),
+both of which the attacker can trivially satisfy by naming a real, pending colleague extraction. The
+write proceeds in full.
+
+**Reproduced red, independently, in a fresh scratch Postgres** (`engine/security/replay_schema.sh`
+against `main`'s real 113 migrations, then PR `#186`'s own `0125` applied on top via `git show
+origin/pr/186:app/supabase/migrations/0125_cv_extraction_apply_employee_gap.sql | psql` - never `main`
+itself, never a different PR's content mixed in). Seeded one company; one `owner`; one `employee`
+member with **zero** `people` rows linking to them at all (the state above); one separate `people`
+row for a colleague, never linked to any account; one `cv_uploads` + `pending_review`
+`cv_extraction_results` row for that colleague. Acting as the employee (`set role authenticated;
+select set_config('test.uid', '<employee uuid>', true)`):
+- Sanity check first: `select is_employee_in_company('<company>')` -> `t`; `select
+  own_linked_person_id('<company>')` -> empty/`null` - confirmed directly, not assumed from the
+  schema alone.
+- `select apply_my_cv_extraction_checked('<colleague's extraction id>', '<colleague's person id>',
+  '{"phone":"9999999999","name":"PWNED BY EMPLOYEE WITH NO LINKED PERSON"}', '{}')` - **SUCCEEDED**,
+  no error.
+- A follow-up superuser read confirmed the colleague's real `people.name`/`people.phone` had been
+  overwritten to the attacker-supplied values, and `cv_extraction_results.review_status` was now
+  `'applied'` with `reviewed_by` set to the ATTACKING EMPLOYEE's own uid - a full, unrestricted
+  read/write bypass of a colleague's record by an employee who, by the fix's own stated intent, was
+  supposed to be confined to "their OWN linked person" and nothing else.
+
+**Confirmed green with the exact, minimal, NULL-safe fix** (`IS DISTINCT FROM` in place of `<>`,
+the identical operator `0128`'s own `cv-documents` storage policies already use correctly for the
+same comparison) applied as a `create or replace function` on the SAME scratch database, re-running
+the identical three scenarios:
+- The identical exploit call above now raised `'That extraction result wasn''t found for you.'`
+  (42501) before touching either table; a follow-up superuser read confirmed the colleague's
+  `people` row and `cv_extraction_results` row both completely unchanged.
+- The owner calling the identical RPC for the same extraction/person still succeeded unchanged (this
+  guard only ever fires when `is_employee_in_company()` is true, so owner/admin/member are
+  unaffected either way, exactly as `0125`'s own header already claims).
+- A SECOND employee, this one correctly linked to their OWN `people` row, calling
+  `apply_my_cv_extraction_checked()` for their OWN extraction/person still succeeded unchanged,
+  confirming the fix narrows nothing beyond the one NULL case.
+
+Scratch database (`tt_scratch_186`) dropped immediately after use; Postgres service stopped at the
+end of this pass.
+
+**Why this is not being pushed or PR'd by this pass, and is not consuming a `QA-Edge-Case-Findings.md`
+Finding number.** The vulnerable code - the `<>` guard above - exists ONLY on PR `#186`'s own
+still-open, unmerged branch; `main` itself does not yet have `0125` at all, so there is nothing live
+to fix with a direct push, and nothing on `main` for a new PR to target without duplicating `#186`'s
+own, not-yet-merged work. The binding guardrails are explicit that PR `#176`-`#196`'s branches are
+"read-only reference... never checked out as a working tree, built on, pushed to, or merged" for this
+pass - so editing `#186`'s own branch to fix its one line is not this pass's call to make. Opening a
+SEPARATE new PR against `main` that pre-emptively (re)defines `apply_my_cv_extraction_checked()`
+would itself recreate the exact "two open PRs redefine the same function, and whichever merges last
+silently wins" risk this pass's own brief named as a thing to check FOR (see `#187`/`#195` below) -
+worse, it would mean the correct version living on a PR that isn't `#186`'s own, which is far more
+likely to confuse a merge than help it. The same treatment this doc has already given other
+defects found embedded in another PR's own content - `#176`'s stale "no change needed" comment,
+`#164`'s/`#165`'s staleness against `bab5c5b` - applies here: write it up in full, in this doc, as a
+recommendation for Sarel to act on (or to point PR `#186`'s own next revision at) before that PR is
+merged, rather than opened as a competing fix. **Recommendation for Sarel: before merging PR #186,
+change the one line in `0125`'s own `apply_my_cv_extraction_checked()` from `p_person_id <>
+own_linked_person_id(v_company_id)` to `p_person_id is distinct from own_linked_person_id(v_company_id)`**
+- a one-token change, verified above to both close the gap for an employee with no linked person and
+leave every other caller (owner/admin/member, and an employee with a real linked person) completely
+unaffected. No `QA-Edge-Case-Findings.md` Finding number is consumed for this - that file's own
+established house style (every existing entry) is "CONFIRMED, FIXED", reserved for a bug actually
+fixed on `main` or on a PR this review itself opened; this is a defect in another, off-limits PR's own
+not-yet-merged code, the same category `#176`'s stale comment already established does not consume a
+number.
+
+**The `#187`/`#195` `record_tender_document()` collision, re-confirmed still real, and checked
+systematically for any OTHER such pair across all 12 migrations (the brief's own candidate 4).**
+Re-read `#195`'s own `0135` redefinition of `record_tender_document()` side by side with `#187`'s
+`0126`: `0135`'s own copy is based on the PRE-`0126` (0045-era) function body - it has the path-regex
+fix this PR is actually about, but it does NOT carry `0126`'s own `if is_employee_in_company(v_company)
+then raise` guard anywhere in its body (confirmed by reading `0135`'s full function text; zero
+occurrences of `is_employee_in_company` in that file). If `#195` merges AFTER `#187`, its `create or
+replace function` would silently drop `#187`'s own employee-block fix back out of `main`, reopening
+exactly the bypass `#126` closes - the same risk shape this pass's own `0125` finding has, just
+caused by merge ORDER between two PRs instead of one PR's own internal logic. This was already named
+in this doc's own history (candidate 2's write-up, two passes ago) as a known, not-yet-resolved risk
+- re-confirmed here to still hold on the current branch contents, not re-derived as new. Checked
+SYSTEMATICALLY, not just for this one already-known pair, whether any OTHER function/policy/
+constraint name is touched by two or more of the 12 migrations: extracted every `create (or replace)
+function <name>`, `create policy "<name>" on <table>`, and `alter table <table> (add|drop) constraint`
+target from all 12 migration files and diffed them against each other. Result: `record_tender_document`
+is touched by exactly two (`#187`'s `0126`, `#195`'s `0135`) - the only name touched by more than one
+migration in the whole `0124`-`0136` family. Every storage-bucket policy name (`"tender-documents:
+employee excluded, select"` etc., PRs `#188`-`#193`) is scoped to its own bucket and appears in exactly
+one migration each - confirmed by counting occurrences per file, not just per name, since several
+buckets share the same 4-verb (select/insert/update/delete) naming convention and a naive global count
+could have mistaken "4 policies with a similar name" for a cross-PR collision. No second
+`record_tender_document`-shaped collision exists anywhere in this 12-migration family.
+
+**Backlog status.** All 23 open PRs (`#164`/`#165`/`#176`-`#196`) remain open and unmerged -
+reconfirmed via the GitHub REST API at the start and the end of this pass; nothing merged, closed, or
+rebased by anyone, including this session. `#185`-`#196` were read-only referenced (one `git show` of
+their own migration file and, for `#186`/`#195`, a full read of the function bodies plus the fetched
+migration applied to a disposable SCRATCH database, never `#186`'s or any other PR's own branch
+itself) exactly as this pass's own task required, never checked out as a working tree, built on,
+pushed to, or merged; `#164`/`#165`/`#176`-`#184` were not touched at all this pass beyond being
+recounted in the open-PR listing. Finding 168 (`start_payfast_checkout()`), Finding 190's own
+`field_provenance` backfill, and every other previously-named off-limits item remain exactly as left.
+No new `QA-Edge-Case-Findings.md` Finding number consumed (216 remains the next free one, for
+whichever pass needs it). The 12 disposable local refs (`refs/remotes/origin/pr/185` through
+`.../pr/196`) were deleted at the end of this pass via `git update-ref -d`; none was ever checked out
+as a working tree or built on. The one scratch Postgres database (`tt_scratch_186`) was dropped
+immediately after use (`drop database if exists tt_scratch_186;`) and the Postgres service stopped at
+the end of this pass. **Nothing pushed to `main` by this pass except this docs entry; no PR opened,
+closed, or merged.**
+
+To verify independently: `gh api repos/sareljvr2024/tender-tool/pulls?state=open --paginate -q
+'.[].number' | sort -n` and confirm the same 23 numbers. Fetch PR `#186`'s own migration
+(`git fetch origin +refs/pull/186/head:refs/remotes/origin/pr/186` then `git show
+origin/pr/186:app/supabase/migrations/0125_cv_extraction_apply_employee_gap.sql`) and confirm
+`apply_my_cv_extraction_checked()`'s own guard reads `p_person_id <> own_linked_person_id(v_company_id)`,
+not `IS DISTINCT FROM`. Build a scratch Postgres from `main`'s own 113 migrations
+(`engine/security/replay_schema.sh -h 127.0.0.1 -p 5432 -U postgres -d <dbname>`), apply that one
+fetched migration file on top, seed a company with an `owner`, an `employee` member with NO `people`
+row linking to them, and a colleague's `people` row with a `pending_review` `cv_extraction_results`
+row, then `begin; set local role authenticated; select set_config('test.uid', '<employee uuid>',
+true); select apply_my_cv_extraction_checked('<colleague extraction id>', '<colleague person id>',
+'{"phone":"x"}', '{}'); commit;` and confirm it SUCCEEDS (the bug), then re-run after changing that
+one line to `IS DISTINCT FROM` and confirm it now raises `42501` instead. Confirm `0128`'s own
+`cv-documents` policies already use `IS DISTINCT FROM` for the structurally identical comparison
+(`grep -n "is distinct from" <(git show origin/pr/189:app/supabase/migrations/0128_cv_documents_storage_employee_gap.sql)`).
+Confirm `#195`'s own `0135_own_path_double_dot_false_positive.sql` contains zero occurrences of
+`is_employee_in_company` in its own `record_tender_document()` body
+(`git show origin/pr/195:app/supabase/migrations/0135_own_path_double_dot_false_positive.sql | grep -c is_employee_in_company`
+should print `0`), confirming the `#187`/`#195` collision still holds.
+
+---
+
 ## This pass (2026-11-08xliii, standing solution-architect review, background worker): independently re-derived, from a fresh literal/mechanical sweep (grep over source AND a live `pg_constraint`/`pg_proc`/`pg_policies` catalog query on a scratch Postgres built from `main`'s real 113 migrations), whether PR #196's own claim - that `tender_answers_check2` (Finding 215) was the ONLY sibling PR #195's own "9 true siblings" sweep (Finding 214) missed - itself holds up; it does: genuine negative, no 11th sibling found, nothing pushed to any PR branch, no new Finding opened, `main` untouched except this docs entry
 
 `git fetch origin main` at the start found local already matching `origin/main` exactly - `b7ed3b9`
