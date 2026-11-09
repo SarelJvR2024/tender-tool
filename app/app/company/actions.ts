@@ -166,15 +166,14 @@ export async function saveDocumentTemplate(companyId: string, formData: FormData
     .eq("document_type", type.key)
     .maybeSingle();
 
+  // company_id/updated_by/updated_at are no longer part of this object -
+  // replace_company_document_template() (0125) sets the first from its own
+  // p_company_id parameter and the other two itself (auth.uid()/now()), the
+  // same convention as every other SECURITY DEFINER function in this repo.
   const row: Record<string, unknown> = {
-    company_id: companyId,
-    document_type: type.key,
-    mode,
     storage_path: existing?.storage_path ?? null,
     original_filename: existing?.original_filename ?? null,
     guideline: existing?.guideline ?? null,
-    updated_by: user.id,
-    updated_at: new Date().toISOString(),
   };
 
   let uploadedPath: string | null = null;
@@ -203,11 +202,36 @@ export async function saveDocumentTemplate(companyId: string, formData: FormData
     row.guideline = text;
   }
 
-  const { error } = await supabase.from("company_document_templates").upsert(row, { onConflict: "company_id,document_type" });
+  // replace_company_document_template() (0125), not a plain .upsert() -
+  // standing review, 2026-11-09, continuing Finding 231 (six sibling
+  // "replace a document" sites raced on their storage column; this one and
+  // uploadTenderDocument() below write via upsert, which can't take
+  // Finding 231's own `.eq(column, previousPath)` filter: PostgREST upsert
+  // has no row-level WHERE of its own, only the onConflict columns). Two
+  // near-simultaneous saves for the SAME document_type - a double-click, or
+  // two tabs - would otherwise both upload, both upsert successfully, and
+  // silently orphan whichever request's file lost the race, while both
+  // users were told "saved". The RPC locks the company row, re-checks the
+  // row's current storage_path against `existing.storage_path` (what THIS
+  // request read before uploading) only when this request itself just
+  // uploaded a new file, and raises instead of overwriting on a mismatch -
+  // the existing error handling below (clean up this request's own
+  // upload, surface the message, ask the user to retry) already covers
+  // that raise with no new failure path needed.
+  const { error } = await supabase.rpc("replace_company_document_template", {
+    p_company_id: companyId,
+    p_document_type: type.key,
+    p_mode: mode,
+    p_storage_path: row.storage_path,
+    p_original_filename: row.original_filename,
+    p_guideline: row.guideline,
+    p_expected_previous_path: existing?.storage_path ?? null,
+    p_has_new_upload: uploadedPath !== null,
+  });
   if (error) {
-    console.error("company_document_templates upsert failed", error);
+    console.error("replace_company_document_template failed", error);
     if (uploadedPath) await supabase.storage.from(VAULT_BUCKET).remove([uploadedPath]);
-    back("Could not save this template - try again. If it keeps happening, let us know.");
+    back(error.message || "Could not save this template - try again. If it keeps happening, let us know.");
   }
   if (uploadedPath && existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
 

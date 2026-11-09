@@ -52,10 +52,15 @@ function makeChain(queue: Resp[]) {
   return chain;
 }
 
-function makeSupabase(opts: { fromQueues: Resp[][]; uploadError?: { message: string } | null }) {
+function makeSupabase(opts: {
+  fromQueues: Resp[][];
+  uploadError?: { message: string } | null;
+  rpcResp?: Resp;
+}) {
   let fromCallIndex = 0;
   const uploadCalls: string[] = [];
   const removeCalls: string[][] = [];
+  const rpcCalls: { fn: string; args: unknown }[] = [];
   return {
     client: {
       auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
@@ -76,9 +81,14 @@ function makeSupabase(opts: { fromQueues: Resp[][]; uploadError?: { message: str
           },
         }),
       },
+      rpc: async (fn: string, args: unknown) => {
+        rpcCalls.push({ fn, args });
+        return opts.rpcResp ?? { data: null, error: null };
+      },
     },
     uploadCalls,
     removeCalls,
+    rpcCalls,
   };
 }
 
@@ -369,5 +379,114 @@ describe("uploadVaultDocument - two concurrent replace requests (both succeed, n
     expect(removeCalls.flat()).toContain(ORIGINAL_PATH);
     expect(removeCalls.flat()).toContain(loserPath);
     expect(removeCalls.flat()).not.toContain(finalValue);
+  });
+});
+
+// Standing review finding, 2026-11-09, continuing Finding 231:
+// saveDocumentTemplate() wrote via .upsert(onConflict: "company_id,
+// document_type") - the identical "replace a document, storage race" shape
+// Finding 231 fixed at six other, update()-based sites (including this
+// file's own uploadVaultDocument() above), but upsert can't take that fix's
+// `.eq(column, previousPath)` filter (PostgREST upsert has no row-level
+// WHERE of its own - conflict resolution is keyed on the onConflict
+// columns). Fixed by moving the write into
+// replace_company_document_template() (migration 0125), a SECURITY
+// DEFINER function that locks the companies row and re-checks the row's
+// current storage_path against what this request read before uploading,
+// raising instead of overwriting when this request itself uploaded a new
+// file and that check fails. The actual two-session race is reproduced
+// directly in a disposable scratch Postgres database (see 0125's own
+// header comment); these tests only check this Server Action's own wiring:
+// the RPC is called with the right arguments, and either outcome (success
+// or a raised conflict) is handled the same way Finding 231's own sites
+// already were.
+function templateFormData(fields: Record<string, string>, file?: File): FormData {
+  const fd = formDataWith(fields);
+  if (file) fd.set("file", file);
+  return fd;
+}
+
+describe("saveDocumentTemplate - replace_company_document_template raises a conflict (another request just replaced it)", () => {
+  it("cleans up THIS request's own just-uploaded file, surfaces the real conflict message, and does not touch the previous file", async () => {
+    const file = new File(["bytes"], "letter.pdf", { type: "application/pdf" });
+    const { client, uploadCalls, removeCalls, rpcCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { storage_path: "company-1/templates/authority_to_sign/old-uuid-old.pdf", original_filename: "old.pdf", guideline: null }, error: null }],
+      ],
+      rpcResp: { data: null, error: { message: "This document was just replaced in another tab or request - refresh and try again." } },
+    });
+    supabaseState.current = client;
+
+    const { saveDocumentTemplate } = await import("./actions");
+
+    const url = await expectRedirect(
+      saveDocumentTemplate("company-1", templateFormData({ document_type: "authority_to_sign", mode: "uploaded" }, file)),
+    );
+
+    expect(url).toContain("/company?error=");
+    expect(url).toContain(encodeURIComponent("just replaced in another tab or request"));
+
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe("replace_company_document_template");
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_expected_previous_path).toBe("company-1/templates/authority_to_sign/old-uuid-old.pdf");
+    expect(args.p_has_new_upload).toBe(true);
+
+    // This request's own new upload is cleaned up (it lost the race)...
+    expect(uploadCalls).toHaveLength(1);
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toEqual([uploadCalls[0]]);
+    // ...and the PREVIOUS file (still the real, current one) is untouched.
+    expect(removeCalls[0]).not.toContain("company-1/templates/authority_to_sign/old-uuid-old.pdf");
+  });
+});
+
+describe("saveDocumentTemplate - replace_company_document_template succeeds", () => {
+  it("deletes the superseded previous file and redirects to the real success URL", async () => {
+    const file = new File(["bytes"], "letter.pdf", { type: "application/pdf" });
+    const { client, removeCalls, rpcCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { storage_path: "company-1/templates/authority_to_sign/old-uuid-old.pdf", original_filename: "old.pdf", guideline: null }, error: null }],
+      ],
+      // default rpcResp: { data: null, error: null } - success
+    });
+    supabaseState.current = client;
+
+    const { saveDocumentTemplate } = await import("./actions");
+
+    const url = await expectRedirect(
+      saveDocumentTemplate("company-1", templateFormData({ document_type: "authority_to_sign", mode: "uploaded" }, file)),
+    );
+
+    expect(url).toBe("/company?saved=letter#letters");
+    expect(rpcCalls).toHaveLength(1);
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toEqual(["company-1/templates/authority_to_sign/old-uuid-old.pdf"]);
+  });
+});
+
+describe("saveDocumentTemplate - switching to a guideline needs no new upload", () => {
+  it("passes p_has_new_upload: false and never calls storage at all", async () => {
+    const { client, uploadCalls, removeCalls, rpcCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { storage_path: "company-1/templates/authority_to_sign/old-uuid-old.pdf", original_filename: "old.pdf", guideline: null }, error: null }],
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveDocumentTemplate } = await import("./actions");
+
+    const url = await expectRedirect(
+      saveDocumentTemplate(
+        "company-1",
+        templateFormData({ document_type: "authority_to_sign", mode: "ai_guideline", guideline: "Dear {{signatory_name}}, ..." }),
+      ),
+    );
+
+    expect(url).toBe("/company?saved=letter#letters");
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_has_new_upload).toBe(false);
+    expect(uploadCalls).toHaveLength(0);
+    expect(removeCalls).toHaveLength(0);
   });
 });
