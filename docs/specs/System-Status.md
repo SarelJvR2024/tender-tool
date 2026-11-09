@@ -14404,6 +14404,47 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 226, SANRAL Form B7's live client-side total preview showed GREEN for a Targeted Enterprise total over 100% - the exact opposite of the warning `checkPlan()` already raises for the same total once saved, a direct consequence of Finding 202's server-side fix never reaching this pre-submission preview
+
+Oriented from `eaf0713` (own prior pass: Finding 224, `opportunityBuyerMatch.ts`'s missing minimum
+length). `git fetch origin main` found 1 new sibling commit (`bd35a5c`, Finding 225 - a real PayFast
+ITN exact-redelivery idempotency gap, opened as a PR per that pass's own money-adjacent-change
+methodology, not pushed to `main` directly) - no collision with this pass's own files. Fast-forward
+merge was clean. Re-checked again immediately before this pass's own push - still the same tip, no
+further sibling commit landed in between.
+
+**This pass's own task**: SANRAL pack rotation. Extensive reading of `fingerprint.py`,
+`fill_conventional.py`, `fill_tender.py`, `fill_financial_hours.py`, `assemble_pack.py` and
+`sanral_fill.py`'s own shared helpers found nothing new - every one already carries its own
+extensively dated QA history from prior passes. Turned to the TypeScript side of this session's own
+earlier Finding 202 (`checkPlan()`'s missing over-100% check) - specifically whether the actual Form
+B7 Workspace form, filled in BEFORE that server-side check runs, reflects the same rule.
+
+**Found: Finding 226.** `subcontracting-plan-form.tsx`'s own live "Total (excl. provisional sums)"
+preview used `total >= B7_POLICY_MIN_PCT ? "text-success" : "text-warning"` - a lower-bound-only
+check, unchanged since before Finding 202 existed. Constructed the identical adversarial case Finding
+202 used (two TEs at 60%/55%, total 115%): the live preview renders green ("all good") while the
+company is still typing, then on save `checkPlan()`'s own server-side warning appears - the one place
+meant to catch a data-entry mistake before submission said the opposite of what the save itself would.
+
+**Fix**: extracted the banding logic `checkPlan()` already encodes into a new, shared, exported pure
+function in `lib/sanralB7.ts`, `totalPercentInRange()` - single source of truth for both the
+server-side warnings and this client-side preview. Updated the form to use it and added the same
+explanatory text the server-side warning already uses. Verified red-then-green: added 3 tests to the
+existing `sanralB7.spec.ts` (from Finding 202). **Red:** saved the diff, `git apply -R`, re-ran
+`npx vitest run lib/sanralB7.spec.ts` - 3 of 6 failed immediately with `TypeError: totalPercentInRange
+is not a function`. **Green:** reapplied, re-ran - 6/6 pass. `npx tsc --noEmit`/`npx eslint` clean.
+Broader regression: grepped every other real caller of `lib/sanralB7.ts` (none import anything
+touched); full `npx vitest run` - 69/72 files, 527/532 (the same 5 pre-existing, unrelated
+`date-fns`-not-installed failures confirmed earlier this session). See
+`docs/specs/QA-Edge-Case-Findings.md` Finding 226 for the full write-up.
+
+**Backlog status.** No new backlog items opened by this fix. `git fetch origin main` immediately
+before writing this entry and again immediately before pushing showed no sibling commits landed in
+between.
+
+---
+
 ## This pass (2026-11-08, standing QA/robustness review): fix - Finding 224, `opportunityBuyerMatch.ts`'s `sanitizePreferredBuyers()` had a length ceiling but no floor - a 1-character preferred buyer matched 9 of 10 real-shaped buyer names via the module's own bidirectional-substring matching, silently defeating the whole feature
 
 Oriented from `bb2d5ca` (own prior pass: Finding 223, `run_bridges.py`'s `UnicodeDecodeError` crash).

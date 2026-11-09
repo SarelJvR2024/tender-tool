@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { saveSubcontractingPlan } from "./b7-actions";
-import { B7_MAX_TES, B7_POLICY_MIN_PCT, B7_TBC_NAME, type SubcontractingPlan, type TargetedEnterprise } from "@/lib/sanralB7";
+import { B7_MAX_TES, B7_TBC_NAME, totalPercentInRange, type SubcontractingPlan, type TargetedEnterprise } from "@/lib/sanralB7";
 
 /**
  * The company's answer to SANRAL Form B7: either "we will subcontract" with
@@ -68,6 +68,16 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
     targeted_enterprises: rows.map((r) => ({ ...r, size: r.size || null, in_project_province: r.in_project_province || null, consulting_engineering_firm: r.consulting_engineering_firm || null })),
   });
   const total = rows.reduce((t, r) => t + (Number(r.pct_excl_provisional.replace(",", ".")) || 0), 0);
+  // QA pass, 2026-11-09: this live total used to only check the LOWER bound
+  // (below 30% -> amber) - lib/sanralB7.ts's own checkPlan() (Finding 202,
+  // 2026-11-08) already warns server-side when the total exceeds 100% (more
+  // of the contract subcontracted than the whole contract is worth, almost
+  // always a data-entry mistake), but this live preview never got the same
+  // check: two TEs at 60%/55% showed this total in GREEN ("text-success")
+  // while typing, only turning amber after a save-and-reload round trip
+  // revealed the real server-side warning - the one place meant to catch
+  // this before submission said the opposite of what the save would.
+  const totalInRange = totalPercentInRange(total);
 
   return (
     <form action={saveSubcontractingPlan}>
@@ -188,7 +198,10 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
             ) : (
               <span className="text-xs text-muted-foreground">Form B7 holds at most {B7_MAX_TES}.</span>
             )}
-            <span className={`text-xs font-semibold ${total >= B7_POLICY_MIN_PCT ? "text-success" : "text-warning"}`}>Total (excl. provisional sums): {Math.round(total * 100) / 100}%</span>
+            <span className={`text-xs font-semibold ${totalInRange ? "text-success" : "text-warning"}`}>
+              Total (excl. provisional sums): {Math.round(total * 100) / 100}%
+              {total > 100 ? " - more than the whole contract has been allocated; check for a data-entry error" : ""}
+            </span>
           </div>
           <label className={`${labelClass} mb-2.5`}>
             Comments (printed on Form B7)

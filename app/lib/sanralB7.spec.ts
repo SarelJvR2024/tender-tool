@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkPlan, type TargetedEnterprise } from "./sanralB7";
+import { checkPlan, totalPercentInRange, type TargetedEnterprise } from "./sanralB7";
 
 // QA pass, 2026-11-08: checkPlan() bounded each Targeted Enterprise's own
 // percentage 0-100 individually, but never checked the SUM across TEs - a
@@ -68,5 +68,26 @@ describe("checkPlan - Targeted Enterprise total percentage", () => {
     );
     expect(errors).toEqual([]);
     expect(warnings.some((w) => w.includes("below SANRAL's 30% minimum"))).toBe(true);
+  });
+});
+
+// QA pass, 2026-11-09: subcontracting-plan-form.tsx's own live client-side
+// total preview used to only check the lower bound (below 30% -> amber), so
+// a total of 115% showed in GREEN ("all good") while typing - the exact
+// opposite of the warning checkPlan() above already raises for the same
+// total once saved. Extracted as this shared, single-source-of-truth
+// function so the form's own preview and checkPlan()'s own warnings can
+// never disagree about which band a total falls in again.
+describe("totalPercentInRange", () => {
+  it("is false below the policy minimum", () => {
+    expect(totalPercentInRange(20)).toBe(false);
+  });
+  it("is true within the acceptable band", () => {
+    expect(totalPercentInRange(30)).toBe(true);
+    expect(totalPercentInRange(65)).toBe(true);
+    expect(totalPercentInRange(100)).toBe(true);
+  });
+  it("is false once the total exceeds the whole contract (over 100%)", () => {
+    expect(totalPercentInRange(115)).toBe(false);
   });
 });

@@ -29,6 +29,21 @@ export const B7_MAX_TES = 4;
 export const B7_POLICY_MIN_PCT = 30;
 export const B7_TBC_NAME = "To be identified after tender award";
 
+/**
+ * Whether a Targeted Enterprise total (sum of pct_excl_provisional, as
+ * checkPlan()'s own warnings compute it) is within SANRAL's acceptable band
+ * - at least the policy minimum, and never more than the whole contract.
+ * Shared, single source of truth for both checkPlan()'s own warnings below
+ * and subcontracting-plan-form.tsx's live client-side total preview - QA
+ * pass, 2026-11-09: that form's own live preview used to check only the
+ * lower bound, so two TEs totalling 115% showed in green ("all good") while
+ * typing, the opposite of the warning checkPlan() already raises for the
+ * exact same total once saved.
+ */
+export function totalPercentInRange(total: number): boolean {
+  return total >= B7_POLICY_MIN_PCT && total <= 100;
+}
+
 export type B7Size = "EME" | "QSE" | "GENERIC";
 export type B7Setup = {
   category: number | null;
