@@ -9,7 +9,7 @@ import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { moveTenderStage } from "./actions";
-import { derivedSector, ECONOMICS_COLUMNS, formatRand, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
+import { clientLabel, derivedSector, ECONOMICS_COLUMNS, formatRand, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { loadDisciplineTaxonomy, taxonomyLabel, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { EconomicsForm, type CreditPerson } from "./economics-form";
 import { OutcomeForm, type Outcome } from "./outcome-form";
@@ -284,7 +284,30 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       stage: normalizeStage(pack?.pipeline_stage ?? "found"),
       contractNo: t.contract_no,
       title: t.title || t.description || "(untitled)",
-      buyer: t.buyer || (t.family && t.family !== GENERAL_FAMILY ? "SANRAL" : "(unknown buyer)"),
+      // Standing review, 2026-11-09: this used to be its own inline copy of
+      // lib/dealEconomics.ts's clientLabel() rule, not an import of it, even
+      // though this file already imports several OTHER symbols from that
+      // same module. The two rules were identical when both were written
+      // (2026-10-17, ~7.5 hours apart) EXCEPT that clientLabel() excludes
+      // family === "UNKNOWN" from counting as "SANRAL" and this copy never
+      // did - a real, reachable drift, not a hypothetical one: "UNKNOWN" is
+      // a genuine, still-written tenders.family value (migration 0001's own
+      // column comment; engine/intake/classify_tender.py sets it whenever a
+      // real SANRAL Technical Submission workbook is found - route="sanral"
+      // - but engine/fingerprint.py's detect_family() can't tell Conventional
+      // from RRM apart from the workbook's own sheet set), and it is
+      // deliberately NOT one of lib/pastSubmissionReuse.ts's own canonical
+      // SANRAL_PACK_FAMILIES ["Conventional Consultant Tender", "RRM
+      // Consultant Tender"] - the list every other "is this tender SANRAL"
+      // check in this app already keys off. So a buyer-less tender stuck at
+      // family="UNKNOWN" used to show "SANRAL" on this board's own card
+      // while /pipeline/pricing (dealEconomics.ts's clientLabel(), same
+      // row) and the tender's own Market context section
+      // (market-context.tsx's isSanral) both correctly called it
+      // "(unknown buyer)" for the exact same tender at the exact same time.
+      // Now imports clientLabel() directly instead of a second,
+      // independently-drifted copy - one rule, not two.
+      buyer: clientLabel(t.buyer, t.family),
       closingDate: t.closing_date,
       stageChangedAt: pack?.stage_changed_at ?? null,
       submittedAt: pack?.submitted_at ?? null,

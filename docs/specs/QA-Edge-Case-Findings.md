@@ -15048,3 +15048,47 @@ Full regression after the fix (from `app/`): `npx vitest run` - **76/76 files, 6
 **Regression:** `app/supabase/migrations/0126_platform_admin_billing_overview_not_a_member.sql` (new; `platform_admin_billing_overview()` only - same signature, same other 11 columns unchanged). `company_packs_this_period()` itself: byte-for-byte unchanged.
 
 To verify independently: open PR #210's diff (`gh pr diff 210`, read-only) and confirm it matches this description - one new migration file, `platform_admin_billing_overview()`'s `packs_used_this_period` column now computed inline rather than via `company_packs_this_period()`, no other function or table touched. Replay `engine/security/replay_schema.sh` against a fresh scratch database and run the verification commands above.
+
+---
+
+## 2026-11-09x (standing solution-architect review, background worker): Finding 304 - `app/app/pipeline/page.tsx`'s own inline copy of `lib/dealEconomics.ts`'s `clientLabel()` rule drifted the day it was mirrored, and nobody noticed because `clientLabel()` itself had zero test coverage
+
+**Angle chosen.** Technique from this track's own brief: grep every "mirrors"/"same rule as"/"must match" comment in `app/` and read both sides directly rather than trusting the claim. `lib/dealEconomics.ts`'s own header comment on `clientLabel()` reads: `/** Client: the buyer, or SANRAL for the SANRAL families (same rule as /pipeline cards). */` - a direct, checkable claim that `app/app/pipeline/page.tsx`'s own card-building code computes the identical thing. Read both sides.
+
+**The two rules, side by side.** `app/app/pipeline/page.tsx` (line 287, before this fix):
+```
+buyer: t.buyer || (t.family && t.family !== GENERAL_FAMILY ? "SANRAL" : "(unknown buyer)"),
+```
+`lib/dealEconomics.ts`'s `clientLabel()`:
+```
+export function clientLabel(buyer: string | null, family: string | null): string {
+  return buyer || (family && family !== GENERAL_FAMILY && family !== "UNKNOWN" ? "SANRAL" : "(unknown buyer)");
+}
+```
+Not identical: `clientLabel()` has one extra condition, `&& family !== "UNKNOWN"`, that the Pipeline board's own inline copy never had.
+
+**Is `family === "UNKNOWN"` a real, reachable state, not a hypothetical?** Yes, confirmed from three independent places, not assumed: (1) `app/supabase/migrations/0001_init_schema.sql`'s own column comment: `family text, -- "Conventional Consultant Tender" | "RRM Consultant Tender" | "UNKNOWN"` - `"UNKNOWN"` was a documented, intended value for this column from the very first migration, not a later accident. (2) It is still actively written today: `engine/intake/classify_tender.py`'s `classify_documents()` sets `family = winner[2]` (the Technical Submission workbook's own fingerprinted family) whenever a real SANRAL workbook is found (`route = "sanral"`) - and `winner[2]` is exactly `engine/fingerprint.py`'s `detect_family()` return value, which itself returns the literal string `"UNKNOWN"` when the workbook's sheet set doesn't match either known SANRAL template. So a tender can be genuinely `route="sanral"` (because a real SANRAL workbook was found and the submission-pack flow applies) while `family` is persisted as `"UNKNOWN"` (because WHICH SANRAL sub-family it is couldn't be told from the workbook alone) - `engine/general/process_general_jobs.py` then writes this straight to `tenders.family` via `patch["family"] = decision["family"]`. (3) `lib/pastSubmissionReuse.ts`'s own canonical `SANRAL_PACK_FAMILIES = ["Conventional Consultant Tender", "RRM Consultant Tender"]` - the list every other "is this tender SANRAL" check in this app already keys off (`packKindFor()`) - deliberately does NOT include `"UNKNOWN"`, i.e. the app's own canonical answer is that an `"UNKNOWN"`-family tender is NOT one of the two real SANRAL sub-families for app-side purposes. `clientLabel()`'s exclusion agrees with this canonical list; the Pipeline board's own inline copy did not.
+
+**Reproduced (logical, not a live DB query - a pure-function disagreement needs no database).** Ran both rules, side by side, for `buyer = null, family = "UNKNOWN"` (a buyer-less tender stuck at an unresolved SANRAL sub-family - reachable e.g. via a pursued `discovered_opportunities` row whose own `buyer` field was never captured, `engine/discovery/source_http.py`'s own default dict: `"buyer": None`):
+```
+pipeline/page.tsx inline rule -> "SANRAL"
+lib/dealEconomics.ts clientLabel() -> "(unknown buyer)"
+MISMATCH (bug reproduced)
+```
+Confirmed red. The live consequence: for such a tender, the Pipeline board's own card (`/pipeline`) showed "SANRAL" as the client, while `/pipeline/pricing` (same row, via `clientLabel()`) and the tender's own Market context section (`app/app/tenders/[id]/market-context.tsx`'s `isSanral`, which uses the identical `family !== GENERAL_FAMILY && family !== "UNKNOWN"` test) both correctly showed "(unknown buyer)" for the exact same tender at the exact same time - a direct, visible, three-screen disagreement about who the buyer is, not a cosmetic rounding difference.
+
+**Why the drift happened, confirmed from git history, not guessed.** `git log -S` on both files: `app/app/pipeline/page.tsx`'s inline rule was added at commit `b45f4e4` (2026-10-17 07:40 UTC). `lib/dealEconomics.ts`'s `clientLabel()` was added roughly 7.5 hours later the same day, commit `f2cb3cd` (2026-10-17 15:15 UTC), with the `family !== "UNKNOWN"` exclusion already present from its very first version - i.e. `clientLabel()` was written as a deliberately slightly-more-correct mirror of the Pipeline board's own rule, and that one extra condition was never back-ported to the original. `app/app/pipeline/page.tsx` had exactly one commit touching that line in its entire history (confirmed via `git log --follow -S`) - it was never revisited since.
+
+**Why nobody caught it in three weeks.** `clientLabel()` had NO test coverage at all (`lib/dealEconomics.spec.ts` existed only for `needsCreditFallbackOption()`, a completely different function in the same file) - the exact "canonical rule with no test pinning it, so a sibling copy can drift silently" shape this track's own brief flags as worth checking. `app/app/pipeline/page.tsx` itself is a server component page and, per its own header comment ("this file is a server component page, which can't itself be unit-tested"), deliberately extracts testable logic into `lib/pipelineCardHelpers.ts` - but this one piece of business logic was never extracted, so it had no test of its own either, on either side of the mirror.
+
+**Fix.** `app/app/pipeline/page.tsx`: removed the inline reimplementation, imported `clientLabel` from `@/lib/dealEconomics` (a module this file already imports `derivedSector`/`ECONOMICS_COLUMNS`/`formatRand`/`toNumber`/`PackEconomics`/`PriceSector` from - not a new dependency) and used it directly: `buyer: clientLabel(t.buyer, t.family)`. One rule, not two, going forward - any future refinement to `clientLabel()` (e.g. if a new family value is added) now reaches the Pipeline board automatically instead of needing a second, easily-forgotten edit. `GENERAL_FAMILY`'s own import stays (still used at two other call sites in the same file). `lib/dealEconomics.ts` itself: untouched, already correct.
+
+**Severity and why this was pushed directly, not opened as a PR.** Small, scoped (2 files), display-only (a label string on the Pipeline board) - no RLS, no money-movement, no quota/credit-spend logic, no hard-stop gate, no signed/submitted-document content, no worker image, no multi-RPC schema surface. Per this track's own guardrails, a fix of this shape goes straight to `main`.
+
+**Verified.** `npx tsc --noEmit` - 0 errors. `npx eslint app/pipeline/page.tsx lib/dealEconomics.ts lib/dealEconomics.spec.ts` - 0 errors/warnings. `npx vitest run` - **76/76 test files, 630/630 tests pass** (625 before this pass + 5 new `clientLabel()` cases added below). `npx vitest run lib/dealEconomics.spec.ts` on its own - 9/9 pass (4 pre-existing `needsCreditFallbackOption()` + 5 new).
+
+**Regression:** `app/app/pipeline/page.tsx` (one import line widened, one field's value expression replaced - nothing else in the file touched); `app/lib/dealEconomics.spec.ts` (5 new `describe("clientLabel", ...)` cases added - first-ever coverage for this function - 0 existing tests changed). `lib/dealEconomics.ts` itself: byte-for-byte unchanged.
+
+**Backlog status.** No new standing item opened - this is a plain, mechanical "hand-copied rule drifted from the canonical version it claims to mirror, with no test on either side to catch it" bug with one unambiguous fix, the same general bug class as Findings 240-243/249/293/294/302 (independent occurrences of "two surfaces claiming to show the same thing, one of them wrong"), not a judgment call for Sarel.
+
+To verify independently: from `app/`, `npx vitest run lib/dealEconomics.spec.ts` (expect 9/9 pass, including the 5 new `clientLabel` cases - in particular `clientLabel(null, "UNKNOWN")` returning `"(unknown buyer)"`). Confirm `app/app/pipeline/page.tsx` imports `clientLabel` from `@/lib/dealEconomics` and its card-building loop calls `clientLabel(t.buyer, t.family)` rather than reimplementing the rule inline.
