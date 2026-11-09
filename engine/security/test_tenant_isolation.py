@@ -1065,6 +1065,45 @@ select 1;""")
     ok, _, err = db.run(f"select create_company_invite_checked('{B}', 'legit@example.test', 'member', null)", uB)
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
+    # Finding 237, 2026-11-09: create_company_invite_checked() never
+    # validated p_linked_person_id belonged to p_company_id. A prior pass's
+    # own write-up judged this "dead-but-sloppy, not exploitable" because
+    # redeem_company_invite()'s own later UPDATE is company-scoped - true,
+    # but its EARLIER gating SELECT (the one feeding the "already linked to
+    # a different account" exception) was not, making it a real
+    # cross-tenant information-disclosure oracle: whether an arbitrary
+    # stranger's people row (in a company the caller has no relationship to
+    # at all) is already linked to a user account. Fixed two ways (0138):
+    # the RPC now rejects a cross-company linked_person_id outright, and
+    # the redeem-side SELECT is now scoped by company_id too, so even a row
+    # that bypasses the RPC's own check (inserted directly, as simulated
+    # below) can't resurrect the oracle.
+    print("  -- Finding 237: A can't name B's person as linked_person_id, and the redeem-side oracle is closed too --")
+    bPerson, bLinkedUser = str(uuid.uuid4()), str(uuid.uuid4())
+    db.one(f"""
+insert into auth.users (id, email) values ('{bLinkedUser}', 'iso19-linked@example.test');
+insert into people (id, company_id, name, linked_user_id) values
+  ('{bPerson}', '{B}', 'Iso19 B Person (already linked)', '{bLinkedUser}');
+select 1;""")
+    bad, err = refused(db, f"select create_company_invite_checked('{A}', 'cross@example.test', 'employee', '{bPerson}')", uA)
+    check(bad, f"A can't name B's own person as linked_person_id on an invite into A's own company ({err})")
+
+    # Simulate a row that predates this fix (or any future write path that
+    # isn't this RPC) by inserting the cross-company invite directly,
+    # bypassing create_company_invite_checked() entirely, to test the
+    # redeem-side filter on its own merits.
+    crossInvite, crossToken, uC = str(uuid.uuid4()), f"iso19-cross-{uuid.uuid4()}", str(uuid.uuid4())
+    db.one(f"""
+insert into auth.users (id, email) values ('{uC}', 'iso19c@example.test');
+insert into company_invites (id, company_id, email, role, linked_person_id, token) values
+  ('{crossInvite}', '{A}', 'iso19c@example.test', 'employee', '{bPerson}', '{crossToken}');
+select 1;""")
+    ok, _, err = db.run(f"select redeem_company_invite('{crossToken}')", uC)
+    check(ok and "already linked" not in (err or ""),
+          f"redeeming a (directly-inserted, bypassing the RPC check) cross-company invite doesn't leak B's person's real linked-status ({err.splitlines()[0] if err else 'ok, no leak'})")
+    check(db.one(f"select linked_user_id from people where id = '{bPerson}'") == bLinkedUser,
+          "B's person row is still untouched - still linked to its own real account, not the redeemer")
+
 
 def main():
     part1()
