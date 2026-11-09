@@ -14,6 +14,23 @@ import { sendTransactionalEmail } from "@/lib/resendEmail";
  * uses (migration 0093, already granted to `authenticated`) so it shows up
  * in the dispatch log below for inspection - under a `test-sample-`
  * idempotency key that can never collide with a real send's own key.
+ *
+ * Platform-admin check added here (standing review, 2026-11-09, Finding
+ * 274): unlike every other /admin/ Server Action (admin/actions.ts's RLS-
+ * enforced-update-then-zero-row-check, the SECURITY DEFINER RPCs every
+ * other admin action here calls, or admin/taxonomy/actions.ts's own
+ * explicit requireAdmin()), this action had NO is_platform_admin() check
+ * anywhere in its call chain - claim_notification()/record_notification_sent()
+ * (migration 0093) are deliberately granted to any authenticated (even anon)
+ * caller for real notification flows like the welcome email, so they are not
+ * a backstop here. /admin/layout.tsx's own is_platform_admin() gate only
+ * covers page renders, not a Server Action reached by direct POST (the exact
+ * reasoning that comment, and every sibling action file, already states) -
+ * so any signed-in, non-admin company user could reach this action directly
+ * and make the app send a real outbound email via Resend. Confirmed live in
+ * actions.spec.ts: pre-fix, a mocked non-admin session reached `sent=...`
+ * and the Resend mock was actually called; checked here now, same as every
+ * sibling action.
  */
 export async function sendTestNotificationEmail(formData: FormData) {
   const templateKey = String(formData.get("template_key") ?? "");
@@ -21,6 +38,12 @@ export async function sendTestNotificationEmail(formData: FormData) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) redirect("/login");
+
+  const { data: isAdmin, error: adminCheckError } = await supabase.rpc("is_platform_admin");
+  if (adminCheckError) console.error("is_platform_admin rpc failed", adminCheckError);
+  if (!isAdmin) {
+    redirect(`/admin/notifications?error=${encodeURIComponent("Only a Tender Ready platform admin can send test notification emails.")}&tab=gallery`);
+  }
 
   const sample = EMAIL_TEMPLATE_SAMPLES.find((s) => s.key === templateKey);
   if (!sample) {
