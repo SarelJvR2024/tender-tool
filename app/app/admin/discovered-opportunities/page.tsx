@@ -4,6 +4,7 @@ import { AdminNav } from "../AdminNav";
 import OpportunityTable from "./OpportunityTable";
 import type { OpportunityRowData } from "./OpportunityRow";
 import { assessCompileConfidence, assessCompileReadiness, effectiveConfidence } from "@/lib/compileReadiness";
+import { fetchAllRows } from "@/lib/supabasePaging";
 
 // Reads per-request session/DB data (platform_admin_discovered_opportunities,
 // gated by is_platform_admin() - 0043/0072), same escape hatch as ../page.tsx.
@@ -50,9 +51,24 @@ export default async function AdminDiscoveredOpportunitiesPage({ searchParams }:
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
-  const { data, error } = await supabase.rpc("platform_admin_discovered_opportunities");
+  // `discovered_opportunities` is "one row per (company, OCDS release) the
+  // discovery watch has ever scored and reported" (migration 0004's own
+  // comment) - no retention, accumulating forever across EVERY company, fed
+  // daily by a dozen+ discovery scrapers. This RPC itself (0072) has no
+  // internal LIMIT and no company filter - it is the admin-console,
+  // cross-tenant read of exactly the shape already independently confirmed
+  // to hit PostgREST's live 1000-row db-max-rows cap for other heavy reads
+  // of this project's large/shared tables (lib/supabasePaging.ts). A plain
+  // `.rpc(...)` call with no `.range()` is silently truncated by the same
+  // cap a bare `.select()` is - PostgREST applies db-max-rows to any
+  // SETOF/TABLE-returning read, RPC calls included, not just table/view
+  // reads (standing review, 2026-11-09, Finding 251) - so this must page
+  // through fetchAllRows() the same way, not call the RPC once.
+  const { rows: rpcRows, error } = await fetchAllRows<Rpc>(
+    (from, to) => supabase.rpc("platform_admin_discovered_opportunities").range(from, to),
+    20_000,
+  );
   if (error) console.error("platform_admin_discovered_opportunities rpc failed", error);
-  const rpcRows = (data ?? []) as Rpc[];
 
   const rows: OpportunityRowData[] = rpcRows.map((r) => {
     const readinessInput = {

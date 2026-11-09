@@ -4,6 +4,7 @@ import { AdminNav } from "../AdminNav";
 import TenderCatalogTable from "./TenderCatalogTable";
 import type { TenderCatalogRowData } from "./TenderCatalogRow";
 import { loadDisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
+import { fetchAllRows } from "@/lib/supabasePaging";
 
 // Reads per-request session/DB data (platform_admin_tender_catalog, gated by
 // is_platform_admin() - 0043/0103), same escape hatch as every other admin
@@ -30,12 +31,24 @@ type Rpc = {
 export default async function AdminTendersPage() {
   const supabase = await createClient();
 
-  const [{ data, error }, taxonomy] = await Promise.all([
-    supabase.rpc("platform_admin_tender_catalog"),
+  // `tenders` is this project's own, independently-confirmed highest-risk
+  // table for PostgREST's live 1000-row db-max-rows cap: a SHARED/PUBLIC,
+  // not tenant-scoped catalog (migration 0001's own header), fed daily by a
+  // dozen+ discovery scrapers that have each individually been seen
+  // returning hundreds of rows from a single buyer alone (lib/personCredentials.ts's
+  // own fix for this exact table, 2026-11-06). This RPC (0103) has no
+  // internal LIMIT and reads every tender in the catalog, across every
+  // company, with no filter at all - exactly the shape five sibling
+  // `.select()` reads of this same table were already fixed for. A plain
+  // `.rpc(...)` call is subject to the identical cap a bare `.select()` is -
+  // PostgREST applies db-max-rows to any SETOF/TABLE-returning read, RPC
+  // calls included (standing review, 2026-11-09, Finding 251) - so this
+  // must page through fetchAllRows() rather than call the RPC once.
+  const [{ rows: rpcRows, error }, taxonomy] = await Promise.all([
+    fetchAllRows<Rpc>((from, to) => supabase.rpc("platform_admin_tender_catalog").range(from, to), 20_000),
     loadDisciplineTaxonomy(supabase),
   ]);
   if (error) console.error("platform_admin_tender_catalog rpc failed", error);
-  const rpcRows = (data ?? []) as Rpc[];
 
   const rows: TenderCatalogRowData[] = rpcRows.map((r) => ({
     id: r.tender_id, title: r.title, contractNo: r.contract_no, buyer: r.buyer,
