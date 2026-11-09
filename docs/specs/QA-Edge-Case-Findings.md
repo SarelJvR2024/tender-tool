@@ -14580,3 +14580,100 @@ contributes to one run's own fetch, self-healing on the next run - same risk cla
 window anchor) and its own test file (`engine/discovery/test_gov_sources.py`) - no exported
 signature change, no other call site affected (`fetch_all()`/`releases_for_watch()` just receive
 the now-correct window transparently).
+
+### Finding 293 (CONFIRMED on `main` - a real, live-reproduced cross-file "expiring soon" threshold
+disagreement between the Company vault's Document expiry overview (`lib/documentExpiry.ts`) and
+both the topbar notification bell (`lib/notifications.ts`) and the vault's own Compliance documents
+section (`ComplianceDocumentsSection.tsx`), directly contradicting two explicit "can never disagree"
+comments already written into the first file's own code - FIXED the false comments, deliberately
+NOT the underlying 30-vs-60-day threshold choice itself, which is a Sarel judgment call, same
+precedent as standing items 18/24)
+
+**Why checked.** Task brief's own suggested fresh direction: "does every place that determines a
+document's 'expiring soon' threshold ... use the SAME number, or has one place drifted ... without
+anyone noticing?" Grepped every `RENEW_SOON`/`WINDOW_DAYS`/`THRESHOLD_DAYS`/`windowDays` constant
+across `app/lib`, `app/app`, `app/components`, `app/scripts` and read each one's real usage rather
+than trusting the constant name alone.
+
+**What's actually there (3 independent "is this document due for renewal" surfaces over the same
+`COMPANY_EXPIRY_FIELDS` list):**
+- **The bell** (`lib/notifications.ts`'s `getNotifications()`): `DOCUMENT_WINDOW_DAYS = 60` as the
+  default, but reads each `COMPANY_EXPIRY_FIELDS` entry's own `windowDays` first
+  (`withinWindow(left, windowDays ?? DOCUMENT_WINDOW_DAYS)`) - the one entry with an override,
+  `bank_confirmation_letter_valid_until` (`windowDays: 30`, since that letter is only valid 3
+  months), gets 30; the other 6 company fields, every `held_registrations` row and every person's
+  ECSA/SACPCMP get 60. This per-field override was itself added 2026-10-29 (per this file's own
+  comment) specifically to fix an earlier version of this exact bug class for the bank letter.
+- **The vault's own Compliance documents section** (`ComplianceDocumentsSection.tsx`): calls
+  `documentStatus(hasFile, expiry, renewSoonWithinDays = 60)` (`lib/dates.ts`) per document,
+  explicitly passing `BANK_LETTER_RENEW_SOON_DAYS` (= 30, `lib/vaultDocuments.ts`) only for the
+  bank letter row and leaving every other row at the function's own 60-day default - same 60/30
+  split as the bell, confirmed by reading every one of its 7 entries directly, not inferred.
+- **The Document expiry overview** (`lib/documentExpiry.ts`'s `loadDocumentExpiryOverview()` /
+  `statusFor()`, rendered by `DocumentExpiryOverview.tsx` on the company page): applies a single,
+  flat `EXPIRING_SOON_WINDOW_DAYS = 30` to literally every row - company fields, held
+  registrations, and people - never reading `windowDays` at all. Its own header comment (and
+  `DocumentExpiryOverview.tsx`'s own, separately) explicitly claims this "can never disagree with
+  what the bell already says about the same document - just shows more of it."
+
+**That claim is false, and was false from this file's own first commit.** `git log --follow -p --
+app/lib/documentExpiry.ts` shows the "can never disagree ... just shows more of it" sentence and
+`const EXPIRING_SOON_WINDOW_DAYS = 30` were both introduced in the SAME original commit
+(`7e8e8c8`, 2026-10-21, PR #42) - and at that point the bell itself was still a flat 60 for every
+field (the `windowDays` per-field override didn't exist until 2026-10-29), so even on day one a
+document 31-60 days from expiry was already classified "valid" by this file while the bell (flat
+60 at the time) was already nagging about it. The claim was never once true.
+
+**Live-reproduced, not reasoning-only.** Wrote a standalone vitest spec importing the real,
+unmodified `statusFor()` from `documentExpiry.ts` and the real `COMPANY_EXPIRY_FIELDS` list, and
+swept every entry's `daysLeft` from 31 to 60 (the exact band where the bell's 60-day default and
+this file's flat 30-day window must disagree for any field without its own `windowDays` override):
+
+```
+field: 'coid_letter_of_good_standing_expiry', daysLeft: 45, bellFlags: true, overviewStatus: 'valid'
+total disagreements: 180   // 6 non-overridden fields x 30 days each (31..60) = 180 of 210 checked
+```
+
+Confirmed concretely: a COID Letter of Good Standing 45 days from expiry shows a green "Valid" chip
+on the Document expiry overview, and is excluded from its own "N documents need attention before
+your next bid" banner count - while the topbar bell is, at the exact same instant, already showing
+an amber "renew soon" notification for that identical document. The one field where the two
+genuinely agree is the bank confirmation letter (`windowDays`/`BANK_LETTER_RENEW_SOON_DAYS` both
+30, which happens to equal this file's own flat 30 too) - the coincidence that likely let the false
+"can never disagree" claim go unnoticed for this long, since the field it was presumably written
+and tested against is the one field where it happens to hold.
+
+**Severity, honestly scoped - this is a documentation-correctness finding, not forcing a behavior
+change.** `EXPIRING_SOON_WINDOW_DAYS`'s own adjacent comment (unchanged by this fix) states the 30-
+day flat window is deliberate: "'Expires in 30 days' per Sarel's own spec - a tighter window than
+the notification bell's 60-day 'renew soon' glance, since this list is meant to answer 'what needs
+attention before my next bid', not 'what's worth a heads-up eventually'." That is a real, stated
+product decision, not an accident - so the actual question of whether the overview's threshold
+should ever match the bell's per-field `windowDays` exactly is Sarel's own call (same precedent as
+standing items 18 and 24, both left open for exactly this reason). What this Finding fixes is the
+file's OWN separate, factually incorrect claim that the two already agree - a false invariant that
+could mislead a future pass (or Sarel himself, reading the code) into trusting a guarantee that was
+never real.
+
+**Fixed directly on `main` - no PR.** Comment-only change in two files
+(`lib/documentExpiry.ts`'s header + its `EXPIRING_SOON_WINDOW_DAYS` comment, and
+`DocumentExpiryOverview.tsx`'s header) replacing the false "can never disagree" claim with an
+accurate description of the real, deliberate-but-undocumented 30-vs-60/per-field split, plus a new
+regression test (`lib/documentExpiry.spec.ts`) that locks in and documents the real relationship so
+a future pass sees it as a verified, intentional fact rather than rediscovering it from scratch -
+zero behavior change, no RLS/money/schema/worker-image surface, no authz/tenant-isolation angle.
+
+**Verified.** `npx vitest run lib/documentExpiry.spec.ts` - 16/16 passed (1 new test added,
+asserting the real disagreement for daysLeft 31/45/60 against `statusFor()` and the bell's own 60-
+day default, explicitly framed as "deliberate, not a regression" so an intentional future change
+doesn't look like silent test rot). Full suite after: `npx vitest run` - **75 files, 613 tests, all
+passed**. `npx tsc --noEmit` - 0 errors. `npx eslint` on all 3 changed files - clean.
+
+**Open standing item added** (see `System-Status.md`'s consolidated list, item 25): whether the
+Document expiry overview's flat 30-day classification window should ever be made per-field
+(matching the bell/vault-page's `windowDays`/`BANK_LETTER_RENEW_SOON_DAYS` exactly for every
+field, not just the bank letter) is Sarel's own call - not changed here.
+
+**Regression:** `app/lib/documentExpiry.ts`, `app/app/company/DocumentExpiryOverview.tsx`
+(comments only, no logic change), `app/lib/documentExpiry.spec.ts` (one new test) - no exported
+signature change, no other call site affected.
