@@ -8,6 +8,12 @@ import { HEALTH_SOURCE_GROUPS } from "./adminHealthGroups";
 //   engine/cv/extract_cv_fields.py                       -> "cv_extract", "ocr"
 //   engine/compliance/watch_deadlines.py                 -> "deadlines"
 //   engine/notify/daily_digest.py                        -> "digest"
+//   engine/notify/send_digest_emails.py                   -> "digest_send"
+//     (added 2026-11-09 - a real, distinct source missed by the original
+//     2026-11-06 sweep below: daily_digest.py only BUILDS the digest
+//     ("digest"); send_digest_emails.py is the separate step that actually
+//     calls Resend, and is the one that raises "RESEND_API_KEY not set" /
+//     "N of M digest emails failed to send" / "could not mark as digested")
 //   engine/discovery/watch_new_tenders.py,
 //   engine/discovery/opportunity_requirements.py,
 //   engine/discovery/download_discovered_documents.py    -> "discovery"
@@ -31,6 +37,7 @@ const REAL_SYSTEM_ALERT_SOURCES = [
   "cv_extract",
   "deadlines",
   "digest",
+  "digest_send",
   "discovery",
   "general",
   "narrative",

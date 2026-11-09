@@ -43,8 +43,23 @@
 // run_bridges.py's BRIDGES dict (cv/cv_extract/pack/general/narrative all
 // use the SAME literal for both their bridge- and job-level alerts, which is
 // why only "onboarding" needs its own second entry here).
+//
+// Standing review pass, 2026-11-09: both 2026-11-06 fixes' own "every real
+// source" accounting still missed one - "digest_send"
+// (engine/notify/send_digest_emails.py, 5 real call sites: a missing
+// RESEND_API_KEY, a failed-to-send summary, and 2 "could not mark as
+// digested" warnings) is a real, actively-used, error/warning-severity
+// source distinct from "digest" (engine/notify/daily_digest.py, the
+// digest-BUILDING step; send_digest_emails.py is the separate SENDING step
+// that actually calls Resend). Confirmed missing from every group here, and
+// from REAL_SYSTEM_ALERT_SOURCES in this file's own exhaustiveness test
+// (adminHealthGroups.spec.ts) - which is why that test's prior passing
+// result never caught it: its own "ground truth" list was itself
+// incomplete, not just this export. Same invisible-on-both-dashboards
+// consequence as the 2026-11-06 gaps this list's own comment above already
+// describes.
 export const HEALTH_SOURCE_GROUPS: Record<string, string[]> = {
   "Scraper / Discovery feed": ["discovery", "scraper", "tender_changes", "tender_updates"],
   "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "ocr", "onboarding", "onboarding_scan", "worker"],
-  "Deadline watch & daily digest": ["deadlines", "digest"],
+  "Deadline watch & daily digest": ["deadlines", "digest", "digest_send"],
 };
