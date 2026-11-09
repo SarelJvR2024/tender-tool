@@ -24,12 +24,27 @@ export type ReadinessInput = {
   /** Tax compliance (15) */
   taxPin: string | null;
   taxPinExpiry: string | null;
+  /**
+   * Standing review, 2026-11-09 (Finding 240's own sibling, same pass):
+   * optional, defaults to null for the one caller that can't supply it yet
+   * (lib/customerRowData.ts's admin customer list - its RPC,
+   * platform_admin_company_readiness_data() in migration 0098, doesn't
+   * return this column; a schema change is left for a separate pass per
+   * this track's own guardrail against direct-pushing migrations). Omitting
+   * it only ever makes this criterion as strict as it already was, never
+   * stricter - see hasPin below.
+   */
+  taxPinDocumentPath?: string | null;
   /** B-BBEE, valid and not expired (15) */
   beeLevel: number | null;
   beeProofExpiry: string | null;
+  /** Same optional/null-default note as taxPinDocumentPath above. */
+  beeProofDocumentPath?: string | null;
   /** CIDB (15) */
   cidbGrading: string | null;
   cidbExpiry: string | null;
+  /** Same optional/null-default note as taxPinDocumentPath above. */
+  cidbDocumentPath?: string | null;
   /** Bank confirmation letter (5) */
   bankConfirmationValidUntil: string | null;
   /** At least one principal (5) */
@@ -105,7 +120,20 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
   });
 
   {
-    const hasPin = presence(input.taxPin);
+    // Standing review, 2026-11-09: "hasPin" used to be presence(taxPin) alone
+    // - text only, blind to a genuinely-uploaded PIN letter. That's the
+    // EXACT bug Finding 240 fixed for the dashboard checklist (and
+    // lib/vaultDocuments.ts's sarsTcsPinOnFile() for the two Company vault
+    // views): "on file" for this field is document OR PIN text OR expiry
+    // date, not text alone. This criterion feeds the readiness PERCENT and
+    // the "blockers" list shown on the dashboard, the Company page header
+    // AND right next to ComplianceDocumentsSection.tsx on that same page -
+    // the old narrower rule meant a company that had uploaded the letter
+    // but not yet typed the PIN saw "SARS tax compliance PIN" as a top
+    // blocker here while the vault section two inches below it, reading the
+    // same row, already said "Needs date verification"/"On file". Mirrors
+    // sarsTcsPinOnFile()'s exact three-way rule.
+    const hasPin = presence(input.taxPin) || !!input.taxPinDocumentPath || !!input.taxPinExpiry;
     const expiry = expiryState(input.taxPinExpiry);
     const satisfied = hasPin && (expiry.current || input.taxPinExpiry === null);
     criteria.push({
@@ -120,7 +148,12 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
   }
 
   {
-    const hasLevel = input.beeLevel !== null;
+    // Same fix, same reason: mirrors ComplianceDocumentsSection.tsx/
+    // ReadOnlyView.tsx's own established bee_proof hasFile rule
+    // (`bee_proof_document_path !== null || !!bee_level` - deliberately NOT
+    // OR'd with the expiry date for this one field, matching those two
+    // views exactly) instead of a narrower, independently-derived guess.
+    const hasLevel = input.beeLevel !== null || !!input.beeProofDocumentPath;
     const expiry = expiryState(input.beeProofExpiry);
     const satisfied = hasLevel && (expiry.current || input.beeProofExpiry === null);
     criteria.push({
@@ -135,7 +168,11 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
   }
 
   {
-    const hasGrading = presence(input.cidbGrading);
+    // Same fix, same reason: mirrors ComplianceDocumentsSection.tsx's own
+    // established cidb hasFile rule (`cidb_document_path !== null ||
+    // !!cidb_grading || !!cidb_expiry` - the three-way OR, same shape as
+    // sars_tcs_pin's) instead of a narrower, independently-derived guess.
+    const hasGrading = presence(input.cidbGrading) || !!input.cidbDocumentPath || !!input.cidbExpiry;
     const expiry = expiryState(input.cidbExpiry);
     const satisfied = hasGrading && (expiry.current || input.cidbExpiry === null);
     criteria.push({

@@ -86,4 +86,38 @@ describe("computeBidReadiness", () => {
     const weights = result.blockers.map((b) => b.weight);
     expect(weights).toEqual([...weights].sort((a, b) => b - a));
   });
+
+  // Standing review, 2026-11-09 (Finding 240's own sibling, same pass):
+  // tax_compliance/bee/cidb each used to go "missing" whenever only the
+  // document was on file but the text/level/grading field hadn't also been
+  // captured - disagreeing with lib/vaultDocuments.ts's sarsTcsPinOnFile()
+  // and ComplianceDocumentsSection.tsx's own established per-field hasFile
+  // rules for the exact same columns. These three cases are each the
+  // minimal real-world shape that bug mishandled.
+  it("tax_compliance is satisfied from a document path alone (PIN text and expiry both still empty)", () => {
+    const result = computeBidReadiness({ ...EMPTY, taxPinDocumentPath: "co/vault/sars_tcs_pin/letter.pdf" });
+    const taxCompliance = result.criteria.find((c) => c.key === "tax_compliance")!;
+    expect(taxCompliance.satisfied).toBe(true);
+    expect(taxCompliance.reason).toBeUndefined();
+  });
+
+  it("bee is satisfied from a document path alone (no bee_level set)", () => {
+    const result = computeBidReadiness({ ...EMPTY, beeProofDocumentPath: "co/vault/bee_proof/cert.pdf" });
+    const bee = result.criteria.find((c) => c.key === "bee")!;
+    expect(bee.satisfied).toBe(true);
+  });
+
+  it("cidb is satisfied from a document path alone (no cidb_grading set)", () => {
+    const result = computeBidReadiness({ ...EMPTY, cidbDocumentPath: "co/vault/cidb/cert.pdf" });
+    const cidb = result.criteria.find((c) => c.key === "cidb")!;
+    expect(cidb.satisfied).toBe(true);
+  });
+
+  it("omitting the new document-path fields entirely (the one caller - lib/customerRowData.ts's admin RPC - that can't supply them yet) behaves exactly as before: never a false pass", () => {
+    const result = computeBidReadiness(EMPTY); // EMPTY has no taxPinDocumentPath/beeProofDocumentPath/cidbDocumentPath keys at all
+    expect(result.percent).toBe(0);
+    expect(result.criteria.find((c) => c.key === "tax_compliance")!.satisfied).toBe(false);
+    expect(result.criteria.find((c) => c.key === "bee")!.satisfied).toBe(false);
+    expect(result.criteria.find((c) => c.key === "cidb")!.satisfied).toBe(false);
+  });
 });

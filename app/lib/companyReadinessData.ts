@@ -33,7 +33,9 @@ export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<R
   ] = await Promise.all([
     supabase
       .from("companies")
-      .select("legal_name, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, bee_level, bee_proof_expiry, cidb_grading, cidb_expiry, bank_confirmation_letter_valid_until")
+      .select(
+        "legal_name, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, bee_level, bee_proof_expiry, bee_proof_document_path, cidb_grading, cidb_expiry, cidb_document_path, bank_confirmation_letter_valid_until",
+      )
       .maybeSingle(),
     supabase.from("company_principals").select("id", { count: "exact", head: true }),
     fetchAllRows<{ person_id: string }>(
@@ -58,10 +60,13 @@ export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<R
     csdSupplierNumber: company?.csd_supplier_number ?? null,
     taxPin: company?.sars_tcs_pin ?? null,
     taxPinExpiry: company?.sars_tcs_pin_expiry ?? null,
+    taxPinDocumentPath: company?.sars_tcs_pin_document_path ?? null,
     beeLevel: company?.bee_level ?? null,
     beeProofExpiry: company?.bee_proof_expiry ?? null,
+    beeProofDocumentPath: company?.bee_proof_document_path ?? null,
     cidbGrading: company?.cidb_grading ?? null,
     cidbExpiry: company?.cidb_expiry ?? null,
+    cidbDocumentPath: company?.cidb_document_path ?? null,
     bankConfirmationValidUntil: company?.bank_confirmation_letter_valid_until ?? null,
     principalCount: principalCount ?? 0,
     peopleWithCvCount,

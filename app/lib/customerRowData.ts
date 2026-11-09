@@ -80,6 +80,19 @@ export function buildCustomerRow(
         csdSupplierNumber: r.csd_supplier_number,
         taxPin: r.sars_tcs_pin,
         taxPinExpiry: r.sars_tcs_pin_expiry,
+        // Standing review, 2026-11-09: taxPinDocumentPath/beeProofDocumentPath/
+        // cidbDocumentPath (lib/readiness.ts's own sibling fix to Finding 240 -
+        // same pass) are deliberately omitted here, not set to a value this
+        // RPC doesn't have. platform_admin_company_readiness_data() (migration
+        // 0098) doesn't return the 3 vault document-path columns, so this is
+        // the one caller still scored by the OLD, stricter rule (text/level
+        // presence only) until that RPC is widened in its own migration -
+        // a schema change this track's own guardrails leave for a separate,
+        // explicitly-approved pass, not this one. Omitting them only ever
+        // makes this admin-only score as strict as it already was today,
+        // never wrong in the OTHER direction (no false "satisfied") - so
+        // /admin/customers staying temporarily narrower than the rest of the
+        // app is a documented gap, not a regression.
         beeLevel: r.bee_level,
         beeProofExpiry: r.bee_proof_expiry,
         cidbGrading: r.cidb_grading,
