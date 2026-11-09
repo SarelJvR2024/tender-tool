@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Zap, FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
-import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
+import { SANRAL_PACK_FAMILIES } from "@/lib/pastSubmissionReuse";
 import { AppShell } from "../_components/AppShell";
 import { PageHeader } from "@/components/tt/page-header";
 import { EmptyState } from "@/components/tt/empty-state";
@@ -25,6 +25,19 @@ import { RetryButton } from "../_components/RetryButton";
  * Presentation and flow only, per the prompt's own instruction - the
  * query below only reads tenders/tender_packs/pack_generation_jobs that
  * already exist; nothing new is stored.
+ *
+ * Standing review, 2026-11-09: this page used to filter on
+ * SANRAL_CONVENTIONAL_FAMILY alone, silently leaving every RRM Consultant
+ * Tender off its own feature's front door - app/app/tenders/[id]/page.tsx's
+ * own isSanralPackFamily (and compliance-data.ts, submission-pack.tsx,
+ * suggest_pack.py, process_pack_jobs.py's SANRAL_FAMILIES) have always
+ * treated "Conventional Consultant Tender" and "RRM Consultant Tender" as
+ * the same SANRAL pack flow (same assemble_pack.py FILLERS, same
+ * engine='sanral' pack_generation_jobs row, same "Fill SANRAL schedules"
+ * button) - this page just never widened its own filter to match. Now
+ * uses SANRAL_PACK_FAMILIES (app/lib/pastSubmissionReuse.ts), the one
+ * place that pairing is already named, instead of a second, narrower
+ * family list.
  */
 export const instant = false;
 
@@ -57,7 +70,7 @@ export default async function SanralSchedulesPage() {
     const { data: tenderRows, error: tendersError } = await supabase
       .from("tenders")
       .select("id, contract_no, title, buyer, closing_date, tender_packs!inner(id)")
-      .eq("family", SANRAL_CONVENTIONAL_FAMILY)
+      .in("family", SANRAL_PACK_FAMILIES)
       .order("closing_date", { ascending: true });
     if (tendersError) throw tendersError;
 
@@ -122,7 +135,7 @@ export default async function SanralSchedulesPage() {
               title="No SANRAL tenders yet"
               description={
                 <>
-                  Fill this in once you&apos;re bidding on a SANRAL conventional-consultant tender - find one from{" "}
+                  Fill this in once you&apos;re bidding on a SANRAL Conventional or RRM Consultant tender - find one from{" "}
                   <Link href="/discovery" className="font-medium text-foreground underline">
                     Opportunities
                   </Link>
