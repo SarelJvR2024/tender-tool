@@ -119,9 +119,64 @@ def code_alias(label):
     return f"{m.group(1).strip()}({'Toll' if m.group(2).lower() == 't' else 'T'})"
 
 
+# Decompression-bomb guard (standing review, 2026-11-09): every .xlsm/.xlsx a
+# user uploads reaches this exact class - engine/intake/classify_tender.py's
+# classify_workbook() opens EVERY uploaded .xlsm/.xlsx document through it at
+# intake (both ACCEPTED_EXTENSIONS in app/lib/manualTender.ts, up to its own
+# 50MB MAX_TENDER_FILE_BYTES), as do engine/pack/process_pack_jobs.py,
+# engine/pack/assemble_pack.py and engine/fingerprint.py on the same
+# per-tender files later. Like the already-fixed docx_text() (Finding 233,
+# engine/general/requirements.py's _docx_zip_bomb_guard - this guard reuses
+# that one's own reasoning and caps, not just its shape), a .xlsm/.xlsx is
+# itself a zip container, and __init__ below used to decompress EVERY member
+# into memory unconditionally, via this one dict comprehension, before ANY
+# real structure check (_map_sheets() et al, below) ever ran - so a bogus,
+# never-otherwise-used member is enough on its own; the file doesn't need to
+# look like a real workbook at all. Confirmed live: a 3.89MB crafted .xlsm
+# (one bogus non-essential zip member, ~1,030:1 ratio) made this class alone
+# peak at ~7.84GB RSS / ~13.7s CPU before it happened to fail on an unrelated
+# KeyError in _map_sheets() - worse than docx_text()'s own repro despite a
+# smaller file, well under every real upload-size cap this app enforces, and
+# genuinely raises an uncontrolled MemoryError under a realistic worker
+# memory limit. python-docx/lxml here run in-process exactly as they do for
+# docx_text(), with no subprocess boundary to contain it.
+#
+# Streams every member fully through (never trusting a zip's own stated
+# file_size - a crafted zip can misstate it) and enforces the SAME per-member/
+# total caps _docx_zip_bomb_guard already uses, raising ValueError on a
+# breach - every real call site either already catches a broad Exception
+# around Workbook(...) (classify_tender.classify_workbook()'s own
+# "could not open as a workbook" path) or treats any Workbook(...) failure as
+# a fatal, reported error already (process_pack_jobs.py/assemble_pack.py on a
+# template that must be valid to proceed), so this adds no new failure
+# branch - it only replaces an unbounded resource spike with a fast, bounded
+# rejection.
+_ZIP_MEMBER_MAX_BYTES = 300 * 1024 * 1024  # 300MB - same cap as requirements.py's sibling guards
+_ZIP_TOTAL_MAX_BYTES = 1024 * 1024 * 1024  # 1GB per zip, across all its members combined
+
+
+def _zip_bomb_guard(zin):
+    total = 0
+    for member in zin.namelist():
+        member_total = 0
+        with zin.open(member) as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                member_total += len(chunk)
+                total += len(chunk)
+                if member_total > _ZIP_MEMBER_MAX_BYTES or total > _ZIP_TOTAL_MAX_BYTES:
+                    raise ValueError(
+                        f"decompresses past the {_ZIP_MEMBER_MAX_BYTES // (1024 * 1024)}MB per-part / "
+                        f"{_ZIP_TOTAL_MAX_BYTES // (1024 * 1024)}MB total guard - treated as unreadable "
+                        "rather than risk exhausting the worker's memory")
+
+
 class Workbook:
     def __init__(self, path):
         self.zin = zipfile.ZipFile(path)
+        _zip_bomb_guard(self.zin)
         self.files = {i.filename: self.zin.read(i.filename) for i in self.zin.infolist()}
         self.order = [i.filename for i in self.zin.infolist()]
         self.trees = {}
