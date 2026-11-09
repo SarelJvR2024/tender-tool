@@ -216,7 +216,23 @@ def read_source(name, with_documents=True, log=print):
         return etenders_portal.fetch_releases("advertised", log=log), []
     if name == "etenders_ocds":
         import etenders_national
-        today = datetime.date.today()
+        # Finding 292 (2026-11-09, standing solution-architect review, engine/-wide sweep for
+        # the naive-UTC-anchor day-count bug class - Findings 72/287/288/289/290/291): this used
+        # a bare `datetime.date.today()`, the same mistake already fixed in this exact "what
+        # calendar day is it for this OCDS fetch window" computation everywhere else it's done -
+        # watch_new_tenders.py's own `today = datetime.datetime.now(sh.SAST).date()` a few lines
+        # before it calls into this very function, and daily_digest.py's own
+        # `datetime.datetime.now(watch_deadlines.SAST).date()` for the identical purpose. A
+        # worker/runner with no TZ set (the documented real condition for this whole bug class -
+        # see lephalale.py/fill_a_forms.py/company_documents.py) runs in UTC, so during the
+        # 00:00-01:59 SAST window (22:00-23:59 UTC the day before) this made date_to one real
+        # calendar day stale - silently excluding every release the OCDS API published so far
+        # today (true SAST) from this source's own fetch for the run. Self-healing on the NEXT
+        # run (its own 14-day lookback catches up), so not a permanent data loss, but still the
+        # one real engine/ instance of this bug class this pass's sweep turned up. `sh` (already
+        # imported at module scope, `source_http as sh`) is used here instead of a fresh import
+        # since every sibling caller of this exact pattern already uses it.
+        today = datetime.datetime.now(sh.SAST).date()
         raw = etenders_national.fetch_releases((today - datetime.timedelta(days=14)).isoformat(), today.isoformat())
         return [ocds_to_release(etenders_national.normalize(r)) for r in raw], []
     if name == "sanral":

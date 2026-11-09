@@ -775,6 +775,55 @@ def test_changes():
           and ev6[0]["ocid"] == "eskom-bulletin:90001")
 
 
+class FixedDateTime(datetime.datetime):
+    """Freezes datetime.datetime.now() to a given instant - same pattern as
+    engine/general/test_process_general_jobs.py's own FixedDateTime (Finding 291) /
+    engine/pack/test_pdf_merge.py / engine/cv/test_generate_cv.py's - needed to land
+    squarely inside the 00:00-01:59 SAST window (22:00-23:59 UTC the day before)."""
+    _frozen = None
+
+    @classmethod
+    def now(cls, tz=None):
+        base = cls._frozen
+        return base.astimezone(tz) if tz is not None else base.replace(tzinfo=None)
+
+
+def test_etenders_ocds_fetch_window_uses_sast_calendar_day_not_naive_utc_today():
+    print("\ngov_sources.read_source('etenders_ocds'): its own OCDS fetch window must use the "
+          "real SAST calendar day, not a naive datetime.date.today(), during the 00:00-01:59 SAST window")
+    # Finding 292 (2026-11-09): read_source('etenders_ocds') used to build its own date_from/
+    # date_to window from a bare datetime.date.today() - the same naive-UTC-anchor mistake
+    # already fixed in this exact computation everywhere else it's done (watch_new_tenders.py's
+    # own `today` line immediately before it calls into this very function; daily_digest.py's
+    # own score_discovery_feed()). 22:30 UTC on 2026-11-09 is 00:30 SAST on 2026-11-10 - the real
+    # SAST "today" is 2026-11-10, a full day later than the naive UTC one.
+    FixedDateTime._frozen = datetime.datetime(2026, 11, 9, 22, 30, 0, tzinfo=datetime.timezone.utc)
+    real_datetime = gov_sources.datetime.datetime
+    gov_sources.datetime.datetime = FixedDateTime
+
+    import etenders_national
+    captured = {}
+    real_fetch = etenders_national.fetch_releases
+
+    def fake_fetch(date_from, date_to, max_pages=200):
+        captured["date_from"], captured["date_to"] = date_from, date_to
+        return []
+    etenders_national.fetch_releases = fake_fetch
+    try:
+        releases, notices = gov_sources.read_source("etenders_ocds")
+    finally:
+        gov_sources.datetime.datetime = real_datetime
+        etenders_national.fetch_releases = real_fetch
+
+    check("fetch window's date_to is the real SAST calendar day (2026-11-10), not the naive-UTC "
+          "one (2026-11-09) a bare date.today() would give on a UTC-TZ host at this instant",
+          captured.get("date_to") == "2026-11-10", captured)
+    check("fetch window's date_from is 14 real SAST days back from that same real SAST day",
+          captured.get("date_from") == "2026-10-27", captured)
+    check("no releases, no notices, nothing crashes with the frozen clock in place",
+          releases == [] and notices == [])
+
+
 def test_digest():
     print("daily_digest listing_changes")
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "notify"))
@@ -804,6 +853,7 @@ if __name__ == "__main__":
     test_fold_copies_published_opening_category()
     test_scope_enrichment_hook()
     test_changes()
+    test_etenders_ocds_fetch_window_uses_sast_calendar_day_not_naive_utc_today()
     test_digest()
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED: ' + ', '.join(FAILS)}")
     sys.exit(1 if FAILS else 0)
