@@ -14822,6 +14822,65 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 244, `looksLikeExistingProject()` (CV-review page's "probably already on file" pre-tick heuristic) false-matched two genuinely unrelated projects whenever squashing ran two adjacent, unrelated tokens in the EXISTING line together into a digit run that coincidentally contained the NEW project's own contract number - a different root cause from the bare-year false positive an earlier pass already closed in this same function
+
+Oriented from `a1cddfb` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: CV. Swept the TypeScript-side CV surfaces first - `cv-compare.tsx` (clean: a "ready"
+`generated_cvs` row with a null `storage_path_pdf` is a real, intentional state per
+`process_cv_jobs.py`'s own PDF-conversion-can-fail-without-failing-the-job comment, and the
+component already renders that correctly; `storage_path_docx` is provably always set before a row
+reaches "ready"), `createPersonWithCv()`/`bulkUploadCvs()` (the latter's `person_id_<i>` taken
+straight from client FormData with no app-level company check looked like a cross-tenant write at
+first read, but migration 0043's `tt_check_same_company()` trigger already closes exactly this
+column for every writer including the service role - confirmed by reading that migration's own
+header, which names `cv_uploads.person_id` explicitly as one of the columns it fixed; a rejected
+insert there just orphans the already-uploaded file under the ATTACKER'S OWN company storage
+prefix, not a real leak), `queueStandardCvs()` (its own docstring already fully analyzes the
+TOCTOU gap between two concurrent calls and explains why it's accepted as a known, undefended edge
+case - not fresh ground). Found the real bug in `lib/cvExtraction.ts`'s `looksLikeExistingProject()`
+- a function an earlier pass (2026-11-06) already fixed once for a DIFFERENT false-positive (a bare
+shared calendar year). Reading the current implementation adversarially for a second, unrelated
+root cause: the function's final check, `ex.includes(n)`, tests whether a proposed project's number
+token is a substring of the ENTIRE squashed existing line - and `squash()` removes every separator,
+including the ones BETWEEN two unrelated original tokens, so e.g. `"N1-234/2019"` squashes to
+`"n12342019"`, which happens to contain `"1234"` purely because `"N1"` runs into `"234"` once the
+hyphen is stripped - a coincidence of concatenation, not a real shared number. Confirmed live: the
+real, unmodified function returned `true` for `existing = ["SANRAL N1-234/2019 Upgrade of N1
+Western Bypass"]` against `proposed = "Joburg Water Contract 1234 Reservoir Upgrade"` - two
+projects with nothing genuinely in common. Per the function's own header comment (restated by the
+2026-11-06 pass's own spec file, not invented here): this is exactly the "silent-data-loss risk, not
+a cosmetic nuisance" case - the CV-review page starts a genuinely new project's "Add this project"
+checkbox UNTICKED whenever this returns true, and a reviewer who trusts the flag rather than
+manually comparing the two projects never adds it.
+
+Fix: extracted the number-token extraction into a small private `projectNumberTokens()` helper and
+applied it to BOTH sides of the comparison (previously only the proposed side was tokenized; the
+existing side was compared as one fully-squashed, boundary-free string) - the check is now "does the
+proposed number EXACTLY match one of the existing line's own extracted number tokens," never
+"is it a substring anywhere in the existing line's squashed text." Every already-covered case (an
+identical whole line, a real shared number that embeds a year, a genuine non-year 4+ digit number,
+the bare-year exclusion) still passes, since all of those rely on an exact token match or a
+whole-line match, not on the substring-across-concatenation behavior just removed.
+
+Verified red-then-green: added one new case to the existing `lib/cvExtraction.spec.ts` (same file,
+same style as the 2026-11-06 fix) reproducing the concatenation false-positive above. **Red:** saved
+the diff to `cvExtraction.ts` only, `git apply -R`, re-ran `npx vitest run lib/cvExtraction.spec.ts`
+- `1 failed | 5 passed`, exactly the new case, confirming the other 5 pre-existing cases (the
+already-fixed bare-year one included) were untouched. **Green:** reapplied, re-ran - `6/6 pass`.
+`npx tsc --noEmit` clean (only the pre-existing, unrelated `date-fns`/`react-day-picker`
+module-resolution gap this session has repeatedly confirmed is environment-only).
+
+Not escalated to a PR: small, safe, pure-TS fix to one function plus its own spec file - no RLS, no
+migration, no money path, no worker-image change, same boolean contract for its one real caller
+(`cv-review.tsx`). Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 234, both the SANRAL and non-SANRAL "qualifying experience" renderers re-filtered the Experience Library by document type ALONE, silently dropping the rule's own `since_year` cutoff that `evaluateEvidence()` already applies - a tender stating "completion certificates since 2020" showed 3-of-3/green on the chip and "3 item(s)" in Pack Review for the exact same items `evaluateEvidence()` itself correctly scored "missing - only 2 of 3 qualifying", because one of the three pre-dated 2020
 
 Oriented from `164637b` (sibling pass: Finding 232, the `upsert()`-based document-replace race PR).

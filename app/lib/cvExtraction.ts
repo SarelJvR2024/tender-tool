@@ -134,16 +134,30 @@ const BARE_YEAR = /^(?:19|20)\d{2}$/;
  * never be treated as a match: that would risk silently leaving a genuinely
  * new project unticked, not just a real duplicate.
  */
+function projectNumberTokens(clientAndNumber: string): string[] {
+  return clientAndNumber
+    .split(/[\s,;:()]+/)
+    .filter((t) => /\d/.test(t) && t.replace(/[^a-z0-9]/gi, "").length >= 4)
+    .map((t) => t.toLowerCase().replace(/[^a-z0-9]/g, ""))
+    .filter((n) => !BARE_YEAR.test(n));
+}
+
 export function looksLikeExistingProject(clientAndNumber: string, existing: string[]): boolean {
   const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const whole = squash(clientAndNumber);
-  const numbers = clientAndNumber
-    .split(/[\s,;:()]+/)
-    .filter((t) => /\d/.test(t) && t.replace(/[^a-z0-9]/gi, "").length >= 4)
-    .map(squash)
-    .filter((n) => !BARE_YEAR.test(n));
+  const numbers = projectNumberTokens(clientAndNumber);
   return existing.some((e) => {
-    const ex = squash(e);
-    return ex === whole || numbers.some((n) => ex.includes(n));
+    // An EXACT match against the existing line's own number tokens, not
+    // "is this proposed number a substring of the whole squashed existing
+    // line" - squash() strips every separator, including the one between
+    // two unrelated tokens, so e.g. "N1-234/2019" squashes to "n12342019",
+    // which contains "1234" purely by the coincidence of "N1" running into
+    // "234" when concatenated - a genuinely unrelated proposed project whose
+    // own contract number happens to be "1234" then false-matched against
+    // it. Comparing extracted number tokens to extracted number tokens
+    // keeps each one's own boundaries intact, closing that gap while
+    // leaving every already-covered case (bare years, a real shared
+    // embedded-year number, an identical whole line) unaffected.
+    return squash(e) === whole || projectNumberTokens(e).some((exN) => numbers.includes(exN));
   });
 }

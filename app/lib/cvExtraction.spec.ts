@@ -43,4 +43,16 @@ describe("looksLikeExistingProject", () => {
     const proposed = "Rand Water - Reservoir Lining, Contract 3321";
     expect(looksLikeExistingProject(proposed, existing)).toBe(false);
   });
+
+  it("does not match on a number that only appears by concatenating two unrelated adjacent tokens in the existing line", () => {
+    // squash() strips every separator, so "N1-234/2019" squashes to
+    // "n12342019" - which happens to CONTAIN "1234" purely because "N1" runs
+    // into "234" when the hyphen is stripped. A genuinely unrelated proposed
+    // project whose own contract number really is "1234" must not match
+    // just because that coincidental substring exists somewhere in the
+    // existing line's squashed text (Finding 244).
+    const existing = ["SANRAL N1-234/2019 Upgrade of N1 Western Bypass"];
+    const proposed = "Joburg Water Contract 1234 Reservoir Upgrade";
+    expect(looksLikeExistingProject(proposed, existing)).toBe(false);
+  });
 });
