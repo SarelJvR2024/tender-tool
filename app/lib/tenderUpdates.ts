@@ -143,3 +143,29 @@ export function closingNeedsDecision(c: ClosingDateChange | undefined): boolean 
 export function briefingNeedsDecision(b: BriefingChange | undefined): boolean {
   return !!b && !!b.date && !b.cancelled && !b.applied && b.on_file_agrees === false;
 }
+
+/**
+ * Why `closingNeedsDecision()`'s own card wasn't applied automatically,
+ * worded to match the real reason rather than one hardcoded assumption.
+ *
+ * QA finding, 2026-11-09: `closingNeedsDecision()` is also true when
+ * `direction === "unknown"` (no closing date on file at all to compare a
+ * direction against - e.g. a manually-loaded tender with a real OCID but no
+ * closing date entered yet, confirmed reachable: `app/app/tenders/new/actions.ts`
+ * lets `closingDate` stay blank regardless of `ocid`) - a case engine/discovery/
+ * watch_tender_updates.py's own auto-apply check never applies automatically
+ * either, since it only fires for `direction in ("later", "earlier")`
+ * (classify_document(), `engine/discovery/tender_updates.py`). That case can
+ * have `listing_agrees: true` (the buyer's own listing already states this
+ * exact date) - the tender-updates.tsx card used to say "Not applied
+ * automatically, because the buyer's own listing doesn't show this date" in
+ * EVERY case `closingNeedsDecision()` was true, which is simply false here,
+ * and directly contradicted the very next row on the same card ("The buyer's
+ * eTenders listing shows" - the identical date as "This document says").
+ */
+export function closingDisagreementReason(c: ClosingDateChange): string {
+  if (c.listing_agrees) {
+    return "there's no closing date on file yet to compare it against - the buyer's own listing already shows this same date";
+  }
+  return "the buyer's own listing doesn't show this date";
+}

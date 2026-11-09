@@ -5,6 +5,7 @@ import {
   appliedLine,
   briefingNeedsDecision,
   closingDateLine,
+  closingDisagreementReason,
   closingNeedsDecision,
   formatDay,
   mostUrgent,
@@ -147,7 +148,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                     },
                     { label: "On file here", value: closingOnFile ? formatDay(closingDayOf(closingOnFile)) : "no closing date" },
                   ]}
-                  note={`${closing.text} Not applied automatically, because the buyer's own listing doesn't show this date. Check the document (and with the buyer if in doubt) before accepting it - accepting moves the closing date, its countdown, every company's “Tender closes” task and the Discovery entry.`}
+                  note={`${closing.text} Not applied automatically, because ${closingDisagreementReason(changes.closing_date)}. Check the document (and with the buyer if in doubt) before accepting it - accepting moves the closing date, its countdown, every company's “Tender closes” task and the Discovery entry.`}
                   form={canAccept ? { tenderId, documentId: u.id, change: "closing_date", label: `Accept ${formatDay(changes.closing_date.date)} as the closing date` } : null}
                 />
               ) : (
