@@ -24,10 +24,18 @@ export type ReadinessDataRow = {
   csd_supplier_number: string | null;
   sars_tcs_pin: string | null;
   sars_tcs_pin_expiry: string | null;
+  // 0125: the 3 vault document-path columns, widened in specifically so
+  // this RPC's one caller (buildCustomerRow(), below) can stop being the
+  // one surface still scored by the OLD, stricter rule - see that
+  // migration's own header comment and readiness.ts's ReadinessInput for
+  // the full history (Finding 240/241).
+  sars_tcs_pin_document_path: string | null;
   bee_level: number | null;
   bee_proof_expiry: string | null;
+  bee_proof_document_path: string | null;
   cidb_grading: string | null;
   cidb_expiry: string | null;
+  cidb_document_path: string | null;
   bank_confirmation_letter_valid_until: string | null;
   principal_count: number;
   people_with_cv_count: number;
@@ -80,23 +88,19 @@ export function buildCustomerRow(
         csdSupplierNumber: r.csd_supplier_number,
         taxPin: r.sars_tcs_pin,
         taxPinExpiry: r.sars_tcs_pin_expiry,
-        // Standing review, 2026-11-09: taxPinDocumentPath/beeProofDocumentPath/
-        // cidbDocumentPath (lib/readiness.ts's own sibling fix to Finding 240 -
-        // same pass) are deliberately omitted here, not set to a value this
-        // RPC doesn't have. platform_admin_company_readiness_data() (migration
-        // 0098) doesn't return the 3 vault document-path columns, so this is
-        // the one caller still scored by the OLD, stricter rule (text/level
-        // presence only) until that RPC is widened in its own migration -
-        // a schema change this track's own guardrails leave for a separate,
-        // explicitly-approved pass, not this one. Omitting them only ever
-        // makes this admin-only score as strict as it already was today,
-        // never wrong in the OTHER direction (no false "satisfied") - so
-        // /admin/customers staying temporarily narrower than the rest of the
-        // app is a documented gap, not a regression.
+        // Standing review, 2026-11-09 (Finding 241's own flagged open item,
+        // closed this pass via migration 0125): the RPC now returns these 3
+        // vault document-path columns, so /admin/customers uses the exact
+        // same document-aware rule every other caller of computeBidReadiness()
+        // already does (dashboard, Company vault, the discovery page's
+        // readiness chip) instead of a stricter, independently-drifted one.
+        taxPinDocumentPath: r.sars_tcs_pin_document_path,
         beeLevel: r.bee_level,
         beeProofExpiry: r.bee_proof_expiry,
+        beeProofDocumentPath: r.bee_proof_document_path,
         cidbGrading: r.cidb_grading,
         cidbExpiry: r.cidb_expiry,
+        cidbDocumentPath: r.cidb_document_path,
         bankConfirmationValidUntil: r.bank_confirmation_letter_valid_until,
         principalCount: r.principal_count,
         peopleWithCvCount: r.people_with_cv_count,

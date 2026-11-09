@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { buildCustomerRow, type CompanyOverviewRow } from "./customerRowData";
+import { buildCustomerRow, type CompanyOverviewRow, type ReadinessDataRow } from "./customerRowData";
 import type { CustomerMember } from "@/app/admin/customers/CustomerRow";
 
 const COMPANY: CompanyOverviewRow = {
@@ -92,6 +92,38 @@ describe("buildCustomerRow()", () => {
     ];
     const row = buildCustomerRow(COMPANY, { data: nonOwnerMembers, error: null }, NO_READINESS);
     expect(row.primaryContact).toBe("admin@acme.co.za");
+  });
+
+  // Standing review, 2026-11-09 (Finding 241's own flagged open item,
+  // closed via migration 0125): platform_admin_company_readiness_data()
+  // now returns the 3 vault document-path columns - this guards that
+  // buildCustomerRow() actually reads and passes them through to
+  // computeBidReadiness(), rather than silently dropping them again. Same
+  // "document uploaded, text/level/grading field never typed in" shape
+  // Finding 241 itself used for the Company page/dashboard.
+  it("a genuinely document-only company (document uploaded, no text/level/grading typed in) scores tax_compliance/bee/cidb as satisfied, not missing", () => {
+    const documentOnlyReadiness: ReadinessDataRow = {
+      legal_name: COMPANY.legal_name,
+      csd_supplier_number: COMPANY.csd_supplier_number,
+      sars_tcs_pin: null,
+      sars_tcs_pin_expiry: null,
+      sars_tcs_pin_document_path: "c1/vault/sars_tcs_pin/real-pin-letter.pdf",
+      bee_level: null,
+      bee_proof_expiry: null,
+      bee_proof_document_path: "c1/vault/bee_proof/real-bee-cert.pdf",
+      cidb_grading: null,
+      cidb_expiry: null,
+      cidb_document_path: "c1/vault/cidb/real-cidb-cert.pdf",
+      bank_confirmation_letter_valid_until: null,
+      principal_count: 1,
+      people_with_cv_count: 0,
+      experience_project_count: 0,
+    };
+    const row = buildCustomerRow(COMPANY, { data: REAL_MEMBERS, error: null }, { data: [documentOnlyReadiness], error: null });
+    const byKey = Object.fromEntries((row.readinessCriteria ?? []).map((c) => [c.key, c]));
+    expect(byKey.tax_compliance?.satisfied).toBe(true);
+    expect(byKey.bee?.satisfied).toBe(true);
+    expect(byKey.cidb?.satisfied).toBe(true);
   });
 
   it("trialDaysRemaining is only computed for a trialing subscription", () => {
