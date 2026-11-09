@@ -26,6 +26,7 @@ Run: python3 engine/onboarding/test_process_onboarding_jobs.py
 """
 import os
 import sys
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.dirname(HERE)
@@ -459,6 +460,35 @@ def test_poll_once_still_propagates_setup_error():
     check("SetupError still propagates out of poll_once(), not swallowed", raised is True)
 
 
+def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
+    print("supabase_request_all(): a table with more matching rows than PostgREST's own "
+          "db-max-rows cap (same bug class as Finding 252/253 - process_general_jobs.py's "
+          "Supabase.select(), process_pack_jobs.py's SupabaseRest.select(), process_narrative_jobs.py's/"
+          "process_cv_jobs.py's own supabase_request() helper - Finding 252's own write-up had already "
+          "named THIS file's fail_stale_uploads()/poll_once() reads as the identical bounded-queue shape "
+          "through the same unfixed helper, and deliberately left them for Sarel's own future-scale "
+          "judgment call rather than fixing them - resolved here for consistency with every other "
+          "instance of this bug class already being closed unconditionally.")
+    all_rows = [{"id": i} for i in range(2500)]
+
+    def fake_req(url, key, method, path, body=None):
+        qs = urllib.parse.parse_qs(path.split("?", 1)[1] if "?" in path else "")
+        requested_limit = int(qs["limit"][0]) if "limit" in qs else 10**9
+        offset = int(qs["offset"][0]) if "offset" in qs else 0
+        return all_rows[offset: offset + min(requested_limit, 1000)] if method == "GET" else []
+
+    original = poj.supabase_request
+    poj.supabase_request = fake_req
+    try:
+        got = poj.supabase_request_all("https://example.test", "k", "onboarding_uploads?status=eq.classification_requested&select=*")
+    finally:
+        poj.supabase_request = original
+    check("supabase_request_all() returns EVERY matching row, not just PostgREST's own first 1000-row page",
+          len(got) == len(all_rows), f"got {len(got)} of {len(all_rows)}")
+    check("rows come back in order, nothing dropped or duplicated across pages",
+          [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
+
+
 def main():
     test_legit_double_dot_filename_is_not_rejected_by_the_guard()
     test_real_traversal_via_dotdot_segment_is_still_rejected()
@@ -474,6 +504,7 @@ def main():
     test_process_upload_classification_failed_marks_the_row_failed_without_raising()
     test_poll_once_does_not_abort_the_whole_pass_when_one_uploads_claim_fails()
     test_poll_once_still_propagates_setup_error()
+    test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

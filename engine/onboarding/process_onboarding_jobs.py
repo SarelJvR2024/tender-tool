@@ -39,6 +39,36 @@ from process_cv_jobs import supabase_request  # noqa: E402  (same REST helper, s
 from extract_cv_fields import storage_download as _storage_download  # noqa: E402  (same Storage download helper)
 import classify_documents as cd  # noqa: E402
 
+PAGE = 1000  # PostgREST's own db-max-rows cap on a response with no explicit
+             # limit/offset (same cap Finding 252 fixed in process_general_jobs.py's
+             # Supabase.select()/process_pack_jobs.py's SupabaseRest.select(), and
+             # Finding 253 fixed in process_narrative_jobs.py's/process_cv_jobs.py's
+             # own supabase_request() helper). Finding 252's own write-up had already
+             # named fail_stale_uploads()'s stuck-row read and poll_once()'s own
+             # job-queue read below as the identical bounded-queue shape through
+             # this file's imported supabase_request() and deliberately left them
+             # for Sarel's own future-scale judgment call - resolved here, same fix,
+             # for consistency with every other instance of this bug class already
+             # closed unconditionally. Defined locally (not imported from
+             # process_cv_jobs) so this file's own test suite's existing
+             # `poj.supabase_request = stub` convention still reaches every call this
+             # makes - the name resolved at call time is this module's own global.
+
+
+def supabase_request_all(url, service_key, path):
+    """GET every page of `path` past PostgREST's own db-max-rows cap - same
+    limit=&offset= loop as company_profiles.RestClient.select() / the sibling
+    bridges' Supabase.select()/SupabaseRest.select()/supabase_request_all()
+    (Findings 252/253)."""
+    sep = "&" if "?" in path else "?"
+    out, offset = [], 0
+    while True:
+        page = supabase_request(url, service_key, "GET", f"{path}{sep}limit={PAGE}&offset={offset}")
+        out += page
+        if len(page) < PAGE:
+            return out
+        offset += PAGE
+
 # Lowered from 30 (UX audit, 2026-10-23, same root cause as
 # extract_cv_fields.py's own STALE_AFTER_MINUTES: 30 minutes was itself the
 # problem, not just the worst case). Generous above the LLM call's own
@@ -95,7 +125,7 @@ def fail_stale_uploads(url, key, now=None):
     self-healed onboarding classification alert."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
-    for up in supabase_request(url, key, "GET", "onboarding_uploads?status=eq.classifying&select=id,company_id,classification_claimed_at"):
+    for up in supabase_request_all(url, key, "onboarding_uploads?status=eq.classifying&select=id,company_id,classification_claimed_at"):
         claimed = up.get("classification_claimed_at")
         if not claimed:
             continue
@@ -226,8 +256,8 @@ def _safe_update(write, upload, what):
 
 def poll_once(url, key, quiet_when_empty=False, client_factory=cd.default_llm_client):
     fail_stale_uploads(url, key)
-    uploads = supabase_request(
-        url, key, "GET", "onboarding_uploads?status=eq.classification_requested&select=*&order=created_at.asc")
+    uploads = supabase_request_all(
+        url, key, "onboarding_uploads?status=eq.classification_requested&select=*&order=created_at.asc")
     if not uploads:
         if not quiet_when_empty:
             print("No pending onboarding document classification requests.")
