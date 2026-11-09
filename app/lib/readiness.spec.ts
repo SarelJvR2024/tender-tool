@@ -120,4 +120,49 @@ describe("computeBidReadiness", () => {
     expect(result.criteria.find((c) => c.key === "bee")!.satisfied).toBe(false);
     expect(result.criteria.find((c) => c.key === "cidb")!.satisfied).toBe(false);
   });
+
+  // Standing review, 2026-11-09: bank_confirmation is the SAME Finding
+  // 240/241 "no date yet" vs "nothing at all" conflation, a 4th instance -
+  // bankConfirmationValidUntil is a GENERATED column (letter date + 3
+  // months) that stays null whenever uploadVaultDocument() has written the
+  // path but the date was never typed in (the real, reachable upload path,
+  // not a hypothetical one - app/app/company/actions.ts's generic vault
+  // uploader only ever writes the path column).
+  it("bank_confirmation is satisfied from a document path alone (letter date and valid_until both still null)", () => {
+    const result = computeBidReadiness({ ...EMPTY, bankConfirmationLetterPath: "co/vault/bank_letter/fnb.pdf" });
+    const bank = result.criteria.find((c) => c.key === "bank_confirmation")!;
+    expect(bank.satisfied).toBe(true);
+    expect(bank.reason).toBeUndefined();
+  });
+
+  it("bank_confirmation is satisfied from the letter date alone (valid_until not pre-computed in this input)", () => {
+    const result = computeBidReadiness({ ...EMPTY, bankConfirmationLetterDate: daysFromToday(-10) });
+    const bank = result.criteria.find((c) => c.key === "bank_confirmation")!;
+    expect(bank.satisfied).toBe(true);
+  });
+
+  it("bank_confirmation still goes missing with neither the letter nor a valid_until date on file", () => {
+    const result = computeBidReadiness(EMPTY);
+    const bank = result.criteria.find((c) => c.key === "bank_confirmation")!;
+    expect(bank.satisfied).toBe(false);
+    expect(bank.reason).toBe("missing");
+  });
+
+  it("bank_confirmation still goes expired when valid_until is a real, past date - a document path alone doesn't override a genuinely expired letter", () => {
+    const result = computeBidReadiness({
+      ...EMPTY,
+      bankConfirmationLetterPath: "co/vault/bank_letter/fnb.pdf",
+      bankConfirmationValidUntil: daysFromToday(-5),
+    });
+    const bank = result.criteria.find((c) => c.key === "bank_confirmation")!;
+    expect(bank.satisfied).toBe(false);
+    expect(bank.reason).toBe("expired");
+  });
+
+  it("omitting bankConfirmationLetterPath/Date entirely (every caller not yet updated) behaves exactly as before: bankConfirmationValidUntil alone still decides it", () => {
+    const result = computeBidReadiness(FULL); // FULL sets bankConfirmationValidUntil only, no path/date fields at all
+    const bank = result.criteria.find((c) => c.key === "bank_confirmation")!;
+    expect(bank.satisfied).toBe(true);
+    expect(result.percent).toBe(100);
+  });
 });

@@ -47,6 +47,20 @@ export type ReadinessInput = {
   cidbDocumentPath?: string | null;
   /** Bank confirmation letter (5) */
   bankConfirmationValidUntil: string | null;
+  /**
+   * Standing review, 2026-11-09 (Finding 240/241's own sibling shape, a
+   * 4th instance in this same function): optional, defaults to falsy for
+   * any caller that doesn't supply it - including lib/customerRowData.ts's
+   * admin RPC (migration 0098's platform_admin_company_readiness_data(),
+   * the same RPC Finding 242/PR #201 is already widening for the OTHER
+   * three document-path columns; adding these two as well is left for that
+   * same future schema-change pass rather than duplicated here). Omitting
+   * them only ever makes this criterion as strict as it already was
+   * (bankConfirmationValidUntil alone), never stricter - see hasBankLetter
+   * below.
+   */
+  bankConfirmationLetterPath?: string | null;
+  bankConfirmationLetterDate?: string | null;
   /** At least one principal (5) */
   principalCount: number;
   /** At least 2 people with a CV on file (10) */
@@ -187,14 +201,35 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
   }
 
   {
+    // Standing review, 2026-11-09: this used to gate on
+    // bankConfirmationValidUntil alone - a GENERATED column
+    // (bank_confirmation_letter_date + 3 months, migration 0014), null
+    // whenever the date hasn't been typed in yet, EVEN when the letter
+    // itself is genuinely on file. uploadVaultDocument()
+    // (app/app/company/actions.ts) only ever writes
+    // bank_confirmation_letter_path on upload, never the date - so "file
+    // uploaded, date not yet typed" is a real, reachable state, not a
+    // hypothetical one, and this criterion showed it as "missing" (a top
+    // dashboard/Company-page blocker) while ComplianceDocumentsSection.tsx/
+    // ReadOnlyView.tsx's own established hasFile rule for this exact column
+    // pair (`bank_confirmation_letter_path !== null ||
+    // !!bank_confirmation_letter_date`) already correctly showed "Needs
+    // date verification" two inches below it on the same page - the same
+    // Finding 240/241 conflation, a 4th instance. hasBankLetter also treats
+    // a non-null bankConfirmationValidUntil as presence on its own (not
+    // just the two new fields), so a caller that hasn't been updated to
+    // supply bankConfirmationLetterPath/Date yet (see those fields' own
+    // comment above) behaves exactly as before.
+    const hasBankLetter = !!input.bankConfirmationValidUntil || !!input.bankConfirmationLetterPath || !!input.bankConfirmationLetterDate;
     const expiry = expiryState(input.bankConfirmationValidUntil);
+    const satisfied = hasBankLetter && (expiry.current || input.bankConfirmationValidUntil === null);
     criteria.push({
       key: "bank_confirmation",
       label: "Bank confirmation letter",
       weight: 5,
-      satisfied: expiry.current,
-      reason: expiry.reason ?? undefined,
-      daysLeft: expiry.daysLeft,
+      satisfied,
+      reason: satisfied ? undefined : !hasBankLetter ? "missing" : expiry.reason ?? "missing",
+      daysLeft: hasBankLetter ? expiry.daysLeft : undefined,
       href: "/company#bank-details",
     });
   }

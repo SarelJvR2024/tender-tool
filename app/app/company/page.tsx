@@ -150,6 +150,8 @@ export default async function CompanyPage({
       cidbExpiry: row.cidb_expiry,
       cidbDocumentPath: row.cidb_document_path,
       bankConfirmationValidUntil: row.bank_confirmation_letter_valid_until,
+      bankConfirmationLetterPath: row.bank_confirmation_letter_path,
+      bankConfirmationLetterDate: row.bank_confirmation_letter_date,
       principalCount: registerCounts.principals,
       peopleWithCvCount: peopleWithCvIds.size,
       experienceProjectCount: experienceCount ?? 0,

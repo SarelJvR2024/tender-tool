@@ -34,7 +34,7 @@ export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<R
     supabase
       .from("companies")
       .select(
-        "legal_name, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, bee_level, bee_proof_expiry, bee_proof_document_path, cidb_grading, cidb_expiry, cidb_document_path, bank_confirmation_letter_valid_until",
+        "legal_name, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, bee_level, bee_proof_expiry, bee_proof_document_path, cidb_grading, cidb_expiry, cidb_document_path, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bank_confirmation_letter_date",
       )
       .maybeSingle(),
     supabase.from("company_principals").select("id", { count: "exact", head: true }),
@@ -68,6 +68,8 @@ export async function fetchCompanyReadiness(supabase: SupabaseClient): Promise<R
     cidbExpiry: company?.cidb_expiry ?? null,
     cidbDocumentPath: company?.cidb_document_path ?? null,
     bankConfirmationValidUntil: company?.bank_confirmation_letter_valid_until ?? null,
+    bankConfirmationLetterPath: company?.bank_confirmation_letter_path ?? null,
+    bankConfirmationLetterDate: company?.bank_confirmation_letter_date ?? null,
     principalCount: principalCount ?? 0,
     peopleWithCvCount,
     experienceProjectCount: experienceCount ?? 0,
