@@ -43,11 +43,16 @@ function makeChain(queue: Resp[], updateCalls: unknown[]) {
   return chain;
 }
 
-function makeSupabase(fromQueues: Resp[][], rpcResp: Resp = { data: null, error: null }) {
+function makeSupabase(
+  fromQueues: Resp[][],
+  rpcResp: Resp = { data: null, error: null },
+  uploadResp: { error: { message: string } | null } = { error: null },
+) {
   let fromCallIndex = 0;
   const fromCalls: string[] = [];
   const updateCalls: unknown[] = [];
   const removeCalls: { bucket: string; paths: string[] }[] = [];
+  const uploadCalls: { bucket: string; path: string }[] = [];
   const rpcCalls: { fn: string; args: unknown }[] = [];
   return {
     client: {
@@ -64,6 +69,10 @@ function makeSupabase(fromQueues: Resp[][], rpcResp: Resp = { data: null, error:
             removeCalls.push({ bucket, paths });
             return { data: null, error: null };
           },
+          upload: async (path: string) => {
+            uploadCalls.push({ bucket, path });
+            return uploadResp;
+          },
         }),
       },
       rpc: async (fn: string, args: unknown) => {
@@ -74,6 +83,7 @@ function makeSupabase(fromQueues: Resp[][], rpcResp: Resp = { data: null, error:
     fromCalls,
     updateCalls,
     removeCalls,
+    uploadCalls,
     rpcCalls,
   };
 }
@@ -250,5 +260,107 @@ describe("saveGeneralAnswers - companies update genuinely succeeds", () => {
     const url = await expectRedirect(saveGeneralAnswers(generalAnswersFormData("tender-1")));
 
     expect(url).toBe("/tenders/tender-1?saved=answers#general-preparation");
+  });
+});
+
+// Standing review finding, 2026-11-09, continuing Finding 231:
+// uploadTenderDocument() wrote via .upsert(onConflict: "company_id,
+// tender_id,field_key"), the identical "replace a document, storage race"
+// shape Finding 231 fixed at six other, update()-based sites - but upsert
+// can't take that fix's own `.eq(column, previousPath)` filter (PostgREST
+// upsert has no row-level WHERE of its own). Fixed by moving the write into
+// replace_tender_answer_document() (0125), a SECURITY DEFINER function that
+// locks the company row and re-checks the row's current storage_path
+// against what this request read before uploading, raising instead of
+// overwriting on a mismatch. The actual two-session race is reproduced
+// directly in a disposable scratch Postgres database (see migration 0125's
+// own header comment) - these tests only check this Server Action's own
+// wiring: the RPC is called with the right arguments, and either outcome
+// (success or a raised conflict) is handled the same way Finding 231's own
+// sites already were (clean up THIS request's own upload on failure, never
+// touch the still-referenced previous file; delete the superseded previous
+// file only once the write that replaces it has actually committed).
+function uploadDocFormData(tenderId: string, key: string, file: File) {
+  const fd = new FormData();
+  fd.set("tender_id", tenderId);
+  fd.set("returnable_key", key);
+  fd.set("file", file);
+  return fd;
+}
+
+describe("uploadTenderDocument - replace_tender_answer_document raises a conflict (another request just replaced it)", () => {
+  it("cleans up THIS request's own just-uploaded file, surfaces the real conflict message, and does not touch the previous file", async () => {
+    const file = new File(["bytes"], "municipal.pdf", { type: "application/pdf" });
+    const { client, uploadCalls, removeCalls, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }], // requireMember
+        [{ data: { storage_path: "company-1/tenders/tender-1/old-uuid-old.pdf" }, error: null }], // existing answer
+      ],
+      { data: null, error: { message: "This document was just replaced in another tab or request - refresh and try again." } },
+    );
+    supabaseState.current = client;
+
+    const { uploadTenderDocument } = await import("./general-actions");
+
+    const url = await expectRedirect(uploadTenderDocument(uploadDocFormData("tender-1", "municipal_account", file)));
+
+    expect(url).toContain("/tenders/tender-1");
+    expect(url).toContain(encodeURIComponent("just replaced in another tab or request"));
+
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe("replace_tender_answer_document");
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_expected_previous_path).toBe("company-1/tenders/tender-1/old-uuid-old.pdf");
+    expect(args.p_field_key).toBe("upload:municipal_account");
+
+    // This request's own new upload is cleaned up (it lost the race)...
+    expect(uploadCalls).toHaveLength(1);
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0].paths).toEqual([uploadCalls[0].path]);
+    // ...and the PREVIOUS file (still the real, current one - this request
+    // never actually won) is never touched.
+    expect(removeCalls[0].paths).not.toContain("company-1/tenders/tender-1/old-uuid-old.pdf");
+  });
+});
+
+describe("uploadTenderDocument - replace_tender_answer_document succeeds", () => {
+  it("deletes the superseded previous file and redirects to the real success URL", async () => {
+    const file = new File(["bytes"], "municipal.pdf", { type: "application/pdf" });
+    const { client, removeCalls, rpcCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: { storage_path: "company-1/tenders/tender-1/old-uuid-old.pdf" }, error: null }], // existing answer
+    ]); // default rpcResp: { data: null, error: null } - success
+
+    supabaseState.current = client;
+
+    const { uploadTenderDocument } = await import("./general-actions");
+
+    const url = await expectRedirect(uploadTenderDocument(uploadDocFormData("tender-1", "municipal_account", file)));
+
+    expect(url).toBe("/tenders/tender-1?saved=doc#general-preparation");
+    expect(rpcCalls).toHaveLength(1);
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0].paths).toEqual(["company-1/tenders/tender-1/old-uuid-old.pdf"]);
+  });
+});
+
+describe("uploadTenderDocument - no previous document on file", () => {
+  it("does not try to delete anything when there was nothing to replace", async () => {
+    const file = new File(["bytes"], "municipal.pdf", { type: "application/pdf" });
+    const { client, removeCalls, rpcCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: null, error: null }], // no existing answer
+    ]);
+
+    supabaseState.current = client;
+
+    const { uploadTenderDocument } = await import("./general-actions");
+
+    const url = await expectRedirect(uploadTenderDocument(uploadDocFormData("tender-1", "municipal_account", file)));
+
+    expect(url).toBe("/tenders/tender-1?saved=doc#general-preparation");
+    const args = rpcCalls[0].args as Record<string, unknown>;
+    expect(args.p_expected_previous_path).toBeNull();
+    expect(removeCalls).toHaveLength(0);
   });
 });

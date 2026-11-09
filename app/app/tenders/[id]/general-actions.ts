@@ -119,7 +119,11 @@ export async function saveGeneralAnswers(formData: FormData) {
 
 /** A supporting document the vault has no field for, uploaded for THIS tender. */
 export async function uploadTenderDocument(formData: FormData) {
-  const { supabase, userId, companyId } = await requireMember();
+  // answered_by is now set inside replace_tender_answer_document() (0125)
+  // via auth.uid(), not passed as a parameter - same convention as every
+  // other SECURITY DEFINER function in this file (requested_by, etc.) -
+  // so userId is no longer needed here.
+  const { supabase, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   const key = formData.get("returnable_key") as string | null;
   if (!tenderId) redirect("/dashboard");
@@ -148,17 +152,33 @@ export async function uploadTenderDocument(formData: FormData) {
     redirect(back(tenderId, `?error=${encodeURIComponent(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`)}`));
   }
 
-  const { error } = await supabase.from("tender_answers").upsert(
-    { company_id: companyId, tender_id: tenderId, field_key: fieldKey, storage_path: storagePath, original_filename: file.name, value: null, answered_by: userId },
-    { onConflict: "company_id,tender_id,field_key" },
-  );
+  // replace_tender_answer_document() (0125), not a plain .upsert() -
+  // standing review, 2026-11-09, continuing Finding 231 the same way as
+  // saveDocumentTemplate() above it (app/company/actions.ts): this write
+  // is upsert-based, which can't take Finding 231's own
+  // `.eq(column, previousPath)` filter, so two near-simultaneous uploads
+  // for the SAME field would otherwise both upload, both upsert
+  // successfully, and silently orphan whichever request's file lost the
+  // race. The RPC locks the company row and raises instead of overwriting
+  // if the row's current storage_path no longer matches `previousPath`
+  // (what THIS request read before uploading) - the existing error
+  // handling below (clean up this request's own upload, surface the
+  // message, ask the user to retry) already covers that raise.
+  const previousPath = (existing?.storage_path as string | null | undefined) ?? null;
+  const { error } = await supabase.rpc("replace_tender_answer_document", {
+    p_company_id: companyId,
+    p_tender_id: tenderId,
+    p_field_key: fieldKey,
+    p_storage_path: storagePath,
+    p_original_filename: file.name,
+    p_expected_previous_path: previousPath,
+  });
   if (error) {
-    console.error("tender_answers upsert failed for document", error);
+    console.error("replace_tender_answer_document failed", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);
-    redirect(back(tenderId, `?error=${encodeURIComponent("Could not save this document - try again. If it keeps happening, let us know.")}`));
+    redirect(back(tenderId, `?error=${encodeURIComponent(error.message || "Could not save this document - try again. If it keeps happening, let us know.")}`));
   }
-  const previous = (existing?.storage_path as string | null | undefined) ?? null;
-  if (previous && previous !== storagePath) await supabase.storage.from(VAULT_BUCKET).remove([previous]);
+  if (previousPath) await supabase.storage.from(VAULT_BUCKET).remove([previousPath]);
 
   revalidatePath(`/tenders/${tenderId}`);
   redirect(back(tenderId, "?saved=doc"));
