@@ -371,6 +371,41 @@ def test_submission_due_signals_survives_a_non_string_closing_date():
     check(out3 == [], f"a malformed-but-string closing_date is still handled by the existing ValueError path ({out3})")
 
 
+def test_submission_due_signals_uses_sast_calendar_day_not_a_naive_utc_slice():
+    """Finding 290 (2026-11-09, standing solution-architect review, blast-radius
+    follow-up on Finding 289): submission_due_signals() used to derive a
+    release's own closing day with `datetime.date.fromisoformat(closing[:10])`
+    - a naive truncation of the raw closing_date STRING that silently assumed
+    its first 10 characters were already the true SAST calendar day. Real
+    tenders.closing_date/discovered_opportunities.closing_date values come
+    back from PostgREST in UTC (every closing_date fixture in this repo uses
+    this shape, e.g. test_discovery_fanout.py's "2099-01-01T11:00:00Z"), so
+    for any closing time whose UTC time-of-day falls in [22:00, 23:59:59] -
+    SAST 00:00-01:59 the FOLLOWING day - the naive slice read the wrong,
+    EARLIER UTC calendar day instead of the true, later SAST one. This is
+    not a rare shape: app/lib/dates.ts's own formatClosingDateTime() docstring
+    confirms a source that gives no real closing time at all is defaulted to
+    SAST midnight by parse_sast() as a generic "unknown" marker - stored as
+    exactly "...T22:00:00Z", squarely inside the broken window - so this hit
+    every tender with an unspecified closing time, not just a theoretical
+    corner case. Fixed by reusing the same shared, already-correct
+    tender_updates.to_date() this engine already uses elsewhere for exactly
+    this conversion (watch_tender_updates.active_pursuits()), rather than a
+    second, independent (and wrong) one here."""
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
+    # A closing instant at 23:00 UTC, two calendar days from now (UTC) - which
+    # is 01:00 SAST, THREE calendar days from "today" in true SAST terms: the
+    # naive [:10] slice reads the UTC day (today + 2), the correct SAST
+    # conversion reads today + 3.
+    utc_day = today + datetime.timedelta(days=2)
+    closing_date = f"{utc_day.isoformat()}T23:00:00+00:00"
+    out = daily_digest.submission_due_signals([{"verdict": "strong_fit", "closing_date": closing_date}])
+    check(len(out) == 1, f"the release is still reported as closing soon ({out})")
+    if out:
+        check(out[0]["days_left"] == 3,
+              f"days_left is the true SAST calendar-day count (3), not the naive UTC-slice count (2) ({out[0]})")
+
+
 def test_orphaned_field_provenance_owner_not_silently_dropped():
     """field_provenance.tender_pack_id is NOT NULL and cascades from
     tender_packs, so in normal operation it always resolves - the one way
@@ -453,6 +488,7 @@ def test_document_expiry_signals_includes_documents_lapsing_before_a_tenders_clo
 
 if __name__ == "__main__":
     test_submission_due_signals_survives_a_non_string_closing_date()
+    test_submission_due_signals_uses_sast_calendar_day_not_a_naive_utc_slice()
     test_orphaned_field_provenance_owner_not_silently_dropped()
     test_document_expiry_signals_includes_documents_lapsing_before_a_tenders_closing()
     main()

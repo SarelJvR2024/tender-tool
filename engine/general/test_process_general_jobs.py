@@ -159,6 +159,33 @@ def test_within_missing_closing_date_uses_real_sast_today_not_naive_utc():
         pgj.datetime.datetime = real_datetime
 
 
+def test_within_real_closing_date_uses_its_own_sast_day_not_a_naive_utc_slice():
+    print("\n_within(): a REAL tender closing date must go through the same SAST conversion as "
+          "the 'no closing date' fallback above - not a naive [:10] slice of the raw UTC string")
+    # Finding 291 (2026-11-09): closing_date "2026-10-20T22:30:00+00:00" is 00:30 SAST on
+    # 2026-10-21 - the true SAST ref day is 2026-10-21, so a 5-year window's cutoff is
+    # 2021-10-21. The old code sliced the raw string's first 10 characters ("2026-10-20",
+    # the UTC day) and got a one-day-early cutoff (2021-10-20).
+    closing = "2026-10-20T22:30:00+00:00"
+    rule = {"window_years": 5}
+    # Genuinely ONE DAY before the real cutoff - outside the window either way - but lands
+    # exactly ON the buggy, one-day-early cutoff, so the old naive-slice code wrongly let
+    # it through as "recent enough".
+    stale_item = {"id": "exp-stale-real-closing", "completion_date": "2021-10-20"}
+    check("an item one day before the REAL SAST-based cutoff is excluded, not let through by "
+          "a naive UTC-day reading of the real closing date",
+          pgj._within(stale_item, rule, closing) is False)
+    # One day younger - genuinely inside the real window - must stay included.
+    fresh_item = {"id": "exp-fresh-real-closing", "completion_date": "2021-10-21"}
+    check("an item exactly on the REAL cutoff day is still included (fix didn't over-correct)",
+          pgj._within(fresh_item, rule, closing) is True)
+    # A malformed real closing date must still fall back to today (unchanged behaviour),
+    # not crash.
+    bad_result = pgj._within({"id": "exp-x", "completion_date": "2020-01-01"}, {"window_years": 5}, "not-a-real-date")
+    check("a malformed (but truthy) closing date falls back to today, doesn't crash",
+          bad_result is False, bad_result)
+
+
 def test_within_malformed_completion_date_alert_carries_company_id():
     print("_within(): a malformed completion_date's own alert carries the item's company_id too")
     # Finding 188 (2026-11-07): client.select()'s own "select=*" means `item`
@@ -354,6 +381,7 @@ def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
+    test_within_real_closing_date_uses_its_own_sast_day_not_a_naive_utc_slice()
     test_within_malformed_completion_date_alert_carries_company_id()
     test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()
     test_gather_pack_inputs_signatory_fallback()

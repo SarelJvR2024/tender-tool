@@ -606,11 +606,35 @@ def _within(item, rule, closing):
         # stale Experience Library row (completed exactly one day too long
         # ago) through as recent-enough evidence - confirmed live by mocking
         # that window and reproducing the wrong True (QA pass, 2026-10-21).
-        today_sast = datetime.datetime.now(SAST).date().isoformat()
-        try:
-            ref = datetime.date.fromisoformat(str(closing or today_sast)[:10])
-        except ValueError:
-            ref = datetime.date.fromisoformat(today_sast)
+        #
+        # Finding 291 (2026-11-09, standing solution-architect review, Finding
+        # 289/290's own blast-radius follow-up): the REAL closing date, when
+        # one IS given, had the identical mistake one level down - this used
+        # to be `datetime.date.fromisoformat(str(closing)[:10])`, a naive
+        # slice of the raw closing_date STRING that assumed its first 10
+        # characters already named the true SAST calendar day. tenders.
+        # closing_date comes back from PostgREST in UTC (every fixture in
+        # this repo uses this shape), so for any closing time whose UTC time-
+        # of-day falls in 22:00-23:59 (SAST 00:00-01:59 the next day) - the
+        # SAME window the comment above already fixed for the "no closing
+        # date" fallback, just never carried over to this branch - the slice
+        # read the wrong, EARLIER UTC day, moving the window-years cutoff a
+        # day early and letting a genuinely-stale Experience Library row
+        # through as recent-enough evidence. Confirmed live: closing_date
+        # "2026-10-20T22:30:00+00:00" (00:30 SAST on 2026-10-21) with a
+        # 5-year window read True for a completion_date of 2021-10-20 -
+        # genuinely ONE DAY before the real (2021-10-21) cutoff - instead of
+        # the correct False. Converts via the real instant's own tzinfo
+        # (SAST = UTC+2, same local convention as the rest of this file - see
+        # the module-level SAST comment above), never a string slice.
+        today_sast = datetime.datetime.now(SAST).date()
+        ref = today_sast
+        if closing:
+            try:
+                closing_ts = datetime.datetime.fromisoformat(str(closing).replace("Z", "+00:00"))
+                ref = closing_ts.astimezone(SAST).date() if closing_ts.tzinfo else closing_ts.date()
+            except ValueError:
+                pass
         if comp_day < _years_before(ref, int(rule["window_years"])):
             return False
     return True

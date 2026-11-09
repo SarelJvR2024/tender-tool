@@ -140,6 +140,7 @@ import watch_deadlines
 import watch_tender_updates
 import discovery_downgrades
 import system_alerts  # noqa: E402  (engine/alerts, on the path via watch_deadlines)
+from tender_updates import to_date as _closing_to_sast_date  # noqa: E402 (Finding 290 - see submission_due_signals() below)
 
 LOCAL_COMPANY_KEY = "local"  # --mode local: the one --profile company
 
@@ -392,9 +393,26 @@ def submission_due_signals(scored, lead_days=14):
                                  "skipped from the 'closing soon' section, not treated as due.", "warning",
                                  context={"closing_date": str(closing)})
             continue
-        try:
-            closing_date = datetime.date.fromisoformat(closing[:10])
-        except ValueError:
+        # Finding 290 (2026-11-09): this used to be `datetime.date.fromisoformat(closing[:10])`
+        # - a naive truncation of the raw timestamp string that silently assumed its
+        # first 10 characters were already the SAST calendar day. tenders.closing_date/
+        # discovered_opportunities.closing_date come back from PostgREST in UTC (e.g.
+        # "2026-11-20T23:30:00+00:00" - every fixture in this repo uses this shape, and
+        # a closing time defaulted to SAST midnight by parse_sast() for an unspecified
+        # source time - app/lib/dates.ts's formatClosingDateTime()'s own "(Time TBC in
+        # RFP)" case - is stored as exactly "...T22:00:00Z", squarely in the broken
+        # window). For any closing_date whose UTC time-of-day falls in [22:00, 23:59:59]
+        # (SAST 00:00-01:59 the next day), the naive slice read the WRONG, EARLIER UTC
+        # calendar day instead of the true SAST one - the submission_due_signals()
+        # equivalent of Finding 289, independently present here because this function
+        # never called the shared, already-correct tender_updates.to_date() (docstring:
+        # "in SAST (UTC+2) like app/lib/dates.ts closingDayOf()"), already used
+        # elsewhere in this same engine for exactly this conversion (watch_tender_updates.
+        # active_pursuits()). Confirmed live: a closing_date of "2026-11-20T23:30:00+00:00"
+        # with "today" 2026-11-19 SAST read days_left=1 (naive slice -> SAST day
+        # 2026-11-20) instead of the correct 2 (to_date() -> true SAST day 2026-11-21).
+        closing_date = _closing_to_sast_date(closing)
+        if closing_date is None:
             continue
         days_left = (closing_date - today).days
         if 0 <= days_left <= lead_days:
