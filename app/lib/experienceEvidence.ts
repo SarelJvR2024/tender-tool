@@ -118,7 +118,29 @@ export function acceptedDocTypes(rule: EvidenceRule): Set<string> {
   return types;
 }
 
-type ExperienceLite = { document_type: string; performance_rating: string | null; completion_date: string | null };
+export type ExperienceLite = { document_type: string; performance_rating: string | null; completion_date: string | null };
+
+/**
+ * Does this one Experience Library item actually count toward the rule - the
+ * right document type AND (when the rule states a "since <year>" cutoff
+ * rather than a rolling window) completed on or after it? The single source
+ * both evaluateEvidence() below and any renderer showing a per-item or total
+ * qualifying count must use - QA pass, 2026-11-09 (non-SANRAL pack rotation,
+ * Finding 234): compliance-report.tsx's own chip/per-item badges and
+ * general-pack-review-data.ts's own displayed count each re-filtered by
+ * document type alone, omitting this since_year check that evaluateEvidence()
+ * already applies - so a tender stating "completion certificates since 2020"
+ * showed 3 of 3 qualifying (chip, green) and "3 item(s)" (pack review) right
+ * next to evaluateEvidence()'s own correct "missing - only 2 of 3 qualifying"
+ * for the exact same items, because one of the three pre-dated 2020.
+ * general-workspace.tsx already got this right (uses evaluateEvidence()'s
+ * own returned `qualifying` count, never a type-only re-filter) - this is
+ * that same correct pattern, pulled out so every caller shares it.
+ */
+export function itemQualifiesForRule(rule: EvidenceRule, item: ExperienceLite): boolean {
+  if (!acceptedDocTypes(rule).has(item.document_type)) return false;
+  return !rule.since_year || (!!item.completion_date && Number(item.completion_date.slice(0, 4)) >= rule.since_year);
+}
 
 export type EvidenceEvaluation = {
   status: ComplianceStatus;
@@ -136,8 +158,7 @@ export type EvidenceEvaluation = {
 export function evaluateEvidence(chosen: ChosenRule, items: ExperienceLite[], ratingsMatter: boolean): EvidenceEvaluation {
   const { rule, source } = chosen;
   const accepted = acceptedDocTypes(rule);
-  const inSince = (i: ExperienceLite) => !rule.since_year || (!!i.completion_date && Number(i.completion_date.slice(0, 4)) >= rule.since_year);
-  const qualifyingItems = items.filter((i) => accepted.has(i.document_type) && inSince(i));
+  const qualifyingItems = items.filter((i) => itemQualifiesForRule(rule, i));
   const n = qualifyingItems.length;
   const rated = qualifyingItems.filter((i) => !!i.performance_rating).length;
   const need = rule.projects_required;

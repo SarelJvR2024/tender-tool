@@ -14,7 +14,7 @@ import { COMPANY_VAULT_COLUMNS } from "@/lib/tenderCompliance";
 import { matchLocality, COMPANY_OFFICE_COLUMNS, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
-import { acceptedDocTypes, evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
+import { evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
 import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
 
@@ -294,7 +294,12 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
           items.push({
             key: "experience",
             label: "Qualifying experience",
-            value: `${acceptedDocTypes(rule).size > 0 ? experience.items.filter((i) => acceptedDocTypes(rule).has(i.document_type)).length : experience.items.length} item(s)`,
+            // evidenceEval.qualifying, not a fresh document-type-only filter
+            // here - Finding 234 (see itemQualifiesForRule()'s own comment,
+            // lib/experienceEvidence.ts): a re-filter that skips the rule's
+            // own since_year cutoff showed a higher count than the status/
+            // note right next to it, which already account for it.
+            value: `${evidenceEval.qualifying} item(s)`,
             status: reviewStatus,
             note: evidenceEval.detail,
           });

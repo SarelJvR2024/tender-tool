@@ -14598,6 +14598,87 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 234, both the SANRAL and non-SANRAL "qualifying experience" renderers re-filtered the Experience Library by document type ALONE, silently dropping the rule's own `since_year` cutoff that `evaluateEvidence()` already applies - a tender stating "completion certificates since 2020" showed 3-of-3/green on the chip and "3 item(s)" in Pack Review for the exact same items `evaluateEvidence()` itself correctly scored "missing - only 2 of 3 qualifying", because one of the three pre-dated 2020
+
+Oriented from `164637b` (sibling pass: Finding 232, the `upsert()`-based document-replace race PR).
+`git fetch origin main` found no new sibling commits either before starting or immediately before
+this push - `main` stayed at `164637b` throughout.
+
+Rotation: non-SANRAL pack. Swept `app/lib/generalTender.ts`'s `checkReturnable()` (every vault
+case: csd/tax/bbbee/coid/bank/insurance/cidb/default) and `questionStates()`/`companyFieldStates()`
+in full - no gap found; `validityAtClosing()` (lib/tenderCompliance.ts) already inherits Finding
+228's SAST-midnight fix via its own call to `daysUntil()`, and `bank_confirmation_letter_valid_until`
+being a `generated always as (bank_confirmation_letter_date + interval '3 months') stored` column
+(migration 0014) makes `generalTender.ts`'s single-field null guard on that column provably safe -
+the generating column can never be non-null while its source is null. Checked
+`app/app/tenders/[id]/general-pack-review-data.ts`/`general-pack-review-logic.ts` in full -
+`signatureAnswerStatus()` there already carries the exact chosenId/chosenPerson-divorced guard
+Finding 203 just added to SANRAL's own sibling, independently correct already. Checked
+`pack-inputs-actions.ts`'s `confirmPositionPerson()` - its `required` set unions `tender_requirements`
+(is_alternate=false) position codes with every existing `tender_pack_assignments` position code;
+traced whether a legitimate caller can ever create an assignment row for a position_code outside
+that required set (which would wrongly inflate "required" and block `allConfirmed`) - no such path
+exists in this codebase (every real call site passes a position_code already drawn from the
+required list), so the union is a harmless no-op, not a bug. Checked
+`engine/general/build_general_pack.py`'s `VAULT_FILE_FOR`/`VAULT_EXPIRY_FOR` dicts - the
+`cidb_document_path` gap an earlier pass (2026-11-03) already found and fixed is confirmed still
+fixed; `VAULT_MISMATCH_KEYWORDS`'s narrower coverage (coid/bbbee/tax only) is deliberately scoped to
+the one real incident it documents, not an oversight.
+
+Found the real bug via sibling comparison, this pass's own most productive technique again:
+`app/app/tenders/[id]/general-workspace.tsx` (the live Tender Workspace screen) already renders its
+own "qualifying experience" count correctly - `evidenceEval.qualifying` (general-workspace.tsx:720),
+i.e. `evaluateEvidence()`'s own returned count, which filters by BOTH accepted document type AND the
+rule's `since_year` cutoff (`lib/experienceEvidence.ts`'s own `inSince` check, pre-fix inlined,
+private to that function). Two OTHER renderers of the identical fact independently recomputed their
+own count/chip from the raw Experience Library items, filtering by document type alone and omitting
+`since_year` entirely: `general-pack-review-data.ts`'s Pack Review "Qualifying experience" item
+value, and `app/app/tenders/[id]/compliance-report.tsx`'s SANRAL "Company experience" chip and its
+per-item "Counts" badges (the latter is SANRAL-side, not strictly this pass's own non-SANRAL
+rotation, but shares the exact same root cause and the exact same shared function, so fixed in the
+same pass rather than left half-fixed). `since_year` is a real, live field - this project's own
+`EvidenceRule` docstring names Gauteng DRT's real "completion certificates since 2000" rule as one
+of the real tender families this exact field exists to express, so this is not a contrived edge case.
+
+Confirmed live, not inferred: built a real `EvidenceRule` with `since_year: 2020`,
+`accepted_evidence: ["completion_certificate"]`, `projects_required: 3`, and 3 real
+`completion_certificate` items (2 dated 2023, 1 dated 2015), ran the REAL, unmodified
+`evaluateEvidence()` and the REAL, unmodified type-only re-filter each buggy renderer used -
+`evaluateEvidence()` correctly returned `status: "missing"`, `qualifying: 2`, detail "Only 2 of 3
+qualifying item(s)"; the type-only re-filter returned `3` both times (`general-pack-review-data.ts`'s
+"3 item(s)" value sitting directly above `evaluateEvidence()`'s own "Only 2 of 3" detail text on the
+same item; `compliance-report.tsx`'s chip reading "3 of 3 qualifying" in SUCCESS green for a tender
+that is actually missing a qualifying project).
+
+Fix: extracted the combined type-and-since_year check `evaluateEvidence()` already had inlined (as
+`inSince`) into a new exported pure function, `itemQualifiesForRule(rule, item)` -
+`lib/experienceEvidence.ts`'s own single source of truth for "does this one item actually count",
+reused by `evaluateEvidence()` internally (no behavior change there) and by both buggy renderers:
+`general-pack-review-data.ts`'s displayed value now reads `evidenceEval.qualifying` directly (no
+independent recomputation needed at all, `acceptedDocTypes` import dropped as now-unused);
+`compliance-report.tsx`'s chip and per-item badges now call `itemQualifiesForRule(rule, i)`, with the
+per-item badge gaining a third, more accurate state ("Accepted type, but before `<since_year>` -
+doesn't count") distinct from "Not accepted by this tender" at all, since the two are genuinely
+different facts about the same item.
+
+Verified red-then-green: added `lib/experienceEvidence.test.ts` (5 new cases, `node
+--experimental-strip-types --test` convention - no existing spec file for this module before this).
+Saved the diff, `git apply -R`, re-ran - import failure (`itemQualifiesForRule` doesn't exist),
+confirming the function is genuinely new; `git apply` to reapply, re-ran - 5/5 pass. `npx tsc --noEmit`
+clean on all 3 touched files (`experienceEvidence.ts`, `general-pack-review-data.ts`,
+`compliance-report.tsx`). Regression: `npx vitest run lib/sanralB7.spec.ts` (unrelated sanity, 6/6);
+`node --experimental-strip-types --test lib/compileReadiness.test.ts lib/dates.test.ts` (28/28,
+unaffected).
+
+Not escalated to a PR: small, safe, pure-TS logic fix across 3 files (one new shared helper, two
+call-site swaps to use it/its result), no RLS, no migration, no money path, no worker-image change -
+pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 226, SANRAL Form B7's live client-side total preview showed GREEN for a Targeted Enterprise total over 100% - the exact opposite of the warning `checkPlan()` already raises for the same total once saved, a direct consequence of Finding 202's server-side fix never reaching this pre-submission preview
 
 Oriented from `eaf0713` (own prior pass: Finding 224, `opportunityBuyerMatch.ts`'s missing minimum

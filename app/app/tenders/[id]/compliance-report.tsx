@@ -9,7 +9,7 @@ import { QuickBlockerDrawer } from "./quick-blocker-drawer";
 import { VAULT_DRAWER_CONFIG } from "./quick-fix-config";
 import { estimateSanralConventional, type Range } from "@/lib/sanralScoring";
 import { DOCUMENT_TYPES, disciplineLabel, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
-import { acceptedDocTypes, describeRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
+import { acceptedDocTypes, describeRule, itemQualifiesForRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
 import { matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 import { formatDate } from "@/lib/dates";
 
@@ -442,7 +442,14 @@ function ExperienceSection({
     );
   }
   const accepted = acceptedDocTypes(rule);
-  const qualifying = items.filter((i) => accepted.has(i.document_type));
+  // itemQualifiesForRule(), not "accepted.has(document_type)" alone - Finding
+  // 233 (lib/experienceEvidence.ts): a rule stating "since <year>" rather
+  // than a rolling window excludes an otherwise-right-type item completed
+  // before it, exactly as evaluateEvidence() already does for the status/
+  // detail shown elsewhere on this same tender - a type-only re-filter here
+  // showed this chip and the per-item badges below as "qualifying"/"Counts"
+  // for items evaluateEvidence() itself doesn't count.
+  const qualifying = items.filter((i) => itemQualifiesForRule(rule, i));
   const need = rule.projects_required ?? 0;
   const ok = need > 0 && qualifying.length >= need;
   return (
@@ -475,12 +482,14 @@ function ExperienceSection({
               {i.completion_date ? ` · completed ${(formatDate(i.completion_date) ?? "—")}` : ""}
             </div>
           </div>
-          {accepted.has(i.document_type) ? (
+          {itemQualifiesForRule(rule, i) ? (
             isScoreableEvidence(i.document_type) && !i.performance_rating ? (
               <Chip label="Counts - rating not tagged" className="bg-warning/10 text-warning" />
             ) : (
               <Chip label={i.performance_rating ? `Counts - rated ${i.performance_rating}` : "Counts"} className="bg-success/10 text-success" />
             )
+          ) : accepted.has(i.document_type) ? (
+            <Chip label={`Accepted type, but before ${rule.since_year} - doesn't count`} className="bg-muted text-muted-foreground" />
           ) : (
             <Chip label="Not accepted by this tender" className="bg-muted text-muted-foreground" />
           )}
