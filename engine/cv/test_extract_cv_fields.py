@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import types
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -760,6 +761,33 @@ def test_email_verification_survives_line_wrap():
     check(not prop2["person"]["email"]["verified"], "a hallucinated email with no basis in the CV is still flagged")
 
 
+def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
+    print("supabase_request_all(): a table with more matching rows than PostgREST's own "
+          "db-max-rows cap (same bug class as Finding 252/253 - this file's own "
+          "fail_stale_uploads()/poll_once() reads through the imported supabase_request() "
+          "helper, the same unpaginated shape already fixed in process_narrative_jobs.py, "
+          "process_cv_jobs.py and process_onboarding_jobs.py this pass - never checked "
+          "before for THIS sibling file, extract_cv_fields.py's own cv_uploads reads).")
+    all_rows = [{"id": i} for i in range(2500)]
+
+    def fake_req(url, key, method, path, body=None):
+        qs = urllib.parse.parse_qs(path.split("?", 1)[1] if "?" in path else "")
+        requested_limit = int(qs["limit"][0]) if "limit" in qs else 10**9
+        offset = int(qs["offset"][0]) if "offset" in qs else 0
+        return all_rows[offset: offset + min(requested_limit, 1000)] if method == "GET" else []
+
+    original = x.supabase_request
+    x.supabase_request = fake_req
+    try:
+        got = x.supabase_request_all("https://example.test", "k", "cv_uploads?status=eq.extracting&select=*")
+    finally:
+        x.supabase_request = original
+    check(len(got) == len(all_rows),
+          f"supabase_request_all() returns EVERY matching row, not just PostgREST's own first 1000-row page (got {len(got)} of {len(all_rows)})")
+    check([r["id"] for r in got] == list(range(2500)),
+          "rows come back in order, nothing dropped or duplicated across pages")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cv_extract_test_")
     try:
@@ -774,6 +802,7 @@ def main():
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
         test_email_verification_survives_line_wrap()
+        test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALL PASSED' if not FAILS else f'{len(FAILS)} FAILED'}")

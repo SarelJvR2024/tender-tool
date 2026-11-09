@@ -80,6 +80,33 @@ sys.path.insert(0, os.path.join(ENGINE, "general"))
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 from process_cv_jobs import supabase_request  # noqa: E402  (same REST helper, same env vars)
 from requirements import docx_text, pdf_text, convert_with_soffice  # noqa: E402
+
+PAGE = 1000  # PostgREST's own db-max-rows cap on a response with no explicit
+             # limit/offset (same cap Finding 252 fixed in process_general_jobs.py's
+             # Supabase.select()/process_pack_jobs.py's SupabaseRest.select(), and
+             # Finding 253 fixed in this same pass for process_narrative_jobs.py's,
+             # process_cv_jobs.py's and process_onboarding_jobs.py's own
+             # supabase_request() helper - this file's sibling fail_stale_uploads()/
+             # poll_once() reads below have the identical gap, never checked before.
+             # Defined locally (not imported from process_cv_jobs) so this file's own
+             # test suite's existing `x.supabase_request = stub` convention still
+             # reaches every call this makes - the name resolved at call time is this
+             # module's own global.
+
+
+def supabase_request_all(url, service_key, path):
+    """GET every page of `path` past PostgREST's own db-max-rows cap - same
+    limit=&offset= loop as company_profiles.RestClient.select() / the sibling
+    bridges' Supabase.select()/SupabaseRest.select()/supabase_request_all()
+    (Findings 252/253)."""
+    sep = "&" if "?" in path else "?"
+    out, offset = [], 0
+    while True:
+        page = supabase_request(url, service_key, "GET", f"{path}{sep}limit={PAGE}&offset={offset}")
+        out += page
+        if len(page) < PAGE:
+            return out
+        offset += PAGE
 sys.path.insert(0, os.path.join(ENGINE, "ocr"))
 import scan_ocr  # noqa: E402  (EXPERIMENTAL - docs/specs/OCR-Evaluation.md)
 
@@ -839,7 +866,7 @@ def fail_stale_uploads(url, key, now=None):
     # sibling stale-job alert (process_pack_jobs.fail_stale_jobs,
     # process_cv_jobs's own stale sweep) which both already include it.
     # Standing review, 2026-11-07 (engine/ sibling-comparison pass).
-    for up in supabase_request(url, key, "GET", "cv_uploads?status=eq.extracting&select=id,company_id,extraction_claimed_at"):
+    for up in supabase_request_all(url, key, "cv_uploads?status=eq.extracting&select=id,company_id,extraction_claimed_at"):
         claimed = up.get("extraction_claimed_at")
         if not claimed:
             continue
@@ -970,8 +997,8 @@ def _safe_update(write, upload, what):
 
 def poll_once(url, key, quiet_when_empty=False, client_factory=default_llm_client):
     fail_stale_uploads(url, key)
-    uploads = supabase_request(
-        url, key, "GET",
+    uploads = supabase_request_all(
+        url, key,
         "cv_uploads?status=eq.extraction_requested&mode=eq.ai_extract&select=*&order=created_at.asc")
     if not uploads:
         if not quiet_when_empty:
