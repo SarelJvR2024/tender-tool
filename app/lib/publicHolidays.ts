@@ -67,10 +67,10 @@ function addDaysUTC(d: Date, days: number): Date {
   return new Date(d.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
-// All public holidays for one calendar year, sorted by date. Computed
-// (not hardcoded) so Easter-derived dates and the "falls on a Sunday"
-// Monday rule (s2A) are always right, including for a year not yet in the
-// 2025-2027 range this file was authored for.
+// All public holidays for one calendar year, sorted by date, one entry per
+// distinct date. Computed (not hardcoded) so Easter-derived dates and the
+// "falls on a Sunday" Monday rule (s2A) are always right, including for a
+// year not yet in the 2025-2027 range this file was authored for.
 export function holidaysForYear(year: number): Holiday[] {
   const out: Holiday[] = [];
 
@@ -90,8 +90,37 @@ export function holidaysForYear(year: number): Holiday[] {
 
   for (const extra of EXTRA_HOLIDAYS[year] ?? []) out.push(extra);
 
-  out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  return out;
+  // Two of the entries above can land on the SAME calendar date - confirmed
+  // reachable, not hypothetical: whenever Christmas Day (25 Dec) falls on a
+  // Sunday (next: 2033, then 2039/2044/2050/...), s2A's own "following
+  // Monday" shift lands on 26 December, which is ALREADY Day of Goodwill's
+  // fixed date - the shift adds nothing (that Monday was a public holiday
+  // regardless), but pre-dedupe it still produced a second, redundant
+  // "falls on a Sunday" entry for the exact same date. Human Rights Day (21
+  // March) and Good Friday can also coincide on their own, different
+  // substantive grounds (last seen 2008) - genuinely one non-working day,
+  // not two. A single calendar date is one public holiday no matter how
+  // many of the Act's provisions justify it; `isPublicHoliday()`/
+  // `isBusinessDay()` already treat it that way via a Set, but the raw
+  // array this function returns did not - before this fix, the free
+  // deadline calculator's own "Upcoming public holidays" list
+  // (DeadlineCalculatorClient.tsx, keyed by `h.date`) would render two rows
+  // for the one date, with a duplicate React key. Collapse same-date
+  // entries into one, keeping every distinct reason (deduped) joined, so
+  // "two provisions, one day off" reads as one row, not two.
+  const byDate = new Map<string, string[]>();
+  for (const h of out) {
+    const names = byDate.get(h.date);
+    if (names) {
+      if (!names.includes(h.name)) names.push(h.name);
+    } else {
+      byDate.set(h.date, [h.name]);
+    }
+  }
+  const deduped: Holiday[] = Array.from(byDate, ([date, names]) => ({ date, name: names.join(" / ") }));
+
+  deduped.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return deduped;
 }
 
 const holidaySetCache = new Map<number, Set<string>>();

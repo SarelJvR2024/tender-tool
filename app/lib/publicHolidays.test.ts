@@ -45,6 +45,29 @@ test("a fixed-date holiday landing on a Sunday also makes the Monday a public ho
   assert.ok(isPublicHoliday("2027-03-22"), "the following Monday must also be a public holiday");
 });
 
+test("the s2A Sunday shift lands on the SAME date as Day of Goodwill's own fixed date (2033) without a duplicate entry", () => {
+  // Christmas Day 2033 (25 Dec) is a Sunday, so s2A's own "following Monday"
+  // shift lands on 26 December - already Day of Goodwill's own fixed date.
+  // One calendar date, two reasons it's a holiday - must be ONE entry, not
+  // two (two entries sharing a date broke DeadlineCalculatorClient.tsx's
+  // `key={h.date}` list rendering and misleadingly implied two separate
+  // non-working days).
+  const d = new Date("2033-12-25T00:00:00Z");
+  assert.equal(d.getUTCDay(), 0, "test fixture assumption: 2033-12-25 is a Sunday");
+  const h2033 = holidaysForYear(2033);
+  const onDec26 = h2033.filter((x) => x.date === "2033-12-26");
+  assert.equal(onDec26.length, 1, "exactly one entry for 2033-12-26, not a duplicate");
+  assert.match(onDec26[0].name, /Day of Goodwill/);
+  // No date in any year may appear twice - a general invariant, not just
+  // this one known case.
+  const dates = h2033.map((x) => x.date);
+  assert.equal(dates.length, new Set(dates).size, "holidaysForYear must return one entry per distinct date");
+  // The actual business-day math already treated the date as one holiday
+  // either way (via a Set) - confirm that's still true after the fix.
+  assert.ok(isPublicHoliday("2033-12-26"));
+  assert.ok(isBusinessDay("2033-12-27"), "27 Dec 2033 is an ordinary Tuesday, not itself a holiday");
+});
+
 test("isBusinessDay rejects weekends and holidays, accepts an ordinary weekday", () => {
   assert.equal(isBusinessDay("2026-01-01"), false); // New Year's Day, a Thursday
   assert.equal(isBusinessDay("2026-01-03"), false); // Saturday
