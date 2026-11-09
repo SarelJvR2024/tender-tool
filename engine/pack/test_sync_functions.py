@@ -157,6 +157,49 @@ def test_sync_tender_requirements_is_idempotent_once_positions_are_on_file():
           (written, len(client.tables["tender_requirements"])))
 
 
+def test_sync_tender_requirements_treats_a_concurrent_workers_duplicate_insert_as_benign_not_an_error():
+    print("sync_tender_requirements(): a concurrent worker (hosted bridge + a hand-run --once, "
+          "Automated-Fulfillment-Deployment.md's own documented overlap) already wrote this exact "
+          "(tender_id, position_code, is_alternate, company_id) key between the `have` read and this "
+          "insert - live-confirmed on a scratch Postgres to fail with a real 23505 duplicate-key error, "
+          "not a download/parse failure, so it must not be reported as one")
+    alerts = []
+    system_alerts.set_sink(alerts.append)
+
+    class RacedClient(FakeClient):
+        def insert(self, table, row):
+            if table == "tender_requirements":
+                # The exact shape SupabaseRest._req() wraps a real PostgREST
+                # 409 Conflict in - reproduced live against a scratch
+                # Postgres (two concurrent transactions inserting the
+                # identical key; one commits, the other gets this literal
+                # Postgres error text and nothing else).
+                raise RuntimeError(
+                    'POST /rest/v1/tender_requirements failed: 409 {"code":"23505",'
+                    '"details":"Key (tender_id, position_code, is_alternate, company_id)='
+                    '(t1, PL, f, null) already exists.","hint":null,"message":"duplicate key '
+                    'value violates unique constraint \\"tender_requirements_tender_position_company_key\\""}')
+            return super().insert(table, row)
+
+    client = RacedClient(
+        tables={"tender_documents": [{"tender_id": "t1", "doc_type": "technical_xlsm", "company_id": None,
+                                       "storage_path": "shared/technical.xlsm"}],
+                "tender_requirements": []},
+        files={("tender-documents", "shared/technical.xlsm"): SAMPLE_XLSM})
+    work = _workdir()
+    try:
+        written = ppj.sync_tender_requirements(client, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        system_alerts.set_sink(None)
+    check("the workbook was read fine, but nothing was written by THIS run - the other worker's rows stand",
+          written == {}, written)
+    check("no row was double-written either (insert raised before any rows landed)",
+          client.tables["tender_requirements"] == [], client.tables["tender_requirements"])
+    check("a benign concurrent-write race is NOT reported via system_alerts (no false 'error')",
+          alerts == [], alerts)
+
+
 def test_sync_tender_requirements_keeps_a_companys_own_upload_separate_from_the_shared_copy():
     print("sync_tender_requirements(): a company's own upload alongside the buyer's shared copy (0045, per copy)")
     client = FakeClient(
@@ -308,6 +351,7 @@ def test_sync_position_suggestions_is_a_noop_once_the_ranking_is_unchanged():
 def main():
     test_sync_tender_requirements_writes_primary_and_alt_rows_from_setup()
     test_sync_tender_requirements_is_idempotent_once_positions_are_on_file()
+    test_sync_tender_requirements_treats_a_concurrent_workers_duplicate_insert_as_benign_not_an_error()
     test_sync_tender_requirements_keeps_a_companys_own_upload_separate_from_the_shared_copy()
     test_sync_tender_requirements_skips_and_alerts_on_an_unreadable_workbook()
     test_sync_b7_setup_reads_category_and_matrix_from_the_setup_sheet()

@@ -946,10 +946,37 @@ def sync_tender_requirements(client, work_root):
             # key, so the next poll cycle retries the whole workbook
             # cleanly instead of being stuck on a partial list forever.
             if rows:
-                client.insert("tender_requirements", [{
-                    "tender_id": d["tender_id"], "company_id": d.get("company_id"), "position_code": p["code"],
-                    "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
-                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
+                try:
+                    client.insert("tender_requirements", [{
+                        "tender_id": d["tender_id"], "company_id": d.get("company_id"), "position_code": p["code"],
+                        "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
+                        "managerial": _managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
+                except Exception as e:
+                    # QA pass, 2026-11-09: a hosted worker and a hand-run
+                    # --once CAN overlap (Automated-Fulfillment-Deployment.md's
+                    # own documented pairing, same as pack_generation_jobs'
+                    # claim below) - if a concurrent run already won this
+                    # exact (tender_id, position_code, is_alternate,
+                    # company_id) insert between this loop's own `have` read
+                    # and this insert, the workbook WAS read and parsed fine;
+                    # the unique constraint (0045's
+                    # tender_requirements_tender_position_company_key) is the
+                    # ONLY thing that failed, and only because the positions
+                    # are already on file - a benign, self-correcting race,
+                    # not a real error. Before this, it fell straight into
+                    # the broad `except Exception` below and was reported as
+                    # "could not read the uploaded Technical workbook's SETUP
+                    # sheet" (misleading - it was read fine) with a real
+                    # system_alerts "error" entry, every time this ever
+                    # happened. Live-confirmed on a scratch Postgres: two
+                    # concurrent real transactions inserting the identical
+                    # key - one commits, the other gets exactly this
+                    # Postgres error text, nothing else.
+                    if "23505" in str(e) or "duplicate key value violates unique constraint" in str(e):
+                        print(f"[requirements] tender {d['tender_id']}: another worker already wrote these "
+                              "positions for this workbook - skipped, not an error.")
+                        continue
+                    raise
             written[key] = [p["code"] for p, alt in rows if not alt]
             print(f"[requirements] tender {d['tender_id']} ({'company ' + d['company_id'] if d.get('company_id') else 'shared copy'}): "
                   f"{len(primary)} position(s) from SETUP ({', '.join(written[key])}), {len(rows) - len(primary)} ALT")
