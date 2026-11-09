@@ -14,6 +14,7 @@ import {
   byBuyer,
   byCategory,
   byProvince,
+  fieldReliable,
   loadMarketOutcomes,
   tenderFrequencyTrend,
   type Breakdown,
@@ -96,10 +97,14 @@ export default async function MarketIntelligencePage() {
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatCard label="Tenders tracked" value={rows.length} />
               <StatCard label="Awarded" value={awarded.length} />
-              <StatCard label="Median contract size" value={overall.contractSize.median ? formatRand(overall.contractSize.median) : "-"} tone="money" />
+              <StatCard
+                label="Median contract size"
+                value={fieldReliable(overall.contractSize.n) && overall.contractSize.median !== null ? formatRand(overall.contractSize.median) : "-"}
+                tone="money"
+              />
               <StatCard
                 label="Lowest bid won"
-                value={overall.lowestWon.n > 0 ? `${Math.round((overall.lowestWon.won / overall.lowestWon.n) * 100)}%` : "-"}
+                value={fieldReliable(overall.lowestWon.n) ? `${Math.round((overall.lowestWon.won / overall.lowestWon.n) * 100)}%` : "-"}
               />
             </div>
             <p className="-mt-3 mb-6 text-xs text-muted-foreground">
@@ -147,21 +152,21 @@ export default async function MarketIntelligencePage() {
                 <div>
                   <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Lowest bid won</div>
                   <div className="font-display text-2xl font-medium text-foreground">
-                    {overall.lowestWon.n > 0 ? `${Math.round((overall.lowestWon.won / overall.lowestWon.n) * 100)}%` : "-"}
+                    {fieldReliable(overall.lowestWon.n) ? `${Math.round((overall.lowestWon.won / overall.lowestWon.n) * 100)}%` : "-"}
                   </div>
                   <p className="text-xs text-muted-foreground">of {overall.lowestWon.n} awards with a priced, single-contract register</p>
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Winner vs. median bid</div>
                   <div className="font-display text-2xl font-medium text-foreground">
-                    {overall.winnerVsMedian.median !== null ? `${Math.round(overall.winnerVsMedian.median * 100)}%` : "-"}
+                    {fieldReliable(overall.winnerVsMedian.n) && overall.winnerVsMedian.median !== null ? `${Math.round(overall.winnerVsMedian.median * 100)}%` : "-"}
                   </div>
                   <p className="text-xs text-muted-foreground">of the median bid, typically ({overall.winnerVsMedian.n} awards)</p>
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Bidders per tender</div>
-                  <div className="font-display text-2xl font-medium text-foreground">{overall.bidders.median ?? "-"}</div>
-                  <p className="text-xs text-muted-foreground">median ({overall.bidders.p25 ?? "-"}-{overall.bidders.p75 ?? "-"} typical range)</p>
+                  <div className="font-display text-2xl font-medium text-foreground">{fieldReliable(overall.bidders.n) ? overall.bidders.median ?? "-" : "-"}</div>
+                  <p className="text-xs text-muted-foreground">median ({fieldReliable(overall.bidders.n) ? `${overall.bidders.p25 ?? "-"}-${overall.bidders.p75 ?? "-"}` : "-"} typical range)</p>
                 </div>
               </div>
             </section>
@@ -228,9 +233,11 @@ function BreakdownTable({ icon: Icon, title, rows, emptyText }: { icon: typeof B
                     {b.label}
                   </td>
                   <td className="py-2 pr-4 text-muted-foreground">{b.n}</td>
-                  <td className="py-2 pr-4 text-money">{b.benchmark.contractSize.median ? formatRand(b.benchmark.contractSize.median) : "-"}</td>
+                  <td className="py-2 pr-4 text-money">
+                    {fieldReliable(b.benchmark.contractSize.n) && b.benchmark.contractSize.median !== null ? formatRand(b.benchmark.contractSize.median) : "-"}
+                  </td>
                   <td className="py-2 text-muted-foreground">
-                    {b.benchmark.lowestWon.n > 0 ? `${Math.round((b.benchmark.lowestWon.won / b.benchmark.lowestWon.n) * 100)}%` : "-"}
+                    {fieldReliable(b.benchmark.lowestWon.n) ? `${Math.round((b.benchmark.lowestWon.won / b.benchmark.lowestWon.n) * 100)}%` : "-"}
                   </td>
                 </tr>
               ))}

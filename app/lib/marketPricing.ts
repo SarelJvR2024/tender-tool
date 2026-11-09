@@ -86,6 +86,30 @@ export function sampleStrength(n: number): SampleStrength {
   return n < MIN_SAMPLE ? "too_few" : n < THIN_SAMPLE ? "thin" : "fair";
 }
 
+/**
+ * Whether ONE Benchmark field's own n has cleared MIN_SAMPLE - standing
+ * review, 2026-11-09, Finding 239, same shape as marketTrendLogic.ts's
+ * gateMarketTrend() (Finding 238, 2026-11-09): benchmark() returns five
+ * sibling fields (bidders, lowestWon, winnerVsMedian, contractSize,
+ * winners), each its own independently-filtered sub-sample of `rows` -
+ * not every row has a priced_bidder_count >= 2, a lowest_bid_won flag, a
+ * recorded winner_vs_median ratio, or a single-winner priced contract size
+ * (see benchmark()'s own filters). A caller that only checks the headline
+ * `benchmark().n >= MIN_SAMPLE` before rendering anything can still show a
+ * "median contract size" or a "lowest bid won" percentage built on a
+ * single data point once the much bigger headline count alone clears the
+ * bar. market-context.tsx's own MetricRow + sampleStrength() already
+ * applies this per field, by hand, correctly; /market-intelligence and
+ * /analytics did not - each checked a field's value for truthiness
+ * (`median ? ... : "-"`) or its n for `> 0`, which only hides a genuinely
+ * EMPTY field, not a too-thin-to-trust one. Exported so every caller uses
+ * the same one-line rule instead of re-deriving (or, as found here,
+ * forgetting to re-derive) it per page.
+ */
+export function fieldReliable(n: number, minSample = MIN_SAMPLE): boolean {
+  return n >= minSample;
+}
+
 // ------------------------------------------------------------ names
 
 const NOISE_WORDS = ["PTY", "LTD", "LIMITED", "CC", "INC", "T/A", "TRADING AS", "THE", "SA", "SOUTH AFRICA", "HOLDINGS", "GROUP"];

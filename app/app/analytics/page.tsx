@@ -12,7 +12,7 @@ import { buildWinLossTrend, monthLabel } from "@/lib/analyticsLogic";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
 import { fetchAllRows } from "@/lib/supabasePaging";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
-import { loadOutcomesForTenders, ownPosition, firmsMet, benchmark, bestOutcome, MIN_SAMPLE, type OutcomeStats } from "@/lib/marketPricing";
+import { loadOutcomesForTenders, ownPosition, firmsMet, benchmark, bestOutcome, fieldReliable, MIN_SAMPLE, type OutcomeStats } from "@/lib/marketPricing";
 
 /**
  * Analytics (spec §10): "own bid activity, outcomes, upcoming deadlines,
@@ -300,9 +300,9 @@ export default async function AnalyticsPage() {
               <div>
                 <div className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Your own benchmark ({ownBenchmark.n} matched tenders)</div>
                 <dl className="space-y-1.5 text-sm">
-                  <div className="flex justify-between"><dt className="text-muted-foreground">Lowest bid won</dt><dd className="font-medium text-foreground">{ownBenchmark.lowestWon.n > 0 ? `${Math.round((ownBenchmark.lowestWon.won / ownBenchmark.lowestWon.n) * 100)}% of the time` : "-"}</dd></div>
-                  <div className="flex justify-between"><dt className="text-muted-foreground">Median bidders per tender</dt><dd className="font-medium text-foreground">{ownBenchmark.bidders.median ?? "-"}</dd></div>
-                  <div className="flex justify-between"><dt className="text-muted-foreground">Median contract size</dt><dd className="font-medium text-money">{ownBenchmark.contractSize.median ? formatRand(ownBenchmark.contractSize.median) : "-"}</dd></div>
+                  <div className="flex justify-between"><dt className="text-muted-foreground">Lowest bid won</dt><dd className="font-medium text-foreground">{fieldReliable(ownBenchmark.lowestWon.n) ? `${Math.round((ownBenchmark.lowestWon.won / ownBenchmark.lowestWon.n) * 100)}% of the time` : "-"}</dd></div>
+                  <div className="flex justify-between"><dt className="text-muted-foreground">Median bidders per tender</dt><dd className="font-medium text-foreground">{fieldReliable(ownBenchmark.bidders.n) ? ownBenchmark.bidders.median ?? "-" : "-"}</dd></div>
+                  <div className="flex justify-between"><dt className="text-muted-foreground">Median contract size</dt><dd className="font-medium text-money">{fieldReliable(ownBenchmark.contractSize.n) && ownBenchmark.contractSize.median !== null ? formatRand(ownBenchmark.contractSize.median) : "-"}</dd></div>
                 </dl>
               </div>
               <div>

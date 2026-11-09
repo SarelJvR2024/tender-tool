@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  benchmark,
   byBuyer,
   byCategory,
   byProvince,
+  fieldReliable,
   loadOutcomesForTenders,
   loadSegment,
+  MIN_SAMPLE,
   ownPosition,
   tenderFrequencyTrend,
   type Bidder,
@@ -294,5 +297,32 @@ describe("loadSegment", () => {
     const { rows, error } = await loadSegment(supabase, SEGMENT);
     expect(error).toBeNull();
     expect(rows).toEqual([]);
+  });
+});
+
+describe("fieldReliable / benchmark's per-field sample gate (Finding 239)", () => {
+  it("rejects a field whose own n hasn't cleared MIN_SAMPLE, independent of any other count", () => {
+    expect(fieldReliable(MIN_SAMPLE - 1)).toBe(false);
+    expect(fieldReliable(MIN_SAMPLE)).toBe(true);
+    expect(fieldReliable(1, MIN_SAMPLE)).toBe(false);
+  });
+
+  it("benchmark()'s own sibling fields can each be far thinner than the headline n that gates whether anything is shown at all - exactly the shape market-intelligence/page.tsx and analytics/page.tsx missed (market-context.tsx's MetricRow+sampleStrength() already got this right)", () => {
+    // 5 rows clears the headline MIN_SAMPLE - but only ONE has a priced,
+    // single-winner contract (feeding contractSize), and none carry a
+    // priced_bidder_count/lowest_bid_won/winner_vs_median value at all.
+    const rows: MarketRow[] = [
+      row({ id: "1", winner_count: 1, winner_amount_zar: 1_000_000, winner_name: "A" }),
+      row({ id: "2", winner_count: 3 }),
+      row({ id: "3", winner_count: 3 }),
+      row({ id: "4", winner_count: 3 }),
+      row({ id: "5", winner_count: 3 }),
+    ];
+    const b = benchmark(rows);
+    expect(b.n).toBeGreaterThanOrEqual(MIN_SAMPLE); // headline gate alone would pass
+    expect(fieldReliable(b.contractSize.n)).toBe(false); // but this one field must not be shown
+    expect(fieldReliable(b.bidders.n)).toBe(false);
+    expect(fieldReliable(b.lowestWon.n)).toBe(false);
+    expect(fieldReliable(b.winnerVsMedian.n)).toBe(false);
   });
 });
