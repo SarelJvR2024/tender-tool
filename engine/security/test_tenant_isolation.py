@@ -883,6 +883,44 @@ select 1;""")
         check(n_b == "1", f"B still sees the shared positions until its own are read ({n_b})")
 
 
+def part2_bare_folder_slug(db):
+    """Finding 280: tender_folder_readable()/tt_template_object_readable()
+    fail open for the REAL object shape this bucket actually holds, not just
+    the legacy/hypothetical one case [17] above probes. Every shared
+    SANRAL-registered template is stored at the tender's own SLUG (never its
+    uuid), per engine/general/process_general_jobs._template_storage_path();
+    [17]'s own probes used the tender's raw id instead, which happens to
+    match tender_folder_readable()'s id-only check and so never exercised
+    this. Confirms the open/shared case is unaffected, then confirms a total
+    stranger can no longer read the SAME object once the tender becomes
+    private (simulating the only way that combination could ever arise;
+    real code never reaches it today - see migration 0125's own header)."""
+    print("\n[18] Bare folder keyed by the tender's real SLUG (not its id): shared stays open, private now denied")
+    i = {k: str(uuid.uuid4()) for k in ("uA", "uB", "A", "B", "t")}
+    A, B, t = i["A"], i["B"], i["t"]
+    slug = f"sanral-slug-{t[:8]}"
+    path = f"{slug}/technical_xlsm.xlsm"
+    db.one(f"""
+insert into auth.users (id, email) values ('{i['uA']}', 'slug-a@example.test'), ('{i['uB']}', 'slug-b@example.test');
+insert into companies (id, legal_name) values ('{A}', 'Slug A'), ('{B}', 'Slug B');
+insert into company_members (company_id, user_id, role) values ('{A}', '{i['uA']}', 'owner'), ('{B}', '{i['uB']}', 'owner');
+insert into tenders (id, slug, contract_no, title, closing_date, family) values
+  ('{t}', '{slug}', 'TPL-SLUG', 'Shared SANRAL tender (slug-keyed)', now() + interval '30 days', 'Conventional Consultant Tender');
+insert into storage.buckets (id, name) values ('tender-documents', 'tender-documents') on conflict do nothing;
+insert into storage.objects (bucket_id, name) values ('tender-documents', '{path}');
+insert into tender_documents (tender_id, doc_type, storage_path) values ('{t}', 'technical_xlsm', '{path}');
+select 1;""")
+
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = '{path}'", i["uB"])
+    check(n == "1", f"shared tender, slug-keyed folder: a total stranger (B) can read the buyer's published copy ({n})")
+
+    db.one(f"update tenders set owner_company_id = '{A}' where id = '{t}'")
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = '{path}'", i["uA"])
+    check(n == "1", f"now private, owned by A: A itself can still read its own tender's file ({n})")
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = '{path}'", i["uB"])
+    check(n == "0", f"now private, owned by A: total stranger B can no longer read it ({n})")
+
+
 def part2_deletion(db):
     """POPIA s 24 / s 14: a person and a user account can be deleted, and
     nothing of the person stays behind in rows no foreign key reaches."""
@@ -1072,6 +1110,7 @@ def main():
     if psql:
         part2(Db(psql))
         part2_shared_templates(Db(psql))
+        part2_bare_folder_slug(Db(psql))
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
