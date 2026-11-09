@@ -90,8 +90,23 @@ def _safe_name(raw):
     os.path.join(out_dir, ...) call. Confirmed live 2026-10-20: a name like
     "../../../../tmp/x" writes outside out_dir entirely (CWE-22). Same
     sanitizer convention already used for uploaded filenames elsewhere in
-    this project (e.g. the app's own upload actions)."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", raw.replace(" ", "_"))
+    this project (e.g. the app's own upload actions) - except that
+    app/lib/safeFileName.ts's own version also truncates (`.slice(0, 120)`),
+    and this one never did. people.name has no length limit anywhere (plain
+    `text not null`, no form-side maxLength either) and is exactly the kind
+    of free text a CV-extraction misread or a pasted paragraph can make very
+    long; confirmed live, 2026-11-09, a ~5000-character name produced a
+    filename long enough that `doc.save()` raised `OSError: [Errno 36] File
+    name too long`, crashing CV generation outright for that person (not
+    every caller catches this broadly enough to degrade gracefully -
+    engine/pack/harness_pack.py's own `except ValueError` around
+    generate_cv.generate() does not catch an OSError at all). Truncated
+    shorter than the TS file's 120: this function returns only the name
+    PORTION of the final filename, callers append their own
+    `_{format}_{detail}_{mode}_{job_id}` suffix and extension on top of it -
+    80 leaves comfortable room for every real suffix this project uses and
+    stays well under a 255-byte filesystem filename limit regardless."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", raw.replace(" ", "_"))[:80]
 
 
 # ============================================================================

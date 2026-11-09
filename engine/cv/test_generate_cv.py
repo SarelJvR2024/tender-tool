@@ -99,6 +99,30 @@ def test_person_name_cannot_escape_out_dir_via_path_traversal():
           real_docx.startswith(real_out + os.sep), real_docx)
 
 
+def test_person_name_extremely_long_does_not_crash_the_filename():
+    print("output filename: an extremely long person name (free text, no DB/form length limit)")
+    import tempfile
+    long_name = "A" * 5000
+    base_name = gc._safe_name(long_name)
+    check("the sanitized name portion is truncated to a safe length (not 5000 chars)",
+          len(base_name) <= 80, len(base_name))
+
+    out_dir = tempfile.mkdtemp(prefix="test_cv_out_")
+    profile_path = os.path.join(out_dir, "profile.json")
+    import json
+    json.dump({
+        "company": {"legal_name": "Test Co"},
+        "key_people": [{"name": long_name, "projects": [], "qualifications": {}}],
+    }, open(profile_path, "w"))
+    try:
+        gc.generate(profile_path, 0, out_dir, "sanral_keyperson", "summary")
+        check("generate() writes a real .docx for an extremely long name instead of "
+              "raising OSError('File name too long')", True)
+    except OSError as e:
+        check("generate() writes a real .docx for an extremely long name instead of "
+              "raising OSError('File name too long')", False, f"{type(e).__name__}: {e}")
+
+
 def test_null_projects_and_qualifications_degrade_instead_of_crashing():
     print("a person row with explicit null projects/qualifications (not just missing)")
     person = {"name": "Jane Doe", "projects": None, "qualifications": None}
@@ -418,6 +442,7 @@ def main():
     test_matched_candidate_logs_score_not_rationale_on_page()
     test_specialism_warning_shown_and_logged()
     test_person_name_cannot_escape_out_dir_via_path_traversal()
+    test_person_name_extremely_long_does_not_crash_the_filename()
     test_null_projects_and_qualifications_degrade_instead_of_crashing()
     test_control_characters_are_stripped_not_crashed_on()
     test_company_legal_name_control_character_in_footer_is_stripped_not_crashed_on()
