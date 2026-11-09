@@ -170,6 +170,50 @@ def test_amount_fallback_still_works_for_the_same_winner_spelled_differently():
           not any("different winner name" in n for n in row["data_notes"]), row["data_notes"])
 
 
+def test_points_fallback_never_crosses_to_a_different_winners_source():
+    print("merge()'s winner_points/winner_bbbee_points must not silently pick up a DIFFERENT "
+          "SANRAL part's score for a DIFFERENT named winner - the same bug shape Finding 246 fixed "
+          "for winner_amount_zar, left open for these two fields")
+    # The higher-priority (awarded-list) page: a real winner, but its own
+    # detail page never had a Full Points Awarded / BBBEE Points row at all
+    # (not every SANRAL detail page template includes them).
+    awarded_rec = {"source": "sanral_awarded", "reference": "N.003-004-2026/1", "title": "Test tender 3",
+                   "awarded_to": "Acme Construction (Pty) Ltd", "full_points": None, "bbbee_points": None}
+    # The closed-list page for the SAME tender, naming a genuinely DIFFERENT
+    # company (an appeal/re-award that page hasn't caught up with yet - the
+    # exact scenario merge()'s own comment names for the amount field) -
+    # its points belong to ITS OWN winner, not to the awarded-list's.
+    closed_rec = {"source": "sanral_closed", "reference": "N.003-004-2026/1", "title": "Test tender 3",
+                  "awarded_to": "Beta Builders CC", "full_points": "87.4000", "bbbee_points": "10.0000"}
+    row = sao.merge("sanral:N.003-004-2026/1",
+                     [sao.part_from_sanral(awarded_rec), sao.part_from_sanral(closed_rec)])
+    check("the higher-priority winner name is still used",
+          row["winner_name"] == "Acme Construction (Pty) Ltd", row["winner_name"])
+    check("but sanral_closed's points for the DIFFERENT winner (Beta Builders) are NOT attached to it",
+          row["winner_points"] is None and row["winner_bbbee_points"] is None,
+          (row["winner_points"], row["winner_bbbee_points"]))
+    check("an honest note names the excluded source and the other winner each score actually belongs to",
+          sum(1 for n in row["data_notes"] if "sanral_closed" in n and "Beta Builders" in n) == 2,
+          row["data_notes"])
+
+
+def test_points_fallback_still_works_for_the_same_winner_spelled_differently():
+    print("mirror case: the legitimate use this fallback exists for - the SAME real winner, spelled "
+          "differently (or just named on one page and not the other) on each SANRAL page - must still "
+          "get the other page's points")
+    awarded_rec = {"source": "sanral_awarded", "reference": "N.004-005-2026/1", "title": "Test tender 4",
+                   "awarded_to": "Build Co (Pty) Ltd", "full_points": None, "bbbee_points": None}
+    closed_rec = {"source": "sanral_closed", "reference": "N.004-005-2026/1", "title": "Test tender 4",
+                  "awarded_to": "BUILD CO LTD", "full_points": "92.1000", "bbbee_points": "15.0000"}
+    row = sao.merge("sanral:N.004-005-2026/1",
+                     [sao.part_from_sanral(awarded_rec), sao.part_from_sanral(closed_rec)])
+    check("the points still come through for the SAME (just differently spelled) winner",
+          row["winner_points"] == "92.1000", row["winner_points"])
+    check("the BBBEE points too", row["winner_bbbee_points"] == "15.0000", row["winner_bbbee_points"])
+    check("no spurious mismatch note for a genuine same-company spelling difference",
+          not any("different winner name" in n for n in row["data_notes"]), row["data_notes"])
+
+
 def main():
     test_unrelated_company_sharing_a_first_word_is_not_assumed_the_winner()
     test_exact_name_match_still_sets_the_winner()
@@ -179,6 +223,8 @@ def main():
     test_zero_amount_dropped_with_an_explanatory_note()
     test_amount_fallback_never_crosses_to_a_different_winners_source()
     test_amount_fallback_still_works_for_the_same_winner_spelled_differently()
+    test_points_fallback_never_crosses_to_a_different_winners_source()
+    test_points_fallback_still_works_for_the_same_winner_spelled_differently()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

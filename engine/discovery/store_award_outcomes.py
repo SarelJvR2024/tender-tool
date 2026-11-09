@@ -290,6 +290,36 @@ def merge(key, parts, existing_first_seen=None):
             notes.append(f"{mismatched['source']} records an award amount against a different winner name "
                          f"({mismatched['winner']!r}) - not used as {winner!r}'s own amount.")
 
+    def winner_field(field, label):
+        """Same guard as `amount`'s own fallback just above, and for the same
+        reason: `winner_points`/`winner_bbbee_points` are SANRAL-specific
+        scores recorded on that source's OWN page alongside its OWN
+        `awarded_to` (part_from_sanral(): both come from the same `rec`), so
+        a part naming a DIFFERENT winner has a score that belongs to that
+        OTHER company, not to `winner` - plain `first()` picked whichever
+        priority-ordered part had the field at all, with no check it was
+        even describing the same company `winner_name` ended up as. Two
+        SANRAL parts for the same tender (e.g. the closed-list page scraped
+        before an appeal/re-award, still naming the old winner, next to the
+        awarded-list page with the new one - the exact scenario already
+        named above for `amount`) is enough to reach this: whichever one
+        happens to have the points field filled in used to win regardless
+        of whose points they actually were."""
+        if not winner_part:
+            return first(field)
+        w = norm_name(winner)
+        mismatched_p = next((p for p in ordered if p.get(field) not in (None, "", []) and p.get("winner")
+                             and norm_name(p["winner"]) != w), None)
+        value = next((p.get(field) for p in ordered if p.get(field) not in (None, "", [])
+                     and (not p.get("winner") or norm_name(p["winner"]) == w)), None)
+        if value is None and mismatched_p:
+            notes.append(f"{mismatched_p['source']} records a {label} against a different winner name "
+                         f"({mismatched_p['winner']!r}) - not used as {winner!r}'s own {label}.")
+        return value
+
+    winner_points = winner_field("winner_points", "full-points score")
+    winner_bbbee_points = winner_field("winner_bbbee_points", "BBBEE-points score")
+
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     row = {
         "outcome_key": key,
@@ -300,7 +330,7 @@ def merge(key, parts, existing_first_seen=None):
         "status": "awarded" if winner else "register_published",
         "closing_date": first("closing_date"), "award_date": first("award_date"),
         "winner_name": winner, "winner_amount_zar": amount,
-        "winner_points": first("winner_points"), "winner_bbbee_points": first("winner_bbbee_points"),
+        "winner_points": winner_points, "winner_bbbee_points": winner_bbbee_points,
         "winner_count": winner_count,
         "bidders_source": register["bidders_source"] if register else None,
         "register_columns": columns,
