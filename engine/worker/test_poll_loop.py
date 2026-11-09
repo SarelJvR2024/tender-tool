@@ -56,9 +56,9 @@ def seed(fake):
     fake.insert("companies", {"id": "c1", "legal_name": "Test Co"})
 
 
-def job(job_id, fmt="sanral_keyperson", detail="summary", status="requested"):
+def job(job_id, fmt="sanral_keyperson", detail="summary", status="requested", requested_at="2026-01-01T00:00:00Z"):
     return {"id": job_id, "company_id": "c1", "person_id": "p1", "status": status,
-            "format": fmt, "detail": detail}
+            "format": fmt, "detail": detail, "requested_at": requested_at}
 
 
 def env_for(fake):
@@ -210,6 +210,29 @@ def test_claim_is_atomic():
         assert status_of(fake, "j9") == "generating"
         assert not fake.storage, fake.storage
         print("PASS atomic claim: a row already 'generating' is skipped, nothing built or uploaded")
+    finally:
+        fake.stop()
+
+
+def test_fake_supabase_honours_order_requested_at_asc():
+    # Finding (worker/job-queue rotation, 2026-11-09): fake_supabase.py used to
+    # silently drop the `order=` query param (the one real queue read every
+    # process_*_jobs.py bridge sends, oldest-job-first) and always return rows
+    # in plain INSERTION order instead - a real, demonstrable divergence from
+    # real PostgREST that no existing test here could have caught, since every
+    # other test in this file only ever queues one 'requested' row at a time.
+    # Inserted deliberately out of requested_at order (the NEWER job inserted
+    # FIRST) so insertion order and requested_at order disagree - only a fix
+    # that actually sorts by requested_at can pass this.
+    import process_cv_jobs
+    fake = FakeSupabase().start()
+    try:
+        fake.insert("generated_cvs", job("newer", requested_at="2026-02-01T00:00:00Z"))
+        fake.insert("generated_cvs", job("older", requested_at="2026-01-01T00:00:00Z"))
+        rows = process_cv_jobs.supabase_request_all(
+            fake.url, "fake-key", "generated_cvs?status=eq.requested&select=*&order=requested_at.asc")
+        assert [r["id"] for r in rows] == ["older", "newer"], [r["id"] for r in rows]
+        print("PASS fake_supabase honours order=requested_at.asc: oldest job returned first, not insertion order")
     finally:
         fake.stop()
 
@@ -430,6 +453,7 @@ if __name__ == "__main__":
     test_poll_forever_unit()
     test_max_runtime_uses_an_injectable_clock_not_the_real_one()
     test_claim_is_atomic()
+    test_fake_supabase_honours_order_requested_at_asc()
     test_cv_bridge_loop_end_to_end()
     test_runner_drives_bridges_and_stops_on_sigterm()
     test_script_flag_is_additive()

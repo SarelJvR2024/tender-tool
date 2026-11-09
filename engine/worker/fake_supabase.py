@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 def _parse_filters(query):
     filters = {}
     for k, vs in urllib.parse.parse_qs(query).items():
-        if k == "select":
+        if k in ("select", "order"):
             continue
         v = vs[0]
         if v.startswith("eq."):
@@ -35,6 +35,24 @@ def _parse_filters(query):
 
 
 IS_NULL = object()
+
+
+def _parse_order(query):
+    """("col.asc"/"col.desc"/bare "col") -> (column, reverse) or None - PostgREST's
+    own `order=` syntax, the one piece of it process_cv_jobs.py's own queue reads
+    (`order=requested_at.asc`, oldest job first) actually rely on. Found 2026-11-09
+    (worker/job-queue rotation): this fake server used to silently drop `order`
+    entirely (treated the same as any other unrecognised filter value, never
+    sorting) and always returned rows in INSERTION order instead - harmless for
+    every existing test (each only ever queues one 'requested' row at a time), but
+    a real, demonstrable divergence from Supabase's own behaviour that would have
+    let the real worker's FIFO ordering silently regress with no test able to
+    catch it."""
+    vs = urllib.parse.parse_qs(query).get("order")
+    if not vs:
+        return None
+    col, _, direction = vs[0].partition(".")
+    return col, direction == "desc"
 
 
 def _match(row, filters):
@@ -94,6 +112,10 @@ class FakeSupabase:
                 filters = _parse_filters(parsed.query)
                 with fake.lock:
                     rows = [dict(r) for r in fake.tables.get(table, []) if _match(r, filters)]
+                order = _parse_order(parsed.query)
+                if order:
+                    col, reverse = order
+                    rows.sort(key=lambda r: (r.get(col) is None, r.get(col)), reverse=reverse)
                 self._send(200, rows)
 
             def do_PATCH(self):

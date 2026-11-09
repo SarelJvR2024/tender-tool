@@ -15958,6 +15958,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 283, `engine/worker/fake_supabase.py` (the in-memory Supabase stand-in `test_poll_loop.py` uses) silently dropped the `order=` query param and always returned rows in plain insertion order instead - a real divergence from PostgREST's own behaviour the real job-queue code depends on for FIFO processing, undetectable by any existing test since none queue more than one 'requested' row at a time
+
+Oriented from `b58e842` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: worker/job-queue. Mention-count survey put `fake_supabase.py` (7 mentions, 144 lines) far
+below `poll_loop.py`/`run_bridges.py`/the five `process_*_jobs.py` bridges (93-315 each). Read it in
+full: a narrowly-scoped, already well-documented in-memory PostgREST stand-in used only by
+`test_poll_loop.py`. Its `_parse_filters()` recognises `eq.`/`is.null` and explicitly skips `select`
+- but silently ignored `order` too, with no effect on returned rows at all (insertion order, not
+sorted). The real caller it stands in for, `process_cv_jobs.py`, explicitly queries
+`order=requested_at.asc` for its own queue read - oldest-job-first FIFO, something every existing
+test in the file never actually exercises (each only ever queues one 'requested' row at a time), so
+a future regression in the real worker's ordering would sail through this entire test file
+undetected.
+
+Confirmed live: inserted two 'requested' rows out of `requested_at` order (newer row inserted
+first), ran the real `process_cv_jobs.supabase_request_all()` call with the real `order=
+requested_at.asc` query - pre-fix returned `["newer-job", "older-job"]` (insertion order), post-fix
+correctly `["older-job", "newer-job"]`.
+
+Fix: added `_parse_order()` (PostgREST's own `col.asc`/`col.desc` syntax) wired into `do_GET()`,
+sorting matched rows by the named column (nulls grouped via a `(is_none, value)` key so two null
+rows never compare `None` against each other); `_parse_filters()` now explicitly skips `order`
+alongside `select`.
+
+Verified red-then-green: added `test_fake_supabase_honours_order_requested_at_asc()` to
+`test_poll_loop.py` (`job()` helper extended with an optional `requested_at` param, every existing
+call site unaffected). **Red:** reverted `fake_supabase.py` only, re-ran `python3 test_poll_loop.py`
+directly - failed exactly as predicted (`AssertionError: ['newer', 'older']`). **Green:** reapplied,
+re-ran - `All bridge-loop smoke tests passed`. Regression: `python3 -m py_compile` clean on both
+files; the two other real consumers of `fake_supabase.py` (`engine/onboarding/test_process_onboarding_jobs.py`,
+`engine/alerts/test_system_alerts.py`) both re-run directly, both `0 failure(s)`, unaffected.
+
+Severity: minor-to-moderate, test-infrastructure only - no production code touched, a safety-net fix
+for the test double itself, closing a gap that could have hidden a real future FIFO-ordering
+regression in the worker with nothing to catch it.
+
+Not escalated to a PR: small, safe, self-contained Python fix to one test-only helper module plus
+its own test file - no production code, no RLS, no migration, no money path, no worker-image change.
+Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 275, `send-compliance-digest.ts`'s `main()` read `companies` with a plain, unranged `.select()` - the identical PostgREST 1000-row cap already found and fixed in two sibling notification scripts this same day - and this is the sender for the SARS Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP compliance-expiry digest, the one alert `app/company/Notifications.tsx`'s own UI copy promises is "always delivered to keep your submissions compliant"
 
 Oriented from `bfc3d61` (sibling track's own most recent docs commit, confirmed via `git fetch
