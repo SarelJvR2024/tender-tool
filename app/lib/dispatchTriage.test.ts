@@ -119,9 +119,14 @@ test("classifyDispatchBucket: the 7-day boundary agrees with lib/dates.ts's own 
   assert.equal(classifyDispatchBucket(input, now), "in_progress"); // 7 <= 7, same boundary daysUntil() itself uses
 });
 
-test("classifyDispatchBucket: null once the tender is submitted, won or lost - not triaged at all", () => {
+test("classifyDispatchBucket: null once the tender is submitted, briefing_shortlisted, won or lost - not triaged at all", () => {
   const now = new Date("2026-10-30T10:00:00+02:00");
-  for (const stage of ["submitted", "won", "lost"] as const) {
+  // Finding 295: 'briefing_shortlisted' (0105) was missing from this list -
+  // this test previously only checked submitted/won/lost and so never
+  // caught it. Added so a future regression on CLOSED_STAGES is caught
+  // here even though the one live caller (dashboard/page.tsx) already
+  // pre-filters this stage out before calling classifyDispatchBucket at all.
+  for (const stage of ["submitted", "briefing_shortlisted", "won", "lost"] as const) {
     const input: ClassifyInput = { ...baseLogistics, pipelineStage: stage, decisionNeeded: "none" };
     assert.equal(classifyDispatchBucket(input, now), null);
   }

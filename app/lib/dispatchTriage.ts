@@ -36,7 +36,30 @@ export type DispatchBucket = "critical" | "decision" | "in_progress" | "radar";
 export type DecisionNeeded = "attend_briefing" | "director_resolution" | "none";
 
 const DISPATCHED_STATUSES: DispatchStatus[] = ["printed_and_bound", "out_for_delivery", "submitted_and_receipted"];
-const CLOSED_STAGES: PipelineStage[] = ["submitted", "won", "lost"];
+// Standing review, 2026-11-09: was missing 'briefing_shortlisted' (0105,
+// PR #173 - a real stage reached only FROM 'submitted', per lib/pipeline.ts's
+// own PREVIOUS_STAGE), unlike every one of its 7+ sibling "already closed
+// out" lists elsewhere in this codebase that already include it
+// (lib/returnablesDigestCandidates.ts's RETURNABLES_EXCLUDED_STAGES,
+// lib/briefingReminders.ts's BRIEFING_REMINDER_EXCLUDED_STAGES,
+// lib/printCutoffReminders.ts's own identically-named CLOSED_STAGES,
+// lib/deadlineReminders.ts's DEADLINE_REMINDER_EXCLUDED_STAGES,
+// lib/opportunityInsights.ts's/lib/pastSubmissionReuse.ts's DONE_STAGES, and
+// the inline checks in tenders/[id]/page.tsx/market-context.tsx). Confirmed
+// live against the real function (now fixed): a tender at
+// 'briefing_shortlisted' - closing date already in the past, already
+// submitted - was classified into a real triage bucket ("in_progress" in
+// the repro) instead of returning null like 'submitted'/'won'/'lost'
+// already do. NOT reachable through the one current real caller
+// (dispatchDashboard.ts's loadDispatchCards(), only ever called from
+// dashboard/page.tsx with activeBids already pre-filtered to
+// IN_PROGRESS_STAGES - found/assessing/building/legacy-bidding - so a
+// 'briefing_shortlisted' pipelineStage can never actually reach this
+// function today) - but this module's own header states it's "reusable
+// from both the dashboard ... and the tender workspace", so fixing the
+// function's own contract rather than leaving it to depend on one caller's
+// upstream filter forever.
+const CLOSED_STAGES: PipelineStage[] = ["submitted", "briefing_shortlisted", "won", "lost"];
 
 export type DispatchLogisticsInput = {
   closingDate: string | null;
@@ -124,9 +147,12 @@ export type ClassifyInput = DispatchLogisticsInput & {
 
 /**
  * One of the 4 buckets from Sarel's own brief (§1.2), in the same priority
- * order the brief lists them: a tender already closed out (submitted/won/
- * lost) isn't triaged at all - call sites filter those out before this runs,
- * same as lib/tenderNextStep.ts's own closingSoon list already excludes them.
+ * order the brief lists them: a tender already closed out (submitted/
+ * briefing_shortlisted/won/lost) isn't triaged at all - the one real call
+ * site (dashboard/page.tsx, via dispatchDashboard.ts) already filters those
+ * out before this runs too (IN_PROGRESS_STAGES), but CLOSED_STAGES is this
+ * function's own independent guarantee, not a claim that any particular
+ * caller does the filtering.
  */
 export function classifyDispatchBucket(input: ClassifyInput, now: Date = new Date()): DispatchBucket | null {
   if (CLOSED_STAGES.includes(input.pipelineStage)) return null;
