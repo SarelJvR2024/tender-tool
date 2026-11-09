@@ -17,6 +17,25 @@
  * plan never silently disagrees with what Pack Review already says about
  * the exact same document or role.
  *
+ * reconcileQuestionProvenance() below is this file's one exception to "no
+ * re-derivation": it is NOT a new classifier for a new category, it is the
+ * thing that keeps the promise in the paragraph above actually true for
+ * SBD-declaration questions once a real pack has been generated. Finding
+ * 284/285 (docs/specs/QA-Edge-Case-Findings.md): a company's real answer to
+ * an SBD1/4/8 declaration question can be silently left BLANK in the real
+ * generated .docx when this buyer's specific edition's wording doesn't match
+ * what engine/general/fill_sbd_docx.py looks for - a fact only field_provenance
+ * (keyed by tender_pack_id + field_key) records, not tender_answers. Finding
+ * 285 taught general-pack-review-data.ts's own question loop to reconcile its
+ * answerStatus() result against that same field_provenance row before this
+ * fix; without the same reconciliation here, this screen would start silently
+ * DISAGREEING with Pack Review the moment a pack is generated - the exact
+ * failure this header promises never happens - so it reuses the identical
+ * reconciliation rule (missing always wins; assumed_default/computed is never
+ * silently upgraded to confirmed; confirmed/unrecognised keeps the base
+ * result), applied to submission-plan-data.ts's own answerStatus() call for
+ * the same question loop.
+ *
  * Targets the ONE now-canonical status vocabulary (ReviewStatus,
  * pack-review-logic.ts) rather than porting compile_plan()'s own
  * ready/needs_document/needs_input/by_hand/review/blocked vocabulary
@@ -25,7 +44,7 @@
  * Verify/Provide/Fix model (see System-Status.md).
  */
 import type { BidTaskStatus } from "./bid-task-status";
-import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
+import { provenanceStatus, reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
 import type { ManifestForm, RequirementManifest } from "@/lib/generalTender";
 
 export type PlanStep = {
@@ -211,4 +230,35 @@ export function unrepresentedGaps(manifest: RequirementManifest): string[] {
  */
 export function gapStep(gap: string, index: number): PlanStep {
   return step("gap", `gap:${index}`, "Known limitation", "missing", gap);
+}
+
+/**
+ * Reconciles a question's base answerStatus() result (from tender_answers
+ * alone - answered or not) against that SAME tender_pack's own
+ * field_provenance row for the exact same field_key, when one exists - what
+ * fill_sbd_docx.py actually managed to place in the real generated .docx for
+ * THIS buyer's specific edition (Finding 284/285's own root signal). Same
+ * rule general-pack-review-logic.ts's own Finding 285 fix uses for the Pack
+ * Review screen's equivalent question loop, so the two screens never
+ * silently disagree about the same SBD declaration (see this file's own
+ * header comment):
+ *   - no provenance row yet (no pack ever generated) -> base, unchanged.
+ *   - provenance says "missing" -> missing always wins, even if
+ *     tender_answers itself has a value - the real .docx left it blank.
+ *   - provenance says "computed"/"assumed_default" -> assumed_default,
+ *     never silently upgraded to fully confirmed just because tender_answers
+ *     also has a value.
+ *   - provenance says "confirmed" (or any unrecognised future status) ->
+ *     base, unchanged.
+ */
+export function reconcileQuestionProvenance(
+  base: { status: ReviewStatus; note: string | null },
+  provenanceRow: { status: string; reason: string | null } | null,
+): { status: ReviewStatus; note: string | null } {
+  if (!provenanceRow) return base;
+  const mapped = provenanceStatus(provenanceRow.status);
+  if (mapped === "missing" || mapped === "assumed_default") {
+    return { status: mapped, note: provenanceRow.reason ?? base.note };
+  }
+  return base;
 }

@@ -15,7 +15,16 @@ import { reviewStatusToBidTask } from "./pack-review-logic";
 import { returnableReviewStatus } from "./general-pack-review-data";
 import type { BidTaskStatus } from "./bid-task-status";
 import { tenderTimeline, type TimelineMilestone } from "@/lib/tenderTimeline";
-import { briefingStep, buyerFormStep, cidbGradingStep, formStep, gapStep, unrepresentedGaps, type PlanStep } from "./submission-plan-logic";
+import {
+  briefingStep,
+  buyerFormStep,
+  cidbGradingStep,
+  formStep,
+  gapStep,
+  reconcileQuestionProvenance,
+  unrepresentedGaps,
+  type PlanStep,
+} from "./submission-plan-logic";
 
 /**
  * The submission-plan ("assessment engine") snapshot: one step per thing
@@ -84,29 +93,46 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
   for (const f of manifest.forms) steps.push(formStep(f, manifest.form_suite));
   for (const b of manifest.buyer_forms ?? []) steps.push(buyerFormStep(b));
 
+  const packId = (ownPack?.id as string | undefined) ?? null;
   const [
     { data: companyRow, error: companyRowErr },
     { data: answerRows, error: answerRowsErr },
     { data: peopleRows, error: peopleRowsErr },
     { data: roleCatalogRows, error: roleCatalogRowsErr },
     { data: tagRows, error: tagRowsErr },
+    { data: provenanceRows, error: provenanceRowsErr },
   ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
     supabase.from("people").select("id, name, signatory_capacity").order("name"),
     supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
     supabase.from("person_role_eligibility").select("person_id, role_code"),
+    // Finding 284/285/this fix's own root signal: what fill_sbd_docx.py
+    // actually managed to place in the real generated .docx for THIS
+    // buyer's specific edition - read for the SAME ownPack.id this file
+    // already fetches above, so a question answered in tender_answers but
+    // never actually placed in the pack (an edition mismatch) doesn't show
+    // as plain "Verify" here. Empty when no pack has ever been generated
+    // (packId is null) - every question then falls back to the pre-existing
+    // answerStatus() result, unchanged - see reconcileQuestionProvenance().
+    packId
+      ? supabase.from("field_provenance").select("field_key, status, reason").eq("tender_pack_id", packId)
+      : Promise.resolve({ data: [] as { field_key: string; status: string; reason: string | null }[], error: null }),
   ]);
   if (companyRowErr) console.error("companies select failed (submission plan)", companyRowErr);
   if (answerRowsErr) console.error("tender_answers select failed (submission plan)", answerRowsErr);
   if (peopleRowsErr) console.error("people select failed (submission plan)", peopleRowsErr);
   if (roleCatalogRowsErr) console.error("tender_roles select failed (submission plan)", roleCatalogRowsErr);
   if (tagRowsErr) console.error("person_role_eligibility select failed (submission plan)", tagRowsErr);
+  if (provenanceRowsErr) console.error("field_provenance select failed (submission plan)", provenanceRowsErr);
   const company = (companyRow as unknown as GeneralCompany | null) ?? null;
   const answers = (answerRows ?? []) as TenderAnswer[];
   const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null }[];
   const roleCatalog = (roleCatalogRows ?? []) as TenderRole[];
   const tags = (tagRows ?? []) as { person_id: string; role_code: string }[];
+  const provenanceByKey = new Map(
+    ((provenanceRows ?? []) as { field_key: string; status: string; reason: string | null }[]).map((r) => [r.field_key, r]),
+  );
 
   // --- Returnables ------------------------------------------------------------
   try {
@@ -150,7 +176,7 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
         });
         continue;
       }
-      const { status, note } = answerStatus(answered, q.optional ?? false);
+      const { status, note } = reconcileQuestionProvenance(answerStatus(answered, q.optional ?? false), provenanceByKey.get(q.key) ?? null);
       steps.push({
         category: "question",
         id: `question:${q.key}`,

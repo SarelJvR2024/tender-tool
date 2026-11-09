@@ -7,6 +7,7 @@ import {
   formStep,
   formStepStatus,
   gapStep,
+  reconcileQuestionProvenance,
   unrepresentedGaps,
   type PlanStep,
 } from "./submission-plan-logic";
@@ -114,6 +115,52 @@ describe("buyerFormStep", () => {
     expect(s.document).toBe("CEQ.pdf");
     expect(s.note).toBe("Typed for you.");
     expect(s.quote).toBe("the actual quoted text");
+  });
+});
+
+// Finding 284/285's standing follow-up: this screen's own answerStatus()
+// call for SBD-declaration questions must reconcile against field_provenance
+// the same way general-pack-review-data.ts's Finding 285 fix does, so the
+// two screens never silently disagree about the same declaration.
+describe("reconcileQuestionProvenance", () => {
+  const confirmedBase = { status: "confirmed" as const, note: null };
+  const missingBase = { status: "missing" as const, note: "Not answered yet on the Tender Workspace - answer by hand or there." };
+
+  it("no provenance row (no pack ever generated) - base unchanged, confirmed", () => {
+    expect(reconcileQuestionProvenance(confirmedBase, null)).toEqual(confirmedBase);
+  });
+  it("no provenance row (no pack ever generated) - base unchanged, missing", () => {
+    expect(reconcileQuestionProvenance(missingBase, null)).toEqual(missingBase);
+  });
+
+  it("provenance missing always wins, even over a confirmed base (the real .docx left it blank)", () => {
+    const r = reconcileQuestionProvenance(confirmedBase, { status: "missing", reason: "Declaration not found in this edition - answer by hand." });
+    expect(r.status).toBe("missing");
+    expect(r.note).toBe("Declaration not found in this edition - answer by hand.");
+  });
+
+  it("provenance computed is shown as assumed_default, never silently upgraded to confirmed", () => {
+    const r = reconcileQuestionProvenance(confirmedBase, { status: "computed", reason: "Not answered on the Tender Workspace - nothing on file says otherwise; confirm it there before signing." });
+    expect(r.status).toBe("assumed_default");
+  });
+  it("provenance assumed_default is shown as assumed_default too", () => {
+    const r = reconcileQuestionProvenance(confirmedBase, { status: "assumed_default", reason: "CIPC-registered South African company - not answered on the Tender Workspace, confirm there." });
+    expect(r.status).toBe("assumed_default");
+  });
+
+  it("provenance confirmed keeps the base result unchanged, even if base itself was missing", () => {
+    const r = reconcileQuestionProvenance(missingBase, { status: "confirmed", reason: null });
+    expect(r).toEqual(missingBase);
+  });
+  it("an unrecognised future provenance status keeps the base result unchanged (same as confirmed)", () => {
+    const r = reconcileQuestionProvenance(confirmedBase, { status: "something_unexpected", reason: "irrelevant" });
+    expect(r).toEqual(confirmedBase);
+  });
+
+  it("falls back to the base note when the provenance row's own reason is null", () => {
+    const r = reconcileQuestionProvenance(confirmedBase, { status: "missing", reason: null });
+    expect(r.status).toBe("missing");
+    expect(r.note).toBeNull(); // confirmedBase.note is null, used as the fallback
   });
 });
 
