@@ -41,7 +41,7 @@ import subprocess
 import sys
 
 import docx
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, RGBColor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.abspath(os.path.join(HERE, ".."))
@@ -264,6 +264,45 @@ def _field_label(key):
     return key.split(".", 1)[-1].replace("_", " ")
 
 
+# QA pass, 2026-11-09 (Finding 284): fill_sbd_docx.py's own label/
+# question matching is per-buyer-edition, by design (its header comment:
+# "exact section numbers and legal wording differ between buyers") - so a
+# field the company genuinely answered on the Tender Workspace can still end
+# up logged `missing` because THIS buyer's specific edition didn't use the
+# wording fill_sbd_docx.py looks for, not because nothing was on file. Every
+# one of that file's own `log.missing()` calls for exactly this case
+# mentions "edition" in its reason (confirmed by reading every `log.missing(`
+# call site in fill_sbd_docx.py directly, 2026-11-09) - every OTHER `missing`
+# reason there (a true data gap, or a deliberately-always-missing sentinel
+# like a signature/date) never does. Used to tell the company's own answer
+# was silently NOT typed into the real .docx, as opposed to "nothing on file
+# yet" (already visible elsewhere) - see write_guide()'s own use of this
+# below and the `warning` passed to this form's own pack section.
+_SBD_CODE_OF_PREFIX = {"sbd1": "1", "sbd4": "4", "sbd6_1": "6.1", "sbd8": "8", "sbd9": "9"}
+
+
+def _edition_mismatches(entries):
+    """entries: a ProvenanceLog slice (or the whole log) from fill_sbd_docx.py.
+    Returns {code: [field_key, ...]} for every field genuinely answered/on
+    file whose value this buyer's own edition did not actually accept -
+    see the module comment above this function. Never includes a field with
+    no real data behind it at all (that's already correctly visible via
+    tender_answers/the company vault, not re-flagged here)."""
+    by_code: dict = {}
+    for e in entries:
+        if e.get("status") != "missing":
+            continue
+        reason = (e.get("reason") or "").lower()
+        if "edition" not in reason:
+            continue
+        if not any(p in reason for p in ("not found", "wasn't found", "couldn't find")):
+            continue
+        code = _SBD_CODE_OF_PREFIX.get(e["field_key"].split(".", 1)[0])
+        if code:
+            by_code.setdefault(code, []).append(e["field_key"])
+    return by_code
+
+
 def _log_overlay(log, reports):
     """Provenance for every field fill_flat_pdf looked for: typed (and read
     back) -> confirmed / assumed_default; anything else -> missing with the
@@ -340,6 +379,24 @@ def write_guide(path, manifest, ctx, form_results, by_hand):
                                 ". Everything else in the table above is still to be written by hand.")
             p.runs[0].font.size = Pt(8.5)
             p.runs[0].italic = True
+        # QA pass, 2026-11-09: form_results[code]["edition_mismatches"] - set
+        # by build_general_pack()'s own editable_docs loop, see its comment
+        # there - names fields that ARE answered (the table row above shows
+        # the real value) but this buyer's own edition did not accept, so it
+        # was never actually typed into the .docx this guide is for. Without
+        # this, the row above reads exactly like any other confirmed field -
+        # the one case this guide most needs to flag loudly, since a company
+        # reading "(filled)" has no other reason to suspect anything is wrong.
+        mismatches = form_results.get(f["code"], {}).get("edition_mismatches") or []
+        if mismatches:
+            p = d.add_paragraph(_safe_text(
+                "NOT ACTUALLY TYPED IN, even though this form is marked 'filled' above and the table shows "
+                "a value: " + ", ".join(_field_label(k) for k in sorted(mismatches)) + ". This buyer's own "
+                "edition of the form did not match the expected wording for it - write it in by hand before "
+                "signing."))
+            p.runs[0].bold = True
+            p.runs[0].font.size = Pt(8.5)
+            p.runs[0].font.color.rgb = RGBColor(0xB9, 0x1C, 0x1C)
         for row in tbl.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
@@ -407,6 +464,7 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
             continue
         base = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(os.path.basename(d["name"]))[0])[:60]
         out = os.path.join(filled_dir, f"{base}_FILLED.docx")
+        log_before = len(log.entries)
         try:
             fill_sbd_docx.fill_sbd_file(src, out, ctx, log, set(codes))
         except Exception as e:  # a buyer edition python-docx chokes on
@@ -416,10 +474,29 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
         outputs[os.path.basename(out)] = out
         pdf, why = to_pdf(out, conv_dir)
         labels = ", ".join(f"{(manifest.get('form_suite') or 'SBD')} {c}" for c in codes)
+        # QA pass, 2026-11-09: a successful fill_sbd_file() call means the
+        # .docx loaded and saved - NOT that every field inside actually
+        # matched this buyer's own edition (see _edition_mismatches()'s own
+        # comment above). Without this check, a real company answer that
+        # silently never made it into the document showed up nowhere: not on
+        # this section (plain "Included", no warning), not in the Completion
+        # Guide's own table (guide_rows() re-derives the value from ctx
+        # independently of what was actually placed), and not on the Tender
+        # Workspace's own Pack Review screen (general-pack-review-logic.ts's
+        # answerStatus() reads tender_answers only, never field_provenance).
+        mismatches = _edition_mismatches(log.entries[log_before:])
+        flagged = sorted({k for ks in mismatches.values() for k in ks})
+        warning = (
+            "This buyer's own edition of " + labels + " did not match the expected wording for: "
+            + ", ".join(_field_label(k) for k in flagged) + " - your answer on the Tender Workspace was "
+            "NOT typed into the .docx below even though this form shows as filled. Write it in by hand "
+            "before signing."
+        ) if flagged else None
         sections.append({"title": f"{labels} - filled ({d['name']})", "envelope": FORMS_ENV, "pdf": pdf,
-                         "omitted_reason": None if pdf else f"filled .docx could not be converted to PDF ({why}) - print the .docx"})
+                         "omitted_reason": None if pdf else f"filled .docx could not be converted to PDF ({why}) - print the .docx",
+                         "warning": warning})
         for c in codes:
-            form_results[c] = {"status": "filled"}
+            form_results[c] = {"status": "filled", "edition_mismatches": mismatches.get(c, [])}
             done_codes.add(c)
 
     # --- 1b. flat PDF editions: type onto the printed form ----------------

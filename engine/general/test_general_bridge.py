@@ -268,8 +268,21 @@ def main():
     j7 = fake.one("pack_generation_jobs", id="j7")
     check(j7["status"] == "ready", f"pack ready ({j7['status']} {j7.get('error_message')})")
     cl = (j7.get("manifest") or {}).get("checklist") or []
-    tax = [c for c in cl if "SECOND" not in c["title"] and c["status"] == "included_warning"]
+    tax = [c for c in cl if "SECOND" not in c["title"] and c["status"] == "included_warning" and "EXPIRED" in (c["note"] or "")]
     check(len(tax) == 1 and "EXPIRED 2026-01-31" in (tax[0]["note"] or ""), f"checklist: the expired PIN letter is included_warning ({[(c['title'], c['note']) for c in tax]})")
+    # QA pass, 2026-11-09 (Finding 284): this real DSTI sample's own
+    # SBD 1/4/6.1 edition genuinely has no matching "Designation"/signatory
+    # name/address labels this filler looks for, even though co2 has a real
+    # signatory (p2) and registered_address on file - build_general_pack.py's
+    # _edition_mismatches() now correctly flags this as a SECOND,
+    # independent included_warning row (same row count as before - the
+    # SBD-forms section was always there, it just carried no warning).
+    # Asserted explicitly, not folded into the count check below, so a
+    # future change to either file's wording that silently drops this
+    # warning gets caught here, not just "the count still happens to match."
+    sbd_warn = [c for c in cl if c["status"] == "included_warning" and "did not match the expected wording" in (c["note"] or "")]
+    check(len(sbd_warn) == 1 and "signatory" in sbd_warn[0]["note"],
+          f"checklist: the real SBD-forms edition mismatch is included_warning too ({[(c['title'], c['note']) for c in sbd_warn]})")
     check(all(c["status"] in ("included", "included_warning", "not_included") for c in cl) and len(cl) >= 5, f"checklist lists every document ({len(cl)} rows)")
     key7 = f"submission-packs/{j7.get('storage_path_pdf')}"
     if key7 in fake.storage:
