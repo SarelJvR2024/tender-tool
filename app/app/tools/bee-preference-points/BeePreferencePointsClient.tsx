@@ -97,8 +97,19 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
     const cv = Number(contractValue);
     const tp = Number(tenderPrice);
     const lp = Number(lowestPrice);
-    if (!Number.isFinite(cv) || !Number.isFinite(tp) || !Number.isFinite(lp) || lp <= 0) {
-      return { error: "Enter valid numbers (the lowest acceptable price must be greater than 0)." as string | null, data: null };
+    // Standing review, 2026-11-09: `Number("")` is 0, not NaN - so clearing
+    // any of these three CurrencyInput fields to blank (the same select-on-
+    // focus-then-retype flow this very component's own CurrencyInput is
+    // built for) passed this check and was silently scored as a real R0
+    // amount. `lowestAcceptablePriceZar` was already guarded (`lp <= 0`,
+    // for pricePoints()'s own division-by-Pmin reason), but `cv`/`tp`
+    // weren't - confirmed live (Playwright): clearing "Your tendered price"
+    // and blurring showed "Price points (Ps) 80 / 80" (the maximum score,
+    // as if a R0 bid), no error, on a tool whose own copy says "Nothing
+    // here is guessed." A real contract/tender price is never 0 or
+    // negative either, so all three now use the same `<= 0` rule.
+    if (!Number.isFinite(cv) || !Number.isFinite(tp) || !Number.isFinite(lp) || cv <= 0 || tp <= 0 || lp <= 0) {
+      return { error: "Enter valid numbers greater than 0 for the contract value, tendered price and lowest acceptable price." as string | null, data: null };
     }
     try {
       const beeLevel: BeeLevel = level === "non_compliant" ? "non_compliant" : (Number(level) as BeeLevel);
