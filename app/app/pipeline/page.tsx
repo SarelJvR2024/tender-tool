@@ -3,7 +3,7 @@ import { Inbox } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { closingCountdown, daysUntil, formatClosingDateTime } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
-import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
+import { SANRAL_PACK_FAMILIES } from "@/lib/pastSubmissionReuse";
 import { IN_PROGRESS_STAGES, LEGACY_BIDDING_STAGE, NEXT_STAGES, normalizeStage, OUTCOME_FIELD_KEYS, OUTCOME_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
@@ -319,17 +319,28 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     biddingCards.map(async (c): Promise<PackHealth | null> => {
       try {
         // snap.mapped === false means something distinct per family - for
-        // SANRAL it can't actually happen here (c.family already gates the
-        // call), but for GENERAL it means "no document_requirements manifest
-        // extracted yet" (general-pack-review-data.ts), a real, reachable
-        // state for a tender a user has already moved to 'bidding' before
-        // extraction finishes. That used to fall through to `readiness =
-        // null` and render the bare "-" this whole feature exists to
-        // replace, with the Action link silently defaulting to "Continue
-        // workspace" - found 2026-10-30, re-reviewing PR #172 the pass after
-        // it merged. Treated the same as a 'found'-stage card below: real,
-        // known information ("not started"), not a blank to leave unstyled.
-        if (c.family === SANRAL_CONVENTIONAL_FAMILY) {
+        // GENERAL it means "no document_requirements manifest extracted
+        // yet" (general-pack-review-data.ts), a real, reachable state for a
+        // tender a user has already moved to 'bidding' before extraction
+        // finishes. For the SANRAL branch it's genuinely reachable too, for
+        // exactly one of the two SANRAL_PACK_FAMILIES: compliance-data.ts's
+        // own loadTenderCompliance() only maps SANRAL_CONVENTIONAL_FAMILY's
+        // returnable list (its own `family !== SANRAL_CONVENTIONAL_FAMILY`
+        // early-return) - an RRM Consultant Tender pack always comes back
+        // mapped:false, the same documented, honest "no mandatory-item
+        // concept for this family yet" gap System-Status.md's own
+        // 2026-10-27 digest entry already names. Both unmapped cases used
+        // to fall through to `readiness = null` and render the bare "-"
+        // this whole feature exists to replace, with the Action link
+        // silently defaulting to "Continue workspace" - found 2026-10-30
+        // for GENERAL (re-reviewing PR #172 the pass after it merged), and
+        // found again 2026-11-09 for RRM specifically, which this `if` used
+        // to exclude entirely (checking SANRAL_CONVENTIONAL_FAMILY alone,
+        // not SANRAL_PACK_FAMILIES - the same family-list-drift bug class
+        // Finding 281 fixed on the SANRAL schedules front door). Treated
+        // the same as a 'found'-stage card below: real, known information
+        // ("not started"), not a blank to leave unstyled.
+        if (c.family && SANRAL_PACK_FAMILIES.includes(c.family)) {
           const snap = await loadPackReviewSnapshot(c.id);
           if (!snap.mapped) return NOT_STARTED;
           const readiness = computeTenderReadiness(snap.sections);
