@@ -1109,8 +1109,33 @@ def sync_position_suggestions(client, today=None):
                 if row:
                     client.update("tender_pack_assignments", {"id": row["id"]}, body)
                 else:
-                    client.insert("tender_pack_assignments", {"tender_pack_id": pack["id"],
-                                                              "position_code": req["position_code"], **body})
+                    try:
+                        client.insert("tender_pack_assignments", {"tender_pack_id": pack["id"],
+                                                                  "position_code": req["position_code"], **body})
+                    except Exception as e:
+                        # QA pass, 2026-11-09 (gg): same race shape as Finding 278
+                        # (sync_tender_requirements, this same file) - a concurrent
+                        # worker (hosted bridge + a hand-run --once,
+                        # Automated-Fulfillment-Deployment.md's own documented
+                        # overlap) can win this exact (tender_pack_id,
+                        # position_code) insert between this loop's own `existing`
+                        # read and this insert. The ranking WAS computed fine; the
+                        # unique constraint
+                        # (tender_pack_assignments_tender_pack_id_position_code_key,
+                        # 0001) is the ONLY thing that failed, and only because
+                        # another worker's own ranking for this exact position is
+                        # already on file - a benign, self-correcting race, not a
+                        # real error (the next poll cycle's own `existing` read
+                        # picks up the other worker's row and no-ops on it, same as
+                        # any other already-current ranking). Live-confirmed on a
+                        # scratch Postgres: two concurrent real transactions
+                        # inserting the identical key - one commits, the other gets
+                        # exactly this Postgres error text, nothing else.
+                        if "23505" in str(e) or "duplicate key value violates unique constraint" in str(e):
+                            print(f"[suggestions] tender pack {pack['id']}, position {req['position_code']}: "
+                                  "another worker already wrote this ranking - skipped, not an error.")
+                            continue
+                        raise
                 written += 1
         except Exception as e:
             print(f"[suggestions] tender pack {pack['id']}: could not score candidates ({type(e).__name__}: {e})")

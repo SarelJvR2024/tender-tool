@@ -348,6 +348,48 @@ def test_sync_position_suggestions_is_a_noop_once_the_ranking_is_unchanged():
           second == 0, second)
 
 
+def test_sync_position_suggestions_treats_a_concurrent_workers_duplicate_insert_as_benign_not_an_error():
+    print("sync_position_suggestions(): a concurrent worker (hosted bridge + a hand-run --once, "
+          "Automated-Fulfillment-Deployment.md's own documented overlap) already wrote this exact "
+          "(tender_pack_id, position_code) ranking between this loop's own `existing` read and this "
+          "insert - live-confirmed on a scratch Postgres to fail with a real 23505 duplicate-key error, "
+          "not a scoring failure, so it must not be reported as one (Finding 278's own bug class, a "
+          "second instance in this same file)")
+    alerts = []
+    system_alerts.set_sink(alerts.append)
+
+    class RacedClient(FakeClient):
+        def insert(self, table, row):
+            if table == "tender_pack_assignments" and row.get("position_code") == "PL":
+                # The exact shape SupabaseRest._req() wraps a real PostgREST 409
+                # Conflict in - reproduced live against a scratch Postgres (two
+                # concurrent transactions inserting the identical
+                # (tender_pack_id, position_code) key; one commits, the other
+                # gets this literal Postgres error text and nothing else).
+                raise RuntimeError(
+                    'POST /rest/v1/tender_pack_assignments failed: 409 {"code":"23505",'
+                    '"details":"Key (tender_pack_id, position_code)=(pk1, PL) already exists.",'
+                    '"hint":null,"message":"duplicate key value violates unique constraint '
+                    '\\"tender_pack_assignments_tender_pack_id_position_code_key\\""}')
+            return super().insert(table, row)
+
+    client = RacedClient(tables=_suggestions_tables())
+    today = __import__("datetime").date(2026, 10, 26)
+    try:
+        written = ppj.sync_position_suggestions(client, today=today)
+    finally:
+        system_alerts.set_sink(None)
+    check("the position whose insert raced wrote nothing THIS run - the other worker's row stands "
+          "(the other position, DS1, still wrote fine)",
+          written == 1, written)
+    check("no row was double-written for the raced position either (insert raised before any row landed)",
+          client.tables["tender_pack_assignments"] == [
+              r for r in client.tables["tender_pack_assignments"] if r["position_code"] != "PL"],
+          client.tables["tender_pack_assignments"])
+    check("a benign concurrent-write race is NOT reported via system_alerts (no false 'error')",
+          alerts == [], alerts)
+
+
 def main():
     test_sync_tender_requirements_writes_primary_and_alt_rows_from_setup()
     test_sync_tender_requirements_is_idempotent_once_positions_are_on_file()
@@ -359,6 +401,7 @@ def main():
     test_sync_b7_setup_prefers_the_shared_copy_over_a_companys_own_upload()
     test_sync_position_suggestions_writes_a_ranking_for_every_open_position()
     test_sync_position_suggestions_is_a_noop_once_the_ranking_is_unchanged()
+    test_sync_position_suggestions_treats_a_concurrent_workers_duplicate_insert_as_benign_not_an_error()
     if FAILS:
         print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
         sys.exit(1)
