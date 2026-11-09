@@ -420,6 +420,45 @@ check("the BUYER_FAMILY pattern actually matches 'Vaal Central Water Board'",
 check("...and does not match an unrelated buyer (no false-positive fold)",
       not gov_sources.BUYER_FAMILY["vaal_central_water"].search("Rand Water"))
 
+# --- _disambiguate_reused_refs(): the same confirmed-live reused-Ref bug ---
+#     already fixed for dbsa_procurement.py (Ref "RFP185/2026", 2026-11-07)
+#     and kouga.py (Ref "235/2026", 2026-11-06) - this page can equally list
+#     a re-advertisement/addendum as a SECOND row for the same Ref No.,
+#     alongside its own original, with no per-row detail URL to tell the
+#     two apart (same shape as DBSA, not kouga's own per-card URL slug).
+
+row_original = vcw.normalize("VCW422/CONTR/IRM2/26", "CONTRACTOR FOR IRM PHASE 2",
+                              "01 September 2026", "15 September 2026", [])
+row_readvert = vcw.normalize("VCW422/CONTR/IRM2/26",
+                              "RE-ADVERTISEMENT: CONTRACTOR FOR IRM PHASE 2 (ADDENDUM 1 - EXTENDED CLOSING)",
+                              "20 October 2026", "10 November 2026", [])
+check("pre-disambiguation, a reused ref DOES collide to the identical ocid (confirms the bug "
+      "shape is real before asserting the fix)",
+      row_original["ocid"] == row_readvert["ocid"] == "vaal_central_water:VCW422/CONTR/IRM2/26")
+
+reused_pair = [row_original, row_readvert]
+vcw._disambiguate_reused_refs(reused_pair)
+check("a reused ref is disambiguated by published_date, no longer colliding",
+      reused_pair[0]["ocid"] != reused_pair[1]["ocid"] and
+      reused_pair[0]["ocid"] == "vaal_central_water:VCW422/CONTR/IRM2/26:2026-09-01T00:00:00+02:00" and
+      reused_pair[1]["ocid"] == "vaal_central_water:VCW422/CONTR/IRM2/26:2026-10-20T00:00:00+02:00",
+      [r["ocid"] for r in reused_pair])
+
+single = [vcw.normalize("VCW999/X/26", "SOME OTHER TENDER", "01 January 2026", "01 February 2026", [])]
+before_ocid = single[0]["ocid"]
+vcw._disambiguate_reused_refs(single)
+check("a non-colliding ref keeps exactly the ocid it always had (no other tender re-triggers "
+      "a 'new tender' alert)",
+      single[0]["ocid"] == before_ocid == "vaal_central_water:VCW999/X/26")
+
+same_day_pair = [
+    vcw.normalize("VCW1/A/26", "TITLE A", "01 January 2026", "01 February 2026", []),
+    vcw.normalize("VCW1/A/26", "TITLE B (RE-ADVERT)", "01 January 2026", "15 February 2026", []),
+]
+vcw._disambiguate_reused_refs(same_day_pair)
+check("...and a same-published_date collision still falls back to a title hash, never silently merged",
+      same_day_pair[0]["ocid"] != same_day_pair[1]["ocid"], [r["ocid"] for r in same_day_pair])
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)

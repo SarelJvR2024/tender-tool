@@ -47,6 +47,7 @@ Usage:
     python3 vaal_central_water.py [--out FILE.json]
 """
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -135,6 +136,52 @@ def parse_tenders(page, log=print):
     return rows
 
 
+def _disambiguate_reused_refs(rels):
+    """Vaal Central Water's own "advertised-tenders" page can list one
+    tender more than once when it is re-advertised with an addendum - the
+    same confirmed-live shape already fixed for two sibling direct-site
+    readers in this exact module family: dbsa_procurement.py's own
+    `_disambiguate_reused_refs()` (Ref "RFP185/2026", 2026-11-07) and
+    kouga.py's (Ref "235/2026", 2026-11-06) - a second, genuinely separate
+    row for the same Ref No., still-open re-advertisement/addendum
+    alongside its own already-closed original, not a parsing artefact or a
+    duplicate row to collapse.
+
+    Left alone, both rows get the identical ocid
+    ("vaal_central_water:<ref>"), and this engine's own per-release
+    scoring/seeding (watch_new_tenders.fan_out()'s own release_key(),
+    seed_supabase_opportunities.seed()'s own (company_id, ocid) upsert)
+    would treat them as the SAME release, with whichever is written last
+    silently overwriting the other's discovered_opportunities row and
+    reasons - e.g. hiding a still-open re-advertisement behind its own
+    already-closed original, or vice versa, depending on write order.
+
+    This page has no stable per-row detail URL to suffix with the way
+    kouga.py's own per-card link lets that sibling fix do it (every VCW row
+    shares the one list page as source_url, exactly like dbsa_procurement.py)
+    - published_date (this reader's own "Date uploaded:" field) is used
+    instead, the same choice dbsa_procurement.py's own fix made for the
+    identical reason; a short hash of the title is the last-resort fallback
+    for the case where even published_date collides too, so two such rows
+    are never silently merged into one. Only a colliding ocid is touched:
+    every non-colliding row keeps exactly the ocid it always had, so this
+    doesn't re-trigger a "new tender" alert for every other VCW tender that
+    was never ambiguous."""
+    by_ocid = {}
+    for r in rels:
+        by_ocid.setdefault(r["ocid"], []).append(r)
+    for base_ocid, group in by_ocid.items():
+        if len(group) < 2:
+            continue
+        seen_suffix = set()
+        for r in group:
+            suffix = r.get("published_date") or ""
+            if not suffix or suffix in seen_suffix:
+                suffix = hashlib.sha256((r.get("title") or "").encode()).hexdigest()[:10]
+            seen_suffix.add(suffix)
+            r["ocid"] = f"{base_ocid}:{suffix}"
+
+
 def normalize(ref, title, uploaded, closing, docs):
     return sh.release(
         ocid=f"vaal_central_water:{ref}",
@@ -152,6 +199,7 @@ def normalize(ref, title, uploaded, closing, docs):
 def fetch_releases(log=print):
     page = sh.http_get(LIST_URL, timeout=90).decode("utf-8", errors="replace")
     rels = [normalize(*row) for row in parse_tenders(page, log=log)]
+    _disambiguate_reused_refs(rels)
     log(f"  Vaal Central Water Board: {len(rels)} advertised tenders")
     return rels
 
