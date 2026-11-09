@@ -77,12 +77,43 @@ function normArea(s: string | null | undefined): string {
     .replace(/[^a-z]/g, "");
 }
 
+// Same administrative-word stripping as normArea(), but keeps spaces between
+// what's left - used only for the word-boundary substring check in
+// similar(). normArea() collapses straight to bare letters with no word
+// boundaries at all, which let a genuinely different place be scored as a
+// locality "match" purely because its name happens to contain another
+// place's name as a run of letters - confirmed live on the Python side this
+// file mirrors (engine/discovery/score_outlook.py's own _norm_area_words(),
+// 2026-10-21): a company office in "Kannaland" (Western Cape) matched a
+// tender's own locality row for "Nala" (a Free State local municipality,
+// nothing to do with Kannaland) because the bare letters "nala" sit inside
+// "kannaland". Keeping spaces lets the substring check require a whole word
+// (or phrase), which still matches the rule's real intended case ("City of
+// Tshwane" vs "Tshwane" - "city" isn't stripped, but "tshwane" is still a
+// whole word inside it) while rejecting a coincidental letter run.
+function normAreaWords(s: string | null | undefined): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/\b(the|boundaries|of|municipal|municipality|area|jurisdiction|local|district|metropolitan|metro|province)\b/g, " ")
+    .replace(/[^a-z\s]/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// Whole-word(s) substring: needle must appear in haystack bounded by spaces
+// or the string's own edges, not as an arbitrary run of letters (see
+// normAreaWords()'s own docstring).
+function wordIn(needle: string, haystack: string): boolean {
+  if (!needle) return false;
+  const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\s)${esc}(?:$|\\s)`).test(haystack);
+}
+
 // Similarity on normalised names - tenders misspell their own municipality
 // ("Dawid Kruper" in TN051/2026's own points table).
-function similar(a: string, b: string): boolean {
+function similar(a: string, b: string, aWords: string, bWords: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
-  if (b.length >= 6 && (a.includes(b) || b.includes(a))) return true;
   // Levenshtein distance, as a ratio of the longer name.
   let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
@@ -92,12 +123,19 @@ function similar(a: string, b: string): boolean {
     }
     prev = cur;
   }
-  return 1 - prev[b.length] / Math.max(a.length, b.length) >= 0.85;
+  if (1 - prev[b.length] / Math.max(a.length, b.length) >= 0.85) return true;
+  // Whole-word substring, gated on the office field's own word-length (same
+  // side Python gates on) so a short word doesn't match as a substring of
+  // an unrelated longer name.
+  return bWords.length >= 6 && (wordIn(bWords, aWords) || wordIn(aWords, bWords));
 }
 
 function areaMatches(area: string, o: CompanyOffice): boolean {
   const a = normArea(area);
-  return [o.district_municipality, o.local_municipality, o.town].some((f) => similar(a, normArea(f)));
+  const aWords = normAreaWords(area);
+  return [o.district_municipality, o.local_municipality, o.town].some((f) =>
+    similar(a, normArea(f), aWords, normAreaWords(f))
+  );
 }
 
 export function matchLocality(rows: LocalityRow[], offices: CompanyOffice[]): LocalityMatch {
