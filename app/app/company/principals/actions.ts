@@ -203,7 +203,22 @@ export async function uploadPrincipalDocument(formData: FormData) {
   // the just-uploaded file orphaned AND deleted the still-referenced
   // previous file below regardless. Same shape, same fix, as
   // app/company/actions.ts uploadVaultDocument().
-  const { data: updated, error } = await supabase.from("company_principals").update(update).eq("id", id).select("id").maybeSingle();
+  //
+  // `.eq(spec.pathColumn, previous)` (or `.is(...)` when there was none) is a
+  // SECOND, separate race fix - a storage one, not an RLS one (standing
+  // review, 2026-11-09). Same shape as experience/actions.ts
+  // saveExperienceTags() and app/company/actions.ts uploadVaultDocument():
+  // two near-simultaneous uploads for the SAME person/kind both read the
+  // same `previous` path before either writes, both uploads succeed
+  // (distinct random paths), and without this filter both updates would
+  // unconditionally succeed too - last commit wins the row, orphaning the
+  // other request's own new file forever. Scoping the update to only
+  // succeed if the column still holds the exact value this request read
+  // reuses the zero-rows handling right below, which already cleans up this
+  // request's own new upload.
+  let updateQuery = supabase.from("company_principals").update(update).eq("id", id);
+  updateQuery = previous === null ? updateQuery.is(spec.pathColumn, null) : updateQuery.eq(spec.pathColumn, previous);
+  const { data: updated, error } = await updateQuery.select("id").maybeSingle();
   if (error || !updated) {
     await supabase.storage.from(VAULT_BUCKET).remove([path]);
     fail(error ? friendly(error.message) : "That person is no longer in your register - it may have been removed. Refresh and try again.", anchor);

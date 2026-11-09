@@ -332,3 +332,125 @@ describe("deleteHeldRegistration - real delete still succeeds", () => {
     expect(removeCalls.flat()).toContain("company-1/registrations/" + heldId + "/certificate.pdf");
   });
 });
+
+// Second, SEPARATE race in saveHeldRegistration()'s certificate-attach step -
+// a storage-layer one, not an RLS one (standing review, 2026-11-09). Same
+// shape, same fix, as app/company/actions.ts uploadVaultDocument(): two
+// near-simultaneous "attach a corrected certificate" submits for the SAME
+// registration both read the same `existing.storage_path` before either
+// writes, both uploads succeed (distinct random paths), and the pre-fix
+// attach update has no filter on `storage_path` itself, so both attach
+// updates would unconditionally succeed too - whichever commits last wins
+// the row, orphaning the other request's own new file forever. Needs a
+// genuinely stateful mock (not the FIFO queue above): both requests' own
+// reads must land before either one's own attach-write commits.
+describe("saveHeldRegistration - two concurrent certificate-attach requests (both succeed, no RLS failure)", () => {
+  it("lets exactly one request win the row, and cleans up the LOSER's own new upload immediately - no orphan, no silent double success", async () => {
+    const heldId = "11111111-1111-1111-1111-111111111111";
+    const ORIGINAL_PATH = `company-1/registrations/${heldId}/old-old-certificate.pdf`;
+    const state: { storagePath: string | null } = { storagePath: ORIGINAL_PATH };
+    const uploadCalls: string[] = [];
+    const removeCalls: string[][] = [];
+
+    function makeHeldRegistrationsChain() {
+      const filters: Record<string, unknown> = {};
+      let isUpdate = false;
+      let patch: Record<string, unknown> = {};
+      const chain: Record<string, unknown> = {};
+      chain.select = () => chain;
+      chain.update = (p: Record<string, unknown>) => {
+        isUpdate = true;
+        patch = p;
+        return chain;
+      };
+      chain.eq = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.maybeSingle = () => chain;
+      (chain as { then: (resolve: (r: unknown) => void) => void }).then = (resolve) => {
+        if (!isUpdate) {
+          // The "existing" read before upload - the only select this table sees.
+          resolve({ data: { storage_path: state.storagePath }, error: null });
+          return;
+        }
+        if (!("storage_path" in patch)) {
+          // The main row-fields update (registration_type_id/holder/etc.) -
+          // no storage race on this write, succeeds unconditionally.
+          resolve({ data: { id: heldId }, error: null });
+          return;
+        }
+        // The attach update - optimistic-concurrency gated on storage_path.
+        const matches = !("storage_path" in filters) || filters.storage_path === state.storagePath;
+        if (matches) {
+          state.storagePath = patch.storage_path as string;
+          resolve({ data: { id: heldId }, error: null });
+        } else {
+          resolve({ data: null, error: null });
+        }
+      };
+      return chain;
+    }
+
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+      from: (table: string) => {
+        if (table === "held_registrations") return makeHeldRegistrationsChain();
+        // company_members, for requireCompanyId() - always a real member here.
+        return makeChain([{ data: { company_id: "company-1" }, error: null }]);
+      },
+      storage: {
+        from: () => ({
+          upload: async (path: string) => {
+            uploadCalls.push(path);
+            await new Promise((r) => setTimeout(r, path.includes("request-b") ? 5 : 20));
+            return { data: { path }, error: null };
+          },
+          remove: async (paths: string[]) => {
+            removeCalls.push(paths);
+            return { data: null, error: null };
+          },
+        }),
+      },
+    };
+    supabaseState.current = client as unknown as ReturnType<typeof makeSupabase>["client"];
+
+    const { saveHeldRegistration } = await import("./actions");
+
+    const fdA = formDataWith({
+      held_id: heldId,
+      registration_type_id: "22222222-2222-2222-2222-222222222222",
+      holder: "company",
+    });
+    fdA.set("file", new File(["pdf-bytes-a"], "request-a-certificate.pdf", { type: "application/pdf" }));
+    const fdB = formDataWith({
+      held_id: heldId,
+      registration_type_id: "22222222-2222-2222-2222-222222222222",
+      holder: "company",
+    });
+    fdB.set("file", new File(["pdf-bytes-b"], "request-b-certificate.pdf", { type: "application/pdf" }));
+
+    const [urlA, urlB] = await Promise.all([
+      expectRedirect(saveHeldRegistration(fdA)),
+      expectRedirect(saveHeldRegistration(fdB)),
+    ]);
+
+    expect(uploadCalls).toHaveLength(2);
+    const pathA = uploadCalls.find((p) => p.includes("request-a"))!;
+    const pathB = uploadCalls.find((p) => p.includes("request-b"))!;
+
+    const successes = [urlA, urlB].filter((u) => u.includes("saved=1"));
+    const failures = [urlA, urlB].filter((u) => u.includes("error="));
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+
+    const finalValue = state.storagePath;
+    expect([pathA, pathB]).toContain(finalValue);
+    const loserPath = finalValue === pathA ? pathB : pathA;
+
+    expect(removeCalls.flat()).toContain(ORIGINAL_PATH);
+    expect(removeCalls.flat()).toContain(loserPath);
+    expect(removeCalls.flat()).not.toContain(finalValue);
+  });
+});

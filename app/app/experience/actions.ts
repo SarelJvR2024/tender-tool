@@ -185,7 +185,25 @@ export async function saveExperienceTags(formData: FormData) {
   // just-uploaded replacement orphaned AND still deleted the still-
   // referenced replaced file below regardless. Same shape, same fix, as
   // app/company/actions.ts uploadVaultDocument().
-  const { data: updated, error } = await supabase.from("experience_items").update(update).eq("id", id).select("id").maybeSingle();
+  //
+  // When a replacement file was attached, `.eq("storage_path", replacedPath)`
+  // (or `.is(...)` when there was none) guards a SECOND, separate race - a
+  // storage one, not an RLS one (standing review, 2026-11-09): two
+  // near-simultaneous "attach a document" submits for the SAME item both
+  // read the same `replacedPath` before either writes, both uploads succeed
+  // (distinct random paths), and without this filter both updates would
+  // unconditionally succeed too - whichever commits last wins the row, and
+  // the other request's own just-uploaded file is referenced by nothing and
+  // deleted by nobody (its own cleanup only ever targets `replacedPath`, the
+  // file that existed before EITHER request ran, not the other request's
+  // new one). Scoping the update to only succeed if `storage_path` still
+  // holds the exact value this request read reuses the zero-rows handling
+  // already below, which already cleans up this request's own new upload.
+  let updateQuery = supabase.from("experience_items").update(update).eq("id", id);
+  if (file && file.size > 0) {
+    updateQuery = replacedPath === null ? updateQuery.is("storage_path", null) : updateQuery.eq("storage_path", replacedPath);
+  }
+  const { data: updated, error } = await updateQuery.select("id").maybeSingle();
   if (error || !updated) {
     console.error("experience_items update failed", error);
     if (typeof update.storage_path === "string") await supabase.storage.from("experience-documents").remove([update.storage_path]);

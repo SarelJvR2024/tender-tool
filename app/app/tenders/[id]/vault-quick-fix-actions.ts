@@ -140,12 +140,20 @@ export async function uploadCoidQuickFix(
   // since the row ends up pointing at a file that no longer exists. This
   // copy never got the fix uploadVaultDocument() already has (standing
   // review, 2026-11-07).
-  const { data: updated, error } = await supabase
-    .from("companies")
-    .update({ [column]: storagePath })
-    .eq("id", verifiedCompanyId)
-    .select("id")
-    .maybeSingle();
+  //
+  // `.eq(column, previousPath)` (or `.is(column, null)`) below is a SECOND,
+  // separate race fix carried over from uploadVaultDocument() too (standing
+  // review, 2026-11-09) - a storage one, not an RLS one: two near-
+  // simultaneous COID uploads (the drawer's own retry-on-timeout, or two
+  // tabs) both read the same `previousPath` before either writes, and
+  // without this filter both updates would unconditionally succeed -
+  // whichever commits last wins the row, orphaning the other request's own
+  // new file forever. Scoping the update to only succeed if `column` still
+  // holds the value this request read reuses the zero-rows handling right
+  // below, which already cleans up this request's own new upload.
+  let updateQuery = supabase.from("companies").update({ [column]: storagePath }).eq("id", verifiedCompanyId);
+  updateQuery = previousPath === null ? updateQuery.is(column, null) : updateQuery.eq(column, previousPath);
+  const { data: updated, error } = await updateQuery.select("id").maybeSingle();
   if (error || !updated) {
     console.error("companies update failed for vault document (coid quick fix)", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);

@@ -97,12 +97,23 @@ export async function saveHeldRegistration(formData: FormData) {
     // references, since this write never took effect - while the just-
     // uploaded new file sat permanently unreferenced: the row ends up
     // pointing at a file that no longer exists, worse than a plain orphan.
-    const { data: attached, error } = await supabase
-      .from("held_registrations")
-      .update({ storage_path: path, original_filename: file.name })
-      .eq("id", heldId)
-      .select("id")
-      .maybeSingle();
+    // `.eq("storage_path", existing?.storage_path)` (or `.is(...)` when
+    // there was none) is a SECOND, separate race fix, not a duplicate of the
+    // comment above - a storage one, not an RLS one (standing review,
+    // 2026-11-09). Same shape, same fix, as app/company/actions.ts
+    // uploadVaultDocument(): two near-simultaneous certificate-attach
+    // submits for the SAME registration both read the same `existing`
+    // before either writes, both uploads succeed (distinct random paths),
+    // and without this filter both attach-updates would unconditionally
+    // succeed too - last commit wins the row, orphaning the other request's
+    // own new file forever. Scoping the update to only succeed if
+    // `storage_path` still holds the exact value this request read reuses
+    // the zero-rows handling right below, which already cleans up this
+    // request's own new upload.
+    const existingPath = existing?.storage_path as string | null | undefined;
+    let attachQuery = supabase.from("held_registrations").update({ storage_path: path, original_filename: file.name }).eq("id", heldId);
+    attachQuery = !existingPath ? attachQuery.is("storage_path", null) : attachQuery.eq("storage_path", existingPath);
+    const { data: attached, error } = await attachQuery.select("id").maybeSingle();
     if (error || !attached) {
       console.error("held_registrations update failed for certificate attach", error);
       await supabase.storage.from(VAULT_BUCKET).remove([path]);

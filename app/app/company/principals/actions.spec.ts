@@ -267,3 +267,115 @@ describe("deletePrincipal - real delete still succeeds", () => {
     expect(removeCalls.flat()).toContain("company-1/principals/p-1/certified_id/id.pdf");
   });
 });
+
+// Second, SEPARATE race in uploadPrincipalDocument() - a storage-layer one,
+// not an RLS one (standing review, 2026-11-09). Same shape, same fix, as
+// app/company/actions.ts uploadVaultDocument(): two near-simultaneous
+// uploads for the SAME person/document kind (a double-click, or two tabs)
+// both read the same `previous` path before either writes, both uploads
+// genuinely succeed (distinct random paths), and the pre-fix
+// `update(update).eq("id", id)` has no filter on `spec.pathColumn` itself,
+// so BOTH updates unconditionally succeed too - whichever commits last
+// "wins" the row, and the OTHER request's own just-uploaded file is
+// referenced by nothing and deleted by nobody. Needs a genuinely stateful
+// mock (not the FIFO queue above) for the same reason as the company.actions
+// one this is modelled on: both requests' own reads must land before either
+// one's own write commits.
+describe("uploadPrincipalDocument - two concurrent replace requests (both succeed, no RLS failure - a genuine double-submit)", () => {
+  it("lets exactly one request win the row, and cleans up the LOSER's own new upload immediately - no orphan, no silent double success", async () => {
+    const PATH_COLUMN = "certified_id_path";
+    const ORIGINAL_PATH = "company-1/principals/p-1/certified_id/old-old.pdf";
+    const state: { value: string | null } = { value: ORIGINAL_PATH };
+    const uploadCalls: string[] = [];
+    const removeCalls: string[][] = [];
+
+    function makePrincipalsChain() {
+      const filters: Record<string, unknown> = {};
+      let isUpdate = false;
+      let patch: Record<string, unknown> = {};
+      const chain: Record<string, unknown> = {};
+      chain.select = () => chain;
+      chain.update = (p: Record<string, unknown>) => {
+        isUpdate = true;
+        patch = p;
+        return chain;
+      };
+      chain.eq = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.is = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.maybeSingle = () => chain;
+      (chain as { then: (resolve: (r: unknown) => void) => void }).then = (resolve) => {
+        if (!isUpdate) {
+          resolve({ data: { [PATH_COLUMN]: state.value }, error: null });
+          return;
+        }
+        const matches = !(PATH_COLUMN in filters) || filters[PATH_COLUMN] === state.value;
+        if (matches) {
+          state.value = patch[PATH_COLUMN] as string;
+          resolve({ data: { id: "p-1" }, error: null });
+        } else {
+          resolve({ data: null, error: null });
+        }
+      };
+      return chain;
+    }
+
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+      from: (table: string) => {
+        if (table === "company_principals") return makePrincipalsChain();
+        // company_members, for requireCompanyId() - always a real member here.
+        return makeChain([{ data: { company_id: "company-1" }, error: null }]);
+      },
+      storage: {
+        from: () => ({
+          upload: async (path: string) => {
+            uploadCalls.push(path);
+            await new Promise((r) => setTimeout(r, path.includes("request-b") ? 5 : 20));
+            return { data: { path }, error: null };
+          },
+          remove: async (paths: string[]) => {
+            removeCalls.push(paths);
+            return { data: null, error: null };
+          },
+        }),
+      },
+    };
+    supabaseState.current = client as unknown as ReturnType<typeof makeSupabase>["client"];
+
+    const { uploadPrincipalDocument } = await import("./actions");
+
+    const fdA = formDataWith({ principal_id: "p-1", kind: "certified_id", certified_id_on: "2026-11-06" });
+    fdA.set("file", new File(["pdf-bytes-a"], "request-a-id-copy.pdf", { type: "application/pdf" }));
+    const fdB = formDataWith({ principal_id: "p-1", kind: "certified_id", certified_id_on: "2026-11-06" });
+    fdB.set("file", new File(["pdf-bytes-b"], "request-b-id-copy.pdf", { type: "application/pdf" }));
+
+    const [urlA, urlB] = await Promise.all([
+      expectRedirect(uploadPrincipalDocument(fdA)),
+      expectRedirect(uploadPrincipalDocument(fdB)),
+    ]);
+
+    expect(uploadCalls).toHaveLength(2);
+    const pathA = uploadCalls.find((p) => p.includes("request-a"))!;
+    const pathB = uploadCalls.find((p) => p.includes("request-b"))!;
+
+    const successes = [urlA, urlB].filter((u) => u.includes("saved=doc"));
+    const failures = [urlA, urlB].filter((u) => u.includes("/company/principals?error="));
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+
+    const finalValue = state.value;
+    expect([pathA, pathB]).toContain(finalValue);
+    const loserPath = finalValue === pathA ? pathB : pathA;
+
+    expect(removeCalls.flat()).toContain(ORIGINAL_PATH);
+    expect(removeCalls.flat()).toContain(loserPath);
+    expect(removeCalls.flat()).not.toContain(finalValue);
+  });
+});

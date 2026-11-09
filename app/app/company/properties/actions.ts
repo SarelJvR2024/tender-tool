@@ -172,9 +172,28 @@ export async function savePropertyDocument(formData: FormData) {
   // indistinguishable from a real update by `error` alone. Without this
   // check, that race left a newly-uploaded file orphaned AND unconditionally
   // deleted the still-referenced previous file below regardless.
+  //
+  // When a file was actually uploaded this call, `.eq("storage_path",
+  // existing.storage_path)` (or `.is(...)` when there was none) guards a
+  // SECOND, separate race - a storage one, not an RLS one (standing review,
+  // 2026-11-09). Same shape as experience/actions.ts saveExperienceTags(),
+  // app/company/principals/actions.ts uploadPrincipalDocument() and
+  // app/company/actions.ts uploadVaultDocument(): two near-simultaneous
+  // "replace this building's document" submits both read the same
+  // `existing.storage_path` before either writes, both uploads succeed
+  // (distinct random paths), and without this filter both updates would
+  // unconditionally succeed too - last commit wins the row, orphaning the
+  // other request's own new file forever. Scoping the update to only
+  // succeed if `storage_path` still holds the exact value this request read
+  // reuses the zero-rows handling right below, which already cleans up this
+  // request's own new upload (`if (newPath) ... remove([newPath])`).
   let saveError: { message: string } | null = null;
   if (existing) {
-    const { data, error } = await supabase.from("property_documents").update(row).eq("id", existing.id).select("id").maybeSingle();
+    let updateQuery = supabase.from("property_documents").update(row).eq("id", existing.id);
+    if (newPath) {
+      updateQuery = existing.storage_path ? updateQuery.eq("storage_path", existing.storage_path) : updateQuery.is("storage_path", null);
+    }
+    const { data, error } = await updateQuery.select("id").maybeSingle();
     saveError = error ?? (data ? null : { message: "This document's building record is no longer there - it may have been removed. Refresh and try again." });
   } else {
     const { error } = await supabase.from("property_documents").insert(row);

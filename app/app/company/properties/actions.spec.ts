@@ -252,3 +252,112 @@ describe("deleteProperty - real delete still succeeds", () => {
     expect(removeCalls.flat()).toContain("company-1/properties/prop-1/title_deed/deed.pdf");
   });
 });
+
+// Second, SEPARATE race in savePropertyDocument()'s update branch - a
+// storage-layer one, not an RLS one (standing review, 2026-11-09). Same
+// shape, same fix, as app/company/actions.ts uploadVaultDocument(): two
+// near-simultaneous "replace this building's document" submits both read
+// the same `existing.storage_path` before either writes, both uploads
+// succeed (distinct random paths), and the pre-fix update has no filter on
+// `storage_path` itself, so both updates would unconditionally succeed too -
+// whichever commits last wins the row, orphaning the other request's own
+// new file forever. Needs a genuinely stateful mock (not the FIFO queue
+// above): both requests' own reads must land before either one's own write
+// commits.
+describe("savePropertyDocument - two concurrent replace requests (both succeed, no RLS failure)", () => {
+  it("lets exactly one request win the row, and cleans up the LOSER's own new upload immediately - no orphan, no silent double success", async () => {
+    const ORIGINAL_PATH = "company-1/properties/prop-1/title_deed/old-old.pdf";
+    const state: { storagePath: string | null } = { storagePath: ORIGINAL_PATH };
+    const uploadCalls: string[] = [];
+    const removeCalls: string[][] = [];
+
+    function makePropertyDocumentsChain() {
+      const filters: Record<string, unknown> = {};
+      let isUpdate = false;
+      let patch: Record<string, unknown> = {};
+      const chain: Record<string, unknown> = {};
+      chain.select = () => chain;
+      chain.update = (p: Record<string, unknown>) => {
+        isUpdate = true;
+        patch = p;
+        return chain;
+      };
+      chain.eq = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.is = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.maybeSingle = () => chain;
+      (chain as { then: (resolve: (r: unknown) => void) => void }).then = (resolve) => {
+        if (!isUpdate) {
+          resolve({ data: { id: "doc-1", storage_path: state.storagePath }, error: null });
+          return;
+        }
+        const matches = !("storage_path" in filters) || filters.storage_path === state.storagePath;
+        if (matches) {
+          state.storagePath = patch.storage_path as string;
+          resolve({ data: { id: "doc-1" }, error: null });
+        } else {
+          resolve({ data: null, error: null });
+        }
+      };
+      return chain;
+    }
+
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+      from: (table: string) => {
+        if (table === "property_documents") return makePropertyDocumentsChain();
+        // company_members, for requireCompanyId() - always a real member here.
+        return makeChain([{ data: { company_id: "company-1" }, error: null }]);
+      },
+      storage: {
+        from: () => ({
+          upload: async (path: string) => {
+            uploadCalls.push(path);
+            await new Promise((r) => setTimeout(r, path.includes("request-b") ? 5 : 20));
+            return { data: { path }, error: null };
+          },
+          remove: async (paths: string[]) => {
+            removeCalls.push(paths);
+            return { data: null, error: null };
+          },
+        }),
+      },
+    };
+    supabaseState.current = client as unknown as ReturnType<typeof makeSupabase>["client"];
+
+    const { savePropertyDocument } = await import("./actions");
+
+    const fdA = formDataWith({ property_id: "prop-1", document_type: "title_deed" });
+    fdA.set("file", new File(["pdf-bytes-a"], "request-a-title-deed.pdf", { type: "application/pdf" }));
+    const fdB = formDataWith({ property_id: "prop-1", document_type: "title_deed" });
+    fdB.set("file", new File(["pdf-bytes-b"], "request-b-title-deed.pdf", { type: "application/pdf" }));
+
+    const [urlA, urlB] = await Promise.all([
+      expectRedirect(savePropertyDocument(fdA)),
+      expectRedirect(savePropertyDocument(fdB)),
+    ]);
+
+    expect(uploadCalls).toHaveLength(2);
+    const pathA = uploadCalls.find((p) => p.includes("request-a"))!;
+    const pathB = uploadCalls.find((p) => p.includes("request-b"))!;
+
+    const successes = [urlA, urlB].filter((u) => u.includes("saved=doc"));
+    const failures = [urlA, urlB].filter((u) => u.includes("/company/properties?error="));
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+
+    const finalValue = state.storagePath;
+    expect([pathA, pathB]).toContain(finalValue);
+    const loserPath = finalValue === pathA ? pathB : pathA;
+
+    expect(removeCalls.flat()).toContain(ORIGINAL_PATH);
+    expect(removeCalls.flat()).toContain(loserPath);
+    expect(removeCalls.flat()).not.toContain(finalValue);
+  });
+});

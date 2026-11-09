@@ -228,3 +228,115 @@ describe("uploadCoidQuickFix - companies update matches zero rows (RLS race)", (
     expect(removeCalls).toHaveLength(1);
   });
 });
+
+// Second, SEPARATE race in uploadCoidQuickFix() - a storage-layer one, not
+// an RLS one (standing review, 2026-11-09). Same shape, same fix, as
+// app/company/actions.ts uploadVaultDocument(): two near-simultaneous COID
+// uploads for the same company (the drawer's own retry-on-timeout, or two
+// tabs) both read the same `previousPath` before either writes, both
+// uploads succeed (distinct random paths), and the pre-fix update has no
+// filter on `column` itself, so both updates would unconditionally succeed
+// too - whichever commits last wins the row, orphaning the other request's
+// own new file forever. Needs a genuinely stateful mock (not the FIFO queue
+// above): both requests' own reads must land before either one's own write
+// commits.
+describe("uploadCoidQuickFix - two concurrent uploads (both succeed, no RLS failure - a genuine double-submit)", () => {
+  it("lets exactly one request win the row, and cleans up the LOSER's own new upload immediately - no orphan, no silent double success", async () => {
+    const COLUMN = "coid_letter_document_path";
+    const ORIGINAL_PATH = "company-1/vault/coid/old-old.pdf";
+    const state: { value: string | null } = { value: ORIGINAL_PATH };
+    const uploadCalls: string[] = [];
+    const removeCalls: string[][] = [];
+
+    function makeCompaniesChain() {
+      const filters: Record<string, unknown> = {};
+      let isUpdate = false;
+      let patch: Record<string, unknown> = {};
+      const chain: Record<string, unknown> = {};
+      chain.select = () => chain;
+      chain.update = (p: Record<string, unknown>) => {
+        isUpdate = true;
+        patch = p;
+        return chain;
+      };
+      chain.eq = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.is = (col: string, val: unknown) => {
+        filters[col] = val;
+        return chain;
+      };
+      chain.maybeSingle = () => chain;
+      (chain as { then: (resolve: (r: unknown) => void) => void }).then = (resolve) => {
+        if (!isUpdate) {
+          resolve({ data: { [COLUMN]: state.value }, error: null });
+          return;
+        }
+        const matches = !(COLUMN in filters) || filters[COLUMN] === state.value;
+        if (matches) {
+          state.value = patch[COLUMN] as string;
+          resolve({ data: { id: "company-1" }, error: null });
+        } else {
+          resolve({ data: null, error: null });
+        }
+      };
+      return chain;
+    }
+
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
+      from: (table: string) => {
+        if (table === "companies") return makeCompaniesChain();
+        // company_members, for requireCompanyId() - always a real member here.
+        const chain: Record<string, unknown> = {};
+        for (const m of ["select", "eq"]) chain[m] = () => chain;
+        chain.maybeSingle = () => chain;
+        (chain as { then: (resolve: (r: unknown) => void) => void }).then = (resolve) => resolve({ data: { company_id: "company-1" }, error: null });
+        return chain;
+      },
+      storage: {
+        from: () => ({
+          upload: async (path: string) => {
+            uploadCalls.push(path);
+            await new Promise((r) => setTimeout(r, path.includes("request-b") ? 5 : 20));
+            return { data: { path }, error: null };
+          },
+          remove: async (paths: string[]) => {
+            removeCalls.push(paths);
+            return { data: null, error: null };
+          },
+        }),
+      },
+    };
+    supabaseState.current = client as unknown as ReturnType<typeof makeSupabase>["client"];
+
+    const { uploadCoidQuickFix } = await import("./vault-quick-fix-actions");
+
+    const fileA = new File(["a"], "request-a-coid.pdf", { type: "application/pdf" });
+    const fileB = new File(["b"], "request-b-coid.pdf", { type: "application/pdf" });
+
+    const [resA, resB] = await Promise.all([
+      uploadCoidQuickFix("tender-1", "company-1", fileA),
+      uploadCoidQuickFix("tender-1", "company-1", fileB),
+    ]);
+
+    expect(uploadCalls).toHaveLength(2);
+    const pathA = uploadCalls.find((p) => p.includes("request-a"))!;
+    const pathB = uploadCalls.find((p) => p.includes("request-b"))!;
+
+    const successes = [resA, resB].filter((r) => r.ok);
+    const failures = [resA, resB].filter((r) => !r.ok);
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+
+    const finalValue = state.value;
+    expect([pathA, pathB]).toContain(finalValue);
+    const loserPath = finalValue === pathA ? pathB : pathA;
+
+    expect(removeCalls.flat()).toContain(ORIGINAL_PATH);
+    expect(removeCalls.flat()).toContain(loserPath);
+    expect(removeCalls.flat()).not.toContain(finalValue);
+  });
+});

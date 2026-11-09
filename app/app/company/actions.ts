@@ -99,12 +99,27 @@ export async function uploadVaultDocument(companyId: string, formData: FormData)
   // write - indistinguishable from a real update by `error` alone. Without
   // this check, that race left the just-uploaded file orphaned AND deleted
   // the still-referenced previous file below regardless.
-  const { data: updated, error } = await supabase
-    .from("companies")
-    .update({ [column]: storagePath })
-    .eq("id", companyId)
-    .select("id")
-    .maybeSingle();
+  //
+  // The `.eq(column, previousPath)` (or `.is(column, null)`) below is a
+  // SECOND, separate race fix, not a duplicate of the one above - a storage
+  // race, not an RLS one (standing review, 2026-11-09): two near-simultaneous
+  // replace requests for the SAME document (a double-click, or two tabs)
+  // both read the same `previousPath` above before either writes. Without
+  // this filter, both uploads succeed (distinct random paths) and both
+  // updates unconditionally succeed too - whichever commits last "wins" the
+  // row, and the OTHER request's own just-uploaded file is referenced by
+  // nothing and deleted by nobody (its own cleanup only ever targets
+  // `previousPath`, the ORIGINAL file, not the other request's new one) - a
+  // permanent, silent storage leak, with both users told "Document saved."
+  // Scoping the update to only succeed if `column` still holds the exact
+  // value this request read makes it optimistic-concurrency-safe: the
+  // second request to commit now matches zero rows, which the existing
+  // zero-rows handling below already treats as a failure and already cleans
+  // up THIS request's own new upload for - no new failure path needed, just
+  // a narrower match.
+  let updateQuery = supabase.from("companies").update({ [column]: storagePath }).eq("id", companyId);
+  updateQuery = previousPath === null ? updateQuery.is(column, null) : updateQuery.eq(column, previousPath);
+  const { data: updated, error } = await updateQuery.select("id").maybeSingle();
   if (error || !updated) {
     console.error("companies update failed for vault document", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);
