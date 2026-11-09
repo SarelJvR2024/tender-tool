@@ -24,8 +24,30 @@
 //
 // Deliberately permissive otherwise - any same-origin path (with its own
 // query string / hash) is fine; this is not a route allowlist.
+//
+// Finding 267, 2026-11-09: the check above operated on the raw string, but
+// the WHATWG URL spec's own parser (step 1, "remove all ASCII tab or
+// newline") strips every ASCII tab (U+0009), LF (U+000A) and CR (U+000D)
+// character from a URL string UNCONDITIONALLY, wherever it sits, before
+// resolving it - every real browser does this, and Node's own spec-
+// compliant `URL` does too (confirmed directly: `new URL("/\t/evil.com",
+// base).href` is "https://evil.com/"). A value with one of these characters
+// placed right after the leading "/" (e.g. "/\t/evil.com", "/\t\\evil.com")
+// passed the check above - the character right after "/" is neither "/"
+// nor "\\" - but the value a browser actually navigates to, after it
+// strips that character, is exactly the "//"/"/\\" bypass shape this file
+// already exists to block. Confirmed live, not just read-and-reasoned: a
+// real Chromium tab calling `router.push()` on this exact value issued a
+// real outbound HTTP request to the attacker host. Stripping these
+// characters first, the same way a browser's own parser does, closes this
+// without narrowing what a legitimate same-origin path can look like (no
+// real in-app path ever contains one).
+function stripUrlWhitespace(value: string): string {
+  return value.replace(/[\t\r\n]/g, "");
+}
+
 export function isSafeRedirectPath(value: string | null | undefined): value is string {
-  return !!value && /^\/(?!\/|\\)/.test(value);
+  return !!value && /^\/(?!\/|\\)/.test(stripUrlWhitespace(value));
 }
 
 /** `value` if it's a safe same-origin path, else `fallback`. */
