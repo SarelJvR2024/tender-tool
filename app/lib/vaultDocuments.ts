@@ -139,3 +139,66 @@ export function sarsTcsPinOnFile(company: {
 }): boolean {
   return !!company.sars_tcs_pin_document_path || !!company.sars_tcs_pin || !!company.sars_tcs_pin_expiry;
 }
+
+/** The fields {@link vaultDocumentOnFile} needs, across all 7 VAULT_DOCUMENTS kinds. */
+export type VaultDocumentOnFileInput = {
+  coid_letter_document_path: string | null;
+  cidb_document_path: string | null;
+  cidb_grading: string | null;
+  cidb_expiry: string | null;
+  sars_tcs_pin_document_path: string | null;
+  sars_tcs_pin: string | null;
+  sars_tcs_pin_expiry: string | null;
+  pi_insurance_document_path: string | null;
+  pi_insurance_policy_number: string | null;
+  iso_9001_document_path: string | null;
+  iso_9001_certified: boolean | null;
+  bank_confirmation_letter_path: string | null;
+  bank_confirmation_letter_date: string | null;
+  bee_proof_document_path: string | null;
+  bee_level: number | null;
+};
+
+/**
+ * Whether a given VAULT_DOCUMENTS kind is genuinely "on file" for a company -
+ * a document was uploaded, OR (for the 5 kinds whose compliance fact is
+ * sometimes typed in directly through EditForm.tsx instead of uploaded) the
+ * matching text/level/date field was captured. Mirrors the per-kind hasFile
+ * booleans app/app/company/_components/ComplianceDocumentsSection.tsx and
+ * ReadOnlyView.tsx already compute inline for their own per-document status
+ * chips - duplicated identically in both those files.
+ *
+ * Centralised here (standing review, 2026-11-09, Finding 249) because a
+ * third site, this page's own VaultProgressSummary count
+ * (app/app/company/page.tsx's `documentsOnFile`), used a path-only check for
+ * all 7 kinds instead - so a company that had typed in (not uploaded) its
+ * CIDB grading, SARS PIN, PI policy number, bank letter date or B-BBEE level
+ * saw that count silently disagree with the compliance section rendered
+ * directly below it on the exact same page: e.g. "0 of 7 on file - 7 still
+ * missing, add them" right above a section correctly showing 5 of those same
+ * 7 as valid. The identical "these surfaces can't quietly disagree" bug
+ * class as Findings 240-243 (lib/readiness.ts), found independently here.
+ */
+export function vaultDocumentOnFile(kind: VaultDocumentKind, company: VaultDocumentOnFileInput): boolean {
+  switch (kind) {
+    case "coid":
+      return company.coid_letter_document_path !== null;
+    case "cidb":
+      return company.cidb_document_path !== null || !!company.cidb_grading || !!company.cidb_expiry;
+    case "sars_tcs_pin":
+      return sarsTcsPinOnFile(company);
+    case "pi_insurance":
+      return company.pi_insurance_document_path !== null || !!company.pi_insurance_policy_number;
+    case "iso_9001":
+      // Matches isoStatus in ComplianceDocumentsSection.tsx/ReadOnlyView.tsx:
+      // certified === false ("Not certified") and certified === null ("Not
+      // stated") both render with the same muted "not on file" tone there,
+      // so both are "not on file" here too - only a genuinely certified
+      // company with its certificate actually uploaded counts.
+      return company.iso_9001_certified === true && company.iso_9001_document_path !== null;
+    case "bank_letter":
+      return company.bank_confirmation_letter_path !== null || !!company.bank_confirmation_letter_date;
+    case "bee_proof":
+      return company.bee_proof_document_path !== null || !!company.bee_level;
+  }
+}

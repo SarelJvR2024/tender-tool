@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/tt/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { DocumentExpiryOverview } from "./DocumentExpiryOverview";
 import type { CompanyDocumentTemplateRow } from "@/lib/companyDocuments";
-import { VAULT_BUCKET, VAULT_DOCUMENTS, type VaultDocumentKind } from "@/lib/vaultDocuments";
+import { VAULT_BUCKET, VAULT_DOCUMENTS, vaultDocumentOnFile, type VaultDocumentKind } from "@/lib/vaultDocuments";
 import { AppShell } from "../_components/AppShell";
 import { OfficeLocations } from "./OfficeLocations";
 import { Notifications } from "./Notifications";
@@ -160,12 +160,15 @@ export default async function CompanyPage({
   const peopleMissingCv = peopleRows.filter((p) => !peopleWithCvIds.has(p.id));
 
   // Document count for VaultProgressSummary - the same 7 VAULT_DOCUMENTS
-  // columns ComplianceDocumentsSection already renders one row per, counted
-  // here instead of re-deriving its own ComplianceDocEntry[] array just to
-  // count how many have a path.
+  // kinds ComplianceDocumentsSection already renders one row per, using that
+  // same component's own "on file" rule (lib/vaultDocuments.ts's
+  // vaultDocumentOnFile() - a document was uploaded OR the matching text/
+  // level/date field was typed in) rather than a second, path-only rule that
+  // used to silently disagree with the compliance section rendered directly
+  // below it on this same page (standing review, 2026-11-09, Finding 249).
   const documentsTotal = Object.keys(VAULT_DOCUMENTS).length;
   const documentsOnFile = row
-    ? (Object.keys(VAULT_DOCUMENTS) as VaultDocumentKind[]).filter((k) => !!row[VAULT_DOCUMENTS[k].column]).length
+    ? (Object.keys(VAULT_DOCUMENTS) as VaultDocumentKind[]).filter((k) => vaultDocumentOnFile(k, row)).length
     : 0;
 
   // Sub-nav completion ticks - reuses already-computed signals only

@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { VAULT_DOCUMENTS, VAULT_KIND_TO_DOCUMENT_KIND, sarsTcsPinOnFile, vaultDocumentMismatchWarning } from "./vaultDocuments.ts";
+import { VAULT_DOCUMENTS, VAULT_KIND_TO_DOCUMENT_KIND, sarsTcsPinOnFile, vaultDocumentMismatchWarning, vaultDocumentOnFile } from "./vaultDocuments.ts";
 import { VAULT_KINDS } from "./onboardingScan.ts";
 
 test("every VAULT_KIND_TO_DOCUMENT_KIND value is a real onboardingScan vault-routable DocumentKind", () => {
@@ -73,4 +73,83 @@ test("sarsTcsPinOnFile: the PIN typed in with no document and no expiry date yet
 
 test("sarsTcsPinOnFile: an expiry date alone is enough", () => {
   assert.equal(sarsTcsPinOnFile({ sars_tcs_pin_document_path: null, sars_tcs_pin: null, sars_tcs_pin_expiry: "2027-01-01" }), true);
+});
+
+// Standing review, 2026-11-09, Finding 249: page.tsx's own VaultProgressSummary
+// count used a path-only check for all 7 kinds, silently disagreeing with
+// ComplianceDocumentsSection's/ReadOnlyView's own already-correct per-kind
+// rule (a document was uploaded OR the matching text/level/date field was
+// typed in) rendered directly below it on the same page. vaultDocumentOnFile()
+// centralises that rule so page.tsx can't drift from it independently again.
+const NOTHING_ON_FILE = {
+  coid_letter_document_path: null,
+  cidb_document_path: null,
+  cidb_grading: null,
+  cidb_expiry: null,
+  sars_tcs_pin_document_path: null,
+  sars_tcs_pin: null,
+  sars_tcs_pin_expiry: null,
+  pi_insurance_document_path: null,
+  pi_insurance_policy_number: null,
+  iso_9001_document_path: null,
+  iso_9001_certified: null,
+  bank_confirmation_letter_path: null,
+  bank_confirmation_letter_date: null,
+  bee_proof_document_path: null,
+  bee_level: null,
+};
+
+test("vaultDocumentOnFile: nothing on file at all -> false for every one of the 7 kinds", () => {
+  for (const kind of Object.keys(VAULT_DOCUMENTS) as (keyof typeof VAULT_DOCUMENTS)[]) {
+    assert.equal(vaultDocumentOnFile(kind, NOTHING_ON_FILE), false, `${kind} should be false`);
+  }
+});
+
+test("vaultDocumentOnFile: coid only counts an uploaded document, never a typed-in substitute (there isn't one)", () => {
+  assert.equal(vaultDocumentOnFile("coid", { ...NOTHING_ON_FILE, coid_letter_document_path: "x/coid.pdf" }), true);
+});
+
+test("vaultDocumentOnFile: cidb - a typed-in grading alone is enough, matching ComplianceDocumentsSection's own row", () => {
+  assert.equal(vaultDocumentOnFile("cidb", { ...NOTHING_ON_FILE, cidb_grading: "7CE" }), true);
+  assert.equal(vaultDocumentOnFile("cidb", { ...NOTHING_ON_FILE, cidb_expiry: "2027-01-01" }), true);
+  assert.equal(vaultDocumentOnFile("cidb", { ...NOTHING_ON_FILE, cidb_document_path: "x/cidb.pdf" }), true);
+});
+
+test("vaultDocumentOnFile: sars_tcs_pin delegates to sarsTcsPinOnFile (a typed-in PIN alone is enough)", () => {
+  assert.equal(vaultDocumentOnFile("sars_tcs_pin", { ...NOTHING_ON_FILE, sars_tcs_pin: "1234567890" }), true);
+});
+
+test("vaultDocumentOnFile: pi_insurance - a typed-in policy number alone is enough", () => {
+  assert.equal(vaultDocumentOnFile("pi_insurance", { ...NOTHING_ON_FILE, pi_insurance_policy_number: "POL-999" }), true);
+});
+
+test("vaultDocumentOnFile: bank_letter - a typed-in date alone is enough", () => {
+  assert.equal(vaultDocumentOnFile("bank_letter", { ...NOTHING_ON_FILE, bank_confirmation_letter_date: "2026-11-01" }), true);
+});
+
+test("vaultDocumentOnFile: bee_proof - a typed-in B-BBEE level alone is enough", () => {
+  assert.equal(vaultDocumentOnFile("bee_proof", { ...NOTHING_ON_FILE, bee_level: 2 }), true);
+});
+
+test("vaultDocumentOnFile: iso_9001 needs BOTH certified===true AND an uploaded document - certified alone, or a stray document path while not (yet) certified, are each not enough", () => {
+  assert.equal(vaultDocumentOnFile("iso_9001", { ...NOTHING_ON_FILE, iso_9001_certified: true }), false);
+  assert.equal(vaultDocumentOnFile("iso_9001", { ...NOTHING_ON_FILE, iso_9001_document_path: "x/iso.pdf" }), false);
+  assert.equal(vaultDocumentOnFile("iso_9001", { ...NOTHING_ON_FILE, iso_9001_certified: false, iso_9001_document_path: "x/iso.pdf" }), false);
+  assert.equal(
+    vaultDocumentOnFile("iso_9001", { ...NOTHING_ON_FILE, iso_9001_certified: true, iso_9001_document_path: "x/iso.pdf" }),
+    true,
+  );
+});
+
+test("vaultDocumentOnFile: the real repro - 5 of 7 kinds typed in but not uploaded all read as on file, matching ComplianceDocumentsSection/ReadOnlyView rather than the old path-only count of 0", () => {
+  const row = {
+    ...NOTHING_ON_FILE,
+    cidb_grading: "7CE",
+    sars_tcs_pin: "1234567890",
+    pi_insurance_policy_number: "POL-999",
+    bank_confirmation_letter_date: "2026-11-01",
+    bee_level: 2,
+  };
+  const onFileCount = (Object.keys(VAULT_DOCUMENTS) as (keyof typeof VAULT_DOCUMENTS)[]).filter((k) => vaultDocumentOnFile(k, row)).length;
+  assert.equal(onFileCount, 5);
 });
