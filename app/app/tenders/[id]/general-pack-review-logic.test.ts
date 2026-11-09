@@ -12,6 +12,7 @@ import {
   answerStatus,
   localityStatus,
   matchStrengthStatus,
+  questionAnswerStatus,
   roleStatus,
   signatureAnswerStatus,
 } from "./general-pack-review-logic.ts";
@@ -25,6 +26,48 @@ test("answerStatus: answered is confirmed", () => {
 test("answerStatus: unanswered required is missing, unanswered optional is needs_input", () => {
   assert.equal(answerStatus(false, false).status, "missing");
   assert.equal(answerStatus(false, true).status, "needs_input");
+});
+
+// --- questionAnswerStatus (Finding 285: field_provenance reconciliation) --
+
+test("questionAnswerStatus: no provenance row falls back to answerStatus() unchanged", () => {
+  assert.deepEqual(questionAnswerStatus(true, false, null), answerStatus(true, false));
+  assert.deepEqual(questionAnswerStatus(false, false, null), answerStatus(false, false));
+  assert.deepEqual(questionAnswerStatus(false, true, null), answerStatus(false, true));
+});
+
+test("questionAnswerStatus: an answered question whose edition didn't carry the declaration is Fix, with the real reason", () => {
+  // Finding 284's own root cause, surfaced on THIS screen too: tender_answers
+  // has a value (answered=true), but fill_sbd_docx.py's own field_provenance
+  // row says this buyer's specific edition never matched the question text.
+  const r = questionAnswerStatus(true, false, { status: "missing", reason: "Declaration not found in this edition - answer by hand." });
+  assert.equal(r.status, "missing");
+  assert.equal(r.note, "Declaration not found in this edition - answer by hand.");
+});
+
+test("questionAnswerStatus: missing provenance always wins, even with no stated reason", () => {
+  const r = questionAnswerStatus(true, false, { status: "missing", reason: null });
+  assert.equal(r.status, "missing");
+  assert.match(r.note ?? "", /by hand/);
+});
+
+test("questionAnswerStatus: a pipeline-assumed default is shown as assumed_default, not silently upgraded to confirmed", () => {
+  const r = questionAnswerStatus(true, false, { status: "assumed_default", reason: "Not answered on the Tender Workspace - nothing on file says otherwise; confirm it there before signing." });
+  assert.equal(r.status, "assumed_default");
+  assert.match(r.note ?? "", /confirm it there/);
+  // "computed" maps to the same bucket via pack-review-logic's provenanceStatus().
+  const c = questionAnswerStatus(true, false, { status: "computed", reason: "derived" });
+  assert.equal(c.status, "assumed_default");
+});
+
+test("questionAnswerStatus: a real 'confirmed' provenance row agrees with and keeps the answered base status", () => {
+  const r = questionAnswerStatus(true, false, { status: "confirmed", reason: null });
+  assert.deepEqual(r, answerStatus(true, false));
+});
+
+test("questionAnswerStatus: an unknown/future provenance status never downgrades an answered question", () => {
+  const r = questionAnswerStatus(true, false, { status: "some_future_status", reason: "n/a" });
+  assert.deepEqual(r, answerStatus(true, false));
 });
 
 test("roleStatus: nobody tagged is missing, not included", () => {
