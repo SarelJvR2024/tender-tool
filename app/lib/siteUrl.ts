@@ -33,10 +33,29 @@ import { headers } from "next/headers";
 // entirely, rather than ever being used verbatim.
 const KNOWN_GOOD_HOSTS = [/^tenderready\.app$/, /^www\.tenderready\.app$/, /\.vercel\.app$/];
 
-function isKnownGoodHost(host: string): boolean {
-  const hostname = host.split(":")[0]; // strip a port, e.g. "localhost:3100"
-  if (hostname === "localhost" || hostname === "127.0.0.1") return true;
-  return KNOWN_GOOD_HOSTS.some((re) => re.test(hostname));
+// Standing-review pass, 2026-11-09 (Finding 268-fix bypass, found one pass
+// later): this used to split on ":" to strip a real port before checking
+// the hostname, then let `siteUrl()` below substitute the ORIGINAL,
+// un-stripped host string back into the returned URL. That let a Host
+// header like "tenderready.app:@evil.attacker.example" pass this check
+// (its pre-colon part is the real domain) while the URL every real browser
+// and mail client actually resolves from the result is evil.attacker.example -
+// confirmed directly: `new URL("https://tenderready.app:@evil.attacker.example").host`
+// is "evil.attacker.example", because a WHATWG URL parser reads
+// "tenderready.app:" as userinfo (text before a trailing "@"), not a port.
+// Now this function itself decides what, if anything, follows the
+// hostname - a real numeric port, or nothing - so there is no longer a
+// second, unvalidated use of the raw header anywhere in this file.
+function knownGoodHostAndPort(host: string): string | null {
+  const parts = host.split(":");
+  if (parts.length > 2) return null; // more than one ":" is never a plain host[:port]
+  const hostname = parts[0];
+  const port = parts[1]; // undefined when there was no ":" at all
+  if (port !== undefined && !/^\d+$/.test(port)) return null; // anything but digits (e.g. "@evil.com") - reject
+  const isGoodHostname =
+    hostname === "localhost" || hostname === "127.0.0.1" || KNOWN_GOOD_HOSTS.some((re) => re.test(hostname));
+  if (!isGoodHostname) return null;
+  return port === undefined ? hostname : `${hostname}:${port}`;
 }
 
 /**
@@ -52,9 +71,10 @@ function isKnownGoodHost(host: string): boolean {
 export async function siteUrl(): Promise<string> {
   const h = await headers();
   const host = h.get("host");
-  if (host && isKnownGoodHost(host)) {
-    const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
-    return `${isLocal ? "http" : "https"}://${host}`;
+  const goodHostAndPort = host ? knownGoodHostAndPort(host) : null;
+  if (goodHostAndPort) {
+    const isLocal = goodHostAndPort.startsWith("localhost") || goodHostAndPort.startsWith("127.0.0.1");
+    return `${isLocal ? "http" : "https"}://${goodHostAndPort}`;
   }
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";

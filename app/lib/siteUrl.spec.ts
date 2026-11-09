@@ -88,4 +88,46 @@ describe("siteUrl", () => {
     mockHost(null);
     expect(await siteUrl()).toBe("http://localhost:3000");
   });
+
+  // Standing-review pass, 2026-11-09 (follow-up to Finding 269): the
+  // Finding 268 fix above validates only the part of the Host header
+  // BEFORE the first colon (`isKnownGoodHost`'s own `host.split(":")[0]`,
+  // meant to strip a real port like "localhost:3100") - but `siteUrl()`
+  // itself then reconstructs the URL from the RAW, un-stripped host
+  // string, not from the validated hostname. A Host header shaped like
+  // "tenderready.app:@evil.attacker.example" passes the allowlist check
+  // (its pre-colon part is the real domain) and is then substituted
+  // verbatim into "https://tenderready.app:@evil.attacker.example" - which
+  // is NOT a request to tenderready.app with a weird port. Every WHATWG-
+  // compliant URL parser (every real browser, and Node's own `URL`,
+  // confirmed directly: `new URL("https://tenderready.app:@evil.attacker.example").host`
+  // is "evil.attacker.example") treats "tenderready.app:" as userinfo
+  // (text before a trailing "@") and "evil.attacker.example" as the real
+  // host - the exact same "looks same-origin to a naive string check, is a
+  // different origin to every real URL parser" shape Finding 267 already
+  // fixed once in safeRedirect.ts, just never checked for here. This is a
+  // live bypass of the Finding 268 fix in the one file it exists to
+  // protect - confirmed, not merely suspected, by the real `new URL(...)`
+  // call above and by a real spoofed-Host request against a real running
+  // dev server (see this pass's own System-Status.md write-up).
+  it("does NOT trust a Host header that uses a fake 'port' to smuggle a different real host via userinfo (Finding 268-fix bypass)", async () => {
+    mockHost("tenderready.app:@evil.attacker.example");
+    const result = await siteUrl();
+    expect(result).not.toContain("evil.attacker.example");
+    // Confirm the claim about how a real URL parser resolves the
+    // pre-fix value, so this test fails loudly (not just on a substring)
+    // if the fix regresses back to returning that value verbatim.
+    expect(new URL(result).host).not.toBe("evil.attacker.example");
+  });
+
+  it("does NOT trust a Host header with a non-numeric 'port' on a *.vercel.app host either (same bypass, different allowlist branch)", async () => {
+    mockHost("my-preview.vercel.app:@evil.attacker.example");
+    const result = await siteUrl();
+    expect(result).not.toContain("evil.attacker.example");
+  });
+
+  it("still trusts a real numeric port on the real production domain (no false-positive narrowing)", async () => {
+    mockHost("tenderready.app:8443");
+    expect(await siteUrl()).toBe("https://tenderready.app:8443");
+  });
 });
