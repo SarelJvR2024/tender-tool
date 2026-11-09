@@ -14,12 +14,53 @@
 // the very next day's run no longer matches, and nothing in the logs would
 // ever show why.
 import { describe, expect, it, vi } from "vitest";
-import { lifecycleRecipients, unsubscribeUrlFor } from "./send-onboarding-nudges.ts";
+import { lifecycleRecipients, unsubscribeUrlFor, allCompanies } from "./send-onboarding-nudges.ts";
+import { POSTGREST_PAGE_SIZE } from "../lib/supabasePaging.ts";
 
 function mockSupabase(rpcResponses: Record<string, { data: unknown; error: unknown }>) {
   const rpc = vi.fn(async (name: string) => rpcResponses[name] ?? { data: null, error: null });
   return { rpc } as unknown as Parameters<typeof lifecycleRecipients>[0];
 }
+
+/** A `.from("companies").select(...).eq(...).range(from, to)` chain whose
+ * terminal `.range()` call resolves with the page of `allRows` it asks for -
+ * real pagination behaviour, not a single canned response, so a test using
+ * this actually exercises whether a caller ranges through every page or
+ * silently stops at the first one. */
+function mockCompaniesTable(allRows: Record<string, unknown>[]) {
+  const range = vi.fn(async (from: number, to: number) => ({ data: allRows.slice(from, to + 1), error: null }));
+  const eq = vi.fn(() => ({ range }));
+  const select = vi.fn(() => ({ eq }));
+  const from = vi.fn(() => ({ select }));
+  return { client: { from } as unknown as Parameters<typeof allCompanies>[0], range };
+}
+
+describe("allCompanies", () => {
+  it("pages through .range() until every row is read, not just the first PostgREST page", async () => {
+    // Real incident this guards against (Finding, intake rotation 2026-11-09):
+    // runVaultKickstart()/runFirstTender() both used to read `companies` with
+    // a plain, unranged `.select()` - past PostgREST's 1000-row cap
+    // (lib/supabasePaging.ts), every company created after the 1000th
+    // silently never appeared in either candidate list again, with no error
+    // and no retry.
+    const rows = Array.from({ length: POSTGREST_PAGE_SIZE + 5 }, (_, i) => ({ id: `c${i}` }));
+    const { client, range } = mockCompaniesTable(rows);
+    const { rows: result, error } = await allCompanies(client, "id");
+    expect(error).toBeNull();
+    expect(result).toHaveLength(POSTGREST_PAGE_SIZE + 5);
+    expect(result[0]).toEqual({ id: "c0" });
+    expect(result[POSTGREST_PAGE_SIZE + 4]).toEqual({ id: `c${POSTGREST_PAGE_SIZE + 4}` });
+    expect(range).toHaveBeenCalledTimes(2); // one full 1000-row page, then the 5-row remainder
+  });
+
+  it("stops after a short page and never claims more rows than actually exist", async () => {
+    const rows = [{ id: "c0" }, { id: "c1" }];
+    const { client } = mockCompaniesTable(rows);
+    const { rows: result, error } = await allCompanies(client, "id");
+    expect(error).toBeNull();
+    expect(result).toEqual(rows);
+  });
+});
 
 describe("lifecycleRecipients", () => {
   it("logs the real RPC error instead of discarding it silently", async () => {

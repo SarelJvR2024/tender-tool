@@ -48,6 +48,33 @@ type SupabaseService = SupabaseClient;
 // usage (every company's own tender-pursuit history, not one company's).
 const MAX_TENDER_PACK_ROWS = 20_000;
 
+// `companies` is the same shape (every company on the platform, not one
+// company's own slice) - the identical PostgREST 1000-row cap this file's
+// own `tender_packs` comment above already documents and fixes, but it
+// still applied to BOTH of this file's own direct `companies` reads
+// (runVaultKickstart()/runFirstTender() below): plain, unranged `.select()`
+// calls, same risk the sibling fix (commit 4318dc3, "2 more unranged
+// .select() calls on tender_packs") targeted only `tender_packs` for, never
+// `companies` itself. Past 1000 real (is_test_company = false) companies,
+// every company created after the 1000th silently never appears in either
+// candidate list again - not a transient miss, a permanent one, since
+// there's no retry: the company just ages past this script's own grace-
+// period window with no nudge ever sent. Found and fixed this pass
+// (intake rotation, 2026-11-09).
+const MAX_COMPANY_ROWS = 20_000;
+
+/** Paginated `companies` read, real (non-test) companies only - shared by runVaultKickstart()/runFirstTender() below so neither can regress back to a plain, unranged `.select()`. */
+export async function allCompanies<T extends Record<string, unknown>>(supabase: SupabaseService, columns: string): Promise<{ rows: T[]; error: string | null }> {
+  return fetchAllRows<T>(
+    (from, to) =>
+      supabase.from("companies").select(columns).eq("is_test_company", false).range(from, to) as unknown as PromiseLike<{
+        data: T[] | null;
+        error: { message: string } | null;
+      }>,
+    MAX_COMPANY_ROWS,
+  );
+}
+
 async function allTenderPackCompanyIds(supabase: SupabaseService): Promise<{ companyIds: string[]; error: string | null }> {
   const { rows, error } = await fetchAllRows<{ company_id: string }>(
     (from, to) => supabase.from("tender_packs").select("company_id").range(from, to),
@@ -114,9 +141,9 @@ async function sendToRecipients(
   return sent;
 }
 
-async function runVaultKickstart(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
+export async function runVaultKickstart(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
   const columns = ["id", "legal_name", "created_at", ...Object.values(VAULT_DOCUMENTS).map((d) => d.column)].join(", ");
-  const { data, error } = await supabase.from("companies").select(columns).eq("is_test_company", false);
+  const { rows: data, error } = await allCompanies<Record<string, unknown>>(supabase, columns);
   if (error) {
     console.error("nudge-vault-kickstart: could not read companies", error);
     return { sent: 0, candidates: 0 };
@@ -138,9 +165,9 @@ async function runVaultKickstart(supabase: SupabaseService, appUrl: string): Pro
   return { sent, candidates: candidates.length };
 }
 
-async function runFirstTender(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
-  const [{ data: companyRows, error: companyError }, { companyIds: packCompanyIds, error: packError }] = await Promise.all([
-    supabase.from("companies").select("id, legal_name, created_at").eq("is_test_company", false),
+export async function runFirstTender(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
+  const [{ rows: companyRows, error: companyError }, { companyIds: packCompanyIds, error: packError }] = await Promise.all([
+    allCompanies<Record<string, unknown>>(supabase, "id, legal_name, created_at"),
     allTenderPackCompanyIds(supabase),
   ]);
   if (companyError || packError) {

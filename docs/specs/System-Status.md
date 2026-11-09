@@ -15058,6 +15058,52 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 255, `send-onboarding-nudges.ts`'s own `runVaultKickstart()`/`runFirstTender()` each read `companies` with a plain, unranged `.select()` - the identical PostgREST 1000-row cap this very file's own `tender_packs` comment already documents and was fixed for, just never applied to its second table - past the 1000th real company, every later signup silently and permanently never gets an onboarding nudge
+
+Oriented from `d6a1e47` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: intake. `lib/onboardingNudges.ts` (lowest mention count among the candidate files) read
+in full first - already well-tested pure logic, nothing new. Its one real caller,
+`scripts/send-onboarding-nudges.ts`, read next with this session's own immediately-preceding
+context in mind: both tracks had just spent several commits in a row (Finding 253 and 3 "cont'd"
+fixes) on the exact same bug class - an internal helper reading a Supabase table without
+`.range()`, silently truncated past PostgREST's 1000-row cap. This file's own `allTenderPackCompanyIds()`
+already carries a detailed comment on this exact risk (added by an earlier pass, commit `4318dc3`,
+"2 more unranged .select() calls on tender_packs") - but that fix targeted `tender_packs` only, per
+its own commit title, and the two functions sitting right next to that comment,
+`runVaultKickstart()`/`runFirstTender()`, each still had their OWN separate plain `.select()`
+against `companies` itself, never touched. Confirmed both are genuinely unranged by reading the
+code directly (no `.range()` anywhere in either query) - past 1000 real (`is_test_company = false`)
+companies, `vaultKickstartCandidates()`/`firstTenderCandidates()` would simply never see any company
+this script's own truncated read dropped, and since neither of those has any retry state of its own
+(a 3-day grace-period age-out, not a queued job), a company that falls outside the returned 1000 ages
+straight past its nudge window with no error and no second chance - the identical silent, permanent
+failure shape the file's own `tender_packs` comment already names for the sibling table.
+
+Fix: extracted a new shared `allCompanies<T>(supabase, columns)` helper (same naming/shape as the
+existing `allTenderPackCompanyIds()`), wrapping the already-correct `fetchAllRows()`/`.range()`
+pattern this file uses for `tender_packs`, capped at a new `MAX_COMPANY_ROWS = 20_000`. Both
+functions now call this one helper instead of each keeping its own ad hoc unranged read.
+
+Verified red-then-green: added 2 cases to `send-onboarding-nudges.spec.ts` - a real multi-page
+mock (`.range()` resolves with the actual slice asked for, not one canned response) confirming
+`allCompanies()` pages through every row rather than stopping at the first 1000, and a short-page
+case confirming it never over-claims. **Red:** reverted `send-onboarding-nudges.ts` only, re-ran -
+`2 failed | 5 passed`, exactly the new cases (`allCompanies is not a function`), the 5 pre-existing
+cases untouched. **Green:** reapplied, re-ran - `7/7 pass`. `npx tsc --noEmit` clean project-wide
+(only the pre-existing, unrelated `date-fns`/`react-day-picker` gap). Broader regression:
+`npx vitest run scripts/` - all 7 script spec files, 46/46 pass.
+
+Not escalated to a PR: small, safe, pure-TS fix reusing an already-established pagination helper
+exactly as this file's own sibling function already does - no RLS, no migration, no money path, no
+worker-image change. Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 244, `looksLikeExistingProject()` (CV-review page's "probably already on file" pre-tick heuristic) false-matched two genuinely unrelated projects whenever squashing ran two adjacent, unrelated tokens in the EXISTING line together into a digit run that coincidentally contained the NEW project's own contract number - a different root cause from the bare-year false positive an earlier pass already closed in this same function
 
 Oriented from `a1cddfb` (sibling track's own most recent docs commit, confirmed via `git fetch
