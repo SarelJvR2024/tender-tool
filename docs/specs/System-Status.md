@@ -15423,6 +15423,50 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 266, `send-operational-alerts.ts`'s `runClarificationWindow()` read `tender_tasks` with a plain, unranged `.select()` - the identical PostgREST 1000-row cap this very file's own two sibling stages (print cutoff, briefing countdown) were already paginated for, just never applied to this third stage - past the cap, a clarification-window reminder for any task sorting past row 1000 would silently and permanently never fire
+
+Oriented from `7c77674` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: compliance/reminders. Swept the smaller pure-logic files first (`clarificationWindowReminders.ts`,
+`complianceExpiryReminders.ts`, `companyExpiryFields.ts`, `briefingReminders.ts`, `printCutoffReminders.ts`)
+- each already correctly scoped and tested, including confirming `complianceExpiryReminders.ts` is
+deliberately dead code (superseded by `send-compliance-digest.ts` on 2026-10-27, left in place on
+purpose per its own sibling script's header comment) and that the "exclude already-decided pipeline
+stages" bug class across this whole reminder family is already closed everywhere. Moved to the real
+caller, `scripts/send-operational-alerts.ts`: its two other stages, `runPrintCutoff()`/
+`runBriefingReminders()`, each carry an explicit comment on why their own shared-table reads under
+the SERVICE ROLE key are paginated via `fetchAllRows()` - PostgREST's 1000-row cap, summed across
+every company at once. The third stage sitting right below them, `runClarificationWindow()`, read
+`tender_tasks` - the identical shape - with a plain `.select()` and no pagination at all. Confirmed
+by reading the code directly: no `.range()` anywhere in that query. `tender_tasks` rows are never
+deleted (status just flips to 'done'), so this subset only grows, and `clarificationWindowCandidates()`
+fires on an EXACT day match (10 or 2 days left) with a one-time dedupe claim - a task sorting past
+row 1000 on any given run doesn't just miss a day, it misses its one qualifying day permanently.
+
+Fix: wrapped the `tender_tasks` read in `fetchAllRows()`/`.range()`, same pattern and cap as this
+file's own two sibling stages immediately above it.
+
+Verified red-then-green, with an extra step: the first version of the new regression test (a
+multi-page mock, `--dry-run` to avoid 1000+ real network calls to the sandbox Resend API this spec
+file's other tests already show failing with a real `daily_quota_exceeded` 429 in this environment)
+passed even against the UNMODIFIED pre-fix code - traced to the shared `makeBuilder()` test mock's
+own plain-await path returning the WHOLE array handed to it, unlike real PostgREST's own 1000-row
+default cap, so the mock was silently more generous than production and couldn't have caught this
+bug class at all. Fixed the mock first (a direct await now caps at `POSTGREST_PAGE_SIZE`, matching
+the real server), confirmed THAT alone reproduces red against the real pre-fix code (`1 failed | 6
+passed`, exactly the new case), then reapplied the real fix - `7/7 pass`. `npx tsc --noEmit` clean
+project-wide. Broader regression: `npx vitest run scripts/` - all 7 script spec files, 47/47 pass.
+
+Not escalated to a PR: small, safe, pure-TS fix reusing an already-established pagination pattern
+this exact file already applies correctly twice over - no RLS, no migration, no money path, no
+worker-image change. Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 255, `send-onboarding-nudges.ts`'s own `runVaultKickstart()`/`runFirstTender()` each read `companies` with a plain, unranged `.select()` - the identical PostgREST 1000-row cap this very file's own `tender_packs` comment already documents and was fixed for, just never applied to its second table - past the 1000th real company, every later signup silently and permanently never gets an onboarding nudge
 
 Oriented from `d6a1e47` (sibling track's own most recent docs commit, confirmed via `git fetch

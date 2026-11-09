@@ -258,13 +258,28 @@ export async function runBriefingReminders(supabase: SupabaseService, appUrl: st
 }
 
 export async function runClarificationWindow(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
-  let query = supabase
-    .from("tender_tasks")
-    .select("id, company_id, tender_id, description, due_date, status, kind, tenders(id, contract_no, description, buyer)")
-    .eq("kind", "clarification")
-    .not("due_date", "is", null);
-  if (opts.scopeCompanyId) query = query.eq("company_id", opts.scopeCompanyId);
-  const { data: taskRows, error } = await query;
+  // Paginated via fetchAllRows(), not a plain `.select()` - same reasoning
+  // as runPrintCutoff()/runBriefingReminders() above: tender_tasks is read
+  // here under the SERVICE ROLE key, summed across EVERY company's own
+  // clarification tasks at once (unless --company-id scopes a single run),
+  // and a done task's row is never deleted (status just flips to 'done'),
+  // so this subset only grows. Past PostgREST's 1000-row db-max-rows cap
+  // this would silently stop sending the 10-day/48-hour clarification-
+  // window reminder for whichever tasks sort past row 1000 - this stage was
+  // the one of this file's own 3 that never got the fix its two siblings
+  // already carry (found this pass, compliance/reminders rotation).
+  const { rows: taskRows, error } = await fetchAllRows<Record<string, unknown>>(
+    (from, to) => {
+      let query = supabase
+        .from("tender_tasks")
+        .select("id, company_id, tender_id, description, due_date, status, kind, tenders(id, contract_no, description, buyer)")
+        .eq("kind", "clarification")
+        .not("due_date", "is", null);
+      if (opts.scopeCompanyId) query = query.eq("company_id", opts.scopeCompanyId);
+      return query.range(from, to);
+    },
+    20_000,
+  );
   if (error) {
     console.error("clarification-window: could not read tender_tasks", error);
     return { sent: 0, candidates: 0 };
