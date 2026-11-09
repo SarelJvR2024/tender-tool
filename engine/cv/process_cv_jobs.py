@@ -115,6 +115,32 @@ def supabase_request(url, service_key, method, path, body=None):
         raise RuntimeError(f"{method} {path} failed: {e.code} {e.read().decode()}")
 
 
+PAGE = 1000  # PostgREST's own db-max-rows cap on a response with no explicit
+             # limit/offset (same cap already fixed in company_profiles.py's
+             # RestClient.select(), and in process_general_jobs.py's
+             # Supabase.select()/process_pack_jobs.py's SupabaseRest.select(),
+             # Finding 252) - this file builds its own separate
+             # supabase_request() helper (a function, not one of those
+             # classes), and fail_stale_jobs()'s own stuck-job read and
+             # poll_once()'s own job-queue read both called it directly with
+             # no limit/offset at all, so either table growing past 1000
+             # matching rows would silently truncate here too.
+
+
+def supabase_request_all(url, service_key, path):
+    """GET every page of `path` past PostgREST's own db-max-rows cap - same
+    limit=&offset= loop as company_profiles.RestClient.select() / the
+    sibling bridges' Supabase.select()/SupabaseRest.select() (Finding 252)."""
+    sep = "&" if "?" in path else "?"
+    out, offset = [], 0
+    while True:
+        page = supabase_request(url, service_key, "GET", f"{path}{sep}limit={PAGE}&offset={offset}")
+        out += page
+        if len(page) < PAGE:
+            return out
+        offset += PAGE
+
+
 def storage_upload(url, service_key, bucket, object_path, local_path, content_type):
     with open(local_path, "rb") as f:
         data = f.read()
@@ -322,7 +348,7 @@ def fail_stale_jobs(url, key, now=None):
     import datetime
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
-    stuck = supabase_request(url, key, "GET", "generated_cvs?status=eq.generating&select=*")
+    stuck = supabase_request_all(url, key, "generated_cvs?status=eq.generating&select=*")
     for job in stuck:
         claimed = job.get("claimed_at")
         if not claimed:
@@ -427,7 +453,7 @@ def _now_iso():
 def poll_once(url, key, out_dir, quiet_when_empty=False):
     """One pass over the queue. Returns how many jobs this call handled."""
     fail_stale_jobs(url, key)
-    jobs = supabase_request(url, key, "GET", "generated_cvs?status=eq.requested&select=*&order=requested_at.asc")
+    jobs = supabase_request_all(url, key, "generated_cvs?status=eq.requested&select=*&order=requested_at.asc")
     if not jobs and not quiet_when_empty:
         print("No pending generated_cvs jobs.")
     handled = 0

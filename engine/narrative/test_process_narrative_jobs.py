@@ -3,6 +3,7 @@ import datetime
 import io
 import os
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -470,6 +471,36 @@ def test_poll_once_still_propagates_setup_error():
     check("SetupError still propagates out of poll_once(), not swallowed", raised is True)
 
 
+def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
+    print("supabase_request_all(): a table with more matching rows than PostgREST's own "
+          "db-max-rows cap (same bug class as Finding 252 - process_general_jobs.py's "
+          "Supabase.select()/process_pack_jobs.py's SupabaseRest.select() - never checked "
+          "before for THIS file's own separate supabase_request() helper, which fail_stale_jobs() "
+          "and poll_once()'s own job-queue read both call with no limit/offset at all).")
+    all_rows = [{"id": i} for i in range(2500)]
+
+    def fake_req(url, key, method, path, body=None):
+        check_method = method == "GET"
+        qs = urllib.parse.parse_qs(path.split("?", 1)[1] if "?" in path else "")
+        requested_limit = int(qs["limit"][0]) if "limit" in qs else 10**9
+        offset = int(qs["offset"][0]) if "offset" in qs else 0
+        # Faithful PostgREST stand-in: caps at its own db-max-rows (1000)
+        # regardless of what (or whether) a limit was asked for - exactly
+        # what let the pre-fix, no-limit-at-all call silently truncate.
+        return all_rows[offset: offset + min(requested_limit, 1000)] if check_method else []
+
+    original = pnj.supabase_request
+    pnj.supabase_request = fake_req
+    try:
+        got = pnj.supabase_request_all("https://example.test", "k", "narrative_documents?status=eq.requested&select=*")
+    finally:
+        pnj.supabase_request = original
+    check("supabase_request_all() returns EVERY matching row, not just PostgREST's own first 1000-row page",
+          len(got) == len(all_rows), f"got {len(got)} of {len(all_rows)}")
+    check("rows come back in order, nothing dropped or duplicated across pages",
+          [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
+
+
 def main():
     test_load_key_people_computes_years_experience_from_graduation_date()
     test_load_key_people_handles_missing_graduation_date()
@@ -486,6 +517,7 @@ def main():
     test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_poll_once_still_propagates_setup_error()
+    test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
