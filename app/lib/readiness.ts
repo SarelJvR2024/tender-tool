@@ -25,25 +25,23 @@ export type ReadinessInput = {
   taxPin: string | null;
   taxPinExpiry: string | null;
   /**
-   * Standing review, 2026-11-09 (Finding 240's own sibling, same pass):
-   * optional, defaults to null for the one caller that can't supply it yet
-   * (lib/customerRowData.ts's admin customer list - its RPC,
-   * platform_admin_company_readiness_data() in migration 0098, doesn't
-   * return this column; a schema change is left for a separate pass per
-   * this track's own guardrail against direct-pushing migrations). Omitting
-   * it only ever makes this criterion as strict as it already was, never
-   * stricter - see hasPin below.
+   * Standing review, 2026-11-09 (Finding 240's own sibling, same pass).
+   * Optional (not every caller tracks a document upload the same way), but
+   * as of migration 0125 every real caller - including
+   * lib/customerRowData.ts's admin customer list, via
+   * platform_admin_company_readiness_data(), which used to be the one
+   * caller that couldn't supply this column at all - does supply it.
    */
   taxPinDocumentPath?: string | null;
   /** B-BBEE, valid and not expired (15) */
   beeLevel: number | null;
   beeProofExpiry: string | null;
-  /** Same optional/null-default note as taxPinDocumentPath above. */
+  /** Same optional-but-now-universally-supplied note as taxPinDocumentPath above. */
   beeProofDocumentPath?: string | null;
   /** CIDB (15) */
   cidbGrading: string | null;
   cidbExpiry: string | null;
-  /** Same optional/null-default note as taxPinDocumentPath above. */
+  /** Same optional-but-now-universally-supplied note as taxPinDocumentPath above. */
   cidbDocumentPath?: string | null;
   /** Bank confirmation letter (5) */
   bankConfirmationValidUntil: string | null;
