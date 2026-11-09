@@ -509,6 +509,94 @@ def test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id():
               alerts[0][1]["context"].get("company_id") == "c-req", alerts[0])
 
 
+class TableAwareFakeClient:
+    """A per-table in-memory store - unlike FakeClient above, which matches
+    rows against filters regardless of table (fine for its own tests, which
+    are careful never to let two tables' rows collide on a shared field
+    name). This test needs tender_documents and tender_requirements rows
+    that legitimately share tender_id/company_id, so each table gets its own
+    list. insert() accepts either one row (the pre-fix per-position call
+    shape) or a list of rows (the fix's own single bulk call) and can be
+    told to fail whenever a row with a given position_code is present in
+    the call - modelling one bad/duplicate SETUP-sheet position (a real
+    thing an edited workbook can produce) or an equally real one-request-out-
+    of-several transient network blip, without caring which."""
+
+    def __init__(self):
+        self.tables = {}
+        self.fail_on_code = None
+        self.download_calls = 0
+
+    def _rows(self, table):
+        return self.tables.setdefault(table, [])
+
+    def select(self, table, filters=None, order=None):
+        def match(r, k, v):
+            return r.get(k) in v if isinstance(v, (list, tuple)) else r.get(k) == v
+        return [dict(r) for r in self._rows(table) if all(match(r, k, v) for k, v in (filters or {}).items())]
+
+    def insert(self, table, row):
+        batch = row if isinstance(row, list) else [row]
+        if self.fail_on_code and any(r.get("position_code") == self.fail_on_code for r in batch):
+            raise RuntimeError(f"simulated failure inserting position {self.fail_on_code}")
+        self._rows(table).extend(dict(r) for r in batch)
+        return batch
+
+    def download(self, bucket, path, local):
+        self.download_calls += 1  # proves cycle 2 actually re-read the workbook, not silently skipped it
+
+
+def test_sync_tender_requirements_mid_batch_insert_failure_does_not_strand_a_tender_on_a_partial_position_list():
+    print("Finding 230: sync_tender_requirements() used to call client.insert() once PER position in "
+          "a plain for-loop, no shared transaction - a failure partway through one workbook's own "
+          "positions (a bad/duplicate SETUP-sheet value, or a transient network blip on any one of "
+          "several requests) left the EARLIER positions already committed. The next poll cycle's own "
+          "'already have positions for this tender?' check is existence-based, not completeness-"
+          "based, so it then skipped this workbook SILENTLY, forever - no further alert, no retry, "
+          "permanently stuck on a partial list. Confirmed live against the real schema's own unique "
+          "constraint (tender_requirements_tender_position_company_key) in a scratch Postgres: 3 "
+          "separate per-row INSERTs with a bad 2nd row left 1 row committed; the same 3 rows sent as "
+          "ONE bulk INSERT left 0 rows committed - Postgres makes one statement atomic.")
+
+    docs = [{"id": "doc-230", "tender_id": "t-230", "company_id": "c-230", "storage_path": "x/technical.xlsm",
+             "doc_type": "technical_xlsm", "downloaded_at": "2026-11-01T00:00:00Z"}]
+    primary = [{"code": "PL", "description": "Project Leader", "managerial": "Y"},
+               {"code": "DS1", "description": "Design Specialist 1", "managerial": "N"},
+               {"code": "DS2", "description": "Design Specialist 2", "managerial": "N"}]
+
+    client = TableAwareFakeClient()
+    for d in docs:
+        client.insert("tender_documents", d)
+
+    real_workbook, real_reader, real_record = ppj.Workbook, ppj.read_required_positions, ppj.system_alerts.record
+    alerts = []
+    ppj.Workbook = lambda path: "fake-workbook"
+    ppj.read_required_positions = lambda wb: (primary, {})
+    ppj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        # Cycle 1: DS1's own insert fails this one time (the transient blip).
+        client.fail_on_code = "DS1"
+        ppj.sync_tender_requirements(client, tempfile.mkdtemp())
+        check("cycle 1 recorded its own alert for the failed workbook", len(alerts) == 1, alerts)
+        after_cycle_1 = sorted(r["position_code"] for r in client.select("tender_requirements", {"tender_id": "t-230"}))
+        print(f"  (after cycle 1, with the fix: {after_cycle_1 or 'nothing'} committed - "
+              f"pre-fix this would show ['PL'], the partial per-row result)")
+
+        # Cycle 2: the next poll, well after the blip has cleared.
+        client.fail_on_code = None
+        downloads_before_cycle_2 = client.download_calls
+        ppj.sync_tender_requirements(client, tempfile.mkdtemp())
+        after_cycle_2 = sorted(r["position_code"] for r in client.select("tender_requirements", {"tender_id": "t-230"}))
+        check("cycle 2 actually retried the workbook, rather than the 'have' check silently "
+              "treating cycle 1's partial result as already-done forever",
+              client.download_calls > downloads_before_cycle_2, client.download_calls)
+        check("cycle 2 completes the FULL position list once the transient failure has cleared, "
+              "not permanently stuck on whatever partial subset cycle 1 managed to commit",
+              after_cycle_2 == ["DS1", "DS2", "PL"], after_cycle_2)
+    finally:
+        ppj.Workbook, ppj.read_required_positions, ppj.system_alerts.record = real_workbook, real_reader, real_record
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
@@ -520,6 +608,7 @@ def main():
     test_suggested_person_label_flags_a_real_override_even_when_unresolved()
     test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id()
     test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id()
+    test_sync_tender_requirements_mid_batch_insert_failure_does_not_strand_a_tender_on_a_partial_position_list()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

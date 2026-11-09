@@ -107,7 +107,13 @@ class Store:
         return rows
 
     def insert(self, table, row):
+        # Finding 230: sync_tender_requirements() now sends one whole
+        # workbook's positions as a SINGLE bulk insert (a list of rows), not
+        # one client.insert() call per position - so this fake, like the
+        # real Supabase REST client, accepts either shape.
         self.writes.append(("insert", table, row))
+        if isinstance(row, list):
+            return [self.add(table, **r) for r in row]
         return self.add(table, **row)
 
     def update(self, table, filters, body):

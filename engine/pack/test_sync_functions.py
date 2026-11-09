@@ -77,9 +77,14 @@ class FakeClient:
         return [dict(r) for r in self.tables.get(table, []) if self._match(r, filters)]
 
     def insert(self, table, row):
-        row = dict(row)
-        self.tables.setdefault(table, []).append(row)
-        return dict(row)
+        # Finding 230: sync_tender_requirements() now sends one whole
+        # workbook's positions as a SINGLE bulk insert (a list of rows),
+        # not one client.insert() call per position - so this fake, like the
+        # real Supabase REST client, accepts either shape.
+        batch = row if isinstance(row, list) else [row]
+        batch = [dict(r) for r in batch]
+        self.tables.setdefault(table, []).extend(batch)
+        return batch[0] if len(batch) == 1 else batch
 
     def update(self, table, filters, body):
         out = []

@@ -97,11 +97,19 @@ class PsqlClient:
         return json.loads(self.sql(q))
 
     def insert(self, table, row):
-        cols = ", ".join(row)
+        # Finding 230: sync_tender_requirements() now sends one whole
+        # workbook's positions as a SINGLE bulk insert (a list of rows), not
+        # one client.insert() call per position - so this real-SQL stand-in,
+        # like the real Supabase REST client, accepts either shape, and
+        # (matching PostgREST's own bulk-insert behaviour) inserts a batch
+        # as one atomic statement via json_populate_recordset.
+        batch = row if isinstance(row, list) else [row]
+        cols = ", ".join(batch[0])
         q = (f"with i as (insert into {table} ({cols}) select {cols} from "
-             f"json_populate_record(null::{table}, {lit(json.dumps(row))}::json) returning *) "
-             f"select row_to_json(i) from i")
-        return json.loads(self.sql(q))
+             f"json_populate_recordset(null::{table}, {lit(json.dumps(batch))}::json) returning *) "
+             f"select coalesce(json_agg(i), '[]') from i")
+        out = json.loads(self.sql(q))
+        return out[0] if not isinstance(row, list) and out else out
 
     def download(self, bucket, path, dest):
         src = os.path.join(self.storage, bucket, path)

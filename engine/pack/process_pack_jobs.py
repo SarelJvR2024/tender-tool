@@ -904,11 +904,33 @@ def sync_tender_requirements(client, work_root):
             client.download("tender-documents", d["storage_path"], local)
             primary, alternates = read_required_positions(Workbook(local))
             rows = [(p, False) for p in primary] + [(a, True) for alts in alternates.values() for a in alts[:1]]
-            for p, alt in rows:
-                client.insert("tender_requirements", {
+            # Finding 230: this used to be one client.insert() call PER
+            # position, in a plain for-loop - each call is its own PostgREST
+            # request/statement, not one shared transaction. A failure
+            # partway through one workbook's positions (a transient network
+            # blip, or a bad/duplicate value among several read off the same
+            # SETUP sheet) left the EARLIER positions already committed. The
+            # "already have positions for this tender?" check above (`have`,
+            # read once per poll) is existence-based, not completeness-based
+            # - ANY row for this (tender_id, company_id) key counts as done
+            # - so the next poll cycle then skipped this workbook SILENTLY,
+            # forever: no further alert, no retry, permanently stuck with
+            # only SOME of the real SETUP sheet's positions. Confirmed live
+            # against the real schema's own unique constraint
+            # (tender_requirements_tender_position_company_key): a bad 2nd
+            # insert in a 3-insert loop left the 1st committed; the
+            # identical 3 rows sent as ONE bulk insert instead left zero
+            # rows committed - Postgres makes one INSERT statement atomic.
+            # Sending the whole batch in one client.insert() call (already
+            # how this same file's own upsert() calls send field_provenance
+            # rows) means a failure here always leaves zero rows for this
+            # key, so the next poll cycle retries the whole workbook
+            # cleanly instead of being stuck on a partial list forever.
+            if rows:
+                client.insert("tender_requirements", [{
                     "tender_id": d["tender_id"], "company_id": d.get("company_id"), "position_code": p["code"],
                     "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
-                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt})
+                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
             written[key] = [p["code"] for p, alt in rows if not alt]
             print(f"[requirements] tender {d['tender_id']} ({'company ' + d['company_id'] if d.get('company_id') else 'shared copy'}): "
                   f"{len(primary)} position(s) from SETUP ({', '.join(written[key])}), {len(rows) - len(primary)} ALT")
