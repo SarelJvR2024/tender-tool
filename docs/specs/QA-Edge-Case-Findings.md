@@ -14487,3 +14487,96 @@ PR - same precedent, same risk class, applied consistently.
 **Regression:** `engine/general/process_general_jobs.py` (`_within()`'s own real-closing-date
 conversion) and its own test file (`engine/general/test_process_general_jobs.py`) - no exported
 signature change, no other call site affected.
+
+### Finding 292 (CONFIRMED AND FIXED ON `main` - a third, independent instance of the same
+naive-UTC-anchor-day bug class, found by a dedicated engine/-wide sweep for `[:10]` slices AND
+unwrapped `datetime.now()`/`date.today()` calls after pass `ccc`'s Finding 290/291 fix: this time
+not a `[:10]` string slice at all, but the bare-`date.today()` half of the same bug class, in
+`discovery/gov_sources.py`'s own `read_source("etenders_ocds")`)
+
+**Why checked.** The task brief's own fresh direction: verify the ENTIRE `engine/` tree (not just
+the files pass `ccc` already checked) for this exact anti-pattern, checking both `[:10]`/
+`fromisoformat()` truncations AND bare `datetime.now()`/`date.today()` calls not wrapped in a
+SAST-aware conversion. Ran `grep -rn "\[:10\]" engine --include="*.py"` and `grep -rn
+"datetime\.now(\|date\.today(" engine --include="*.py"` across every `engine/*/*.py` file (both
+commands and full output in `System-Status.md`'s own pass entry below), then checked every hit
+individually against whether it actually needs SAST-awareness, per the brief's own explicit
+"don't over-flag a legitimate log timestamp" instruction.
+
+**What the sweep found.** Every `[:10]` slice already on `main` is either already fixed (Findings
+290/291's own sites), a non-date use (a hash-suffix truncation in `dbsa_procurement.py`/
+`vaal_central_water.py`, a `[:10]`-items-list limiter in `send_digest_emails.py`), or a slice on a
+value that is genuinely already a plain `YYYY-MM-DD` string with no time-of-day component to lose
+(e.g. `intake/classify_tender.py`'s workbook-vs-DB closing-date comparison). Of the bare
+`datetime.now()`/`date.today()` hits, most are genuinely harmless: report `"generated_at"`/
+`"generated"`/`"confirmed_date"` metadata stamps in CLI/admin-only tooling
+(`pack_generator/suggest_pack.py`, `fingerprint.py`, `discovery/award_outcomes.py`,
+`etenders_national.py`'s own `main()` `--out` report, `pack/harness_pack.py` - a synthetic-company
+test harness), a PDF `/CreationDate` metadata field (`pack/pdf_merge.py`), and
+`narrative/process_narrative_jobs.py`'s `years_experience = (date.today() - graduated).days //
+365` - a years-level floor division where a one-day anchor error can never flip the result (the
+exact opposite of a day-count display, where one day IS the whole unit). None of these need the
+treatment.
+
+**One real instance found: `discovery/gov_sources.py:219`, `read_source("etenders_ocds")`.** This
+function builds its own OCDS API fetch window (`date_from`/`date_to`, a 14-day lookback ending
+"today") from a bare `today = datetime.date.today()` - even though this exact same "what calendar
+day is it for this OCDS fetch" computation is done CORRECTLY, SAST-aware, by both of this
+function's own real callers for the IDENTICAL purpose: `watch_new_tenders.py`'s own `today =
+datetime.datetime.now(sh.SAST).date()` a few lines before it calls into
+`gov_sources.releases_for_watch()`/`fetch_all()` (which includes `etenders_ocds` unconditionally -
+`fetch_all()`'s own `by_source["etenders_ocds"] = read_source("etenders_ocds", ...)` line), and
+`daily_digest.py`'s own `datetime.datetime.now(watch_deadlines.SAST).date()` for the same purpose
+one layer up. `gov_sources.py` already imports `source_http as sh` at module scope (used
+throughout the rest of the file) - this was the one spot that didn't use it.
+
+**Confirmed live**, not reasoning-only, against the real, unmodified function (full script and
+output also saved at the time in the session's own scratchpad, not committed): monkeypatched
+`etenders_national.fetch_releases` to capture its arguments and froze the simulated instant at
+2026-11-09 22:30 UTC (00:30 SAST on 2026-11-10, squarely inside the `00:00-01:59 SAST` danger
+window this whole bug class lives in). `read_source("etenders_ocds")` built `date_to="2026-11-09"`
+- the stale, UTC-anchored day - when the real SAST "today" was already `2026-11-10`. Every OCDS
+release genuinely published so far "today" (true SAST) would be silently excluded from this
+source's own fetch for that run.
+
+**Impact, honestly scoped.** This is the mildest of the four engine-side instances found this
+session (72/290/291/292): (a) `watch_new_tenders.py`'s own scheduled cron run (`daily-discovery.yml`,
+02:45 UTC = 04:45 SAST) never actually lands inside the 00:00-01:59 SAST danger window, so the
+ONE scheduled production run per day is unaffected in practice today; (b) even a run that DOES
+land in the window only loses that one day's worth of `etenders_ocds` releases for that single
+run - the next run's own 14-day lookback (now computed from the correct, later "today") re-covers
+the missed day in full, so this is a transient, self-healing miss, never a permanent loss, and
+`discovery_seen_releases`'s own per-company dedup means nothing is double-reported either. The
+real, live risk is a manual `workflow_dispatch` run (or any ad hoc invocation of
+`watch_new_tenders.py`/`gov_sources.fetch_all()`) triggered inside that narrow UTC window, and the
+fact that this function silently disagreed with its own two callers about what "today" means for
+the exact same purpose, in the exact same run, is a real inconsistency worth fixing on its own
+merits even before counting the narrow production exposure.
+
+**Fix.** Changed `today = datetime.date.today()` to `today = datetime.datetime.now(sh.SAST).date()`,
+matching every sibling caller's own pattern exactly, reusing the module's already-imported `sh`
+(no new import needed).
+
+**Verified before pushing - red then green.** Added
+`test_etenders_ocds_fetch_window_uses_sast_calendar_day_not_naive_utc_today` to
+`discovery/test_gov_sources.py` (a `FixedDateTime` freeze at the same 22:30 UTC / 00:30 SAST
+instant, a monkeypatched `etenders_national.fetch_releases` to capture the real `date_from`/
+`date_to` args `read_source()` passes). `git stash push -- engine/discovery/gov_sources.py` to
+isolate the pre-fix implementation with the new test still in place: **2 failures**, the exact
+predicted ones (`date_to`/`date_from` both one day stale), every other check in the file (139
+total checks) still passing. `git stash pop` to restore the fix: **0 failures, ALL PASSED**. Full
+related suite after restoring: `python3 discovery/test_gov_sources.py` - ALL PASSED; `python3
+discovery/test_etenders_national.py` - ALL PASSED; `python3 discovery/test_watch_tender_updates.py`
+- ALL PASSED; `python3 discovery/test_tender_updates.py` - ALL PASSED (Part 3 skipped, no scratch
+Postgres, as documented).
+
+**Fixed directly on `main` - no PR.** Single-file code change (`discovery/gov_sources.py`) plus
+its own test file - no RLS, no payment/money-transaction surface, no schema, no worker-image
+change, no authz/tenant-isolation angle. This affects which releases a single discovery source
+contributes to one run's own fetch, self-healing on the next run - same risk class as Findings
+290/291, same precedent for a direct push.
+
+**Regression:** `engine/discovery/gov_sources.py` (`read_source("etenders_ocds")`'s own fetch-
+window anchor) and its own test file (`engine/discovery/test_gov_sources.py`) - no exported
+signature change, no other call site affected (`fetch_all()`/`releases_for_watch()` just receive
+the now-correct window transparently).
