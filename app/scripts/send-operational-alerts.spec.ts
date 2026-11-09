@@ -11,16 +11,34 @@
 // (record_operational_alert_sent, not record_deadline_reminder_sent), which
 // is why the 2026-10-30 pass's grep for claim_notification callers never
 // found any of these 4 call sites.
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPrintCutoff, runBriefingReminders, runClarificationWindow, type RunOpts } from "./send-operational-alerts.ts";
 import { POSTGREST_PAGE_SIZE } from "../lib/supabasePaging.ts";
 
 type Call = { table?: string; name?: string; kind: "rpc" | "from" };
 
+// Frozen, unambiguous instant for runBriefingReminders/runClarificationWindow
+// below only (NOT runPrintCutoff, whose own `pack` fixture deliberately
+// anchors to the real ambient clock via `Date.now() + 40h` and must keep
+// seeing the real wall clock) - safely mid-day in both UTC and SAST (SAST =
+// UTC+2), nowhere near either timezone's own midnight. daysFromToday() below
+// used to build its "N days from today" fixture off the real host clock's
+// own local (effectively UTC, no TZ env set) calendar day, while
+// runBriefingReminders()/runClarificationWindow()'s underlying daysUntil()
+// call computes "today" as the real SAST calendar day; those two disagree by
+// exactly one day during the real 00:00-02:00 SAST window, making these
+// tests genuinely flaky at that hour regardless of any code change. Freezing
+// the clock (both the fixture dates below AND the functions-under-test's own
+// ambient `new Date()` call, via each describe block's own
+// beforeEach/afterEach pair) to one instant where UTC-today and SAST-today
+// are the same calendar day makes the day-count unambiguous at any real
+// wall-clock time.
+const FROZEN_NOW = new Date("2026-06-15T10:00:00.000Z");
+
 function daysFromToday(n: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + n);
+  const d = new Date(FROZEN_NOW);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString();
 }
 
@@ -85,6 +103,15 @@ describe("runPrintCutoff", () => {
 });
 
 describe("runBriefingReminders", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const tender = { id: "tender-2", contract_no: "N.007-040-2026/1F", description: "Rehab", briefing_date: daysFromToday(5), briefing_time: "10:00", tender_packs: [{ company_id: "company-1", pipeline_stage: "assessing" }] };
 
   it("never claims record_operational_alert_sent for a company with zero opted-in recipients", async () => {
@@ -114,6 +141,15 @@ describe("runBriefingReminders", () => {
 });
 
 describe("runClarificationWindow", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(FROZEN_NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const task = {
     id: "task-1", company_id: "company-1", tender_id: "tender-3", description: "Submit clarification questions", due_date: daysFromToday(10), status: "open", kind: "clarification",
     tenders: { id: "tender-3", contract_no: "N.007-050-2026/1F", description: "Signage", buyer: "SANRAL" },

@@ -1,10 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tenderTimeline } from "./tenderTimeline";
 
+// Frozen, unambiguous instant - safely mid-day in both UTC and SAST (SAST =
+// UTC+2), nowhere near either timezone's own midnight - not the ambient wall
+// clock. Previously daysFromNow() below built its "N days from today"
+// fixture off the real host clock's own local (effectively UTC, no TZ env
+// set) calendar day, while tenderTimeline()'s underlying daysUntil() call
+// computes "today" as the real SAST calendar day; those two disagree by
+// exactly one day during the real 00:00-02:00 SAST window, making these
+// tests genuinely flaky at that hour regardless of any code change. Freezing
+// the clock (both the fixture dates below AND the function-under-test's own
+// ambient `new Date()` call, via the beforeEach/afterEach pair) to one
+// instant where UTC-today and SAST-today are the same calendar day makes the
+// day-count unambiguous at any real wall-clock time.
+const FROZEN_NOW = new Date("2026-06-15T10:00:00.000Z");
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function daysFromNow(days: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + days);
+  const d = new Date(FROZEN_NOW);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString();
 }
 

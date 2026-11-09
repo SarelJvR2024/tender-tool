@@ -1,11 +1,34 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeBidReadiness, type ReadinessInput } from "./readiness";
+
+// Frozen, unambiguous instant - safely mid-day in both UTC and SAST (SAST =
+// UTC+2), nowhere near either timezone's own midnight - not the ambient wall
+// clock. Previously daysFromToday() below built its "N days from today"
+// fixture off the real host clock's own local (effectively UTC, no TZ env
+// set) calendar day, while computeBidReadiness()'s underlying daysUntil()
+// computes "today" as the real SAST calendar day; those two disagree by
+// exactly one day during the real 00:00-02:00 SAST window, making these
+// tests genuinely flaky at that hour regardless of any code change. Freezing
+// the clock (both the fixture dates below AND the function-under-test's own
+// ambient `new Date()` call, via the beforeEach/afterEach pair) to one
+// instant where UTC-today and SAST-today are the same calendar day makes the
+// day-count unambiguous at any real wall-clock time.
+const FROZEN_NOW = new Date("2026-06-15T10:00:00.000Z");
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /** "N days from today" as a plain YYYY-MM-DD date string - matches how a date column (not a timestamp) is actually stored, and matches daysUntil()'s own midnight-normalized "today" so the day count is exact regardless of the time this test happens to run. */
 function daysFromToday(n: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + n);
+  const d = new Date(FROZEN_NOW);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 

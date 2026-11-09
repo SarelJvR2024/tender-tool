@@ -1,10 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { complianceDigestCandidatesForCompany, complianceDigestIdempotencyKey, COMPLIANCE_DIGEST_THRESHOLDS } from "./complianceDigestCandidates";
 import { SARS_PIN_RISK_NOTE } from "./emailTemplatesTier2";
 
+// Frozen, unambiguous instant - safely mid-day in both UTC and SAST (SAST =
+// UTC+2), nowhere near either timezone's own midnight - and not the ambient
+// wall clock. Previously this file's daysFromNow() built its "N days from
+// today" fixture off the real host clock's own UTC calendar day while
+// complianceDigestCandidatesForCompany()'s underlying daysUntil() computes
+// "today" as the real SAST calendar day; those two disagree by exactly one
+// day during the real 00:00-02:00 SAST window on a host with no TZ env set
+// (every CI runner and this sandbox), making these tests genuinely flaky at
+// that hour regardless of any code change. Freezing the clock (fixture
+// construction AND the function-under-test's own ambient `new Date()` call)
+// to one instant where UTC-today and SAST-today are the same calendar day
+// makes the day-count unambiguous at any real wall-clock time.
+const FROZEN_NOW = new Date("2026-06-15T10:00:00.000Z");
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(FROZEN_NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function daysFromNow(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
+  const d = new Date(FROZEN_NOW);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 

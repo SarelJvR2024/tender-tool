@@ -23,21 +23,38 @@ test("daysUntil: an unparsable date is unknown", () => {
   assert.equal(daysUntil("not-a-date"), null);
 });
 
+// These 3 tests used to build "tomorrow"/"today"/"yesterday" off the bare
+// ambient wall clock (`new Date()`, with no `now` passed to daysUntil()
+// either, so it defaulted to the SAME ambient clock a second time) and rely
+// on both calls landing on the same calendar day. That's only true outside
+// the real 00:00-02:00 SAST window: `new Date().toISOString().slice(0, 10)`
+// is a UTC calendar day, while daysUntil()'s own "today" (even when it
+// defaults to `new Date()` too) is the real SAST calendar day - one day
+// ahead of UTC's for those two hours - so these 3 tests were genuinely
+// flaky at exactly that hour, every day, regardless of any code change
+// (confirmed live, 2026-11-10 ~00:17 SAST: all 3 failed on unmodified
+// `main`). Fixed the same way the SAST-window test immediately below this
+// comment already does it: freeze a single, explicit `now` - safely mid-day
+// in both UTC and SAST, nowhere near either timezone's own midnight, so
+// UTC-today and SAST-today are the same calendar day - and pass it to
+// daysUntil() explicitly instead of letting it (and the fixture) each read
+// the ambient clock separately.
+const FROZEN_NOW = new Date("2026-06-15T10:00:00.000Z");
+
 test("daysUntil: a date-only (midnight) value due tomorrow is 1 day left", () => {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  assert.equal(daysUntil(tomorrow.toISOString().slice(0, 10)), 1);
+  const tomorrow = new Date(FROZEN_NOW);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  assert.equal(daysUntil(tomorrow.toISOString().slice(0, 10), FROZEN_NOW), 1);
 });
 
 test("daysUntil: today, whatever today's current time, is 0 days left", () => {
-  const today = new Date();
-  assert.equal(daysUntil(today.toISOString().slice(0, 10)), 0);
+  assert.equal(daysUntil(FROZEN_NOW.toISOString().slice(0, 10), FROZEN_NOW), 0);
 });
 
 test("daysUntil: yesterday is already overdue (-1), not -0 or null", () => {
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  assert.equal(daysUntil(yesterday.toISOString().slice(0, 10)), -1);
+  const yesterday = new Date(FROZEN_NOW);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  assert.equal(daysUntil(yesterday.toISOString().slice(0, 10), FROZEN_NOW), -1);
 });
 
 // SA timezone/date-boundary bug, found this pass: "today" must be the real
