@@ -103,6 +103,26 @@ describe("statusFor", () => {
   it("31+ days is valid", () => {
     expect(statusFor(31)).toBe("valid");
   });
+
+  // Finding 293 (2026-11-09): statusFor()'s own flat 30-day window ignores
+  // each COMPANY_EXPIRY_FIELDS entry's `windowDays` - unlike
+  // notifications.ts's getNotifications(), which reads `windowDays ??
+  // DOCUMENT_WINDOW_DAYS` (60) per field. Locking in the real, confirmed-
+  // live consequence here (not changing it - this file's own header and
+  // EXPIRING_SOON_WINDOW_DAYS comments explain why, and whether it should
+  // ever change is Sarel's call): a document 31-60 days from expiry reads
+  // "Valid" (green, excluded from the "N documents need attention" count)
+  // on this overview while the bell is already showing an amber "renew
+  // soon" notification for the identical document. If a future change
+  // makes statusFor() windowDays-aware, this test should be updated
+  // deliberately, not silently broken.
+  it("disagrees with notifications.ts's own 60-day default window for 31-60 days left - deliberate, not a regression", () => {
+    const bellDefaultWindowDays = 60; // lib/notifications.ts's own DOCUMENT_WINDOW_DAYS
+    for (const daysLeft of [31, 45, 60]) {
+      expect(statusFor(daysLeft)).toBe("valid"); // this overview: nothing to see here
+      expect(daysLeft <= bellDefaultWindowDays).toBe(true); // the bell: already nagging
+    }
+  });
 });
 
 describe("detailFor", () => {

@@ -10,8 +10,31 @@ import type { VaultDocumentKind } from "./vaultDocuments";
  * lib/notifications.ts's own getNotifications(), which deliberately only
  * surfaces what's within its 60-day "renew soon" bell window. Same source
  * tables and the same COMPANY_EXPIRY_FIELDS list, read without a window
- * filter, so this can never disagree with what the bell already says about
- * the same document - just shows more of it.
+ * filter, so it can NEVER disagree with the bell about which documents
+ * exist or their raw daysLeft/expiry values.
+ *
+ * Finding 293 (2026-11-09): this header used to go further and claim status
+ * classification "can never disagree with what the bell already says ...
+ * just shows more of it" - false since this file's own original commit
+ * (confirmed via `git log -p`: the claim and EXPIRING_SOON_WINDOW_DAYS were
+ * introduced in the same commit, so it was never once true). `statusFor()`
+ * below applies its OWN flat 30-day window to every row, regardless of each
+ * COMPANY_EXPIRY_FIELDS entry's own `windowDays` (which the bell DOES read,
+ * via notifications.ts's `windowDays ?? DOCUMENT_WINDOW_DAYS`, and which the
+ * vault's own ComplianceDocumentsSection.tsx also honors via
+ * documentStatus()'s explicit BANK_LETTER_RENEW_SOON_DAYS override). So for
+ * any document 31-60 days from expiry (every COMPANY_EXPIRY_FIELDS entry
+ * except the bank letter, every held_registrations row, every person's
+ * ECSA/SACPCMP) this page's own chip reads "Valid" (green) and that
+ * document is excluded from its own "N documents need attention" count,
+ * while the topbar bell is already showing an amber "renew soon"
+ * notification for the identical document at the identical instant. Live-
+ * confirmed with a real sweep of every COMPANY_EXPIRY_FIELDS entry across
+ * daysLeft 31-60: 180 of 210 combinations disagree. This 30-day window is a
+ * deliberate, narrower-on-purpose choice (see EXPIRING_SOON_WINDOW_DAYS's
+ * own comment below, "per Sarel's own spec") - NOT changed here, since
+ * which number should win is Sarel's call, same as standing items 18/24.
+ * What's fixed here is this comment's own false claim of parity.
  */
 
 export type DocumentExpiryStatus = "expired" | "expiring_soon" | "missing" | "valid";
@@ -39,7 +62,11 @@ export type DocumentExpiryRow = {
 // "Expires in 30 days" per Sarel's own spec - a tighter window than the
 // notification bell's 60-day "renew soon" glance, since this list is meant
 // to answer "what needs attention before my next bid", not "what's worth a
-// heads-up eventually".
+// heads-up eventually". Deliberately flat and NOT per-field (unlike
+// notifications.ts's windowDays-aware withinWindow()/COMPANY_EXPIRY_FIELDS
+// handling, or ComplianceDocumentsSection.tsx's own documentStatus() calls)
+// - see Finding 293 / this file's own header comment for the real, confirmed
+// cross-surface disagreement this flat window causes in the 31-60 day band.
 const EXPIRING_SOON_WINDOW_DAYS = 30;
 
 export function statusFor(daysLeft: number | null): DocumentExpiryStatus {

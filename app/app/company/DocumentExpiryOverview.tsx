@@ -9,12 +9,21 @@ import { VAULT_DOCUMENTS } from "@/lib/vaultDocuments";
  * "2 documents need attention before your next bid" - Sarel's own ask: every
  * document this app already tracks an expiry date for, with a status chip,
  * expired/expiring sorted first. Reuses lib/notifications.ts's own
- * COMPANY_EXPIRY_FIELDS and source tables (lib/documentExpiry.ts), so this
- * can never disagree with what the topbar bell already says about the same
- * document - it just shows the whole list, not only what's within the
- * bell's 60-day window. Card shell restyled to the design system for this
- * sub-PR (prompt 10.1, Company vault shell); the data/logic above is
- * untouched.
+ * COMPANY_EXPIRY_FIELDS and source tables (lib/documentExpiry.ts), so it can
+ * never disagree with the bell about which documents exist, their raw
+ * daysLeft, or their expiry dates - it just shows the whole list, not only
+ * what's within the bell's 60-day window. Card shell restyled to the design
+ * system for this sub-PR (prompt 10.1, Company vault shell); the data/logic
+ * above is untouched.
+ *
+ * Finding 293 (2026-11-09): the status CHIP itself is a different matter -
+ * documentExpiry.ts's `statusFor()` applies its own flat 30-day window to
+ * every row, not the bell's per-field `windowDays`, so a document 31-60
+ * days from expiry shows "Valid" (green) here, and is left out of the
+ * "N documents need attention" count above, while the topbar bell is
+ * already flagging that same document. Deliberate (see documentExpiry.ts's
+ * own header), not fixed here - just no longer mis-described as something
+ * that "can never" happen.
  *
  * Real finding, 2026-10-29 (Sarel: make every row here "an interactive
  * upload target with click-to-upload and inline drag-and-drop"): every row
