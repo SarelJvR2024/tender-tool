@@ -14,9 +14,11 @@ select()/update() shape) rather than a full pipeline test.
 Run: python3 engine/general/test_process_general_jobs.py
 """
 import datetime
+import json
 import os
 import sys
 import tempfile
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -321,8 +323,36 @@ def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
           any(a[0][0] == "general" and a[0][2] == "error" and "job-flaky" in a[0][1] for a in alerts), alerts)
 
 
+def test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap():
+    print("Supabase.select(): a table with more rows than PostgREST's own db-max-rows cap "
+          "(Finding 252 - the same cap already fixed for app/'s .select()/.rpc() reads, "
+          "QA-Edge-Case-Findings.md Findings 249-251, never checked before for this file's own "
+          "Python reads over the identical REST endpoint - process_pack_jobs.py's SANRAL sibling "
+          "has the same real class, same bug, same fix).")
+    all_rows = [{"id": i} for i in range(2500)]
+    client = pgj.Supabase("https://example.test", "k")
+
+    def fake_req(method, path, body=None, headers=None, raw=None):
+        # Same faithful PostgREST stand-in as process_pack_jobs.py's own version of
+        # this test: caps at its own db-max-rows (1000) unless the client asks for
+        # less via limit/offset, which real pagination past the cap relies on.
+        qs = urllib.parse.parse_qs(path.split("?", 1)[1] if "?" in path else "")
+        requested_limit = int(qs["limit"][0]) if "limit" in qs else 10**9
+        offset = int(qs["offset"][0]) if "offset" in qs else 0
+        page = all_rows[offset: offset + min(requested_limit, 1000)]
+        return json.dumps(page).encode()
+
+    client._req = fake_req
+    got = client.select("tender_engine_jobs", {"status": "requested"})
+    check("select() returns EVERY matching row, not just PostgREST's own first 1000-row page",
+          len(got) == len(all_rows), f"got {len(got)} of {len(all_rows)}")
+    check("rows come back in order, nothing dropped or duplicated across pages",
+          [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
+    test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
     test_within_malformed_completion_date_alert_carries_company_id()
     test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()

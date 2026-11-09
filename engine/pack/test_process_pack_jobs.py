@@ -23,10 +23,12 @@ same bug class as watch_deadlines.days_until()'s own malformed-date guard
 Run: python3 engine/pack/test_process_pack_jobs.py
 """
 import datetime
+import json
 import os
 import shutil
 import sys
 import tempfile
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -228,6 +230,38 @@ def test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response():
     calls.clear()
     client.rpc("no_args_function")
     check("args=None sends an empty dict, not null/omitted", calls[0][2] == {}, calls[0])
+
+
+def test_supabase_rest_select_paginates_past_postgrests_own_db_max_rows_cap():
+    print("SupabaseRest.select(): a table with more rows than PostgREST's own db-max-rows cap "
+          "(Finding 252 - the same cap already fixed for app/'s .select()/.rpc() reads, "
+          "QA-Edge-Case-Findings.md Findings 249-251, never checked before for this file's own "
+          "Python reads over the identical REST endpoint - sync_position_suggestions() reads "
+          "ALL of tender_requirements with NO filter at all, cross-tenant, and "
+          "sync_tender_requirements()/sync_b7_setup() read ALL of tender_documents by doc_type, "
+          "also cross-tenant - both grow without bound as more tenders are read over time).")
+    all_rows = [{"id": i} for i in range(2500)]
+    client = ppj.SupabaseRest("https://example.test", "k")
+
+    def fake_req(method, path, body=None, headers=None, raw=None):
+        # A faithful stand-in for the real PostgREST server: it always caps a
+        # response at its own configured db-max-rows (1000 here), REGARDLESS of
+        # what the client asked for - but it DOES honour an explicit limit/offset
+        # smaller than that cap, which is exactly how real pagination past the
+        # cap works (this is the same mechanism the prior pass's own writeup
+        # verified against PostgREST's Haskell planner source, not a guess).
+        qs = urllib.parse.parse_qs(path.split("?", 1)[1] if "?" in path else "")
+        requested_limit = int(qs["limit"][0]) if "limit" in qs else 10**9
+        offset = int(qs["offset"][0]) if "offset" in qs else 0
+        page = all_rows[offset: offset + min(requested_limit, 1000)]
+        return json.dumps(page).encode()
+
+    client._req = fake_req
+    got = client.select("tender_requirements")
+    check("select() with no filter returns EVERY row in the table, not just PostgREST's own "
+          "first 1000-row page", len(got) == len(all_rows), f"got {len(got)} of {len(all_rows)}")
+    check("rows come back in order, nothing dropped or duplicated across pages",
+          [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
 def test_process_job_sends_the_pack_ready_email_on_success():
@@ -602,6 +636,7 @@ def main():
     test_adapt_person_carries_sacnasp_and_sagc_through()
     test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response()
+    test_supabase_rest_select_paginates_past_postgrests_own_db_max_rows_cap()
     test_process_job_sends_the_pack_ready_email_on_success()
     test_process_job_writes_field_provenance_to_the_db_on_success()
     test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent()

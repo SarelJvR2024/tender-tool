@@ -154,10 +154,25 @@ class Supabase:
         parts += extra or []
         return ("?" + "&".join(parts)) if parts else ""
 
+    PAGE = 1000  # PostgREST's own db-max-rows cap on a response with no explicit
+                 # limit/offset (same cap already fixed for .select()/.rpc() reads
+                 # across app/ - QA-Edge-Case-Findings.md Findings 249-251; never
+                 # fixed here, since this file's own select() is Python, over the
+                 # same REST endpoint, not a direct Postgres connection - see
+                 # company_profiles.RestClient's own select(), the one place in
+                 # engine/ that already paginates this exact way). Finding 252.
+
     def select(self, table, filters=None, order=None):
         extra = ["select=*"] + ([f"order={order}"] if order else [])
-        out = self._req("GET", f"/rest/v1/{table}{self._q(filters, extra)}")
-        return json.loads(out) if out else []
+        base = self._q(filters, extra)  # always "?select=*..." - extra is never empty
+        out, offset = [], 0
+        while True:
+            out_page = self._req("GET", f"/rest/v1/{table}{base}&limit={self.PAGE}&offset={offset}")
+            page = json.loads(out_page) if out_page else []
+            out += page
+            if len(page) < self.PAGE:
+                return out
+            offset += self.PAGE
 
     def update(self, table, filters, body):
         out = self._req("PATCH", f"/rest/v1/{table}{self._q(filters)}", body, {"Prefer": "return=representation"})
