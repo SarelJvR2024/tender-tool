@@ -34,28 +34,48 @@ import { headers } from "next/headers";
 const KNOWN_GOOD_HOSTS = [/^tenderready\.app$/, /^www\.tenderready\.app$/, /\.vercel\.app$/];
 
 // Standing-review pass, 2026-11-09 (Finding 268-fix bypass, found one pass
-// later): this used to split on ":" to strip a real port before checking
-// the hostname, then let `siteUrl()` below substitute the ORIGINAL,
-// un-stripped host string back into the returned URL. That let a Host
-// header like "tenderready.app:@evil.attacker.example" pass this check
-// (its pre-colon part is the real domain) while the URL every real browser
-// and mail client actually resolves from the result is evil.attacker.example -
-// confirmed directly: `new URL("https://tenderready.app:@evil.attacker.example").host`
-// is "evil.attacker.example", because a WHATWG URL parser reads
-// "tenderready.app:" as userinfo (text before a trailing "@"), not a port.
-// Now this function itself decides what, if anything, follows the
-// hostname - a real numeric port, or nothing - so there is no longer a
-// second, unvalidated use of the raw header anywhere in this file.
-function knownGoodHostAndPort(host: string): string | null {
-  const parts = host.split(":");
-  if (parts.length > 2) return null; // more than one ":" is never a plain host[:port]
-  const hostname = parts[0];
-  const port = parts[1]; // undefined when there was no ":" at all
-  if (port !== undefined && !/^\d+$/.test(port)) return null; // anything but digits (e.g. "@evil.com") - reject
+// later, THEN a second real bug found one pass after that - Finding 271):
+// this used to split on ":" by hand to strip a real port before checking
+// the hostname (Finding 270's own fix), then a separate ad-hoc
+// `.startsWith("localhost")` substring check below decided the scheme
+// (Finding 271's own bug - see `siteUrl()`'s own history comment). Both
+// were narrow, hand-rolled re-implementations of what a URL parser already
+// does correctly, and both were wrong in a different way. Rewritten once
+// more, this time to stop hand-parsing the authority component at all:
+// feed the Host header through the SAME `URL` constructor every real
+// browser/mail client/WHATWG-compliant parser uses (with a throwaway
+// "http://" scheme prefix purely so `URL` has something to parse - the
+// scheme itself is decided afterwards, below, from the validated hostname,
+// never from this placeholder), then validate and rebuild from its own
+// `.hostname`/`.port` exclusively. This closes Finding 270's bypass at the
+// root rather than patching around it again (`new URL("tenderready.app:@evil.attacker.example")`'s
+// own `.username` is non-empty, so it is rejected outright here, not
+// merely prevented from being echoed back), AND Finding 271's bug (equality
+// against the parser's own `.hostname`, never a substring match) - one
+// parser, one place, no second hand-rolled interpretation of the same
+// string anywhere in this file.
+function knownGoodHostAndPort(host: string): { hostname: string; port: string } | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(`http://${host}`);
+  } catch {
+    return null; // not a parseable host[:port] at all (e.g. a literal comma-joined value)
+  }
+  // A bare Host header is never allowed to carry userinfo ("user:pass@host") -
+  // if it does, something is already being smuggled past this check, exactly
+  // how Finding 270's own bypass worked ("tenderready.app:" read as userinfo,
+  // not a port). Reject outright instead of silently ignoring it and
+  // returning the real (post-"@") host anyway, which - while not actually
+  // exploitable, since that real host still has to pass the allowlist below
+  // on its own merits - would otherwise return a needlessly confusing
+  // string with a misleading, attacker-chosen prefix visible in it.
+  if (parsed.username || parsed.password) return null;
+  const hostname = parsed.hostname; // WHATWG-normalized: lowercased, trailing dot preserved, IPv6 kept bracketed
+  const port = parsed.port; // "" when absent
   const isGoodHostname =
     hostname === "localhost" || hostname === "127.0.0.1" || KNOWN_GOOD_HOSTS.some((re) => re.test(hostname));
   if (!isGoodHostname) return null;
-  return port === undefined ? hostname : `${hostname}:${port}`;
+  return { hostname, port };
 }
 
 /**
@@ -71,10 +91,17 @@ function knownGoodHostAndPort(host: string): string | null {
 export async function siteUrl(): Promise<string> {
   const h = await headers();
   const host = h.get("host");
-  const goodHostAndPort = host ? knownGoodHostAndPort(host) : null;
-  if (goodHostAndPort) {
-    const isLocal = goodHostAndPort.startsWith("localhost") || goodHostAndPort.startsWith("127.0.0.1");
-    return `${isLocal ? "http" : "https"}://${goodHostAndPort}`;
+  const good = host ? knownGoodHostAndPort(host) : null;
+  if (good) {
+    // Finding 271: this used to be `goodHostAndPort.startsWith("localhost")` -
+    // a substring check against the whole (possibly-ported) string, which a
+    // real, already-allowlisted *.vercel.app host whose name merely STARTS
+    // WITH the text "localhost" (a legal Vercel project/preview name) also
+    // matched, downgrading it to "http://" instead of "https://". Now an
+    // exact-equality check against the parser's own validated `.hostname`.
+    const isLocal = good.hostname === "localhost" || good.hostname === "127.0.0.1";
+    const hostAndPort = good.port ? `${good.hostname}:${good.port}` : good.hostname;
+    return `${isLocal ? "http" : "https"}://${hostAndPort}`;
   }
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return "http://localhost:3000";

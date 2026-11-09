@@ -130,4 +130,52 @@ describe("siteUrl", () => {
     mockHost("tenderready.app:8443");
     expect(await siteUrl()).toBe("https://tenderready.app:8443");
   });
+
+  // Standing-review pass, 2026-11-09 (Finding 271 - found while re-reading
+  // THIS file adversarially for a third time): `isLocal` used to be computed
+  // with `goodHostAndPort.startsWith("localhost")` - a SUBSTRING check, not
+  // an exact-hostname check. Any real *.vercel.app host whose name happens
+  // to start with the literal text "localhost" (a perfectly legal, real
+  // Vercel project/preview name - nothing stops anyone naming one that way)
+  // already passes the KNOWN_GOOD_HOSTS allowlist on its own merits, but
+  // then ALSO tripped this substring check and got "http://" instead of
+  // "https://" - a real scheme downgrade for an already-validated host,
+  // confirmed live against the real function pre-fix (see this pass's own
+  // System-Status.md write-up for the exact curl round-trip).
+  it("does NOT downgrade to http:// for a real .vercel.app host that merely starts with the text 'localhost' (Finding 271 - isLocal substring-match bug)", async () => {
+    mockHost("localhost-preview-abc123.vercel.app");
+    const result = await siteUrl();
+    expect(result).toBe("https://localhost-preview-abc123.vercel.app");
+  });
+
+  it("does NOT downgrade to http:// for the exact host 'localhost.vercel.app' either (same bug, zero-length suffix after the literal word)", async () => {
+    mockHost("localhost.vercel.app");
+    const result = await siteUrl();
+    expect(result).toBe("https://localhost.vercel.app");
+  });
+
+  // Side effect of the Finding 271 rewrite (parsing through the real `URL`
+  // constructor, which WHATWG-normalizes hostnames to lowercase): the real
+  // production domain is now correctly recognised regardless of case, where
+  // the old hand-rolled regex match was case-sensitive and would have
+  // fallen back instead. Not a security fix - case differences could never
+  // make the OLD check accept a different, attacker-chosen domain, only
+  // reject a differently-cased real one - but locking it in since the
+  // behaviour genuinely changed here and a future edit could regress it.
+  it("recognises the real production domain regardless of header case (URL-parser normalization, not a security property)", async () => {
+    mockHost("TenderReady.App");
+    expect(await siteUrl()).toBe("https://tenderready.app");
+  });
+
+  // Side effect of the Finding 271 rewrite: a Host carrying userinfo is now
+  // rejected outright by the `username`/`password` check, rather than
+  // (as the Finding 270 fix alone did) merely being prevented from putting
+  // the attacker-chosen prefix anywhere in the final result. Confirms the
+  // tightened behaviour directly, not just "doesn't contain evil.attacker.example".
+  it("rejects a Host that carries userinfo outright, even on the *.vercel.app allowlist branch, rather than stripping it and returning the real host anyway", async () => {
+    mockHost("evil.attacker.example@fake.vercel.app");
+    const result = await siteUrl();
+    expect(result).not.toBe("https://fake.vercel.app");
+    expect(result).toBe("http://localhost:3000"); // falls back, same as any other rejected host
+  });
 });
