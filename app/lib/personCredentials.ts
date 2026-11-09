@@ -259,8 +259,28 @@ export async function registrationsAskedFor(supabase: SupabaseClient): Promise<A
   if (generalRowsErr) console.error("tenders paginated read failed (registrationsAskedFor)", generalRowsErr);
   // "now" only after the (request-time) reads above - Cache Components
   // refuses a current-time value before any dynamic data access.
-  const nowIso = new Date().toISOString();
-  const open = (closing: string | null) => !closing || closing >= nowIso;
+  //
+  // Date-object comparison, not a string compare - `closing_date` is a
+  // `timestamptz` and PostgREST returns it with its own explicit numeric
+  // UTC offset (e.g. "+02:00" for the SAST-tagged rows gov_sources.py's
+  // iso_sast()/process_general_jobs.py's SANRAL intake write, "+00:00"/"Z"
+  // for the UTC-tagged rows watch_tender_updates.apply_closing_date() writes
+  // straight from a raw OCDS feed) - BOTH conventions are confirmed to
+  // genuinely coexist in real `tenders.closing_date` data (Finding 72). A
+  // plain `>=` string compare against `new Date().toISOString()` (always
+  // "Z") is wrong whenever the two sides carry different offsets, exactly
+  // around each day's own SAST-midnight rollover - the same bug class
+  // Finding 72 already found and fixed in watch_deadlines.py's closing-day
+  // math, just not yet in this file's own "is this tender still open" gate.
+  // Same "never a confident wrong answer" rule as isPast()/daysUntil()
+  // elsewhere: an unparseable closing_date reads as still open, not
+  // silently excluded.
+  const nowMs = Date.now();
+  const open = (closing: string | null) => {
+    if (!closing) return true;
+    const t = new Date(closing).getTime();
+    return Number.isNaN(t) || t >= nowMs;
+  };
   const add = (body: RequiredBody, label: string) => {
     if (!out[body].includes(label)) out[body].push(label);
   };

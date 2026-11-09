@@ -13975,3 +13975,70 @@ To verify independently: read `general-pack-review-logic.ts`'s `questionAnswerSt
 **This closes out the standing follow-up pass `pp` named** - the one, now-confirmed-exhaustive, non-company-field consumer of `answerStatus()` beyond the two Finding 285 already covers. No fourth consumer exists (confirmed by the repo-wide `answerStatus(` grep above).
 
 To verify independently: read `submission-plan-logic.ts`'s new `reconcileQuestionProvenance()` and `submission-plan-data.ts`'s new `field_provenance` query (gated on `packId`) and `provenanceByKey` map, and confirm the non-person question branch now calls `reconcileQuestionProvenance(answerStatus(answered, q.optional ?? false), provenanceByKey.get(q.key) ?? null)` instead of the bare `answerStatus(...)`. Run `npx vitest run "app/tenders/[id]/submission-plan-logic.spec.ts"` from `app/` and confirm `45/45` pass. Run `npm run typecheck`, `npm run lint`, and `npx vitest run` from `app/` and confirm 0 errors and `75 files, 620 tests` passing.
+
+### Finding 287 (CONFIRMED AND FIXED ON `main` - moderate, a sibling instance of Finding 72's own already-confirmed bug class, in a file that bug class had never been checked against before)
+
+**Where:** `app/lib/personCredentials.ts`'s `registrationsAskedFor()` - its own local `open(closing)`
+gate, which decides whether a tender's own professional-registration demand (ECSA, SACPCMP, SACNASP,
+SAGC, SACAP, SACPLAN, SACQSP, SACPVP, PSIRA) counts at all, per the function's own header comment:
+"Only tenders still open (or with no closing date) count."
+
+**What was tested:** this pass's own chosen angle (per the task brief's direction (b),
+cross-file consistency) was "does every place that computes `is this tender's deadline in the
+past` agree?" - every `new Date(...).getTime() < Date.now()`-style check across `app/app/*`
+(`pipeline/page.tsx`'s own `isPast()`, `admin/tenders/TenderCatalogRow.tsx`, `analytics/page.tsx`,
+`lib/dispatchTriage.ts`) does real `Date`-object comparison, and `lib/discoveredTendersDigest.ts`'s
+own window filter offloads the comparison to Postgres itself (`closing_date.gte.<iso>` in a
+PostgREST filter string, which Postgres parses and compares as a real timestamptz, not a string).
+`personCredentials.ts`'s own `open()` was the one outlier found doing the comparison as a plain
+JavaScript string compare: `const nowIso = new Date().toISOString(); const open = (closing) =>
+!closing || closing >= nowIso;`.
+
+**Finding (CONFIRMED, moderate).** `tenders.closing_date` is a `timestamptz` (migration `0001`),
+and this exact column is already independently confirmed (Finding 72, `engine/compliance/
+watch_deadlines.py`) to genuinely carry two different ISO-8601 offset conventions in real data:
+`gov_sources.py`'s `iso_sast()` and `process_general_jobs.py`'s own SANRAL-intake write tag the
+value `"+02:00"` (SAST); `watch_tender_updates.apply_closing_date()` writes a raw OCDS feed's own
+UTC-tagged value. `new Date().toISOString()` always produces a `"Z"`-suffixed UTC string. Comparing
+an offset-tagged ISO string against a `"Z"`-tagged one with a plain `>=` is NOT equivalent to real
+chronological comparison - exactly Finding 72's own root cause, just in a different file/column
+consumer. Reproduced live (Node, the exact pattern Finding 72's own write-up used): a tender
+closing `"2026-11-09T01:00:00+02:00"` (01:00 SAST on the 9th, i.e. 23:00 UTC on the 8th - a real
+deadline) checked 30 minutes after it actually passed (`now = 2026-11-08T23:30:00.000Z`, i.e.
+01:30 SAST on the 9th) came back `open() === true` under the old string-compare code - the tender
+reads as still open and its registration demand still counts, half an hour after its real deadline
+- while a `Date`-object comparison (`new Date(closing).getTime() >= now.getTime()`) correctly
+returns `false`. This is the identical daily 00:00-02:00 SAST window `lib/dates.ts`'s own
+`daysUntil()` header comment already documents at length as a recurring host-TZ/offset-mismatch
+bug class in this codebase - just not yet checked against this particular file's own ad-hoc string
+gate. Real-world effect: for up to 2 hours after an "+02:00"-tagged tender's own real closing
+moment, in the window where the closing clock-time happens to fall between 22:00 and 23:59 UTC the
+day before SAST midnight, `registrationsAskedFor()` could keep counting that tender's own
+registration demand (e.g. still showing "SACNASP asked for by Contract X" on the People page) for a
+tender that has, in real terms, already closed - a stale, no-longer-actionable demand signal, not a
+security or tenant-isolation issue (the function itself has no authz/company-scoping gap; `tenders`/
+`tender_requirements` are the shared, not-tenant-scoped catalog per 0001's own RLS, confirmed
+correct by prior passes).
+
+**Fix.** `open()` now parses `closing` as a real `Date` and compares `.getTime()` values (`nowMs =
+Date.now()`, captured at the same point in the function `nowIso` used to be, preserving the
+existing "only after the request-time reads above, since Cache Components refuses a current-time
+value before any dynamic data access" ordering) instead of comparing ISO strings. An unparseable
+`closing_date` (`NaN`) reads as still open, the same "never a confident wrong answer" direction
+`isPast()`/`daysUntil()` already use elsewhere in this codebase, not a silent exclusion.
+
+**Verified, not asserted.** Live red/green repro (Node, mirroring the fix exactly): 6 cases -
+the SAST-midnight-rollover case (above), a clearly-future SAST-offset closing, a clearly-past
+SAST-offset closing, a null closing date, a clearly-future UTC-`"Z"`-tagged closing, and a
+UTC-`"+00:00"`-tagged closing 1 minute in the past. Old string-compare code: wrong (`open=true`)
+on the SAST-rollover case only, correct on the other 5. New `Date`-compare code: correct on all 6,
+including the rollover case. `npx tsc --noEmit` (whole `app/` project) - 0 errors. `npx eslint
+lib/personCredentials.ts` - clean. `npx vitest run` (full suite, from `app/`) - **75 files, 612
+tests passed**, no regression (this module has no dedicated `.spec.ts` of its own - the function
+is a Supabase-client-driven async read with no existing test harness - so this fix was verified by
+the live red/green repro above plus the full suite/typecheck/lint, not a new unit test for an
+untestable-in-isolation local closure).
+
+**Regression:** `app/lib/personCredentials.ts` only - one local helper function, 20 lines changed
+(mostly a comment explaining the "why", per this track's own convention), no exported signature
+change, no call-site change needed (`registrationsAskedFor()`'s own callers are unaffected).
