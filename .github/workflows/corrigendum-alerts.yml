@@ -2,7 +2,12 @@
 # every 2 hours during SA business hours - the Resend replacement for the
 # old Claude-scheduled "Tender update/addendum watch" check-in's plain-text
 # Gmail report. Same cadence that check-in ran on (0 5-17/2 * * 1-5 in UTC =
-# every 2 hours, 07:00-17:00 SAST, weekdays).
+# every 2 hours, 07:00-19:00 SAST, weekdays - matching the original
+# recommendation in docs/specs/System-Status.md's 2026-10-17 "Tender
+# updates" open item: "every 2 hours, 07:00-19:00 SAST weekdays"; the real
+# cron math is 5,7,9,11,13,15,17 UTC = 7,9,11,13,15,17,19 SAST, so this
+# comment's own end time previously said "07:00-17:00 SAST" - a stale/wrong
+# range end, QA pass, 2026-11-09, comment-only, no behavioural change).
 #
 # This workflow only renders and sends what engine/discovery/watch_tender_updates.py
 # (run separately, unchanged) has already found and written to
