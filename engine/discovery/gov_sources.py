@@ -289,7 +289,21 @@ def _merge_docs(primary, extra):
 def _fold(hit, r, name):
     hit["listing_sources"] = hit["listing_sources"] + r["listing_sources"]
     hit["documents"] = _merge_docs(hit.get("documents") or [], [d for d in r.get("documents") or [] if d.get("url")])
-    for f in ("briefing", "province", "tender_type", "description", "scm_reference"):
+    # Finding 244: this list used to stop at scm_reference - published_date/
+    # opening_date/procurement_category were never copied across even when
+    # the portal's OWN value for them was null and the direct-site release
+    # being folded in had a real one (etenders_portal.normalize() passes
+    # both date_Published and category straight through as None when the
+    # portal simply didn't record them for that row - not hypothetical).
+    # published_date/opening_date feed gov_sources.published_since() and
+    # tender_changes.py's own re-advertisement/addendum-timing logic;
+    # procurement_category feeds assess_tender.categorize() and
+    # tender_enrichment.classify_tags() - all three silently saw None for a
+    # buyer's row whenever the portal's own listing was missing the field,
+    # even though the SAME merged release carried a direct-site source with
+    # the real value one field over.
+    for f in ("briefing", "province", "tender_type", "description", "scm_reference",
+              "published_date", "opening_date", "procurement_category"):
         if not hit.get(f) and r.get(f):
             hit[f] = r[f]
     if r.get("documents"):
@@ -364,10 +378,18 @@ def merge(by_source, portal_closed=None):
                     merged.append(hit)
                     for k in ref_keys(hit):
                         idx.setdefault(k, []).append(hit)
-                    hit["listing_sources"] = hit["listing_sources"] + r["listing_sources"]
-                    hit["documents"] = _merge_docs(hit.get("documents") or [], [d for d in r.get("documents") or [] if d.get("url")])
-                    if r.get("documents"):
-                        hit.setdefault("direct_documents", {})[name] = [d.get("title") for d in r["documents"]]
+                    # Same fold as the ordinary hit==found case below (listing_sources,
+                    # documents, direct_documents, and - Finding 244 - the
+                    # briefing/province/tender_type/description/scm_reference/
+                    # published_date/opening_date/procurement_category field
+                    # copy) - this branch used to duplicate only the first two
+                    # by hand and skip the field-copy entirely, so a closed-
+                    # portal-row fold never picked up a null field from the
+                    # direct site either. hit["closing_date"] already equals
+                    # r["closing_date"] (set two lines up), so _fold()'s own
+                    # closing_date-disagreement check is a no-op here, not a
+                    # duplicate of the status disagreement just recorded above.
+                    _fold(hit, r, name)
                     continue
             if hit is None:
                 merged.append(dict(r))

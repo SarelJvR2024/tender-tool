@@ -612,6 +612,71 @@ def test_merge():
           == {"NRA:2026/754B", "SC:N01101020171F"})
 
 
+def test_fold_copies_published_opening_category():
+    # Finding 244: _fold()'s field-copy list stopped at scm_reference -
+    # published_date/opening_date/procurement_category were never copied
+    # from a direct-site release into its matched portal row, even when the
+    # portal's OWN value for the field was null. etenders_portal.normalize()
+    # passes date_Published/category straight through as None whenever the
+    # portal genuinely didn't record them for that row (not hypothetical -
+    # both are nullable on the real portal). Reproduces with the real,
+    # unmodified normalize()/normalize_rfq()/merge() - no mocking.
+    print("gov_sources._fold copies published_date/opening_date/procurement_category")
+    portal_no_dates = etenders_portal.normalize({
+        "id": 900200, "tender_No": "GA12700333", "description": "Ladies softshell jacket navy 3xl",
+        "category": None, "type": "Request for Quotation", "organ_of_State": "City of Cape Town",
+        "status": "Published", "closing_Date": "2026-10-28T12:00:00", "date_Published": None,
+        "briefingSession": False, "province": "Western Cape", "supportDocument": [], "cancelled": None,
+    })
+    check("portal row itself has no published/opening/category (the live-data condition this bites on)",
+          portal_no_dates["published_date"] is None and portal_no_dates["opening_date"] is None
+          and portal_no_dates["procurement_category"] is None)
+    cells = ["GA12700333", "Ladies softshell jacket navy 3xl", "Clothing, PPE & Accessories",
+             "2026/10/28", "10/28/2026 12:00:00 PM", "2026/10/17", "10/17/2026 2:20:39 PM"]
+    direct = capetown_procurement.normalize_rfq(cells, "/web1/procurementportal/RFQ/Details/331433", "331433")
+    merged = gov_sources.merge({"etenders_portal": [portal_no_dates], "capetown_procurement": [direct]})
+    check("direct-site release folds into the portal row", len(merged) == 1, len(merged))
+    m = merged[0]
+    check("published_date copied from the direct site, not left null", m["published_date"] == direct["published_date"], m["published_date"])
+    check("opening_date copied from the direct site, not left null", m["opening_date"] == direct["opening_date"], m["opening_date"])
+    check("procurement_category copied from the direct site, not left null",
+          m["procurement_category"] == direct["procurement_category"], m["procurement_category"])
+
+    # The SAME gap, in the separate "open on the buyer's own site, closed on
+    # the portal" fold path (merge()'s own closed_idx branch) - it used to
+    # duplicate only listing_sources/documents/direct_documents by hand and
+    # skip the field-copy loop entirely, so this path never picked up a null
+    # field from the direct site either, even after the fix above.
+    import datetime as _real_datetime
+
+    class _FixedClock(_real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = _real_datetime.datetime(2026, 10, 25, 9, 0, tzinfo=_real_datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    _real_dt = sh.datetime.datetime
+    sh.datetime.datetime = _FixedClock
+    try:
+        closed_no_dates = etenders_portal.normalize({
+            "id": 900300, "tender_No": "N011-010-2027/1F", "description": "FLOOD MITIGATION",
+            "category": None, "type": "Request for Bid(Open-Tender)",
+            "organ_of_State": "South African National Roads Agency Soc Limited (SANRAL)", "status": "Closed",
+            "closing_Date": "2026-10-15T12:00:00", "date_Published": None,
+            "briefingSession": False, "province": "KwaZulu-Natal", "supportDocument": [], "cancelled": None,
+        }, "closed")
+        reopened = sanral_site("N011-010-2027/1F", "2026-11-19T12:00:00+02:00", slug="n011")
+        reopened["published_date"] = "2026-10-01T00:00:00+02:00"
+        reopened["procurement_category"] = "Construction"
+        merged2 = gov_sources.merge({"etenders_portal": [], "sanral": [reopened]}, portal_closed=[closed_no_dates])
+    finally:
+        sh.datetime.datetime = _real_dt
+    check("closed-portal-row fold path also copies published_date", len(merged2) == 1 and merged2[0]["published_date"] == "2026-10-01T00:00:00+02:00",
+          merged2[0].get("published_date") if merged2 else None)
+    check("closed-portal-row fold path also copies procurement_category", merged2[0]["procurement_category"] == "Construction",
+          merged2[0].get("procurement_category"))
+
+
 def test_scope_enrichment_hook():
     """attach_scope_enrichment() - the per-release hook tender_enrichment.py's
     own module docstring named. Heuristic-only tagging attached to every
@@ -736,6 +801,7 @@ if __name__ == "__main__":
     test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision()
     test_new_sources_are_in_buyer_family()
     test_merge()
+    test_fold_copies_published_opening_category()
     test_scope_enrichment_hook()
     test_changes()
     test_digest()
