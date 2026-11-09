@@ -14327,3 +14327,163 @@ sent reminder logs against this change rather than be surprised by the shift.
 `closingDayOf()`'s header comment) and two test files (`lib/dates.test.ts`,
 `lib/dispatchTriage.test.ts`) - no exported signature change on `daysUntil()` itself, no call-site
 change needed anywhere in either `app/` or the many files that import it.
+
+### Finding 290 (CONFIRMED AND FIXED ON `main` - Finding 289's own blast-radius follow-up, found
+a second, independent instance of the identical "wrong timezone anchor for a real closing
+timestamp" mistake, this time on the Python/`engine/` side: `notify/daily_digest.py`'s
+`submission_due_signals()` - the "tender(s) closing soon" section of every role-based daily digest
+email)
+
+**Context: this pass's own mandate was to re-verify Finding 289's blast radius, not hunt a new
+angle.** Grepped every `daysUntil(` call site across the whole `app/` tree (not just the ones
+Finding 289's own write-up named) and read each one individually against the real migration-level
+column types: `components/tt/command-center.tsx`, `app/tenders/[id]/page.tsx` (its `task.due_date`
+calls are a plain `date` column, unaffected), `lib/notifications.ts`, `lib/customerRowData.ts`,
+`lib/dashboardStats.ts`, and `lib/dispatchDashboard.ts` are all real, `timestamptz`-driven consumers
+Finding 289's own write-up did not name individually - but every one of them calls the shared
+`daysUntil()` directly with no caller-side "+1" compensation of its own, so Finding 289's fix
+(inside the shared function) already corrects every one of them automatically; none needed a
+separate code change. **Finding 289's own consumer list, while a representative sample rather than
+a literally exhaustive per-file list, is confirmed complete in substance: no real consumer was left
+broken.** The TS side's `lib/dates.ts` was also re-read function-by-function for a second instance
+of the same arithmetic mistake (anchoring "today" at the wrong timezone's midnight) elsewhere in
+the same file or a sibling helper - none found; `closingCountdown()` is deliberately time-aware
+(elapsed-ms, not calendar-day) and `closingDayOf()` already does the correct UTC+2 conversion.
+
+**What WAS found, on the Python side.** `engine/compliance/watch_deadlines.py`'s own `days_until()`
+- the Python sibling most directly comparable to the TS `daysUntil()` - was checked first and is
+NOT affected: it already truncates (and only ever receives) plain `date`-typed values (document/
+registration/task expiry columns, confirmed the same way Finding 289 confirmed the TS side's
+`date`-only columns), with no midnight-anchor arithmetic in its own body at all (a plain
+`(d - today).days` on two already-date-only values). But `engine/notify/daily_digest.py`'s
+`submission_due_signals()` - which reports a release as "closing soon" when its real
+`closing_date` (a genuine `timestamptz`, not a `date`) falls inside the digest's lead-time window -
+derived that release's own calendar day with `datetime.date.fromisoformat(closing[:10])`: a naive
+truncation of the raw closing_date STRING that silently assumed its first 10 characters already
+named the true SAST calendar day. `tenders.closing_date`/`discovered_opportunities.closing_date`
+come back from PostgREST in UTC - every closing_date fixture in this repo uses this shape (e.g.
+`test_discovery_fanout.py`'s `"2099-01-01T11:00:00Z"`) - so for any closing time whose UTC
+time-of-day falls in `22:00-23:59:59` (SAST `00:00-01:59` the FOLLOWING day), the naive slice read
+the wrong, EARLIER UTC calendar day instead of the true, later SAST one. This is not a rare corner
+case: `app/lib/dates.ts`'s own `formatClosingDateTime()` docstring already documents that a source
+giving no real closing time at all has its value defaulted to SAST midnight by `parse_sast()` as a
+generic "unknown" marker - stored as exactly `"...T22:00:00Z"`, squarely inside the broken window -
+so this hit every tender with an unspecified closing time, not just a theoretical edge case. The
+shared, already-correct conversion already exists elsewhere in this same engine
+(`discovery/tender_updates.to_date()`, docstring: "in SAST (UTC+2) like app/lib/dates.ts
+closingDayOf()", already used by `watch_tender_updates.active_pursuits()`) - `daily_digest.py`
+simply never called it for this one calculation.
+
+**Confirmed live**, not just by reasoning: a closing_date of `"2026-11-20T23:30:00+00:00"` (01:30
+SAST on 2026-11-21) with "today" fixed at 2026-11-19 SAST read `days_left=1` via the naive slice
+(`to_date()` -> SAST day 2026-11-20) instead of the correct `2` (`to_date()` -> true SAST day
+2026-11-21) - run directly against the real, unmodified `submission_due_signals()` function, no
+reasoning-only claim.
+
+**Fix.** Replaced the naive `closing[:10]` slice with a call to the shared
+`tender_updates.to_date()` (imported as `_closing_to_sast_date` to avoid shadowing this file's own
+`tender_updates` local variable/parameter name, used in several of its functions) - same shared
+helper already proven correct and already used elsewhere in this engine for exactly this
+conversion, rather than a second, independent (and wrong) one here. `to_date()` already returns
+`None` for an unparseable value with no exception raised, so the existing "malformed -> skip, not
+crash" behaviour (and its own test coverage) is unchanged.
+
+**Verified before pushing - red then green.** Added a new regression case to
+`notify/test_digest_live.py` (`test_submission_due_signals_uses_sast_calendar_day_not_a_naive_utc_slice`)
+using a closing_date constructed to land exactly in the broken UTC-day window relative to the real
+"today" the test runs on (23:00 UTC, 2 days out in UTC terms = true SAST day 3 days out), asserting
+`days_left == 3`. `git stash push -- engine/notify/daily_digest.py` to isolate the pre-fix
+implementation with the new test still in place: **1 failure**, the exact predicted one
+(`days_left` read `2`, not `3`), every other check in the file (36 checks) still passing. `git
+stash pop` to restore the fix: same command, **0 failures** (full file, including the new test).
+Full suite after restoring: `python3 notify/test_digest_live.py` - 0 failures;
+`python3 discovery/test_tender_updates.py` - ALL PASSED (the shared `to_date()` this fix now
+depends on); `python3 compliance/test_watch_deadlines_urgency.py` - 0 failures;
+`python3 discovery/test_gov_sources.py` - ALL PASSED; `python3 discovery/test_watch_tender_updates.py`
+- ALL PASSED (the other real caller of `watch_tender_updates`, imported by `daily_digest.py`).
+`python3 -m py_compile` on both changed files - clean. `ruff check` on both changed files - 19
+findings, confirmed against the pre-fix baseline (18) that the one new line is the SAME
+already-present, already-accepted `# noqa: E402` style this file already uses on every other
+sys.path-dependent import (`RUF100`/"unused noqa, E402 not enabled" - a pre-existing, accepted
+convention in this file, not a new issue class); no `BLE001`/`SIM115` or other real finding added.
+
+**Fixed directly on `main` - no PR.** Two-file change (`engine/notify/daily_digest.py` plus its own
+test file) - no RLS, no payment/money-transaction surface (this reorders which releases appear in
+an informational "closing soon" digest section; PayFast/billing is untouched), no schema, no
+worker-image change, no authz/tenant-isolation angle, no document a company signs/submits. Same
+"small, safe, single-calculation fix inside an already-tested helper" category as Finding 289.
+
+**Regression:** `engine/notify/daily_digest.py` (`submission_due_signals()`'s own closing-day
+derivation, now via `tender_updates.to_date()`) and its own test file
+(`engine/notify/test_digest_live.py`) - no exported signature change, no other call site affected
+(this is the only caller of this particular closing-day derivation).
+
+### Finding 291 (CONFIRMED AND FIXED ON `main` - a second, independent recurrence of the SAME
+`engine/` naive-UTC-slice mistake Finding 290 just fixed, found by checking every other `[:10]`
+truncation of a real closing-date STRING across `engine/` rather than assuming Finding 290 was the
+only one: `general/process_general_jobs.py`'s own `_within()` - whether a company's Experience
+Library evidence counts as "recent enough" for a tender's `window_years` eligibility rule)
+
+**Why checked.** Finding 290's root cause (`datetime.date.fromisoformat(closing[:10])` on a real,
+UTC-formatted `timestamptz` string) is a specific, nameable anti-pattern, not a one-off typo -
+worth checking for elsewhere before concluding the engine-side sweep was complete. `_within()`
+already had HALF of this exact bug fixed once before, in a DIFFERENT branch of the same function:
+its own "no closing date -> fall back to today" path was fixed under the heading "Finding 9c"
+(2026-10-21, this file's own comment, still present), with a dedicated test
+(`test_within_missing_closing_date_uses_real_sast_today_not_naive_utc`) - but that fix only touched
+the fallback (`closing` is falsy) side of `ref = datetime.date.fromisoformat(str(closing or
+today_sast)[:10])`. The OTHER side of that same ternary - when a real `closing` (the tender's own
+`closing_date`, a genuine `timestamptz`) IS given - still sliced it naively, carrying the identical
+mistake Finding 9c had already named and fixed one branch over.
+
+**Confirmed live.** `closing_date = "2026-10-20T22:30:00+00:00"` (00:30 SAST on 2026-10-21) with a
+5-year `window_years` rule: the true SAST ref day is 2026-10-21, so the real cutoff is 2021-10-21 -
+an Experience Library row dated `2021-10-20` (genuinely ONE DAY before that cutoff, outside the
+window) should read `False` ("not within"). Pre-fix, `_within()` read `True`: the naive slice read
+`ref` as `2026-10-20` (the UTC day), moving the cutoff one day early to `2021-10-20` - exactly on
+the test item's own date - so the stale row was wrongly treated as recent-enough evidence for the
+tender's eligibility rule. Run directly against the real, unmodified `_within()` function.
+
+**Impact, honestly scoped.** Narrower than Finding 289/290: it only matters when (a) the pursued
+tender's own `closing_date` lands in the same `22:00-23:59` UTC window as Finding 290 (the same
+SAST-midnight-defaulted closing times are the most common real-world trigger), AND (b) a company's
+own Experience Library has a row dated at or within one day of the `window_years` cutoff - a
+day-level coincidence on top of a year-level window. Not reproduced against any real production
+row; this is a genuine, confirmed-live mechanism, not a theoretical one, but with a narrower
+real-world hit rate than Findings 289/290.
+
+**Fix.** Same shape as Finding 9c's own prior fix to the sibling branch: convert the real `closing`
+value via its own timezone info (`datetime.fromisoformat(...).astimezone(SAST).date()`, the SAST
+constant already defined locally in this file - kept a local conversion rather than importing
+`discovery.tender_updates.to_date()`, per this file's own explicit "local constant, not a
+cross-directory import" convention stated in its header comment just above `SAST`'s own
+definition) instead of a string slice. The existing "malformed closing -> fall back to today, no
+crash, no alert" behaviour is unchanged (a `ValueError` from the conversion now falls back to
+`today_sast` exactly as before, just via `pass` instead of a second `except` block).
+
+**Verified before pushing - red then green.** Added
+`test_within_real_closing_date_uses_its_own_sast_day_not_a_naive_utc_slice` to
+`general/test_process_general_jobs.py`, directly alongside the existing Finding-9c sibling test,
+covering: the stale item one day before the real cutoff (must now be excluded), a fresh item
+exactly on the real cutoff (must stay included - confirms no over-correction), and a malformed
+closing_date (must still fall back to today, not crash). `git stash push --
+engine/general/process_general_jobs.py` to isolate the pre-fix implementation with the new test
+still in place: **1 failure**, the exact predicted one, every other check in the file (28 checks)
+still passing. `git stash pop` to restore the fix: same command, **0 failures**. Full suite after
+restoring: `python3 general/test_process_general_jobs.py` - 0 failures; `python3
+general/test_general_bridge.py` - ALL PASSED; `python3 general/test_build_general_pack.py` - 0
+failures. `python3 -m py_compile` - clean. `ruff check` - 13 findings, identical count and content
+to the pre-fix baseline (confirmed by diffing both outputs) - no new issue introduced.
+
+**Fixed directly on `main` - no PR.** Two-file change (`engine/general/process_general_jobs.py`
+plus its own test file) - no RLS, no payment/money-transaction surface, no schema, no worker-image
+change, no authz/tenant-isolation angle. This DOES affect which Experience Library evidence a
+generated pack treats as valid, which is adjacent to "a document a company submits" - but the
+change only ever makes the eligibility check MORE conservative (narrower, more correct), never
+includes evidence the pre-fix code would have excluded, and the pre-existing sibling fix (Finding
+9c) to the other branch of this exact same function was itself pushed directly to `main` with no
+PR - same precedent, same risk class, applied consistently.
+
+**Regression:** `engine/general/process_general_jobs.py` (`_within()`'s own real-closing-date
+conversion) and its own test file (`engine/general/test_process_general_jobs.py`) - no exported
+signature change, no other call site affected.
