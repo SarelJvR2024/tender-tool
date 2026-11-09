@@ -1,5 +1,5 @@
-import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { siteUrl } from "@/lib/siteUrl";
 import { createInvite, revokeInvite, setMemberRole, removeMember } from "./actions";
 import { Card, DangerButton, Select, SubPage, Submit, Text, fmtDate } from "../_components/ui";
 import { Banner } from "../_components/shared";
@@ -66,10 +66,16 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const labelByUser = new Map(((labels ?? []) as { user_id: string; label: string }[]).map((l) => [l.user_id, l.label]));
   const personName = (id: string | null) => (id ? people.find((p) => p.id === id)?.name ?? "that person" : null);
 
-  const h = await headers();
-  const proto = h.get("x-forwarded-proto") ?? "https";
-  const host = h.get("host") ?? "";
-  const origin = host ? `${proto}://${host}` : "";
+  // Finding 269 (follow-up to Finding 268): this used to read the incoming
+  // request's own `host`/`x-forwarded-proto` headers directly to build the
+  // origin for the invite link below - the exact same client-controlled
+  // Host-header-trust gap Finding 268 fixed in app/lib/siteUrl.ts, just
+  // re-implemented inline here instead of calling that fix. Worse here:
+  // the resulting link carries a real, usable invite token
+  // (company_invites.token - see app/app/invite/[token]/page.tsx, where it
+  // alone grants company membership on accept), not a tokenless welcome
+  // link. Now goes through siteUrl()'s own Host allowlist instead.
+  const origin = await siteUrl();
 
   const ownerCount = members.filter((m) => m.role === "owner").length;
 
