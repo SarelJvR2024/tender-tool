@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { computeBidReadiness, type ReadinessResult } from "@/lib/readiness";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { statusFor } from "@/lib/documentExpiry";
 import { COMPANY_EXPIRY_FIELDS } from "@/lib/notifications";
 import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
@@ -107,9 +108,11 @@ export default async function CompanyPage({
 
   // Bid readiness (header badge) - reuses the row already fetched above plus
   // registerCounts.principals; only cv_uploads/experience_items need their
-  // own query. Scoring itself lives in lib/readiness.ts (pure, unit-tested)
-  // so this page, the dashboard and the onboarding end screen can never
-  // quietly disagree - see lib/companyReadinessData.ts.
+  // own query. Scoring itself lives in lib/readiness.ts (pure, unit-tested),
+  // and this page's own cv_uploads read is now paginated the same way
+  // lib/companyReadinessData.ts's fetchCompanyReadiness() reads it for the
+  // dashboard/onboarding end screen (Finding 250) - so the two can no longer
+  // silently disagree once a company's cv_uploads history passes 1000 rows.
   //
   // people(id, name) is the one new query VaultProgressSummary needs (Sarel's
   // own live feedback tonight: "people uploaded and missing docs per
@@ -123,20 +126,32 @@ export default async function CompanyPage({
   let readinessInputsError = false;
   if (row && !editing) {
     const [
-      { data: cvRows, error: cvError },
+      cvUploads,
       { count: experienceCount, error: experienceError },
       { data: peopleData, error: peopleError },
     ] = await Promise.all([
-      supabase.from("cv_uploads").select("person_id"),
+      // Paginated, not a plain `.select()` - the same db-max-rows fix
+      // lib/companyReadinessData.ts's own fetchCompanyReadiness() already
+      // applies to this exact table/column for the dashboard and onboarding
+      // end screen (its own comment: cv_uploads grows forever, no retention,
+      // so a long-lived company can pass PostgREST's 1000-row cap). This
+      // page had its OWN separate, unpaginated cv_uploads query - despite
+      // the comment above claiming parity with the other two surfaces via
+      // "see lib/companyReadinessData.ts" - so a company past that row count
+      // could get a silently LOWER bid-readiness score here than on
+      // dashboard/discovery, and VaultProgressSummary could list real
+      // people as "missing a CV" who already have one (standing review,
+      // 2026-11-09, Finding 250).
+      fetchAllRows<{ person_id: string }>((from, to) => supabase.from("cv_uploads").select("person_id").range(from, to), 20_000),
       supabase.from("experience_items").select("id", { count: "exact", head: true }),
       supabase.from("people").select("id, name").order("name", { ascending: true }),
     ]);
-    if (cvError) console.error("cv_uploads select failed (company)", cvError);
+    if (cvUploads.error) console.error("cv_uploads select failed (company)", cvUploads.error);
     if (experienceError) console.error("experience_items count failed (company)", experienceError);
     if (peopleError) console.error("people select failed (company)", peopleError);
-    readinessInputsError = Boolean(cvError || experienceError || peopleError);
+    readinessInputsError = Boolean(cvUploads.error || experienceError || peopleError);
     peopleRows = (peopleData ?? []) as { id: string; name: string }[];
-    peopleWithCvIds = new Set((cvRows ?? []).map((r) => r.person_id as string));
+    peopleWithCvIds = new Set(cvUploads.rows.map((r) => r.person_id));
     readiness = computeBidReadiness({
       legalName: row.legal_name,
       csdSupplierNumber: row.csd_supplier_number,
