@@ -109,6 +109,22 @@ def _dismiss_cookie_banner(page):
     }""")
 
 
+def download_error_message(result):
+    """The error text for a {"success": false, ...} download-form JSON response.
+    `.get("html", "no link returned")` only falls back when the key is
+    ABSENT - a response that includes the key with a null value (e.g.
+    {"success": false, "html": null}, plausible for a server-side
+    validation failure with no HTML message body) sailed straight through
+    as None, which main()'s own status-line formatting then sliced
+    (`r.get("error", "")[:200]`) - the SAME "default only on missing, not
+    on None" trap, so THAT also returned None, and slicing it crashed with
+    a bare TypeError outside this call's own per-slug try/except, aborting
+    the whole run (every other queued slug lost, not just this one)
+    instead of being logged as one failed download. `or` catches both
+    "absent" and "present but falsy" (None/empty string) in one check."""
+    return result.get("html") or "no link returned"
+
+
 def download_one(page, slug, fullname, company, phone, email, out_dir, accept_policy=True):
     # networkidle waits for ALL background network activity (analytics, the reCAPTCHA
     # badge's own polling, etc.) to stop, which real-world sites often never do within any
@@ -153,7 +169,7 @@ def download_one(page, slug, fullname, company, phone, email, out_dir, accept_po
     result = resp.json()
 
     if not result.get("success"):
-        return {"slug": slug, "success": False, "error": result.get("html", "no link returned")}
+        return {"slug": slug, "success": False, "error": download_error_message(result)}
 
     link = result["link"]
     os.makedirs(out_dir, exist_ok=True)

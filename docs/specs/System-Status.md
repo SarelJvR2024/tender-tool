@@ -16335,6 +16335,53 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 295, `engine/discovery/download_documents.py`'s `download_one()` built its failure `error` field with `.get("html", "no link returned")` - a default that only fires when the key is ABSENT, not when it's present-but-null - and `main()`'s own status-line formatting hit the identical trap a second time, crashing the WHOLE batch run with a bare `TypeError` outside any per-slug handling the moment a response is shaped `{"success": false, "html": null}`
+
+Oriented from `b9126b6` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: discovery (34 non-test files). Mention-count survey put `download_documents.py` (6
+mentions, 211 lines) far below every other candidate. Read it in full: a Playwright script for
+SANRAL's gated document-download form, whose own header comment already documents, from real
+production attempts, that reCAPTCHA v3 reliably rejects every submission - confirmed non-functional
+against the live site today, kept only in case SANRAL's defenses change. Precisely BECAUSE every
+real invocation right now ends in `{"success": false, ...}`, its own failure-handling code is the
+one part of this file that actually runs on every single live attempt - read adversarially rather
+than skipped as "dead/experimental."
+
+Confirmed live: `result.get("html", "no link returned")` only substitutes the default when "html"
+is ABSENT - a response shaped `{"success": false, "html": null}` (plausible for a server-side
+validation failure with no HTML body, distinct from reCAPTCHA's own documented non-null message)
+has the key PRESENT with value `None`, so this returns `None`. `main()`'s own status-line
+formatting (`r.get("error", "")[:200]`) hits the identical trap a second time on the SAME value,
+also returning `None`, and slicing it crashes with a bare `TypeError` - outside `download_one()`'s
+own normal return (no exception there for `main()`'s per-slug `try/except` to catch), aborting the
+whole `for slug in args.slugs:` loop. Every tender queued after the one with this response shape is
+never attempted.
+
+Fix: extracted the error-message derivation into a new, pure `download_error_message(result)`
+function using `result.get("html") or "no link returned"` - `or` falls through on both "absent" and
+"present but falsy," closing the gap at its source.
+
+Verified red-then-green: new `test_download_documents.py` (7 checks, no test coverage existed for
+this file before). It imports `download_documents`, which imports `playwright.sync_api` at module
+scope - absent from `requirements.txt` and from `bridge-worker-ci.yml`'s own test allowlist (this
+script was never wired into CI at all); installed the Python package locally (no browser binaries
+needed) purely to run this verification, and did NOT add the test to CI or touch CI's own
+dependency setup - an unrelated, larger change this fix's own scope doesn't call for. **Red:**
+reverted `download_documents.py` only, re-ran - `AttributeError: module has no attribute
+'download_error_message'`. **Green:** reapplied, re-ran - `ALL PASSED`, 7/7. `python3 -m py_compile`
+clean on both files; confirmed the one real caller, `run_discovery.py`'s own import, still works.
+
+Not escalated to a PR: small, safe, self-contained Python fix - no RLS, no migration, no money path,
+no worker-image change (this script isn't even part of the deployed worker image's CI-tested
+surface). Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 283, `engine/worker/fake_supabase.py` (the in-memory Supabase stand-in `test_poll_loop.py` uses) silently dropped the `order=` query param and always returned rows in plain insertion order instead - a real divergence from PostgREST's own behaviour the real job-queue code depends on for FIFO processing, undetectable by any existing test since none queue more than one 'requested' row at a time
 
 Oriented from `b58e842` (sibling track's own most recent docs commit, confirmed via `git fetch
