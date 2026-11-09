@@ -77,8 +77,58 @@ MANIFEST_VERSION = 2
 # ---------------------------------------------------------------------------
 
 
+def _docx_zip_bomb_guard(path):
+    """A .docx (and a .doc's own LibreOffice-converted .docx) is itself a zip
+    container, opened directly by python-docx with no size limit of its own -
+    a SEPARATE code path from collect_documents()'s own zip-bomb guard below,
+    which only ever runs on literal .zip tender-pack bundles, never on a lone
+    .docx/.doc upload. Confirmed live (standing review, 2026-11-09): a 4.37MB
+    crafted .docx (one <w:t> run repeated with highly-compressible text,
+    well under every upload-size cap this app enforces - MAX_UPLOAD_BYTES is
+    4.4MB) made python-docx's own lxml parse of word/document.xml alone peak
+    at ~6.8GB RSS and ~17s CPU before it happened to fail on an unrelated
+    libxml2 internal limit - with no cap at all, nothing stops a differently
+    -shaped bomb (a single long repeated byte run, not broken up by XML tags
+    every 50KB as this one was) from inflating further still inside the same
+    4.4MB budget. Unlike pdftotext/soffice (separate subprocesses, already
+    bounded by their own `timeout=`), python-docx runs TEXT INSIDE this same
+    worker process, so an OOM here can take the whole worker down mid-queue,
+    not just fail the one job - worse than the "corrupt file" case every
+    docx_text() call site already catches and reports cleanly.
+
+    Streams every member fully through (never trusting a zip's own stated
+    `file_size`, a crafted zip can misstate it - the identical caveat
+    collect_documents() already documents) and enforces the SAME per-member/
+    total caps, before python-docx ever gets to decompress it a second time
+    for real. Raises ValueError, which every call site's existing
+    "could not be opened"/"not really a docx" except-and-report path already
+    catches - this fix only replaces an unbounded resource spike with a fast,
+    bounded rejection, it adds no new failure branch anywhere."""
+    total = 0
+    try:
+        with zipfile.ZipFile(path) as z:
+            for member in z.namelist():
+                member_total = 0
+                with z.open(member) as f:
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        member_total += len(chunk)
+                        total += len(chunk)
+                        if member_total > _ZIP_MEMBER_MAX_BYTES or total > _ZIP_TOTAL_MAX_BYTES:
+                            raise ValueError(
+                                f"decompresses past the {_ZIP_MEMBER_MAX_BYTES // (1024 * 1024)}MB per-part / "
+                                f"{_ZIP_TOTAL_MAX_BYTES // (1024 * 1024)}MB total guard - treated as unreadable "
+                                "rather than risk exhausting the worker's memory")
+    except zipfile.BadZipFile:
+        raise ValueError("not a valid zip-based Office document (corrupt, or not really a .docx)")
+    return total
+
+
 def docx_text(path):
     import docx
+    _docx_zip_bomb_guard(path)
     d = docx.Document(path)
     parts = [p.text for p in d.paragraphs]
     for t in d.tables:

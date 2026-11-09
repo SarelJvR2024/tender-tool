@@ -448,6 +448,66 @@ def check_zip_decompression_bomb_is_capped():
               len(docs3) == 1 and docs3[0]["format"] == "txt" and not docs3[0].get("unreadable"), docs3)
 
 
+def check_docx_zip_bomb_guard_caps_python_docx_parse():
+    print("\nStanding review (2026-11-09): docx_text() opens a .docx (itself a zip "
+          "container) directly via python-docx, a SEPARATE path from collect_documents()'s "
+          "own zip-bomb guard above (which only ever runs on literal .zip tender bundles) - "
+          "must be capped the same way, since python-docx runs in-process, with no "
+          "subprocess timeout to fall back on the way pdftotext/soffice already have")
+    import zipfile
+    with tempfile.TemporaryDirectory() as d:
+        # A real, minimal OOXML docx whose word/document.xml is one highly-
+        # compressible run, built small enough on disk to be a perfectly
+        # plausible upload, but whose real decompressed size blows the guard.
+        bomb = os.path.join(d, "bomb.docx")
+        with zipfile.ZipFile(bomb, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("[Content_Types].xml",
+                       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                       '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                       '<Default Extension="xml" ContentType="application/xml"/>'
+                       '<Override PartName="/word/document.xml" '
+                       'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+                       '</Types>')
+            z.writestr("_rels/.rels",
+                       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                       '<Relationship Id="rId1" '
+                       'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+                       'Target="word/document.xml"/></Relationships>')
+            para = b"<w:p><w:r><w:t>" + b"A" * 50000 + b"</w:t></w:r></w:p>"
+            header = (b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                      b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                      b'<w:body>')
+            footer = b"</w:body></w:document>"
+            with z.open("word/document.xml", "w", force_zip64=True) as f:
+                f.write(header)
+                for _ in range(69000):  # ~3.45GB decompressed from a ~4.4MB file - under every real upload-size cap
+                    f.write(para)
+                f.write(footer)
+        bomb_mb = os.path.getsize(bomb) / (1024 * 1024)
+        check(f"the bomb fixture itself is a realistic upload size (~{bomb_mb:.1f}MB, under the app's 4.4MB cap)",
+              bomb_mb < 4.4, bomb_mb)
+        try:
+            req.docx_text(bomb)
+            check("docx_text() rejects the bomb instead of fully decompressing it", False, "no exception raised")
+        except ValueError as e:
+            check("docx_text() raises a clean ValueError, not an unbounded parse", "guard" in str(e), str(e))
+        except MemoryError:
+            check("docx_text() rejects the bomb instead of fully decompressing it", False, "MemoryError - guard did not run")
+
+        # A genuinely ordinary, small docx must still read normally - the guard
+        # must not false-positive on a real document.
+        import docx as _docx
+        normal = os.path.join(d, "normal.docx")
+        doc = _docx.Document()
+        doc.add_paragraph("A perfectly ordinary SBD 4 declaration.")
+        doc.save(normal)
+        text = req.docx_text(normal)
+        check("an ordinary small docx still reads normally, unaffected by the guard",
+              "A perfectly ordinary SBD 4 declaration." in text, text)
+
+
 def check_cidb_grade_phrasing_is_detected_not_just_grading():
     """Finding 143 (2026-11-07): assess_tender.CIDB_RE's own "GRADING?" only
     ever made the trailing "G" optional ("GRADIN"/"GRADING") - it could never
@@ -494,6 +554,7 @@ def main():
     check_combined_bulletin_detection()
     check_person_registration_detection()
     check_zip_decompression_bomb_is_capped()
+    check_docx_zip_bomb_guard_caps_python_docx_parse()
     check_cidb_grade_phrasing_is_detected_not_just_grading()
 
     print(f"\n{len(FAILS)} failure(s)")
