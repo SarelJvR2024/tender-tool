@@ -28,6 +28,7 @@ import {
   MAN_POSITION_COLUMNS,
   MAN_POSITION_ROWS,
   PROJECT_TYPE_MATRICES,
+  SANRAL_POSITION_CODES,
   TECH_POSITION_COLUMNS,
   TECH_POSITION_ROWS,
   baseCode,
@@ -128,11 +129,27 @@ function projectTypePoints(matrixKey: string | null, tenderType: string | null, 
   return r(Math.min(...row), Math.max(...row));
 }
 
+// "PL(T)" is one of SANRAL's own 23 published key-person codes (T-24) - it's
+// offered as a real "position held" suggestion on the People page - but
+// Book 1's transcribed position-held tables (TECH_POSITION_ROWS/
+// MAN_POSITION_ROWS) have no row for it (unlike its DS(T)/CE(T)/CM(T)/
+// ETS(T) toll siblings, which all do). That's a real data gap, not SANRAL's
+// own "Undefined" ("none of the above") answer - this tells the two apart so
+// a person who genuinely held PL(T) scores an honest 0-5 range (like any
+// other tendered-position-not-in-the-matrix case) instead of a confident,
+// silently-wrong 0 indistinguishable from picking "Undefined".
+function heldCodeIsKnownButUntabulated(heldCode: string, rows: Record<string, number[]>): boolean {
+  return heldCode !== "" && heldCode !== "UNDEFINED" && !rows[heldCode] && SANRAL_POSITION_CODES.some((c) => normPositionCode(c.code) === heldCode);
+}
+
 function lookup(rows: Record<string, number[]>, cols: string[], held: string | null, required: string): number | null {
   const col = cols.indexOf(required);
   if (col < 0) return null;
-  const row = rows[normPositionCode(held)];
-  return row ? row[col] : 0; // unknown held code = SANRAL's own "Undefined" row (0)
+  const heldCode = normPositionCode(held);
+  const row = rows[heldCode];
+  if (row) return row[col];
+  if (heldCodeIsKnownButUntabulated(heldCode, rows)) return null;
+  return 0; // genuinely blank/unrecognised held code = SANRAL's own "Undefined" row (0)
 }
 
 function capSum(values: Range[], cap: number): Range {
@@ -181,6 +198,10 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
     return v === null ? r(0, 5) : r(v, v);
   });
   if (!TECH_POSITION_COLUMNS.includes(required)) notes.push(`Position code ${required} isn't in SANRAL's position matrix - position points shown as a range.`);
+  const untabulatedTechHeld = Array.from(new Set(projects.map((p) => normPositionCode(p.position_code)).filter((c) => heldCodeIsKnownButUntabulated(c, TECH_POSITION_ROWS))));
+  if (untabulatedTechHeld.length > 0) {
+    notes.push(`Position(s) held ${untabulatedTechHeld.join(", ")} are real SANRAL codes with no transcribed position-held row - position points shown as a range, not scored as "Undefined".`);
+  }
 
   const technical = add(add(capSum(typePts, 15), capSum(periodPts, 15)), capSum(posPts, 15));
 
@@ -201,6 +222,10 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
       15,
     );
     management = add(management, manPos);
+    const untabulatedManHeld = Array.from(new Set(projects.map((p) => normPositionCode(p.position_code)).filter((c) => heldCodeIsKnownButUntabulated(c, MAN_POSITION_ROWS))));
+    if (untabulatedManHeld.length > 0) {
+      notes.push(`Position(s) held ${untabulatedManHeld.join(", ")} are real SANRAL codes with no transcribed position-held row - management points shown as a range, not scored as "Undefined".`);
+    }
   }
 
   return {

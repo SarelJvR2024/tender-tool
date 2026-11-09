@@ -129,6 +129,70 @@ test("estimateSanralConventional: a position whose managerial flag IS known on f
   assert.ok(estimate.management.min <= estimate.management.max);
 });
 
+// Finding (2026-11-09, standing solution-architect review): "PL(T)" is one of
+// SANRAL's own 23 published key-person codes (T-24, offered as a real
+// "position held" suggestion via SANRAL_POSITION_CODES on the People page),
+// but Book 1's transcribed position-held tables have no row for it - unlike
+// its DS(T)/CE(T)/CM(T)/ETS(T) toll siblings, which all do. `lookup()` used
+// to treat ANY held code with no row (including this real-but-untabulated
+// one) as SANRAL's own "Undefined" ("none of the above") answer, silently
+// scoring it a confident 0 - indistinguishable from a person who genuinely
+// held no recognisable position at all. Live-reachable: a company can pick
+// "PL(T)" directly from the People page's own suggested-values list for a
+// past project's position_code.
+test("estimatePosition: a past position held of PL(T) (real SANRAL code, no transcribed row) scores a range, not a confident 0 indistinguishable from Undefined", () => {
+  const closing = new Date("2027-01-01");
+  const project = (heldCode: string) => ({
+    client_type: "National Roads Authority",
+    project_type: null,
+    position_code: heldCode,
+    start_date: "2020-01-01",
+    end_date: "2024-01-01",
+  });
+  const input = (heldCode: string): SanralPositionInput => ({
+    positionCode: "CE(T)",
+    description: null,
+    managerial: false,
+    tenderProjectType: null,
+    person: { name: "Test Person", projects: [project(heldCode)] },
+  });
+
+  const plT = estimatePosition(input("PL(T)"), closing);
+  const undefinedHeld = estimatePosition(input("Undefined"), closing);
+  const dsT = estimatePosition(input("DS(T)"), closing); // has a real row - sanity check
+
+  // Before the fix, PL(T) and Undefined were byte-for-byte identical (both a
+  // confident technical: {min:5,max:10}). Now PL(T) widens into a range that
+  // Undefined correctly does not, and carries its own explanatory note.
+  assert.deepEqual(undefinedHeld.technical, { min: 5, max: 10 });
+  assert.deepEqual(plT.technical, { min: 5, max: 15 });
+  assert.notDeepEqual(plT.technical, undefinedHeld.technical);
+  assert.ok(plT.notes.some((n) => n.includes("PL(T)") && n.includes("no transcribed position-held row")));
+  assert.equal(undefinedHeld.notes.some((n) => n.includes("transcribed position-held row")), false);
+
+  // DS(T) (a real, tabulated toll sibling) still scores its real tabulated
+  // value with no such note - this fix only widens the genuinely-missing case.
+  assert.deepEqual(dsT.technical, { min: 7.5, max: 12.5 });
+  assert.equal(dsT.notes.some((n) => n.includes("transcribed position-held row")), false);
+});
+
+test("estimatePosition: the same PL(T) gap also widens the managerial position-held range, not just technical", () => {
+  const closing = new Date("2027-01-01");
+  const input: SanralPositionInput = {
+    positionCode: "CE(T)", // a managerial-eligible tendered code (MAN_POSITION_COLUMNS includes CE(T))
+    description: null,
+    managerial: true,
+    tenderProjectType: null,
+    person: {
+      name: "Test Person",
+      projects: [{ client_type: "National Roads Authority", project_type: null, position_code: "PL(T)", start_date: "2020-01-01", end_date: "2024-01-01" }],
+    },
+  };
+  const estimate = estimatePosition(input, closing);
+  assert.ok(estimate.management.min < estimate.management.max, "management should be a real range, not a single confident value");
+  assert.ok(estimate.notes.some((n) => n.includes("PL(T)") && n.includes("management points shown as a range")));
+});
+
 test("pastPerformanceFromExperience: picks the best 3 scoreable items and fills remaining slots with the B6 affidavit range", () => {
   const result = pastPerformanceFromExperience([
     { document_type: "reference_letter", performance_rating: "excellent" },
