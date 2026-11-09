@@ -578,24 +578,57 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 /**
  * Sarel's own live feedback: "allow bulk upload of all People CVs... or
  * bulk upload of people with their details." One screen, multiple files at
- * once (reuses the shared FileDropzone/uploadBatch pattern spec v3 Batch 2
- * established for company documents) - each file is assigned, per row in
- * the client UI, to either an existing person or a brand-new one (name
- * typed, same one-field minimum as createPersonWithCv() above and for the
- * exact same reason - a CV can't be AI-extracted before a person_id exists,
- * see that function's own comment). Every file still goes through the
- * SAME per-person AI-extraction review card as a single upload - this
- * function only creates/attaches, it never confirms or applies anything
- * extracted.
+ * once - each file is assigned, per row in the client UI, to either an
+ * existing person or a brand-new one (name typed, same one-field minimum as
+ * createPersonWithCv() above and for the exact same reason - a CV can't be
+ * AI-extracted before a person_id exists, see that function's own comment).
+ * Every file still goes through the SAME per-person AI-extraction review
+ * card as a single upload - this function only creates/attaches, it never
+ * confirms or applies anything extracted.
  *
- * Processes all assigned rows in one call and redirects ONCE at the end, to
- * /people with a summary - NOT per-file, since uploadCv()/createPersonWithCv()
- * above each throw their own redirect() and can't be called in a loop.
- * FormData shape, built by the client component: for i = 0..count-1,
- * `kind_<i>` is "existing" or "new", `file_<i>` is the File, and either
- * `person_id_<i>` (existing) or `name_<i>` (new) names the target.
+ * Processes every assigned row passed in THIS call and returns a summary -
+ * it does NOT redirect itself (Finding 272, standing review, 2026-11-09):
+ * this function's own request body carries every file's real bytes in one
+ * multipart POST, and next.config.ts's own `serverActions.bodySizeLimit`
+ * ("4.5mb" - Vercel's hard per-function request-body ceiling, 413
+ * FUNCTION_PAYLOAD_TOO_LARGE before Next.js even sees it) applies to that
+ * WHOLE request, not per file - confirmed live (`npx next dev` plus a
+ * disposable scratch Server Action, same shape as this one: a single ~3 MB
+ * file succeeded, 200; two ~3 MB files in one request - each well under this
+ * file's own per-file `MAX_CV_BYTES` (4.4 MB) client-side cap in
+ * bulk-cv-upload.tsx - failed every time with "Error: Body exceeded 4.5mb
+ * limit.", statusCode 413, surfaced to the browser as an uncaught, generic
+ * failure). Every OTHER multi-file upload surface in this app already
+ * learned this lesson and uploads straight from the browser to Storage
+ * instead (`uploadBatch.ts`'s own header comment states the exact same
+ * "a batch... would blow past that" reasoning, for `upload-form.tsx`/
+ * `VaultDocumentUploader.tsx`/`quick-blocker-drawer.tsx`/
+ * `manual-tender-form.tsx`) - this function's own header comment used to
+ * claim it "reuses the shared FileDropzone/uploadBatch pattern", but the
+ * client component only ever reused `FileDropzone`, never `uploadBatch`,
+ * so this was the one multi-file surface still sending every file's own
+ * bytes through a single capped Server Action body. Moving CV uploads to
+ * that same browser-direct-to-Storage pattern needs a real design decision
+ * this fix doesn't make on its own: a NEW person's `id` doesn't exist until
+ * this function creates it, and `cv_uploads.person_id`/the real storage-path
+ * convention both need that id first (see createPersonWithCv()'s own
+ * comment on exactly this constraint) - so a browser-direct upload would
+ * need a staging path plus a storage `move()` once the person exists, a
+ * larger change than this pass's own severity bar for a direct push. The fix
+ * applied here instead keeps every byte of this function's own logic
+ * unchanged and only changes how the CALLER drives it: `bulk-cv-upload.tsx`
+ * now splits the batch into several smaller calls, each kept under this
+ * same proven-safe per-file ceiling, and accumulates their results itself
+ * before navigating - exactly the "chunk the request, not the
+ * architecture" shape `scripts/send-operational-alerts.ts`'s own
+ * 1000-row-cap pagination fixes (Finding 266) already established for a
+ * different cap in this codebase. FormData shape, built by the client
+ * component: for i = 0..count-1 (count is just THIS call's own rows, not
+ * the whole batch), `kind_<i>` is "existing" or "new", `file_<i>` is the
+ * File, and either `person_id_<i>` (existing) or `name_<i>` (new) names the
+ * target.
  */
-export async function bulkUploadCvs(formData: FormData) {
+export async function bulkUploadCvs(formData: FormData): Promise<{ created: number; attached: number; errors: string[] }> {
   const companyId = await requireCompanyId();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -649,8 +682,11 @@ export async function bulkUploadCvs(formData: FormData) {
   }
 
   revalidatePath("/people");
-  const summary = `${attached} CV${attached === 1 ? "" : "s"} uploaded${created > 0 ? `, ${created} new ${created === 1 ? "person" : "people"} added` : ""}${errors.length > 0 ? `. ${errors.length} failed: ${errors.join(" ")}` : ""}.`;
-  redirect(`/people?bulk=${encodeURIComponent(summary)}`);
+  // No redirect here - see this function's own header comment. The caller
+  // (bulk-cv-upload.tsx) may call this several times, once per size-bounded
+  // chunk of the real batch, and only it knows when the whole batch is done
+  // and it's time to navigate with a combined summary.
+  return { created, attached, errors };
 }
 
 /**

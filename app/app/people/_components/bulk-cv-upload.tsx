@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { bulkUploadCvs } from "../actions";
 import { FileDropzone, validateFiles } from "../../_components/document-intake/FileDropzone";
 import { ACCEPTED_EXTENSIONS } from "@/lib/onboardingScan";
 import { Button } from "@/components/ui/button";
+import { chunkRowsBySize, rowsToFormData } from "./bulkCvChunking";
 
 const MAX_CV_BYTES = 4.4 * 1024 * 1024;
 
@@ -46,6 +48,7 @@ function bestPersonMatch(filename: string, people: Person[]): Person | null {
  * it never auto-submits.
  */
 export function BulkCvUpload({ people }: { people: Person[] }) {
+  const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [mode, setMode] = useState<"ai_extract" | "as_is">("ai_extract");
   const [error, setError] = useState<string | null>(null);
@@ -89,16 +92,35 @@ export function BulkCvUpload({ people }: { people: Person[] }) {
     }
     setError(null);
     startTransition(async () => {
-      const fd = new FormData();
-      fd.append("count", String(rows.length));
-      fd.append("mode", mode);
-      rows.forEach((r, i) => {
-        fd.append(`kind_${i}`, r.kind);
-        fd.append(`file_${i}`, r.file);
-        if (r.kind === "existing") fd.append(`person_id_${i}`, r.personId);
-        else fd.append(`name_${i}`, r.name.trim());
-      });
-      await bulkUploadCvs(fd); // redirects to /people?bulk=... on completion
+      // Finding 272: send the batch as several size-bounded chunks, each its
+      // own Server Action call, rather than one call carrying every file's
+      // real bytes at once (see chunkRowsBySize()'s own header comment for
+      // why, and bulkUploadCvs()'s for the live 413 repro this replaces).
+      // Sequential, not parallel - keeps the created/attached/errors tally
+      // simple and avoids firing several multi-megabyte uploads at once on
+      // what may be a slow connection.
+      let created = 0;
+      let attached = 0;
+      const errors: string[] = [];
+      for (const chunk of chunkRowsBySize(rows, MAX_CV_BYTES)) {
+        try {
+          const result = await bulkUploadCvs(rowsToFormData(chunk, mode));
+          created += result.created;
+          attached += result.attached;
+          errors.push(...result.errors);
+        } catch (e) {
+          // A chunk-level failure (a real network error, or a request that
+          // still somehow exceeds the cap) must not discard the files
+          // already attached in an earlier chunk, or silently stop telling
+          // the user about files that never got processed - counted as
+          // failed for every file in THIS chunk, same spirit as
+          // bulkUploadCvs()'s own per-file partial-failure handling.
+          console.error("bulkUploadCvs chunk failed", e);
+          errors.push(...chunk.map((r) => `${r.file.name}: upload failed - try this file again.`));
+        }
+      }
+      const summary = `${attached} CV${attached === 1 ? "" : "s"} uploaded${created > 0 ? `, ${created} new ${created === 1 ? "person" : "people"} added` : ""}${errors.length > 0 ? `. ${errors.length} failed: ${errors.join(" ")}` : ""}.`;
+      router.push(`/people?bulk=${encodeURIComponent(summary)}`);
     });
   }
 
