@@ -83,7 +83,7 @@ describe("runPrintCutoff", () => {
 });
 
 describe("runBriefingReminders", () => {
-  const tender = { id: "tender-2", contract_no: "N.007-040-2026/1F", description: "Rehab", briefing_date: daysFromToday(5), briefing_time: "10:00", tender_packs: [{ company_id: "company-1" }] };
+  const tender = { id: "tender-2", contract_no: "N.007-040-2026/1F", description: "Rehab", briefing_date: daysFromToday(5), briefing_time: "10:00", tender_packs: [{ company_id: "company-1", pipeline_stage: "assessing" }] };
 
   it("never claims record_operational_alert_sent for a company with zero opted-in recipients", async () => {
     const supabase = mockSupabase({

@@ -208,7 +208,7 @@ export async function runBriefingReminders(supabase: SupabaseService, appUrl: st
     (from, to) =>
       supabase
         .from("tenders")
-        .select("id, contract_no, description, briefing_date, briefing_time, tender_packs!inner(company_id)")
+        .select("id, contract_no, description, briefing_date, briefing_time, tender_packs!inner(company_id, pipeline_stage)")
         .not("briefing_date", "is", null)
         .range(from, to),
     20_000,
