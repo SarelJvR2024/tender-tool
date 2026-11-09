@@ -57,6 +57,14 @@
 # a real, already-fixed bug. Added below, same `if: ${{ !cancelled() }}`
 # convention. Re-diffed `find . -name "test_*.py"` against this file after
 # adding them: zero gaps remain.
+#
+# Standing-review-pass finding (2026-11-09): the same gap shape recurred a
+# 4th time - the 2026-11-06 sweep's own "zero gaps remain" was only true as
+# of that commit. Three test files added the very next day (2026-11-07),
+# each alongside its own already-fixed bug, were never wired in either:
+# discovery/test_etenders_national.py, discovery/test_watch_tender_updates.py,
+# pack_generator/test_confirm_pack.py. Each confirmed individually (exit 0,
+# no live Supabase/Postgres/API key) before being added below.
 name: bridge-worker-ci
 
 on:
@@ -220,6 +228,14 @@ jobs:
       - name: Government sources + listing changes - portal/Eskom/Transnet/Cape Town readers, SANRAL dual-id merge, cancellations and date moves (real trimmed rows, offline)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_gov_sources.py
+
+      - name: National eTenders (OCDS) reader - a total fetch failure raises instead of returning [] silently (never wired into CI, 2026-11-09 sweep)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_etenders_national.py
+
+      - name: Tender updates watcher - the OCDS release-not-found path alerts like its SANRAL sibling (never wired into CI, 2026-11-09 sweep)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_watch_tender_updates.py
 
       - name: Company letters - uploaded as-is / own guideline / not set up (docx read-back)
         if: ${{ !cancelled() }}
@@ -393,6 +409,10 @@ jobs:
       - name: Pack generator - suggest_pack.py's suggest()/score_candidate() ranking
         if: ${{ !cancelled() }}
         run: python3 engine/pack_generator/test_suggest_pack.py
+
+      - name: Pack generator - confirm_pack.py's initial_graduated parsing takes Finding 138's non-string-date guard (never wired into CI, 2026-11-09 sweep)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack_generator/test_confirm_pack.py
 
       - name: Compliance - directors/shareholders/bank-accounts/property registrations catalog (migration 0050)
         if: ${{ !cancelled() }}
