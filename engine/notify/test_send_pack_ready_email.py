@@ -344,6 +344,63 @@ def test_one_recipients_record_notification_sent_failure_does_not_lose_the_rest(
           log_calls == ["a@example.com", "b@example.com"], log_calls)
 
 
+def test_send_via_resend_from_address_matches_the_real_ops_fallback_the_docstring_claims():
+    """Standing-review finding: _send_via_resend()'s own docstring claims
+    parity with app/lib/resendEmail.ts's sendTransactionalEmail() - "same
+    sender-profile fallback chain (RESEND_FROM_BIDS -> RESEND_FROM_ADDRESS ->
+    a literal default)" - but the real TS function (resolveFromAddress(),
+    called for the "ops" profile every Tier-1 sender uses) was changed by
+    commit 80d4b6c (2026-10-24, BEFORE this file was even created on
+    2026-10-27) to resolve each sender profile's OWN env var independently,
+    with NO cross-profile fallback to RESEND_FROM_ADDRESS at all - an unset
+    RESEND_FROM_BIDS falls straight to this file's own hardcoded
+    "Tender Ready Bids <bids@tenderready.app>" default, never to Tier 0's
+    address. This docstring/implementation never matched that real
+    behaviour, not even on day one. Live-verified against the real
+    sendTransactionalEmail() via `cd app && npx vitest run` with a
+    temporary Resend-mocking spec (RESEND_FROM_BIDS unset,
+    RESEND_FROM_ADDRESS="Tier0 <team@tenderready.app>"): TS sent from
+    "Tender Ready Bids <bids@tenderready.app>", never touching
+    RESEND_FROM_ADDRESS for the ops/bids profile."""
+    old_bids = os.environ.pop("RESEND_FROM_BIDS", None)
+    old_addr = os.environ.get("RESEND_FROM_ADDRESS")
+    os.environ["RESEND_FROM_ADDRESS"] = "Tier0 <team@tenderready.app>"
+    os.environ["RESEND_API_KEY"] = "re_test"
+    captured = {}
+
+    class FakeResp:
+        def read(self):
+            return json.dumps({"id": "resend-x"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=30):
+        captured["from"] = json.loads(req.data.decode())["from"]
+        return FakeResp()
+
+    try:
+        monkeypatch_module(pr.urllib.request, "urlopen", fake_urlopen)
+        pr._send_via_resend("x@example.com", "s", "<p>h</p>", "t")
+        check(
+            "with RESEND_FROM_BIDS unset and RESEND_FROM_ADDRESS set, "
+            "_send_via_resend() sends from the same hardcoded bids default "
+            "the real TS ops profile falls back to (never RESEND_FROM_ADDRESS)",
+            captured.get("from") == "Tender Ready Bids <bids@tenderready.app>",
+            captured.get("from"),
+        )
+    finally:
+        if old_bids is not None:
+            os.environ["RESEND_FROM_BIDS"] = old_bids
+        if old_addr is not None:
+            os.environ["RESEND_FROM_ADDRESS"] = old_addr
+        else:
+            os.environ.pop("RESEND_FROM_ADDRESS", None)
+
+
 def monkeypatch_module(obj, attr, value, env=None):
     """Minimal manual monkeypatch (no pytest fixture available in this plain-script test harness) - every patch here is process-local and this test file is always run as its own fresh interpreter, so there's nothing to restore."""
     if env is not None:
@@ -361,6 +418,7 @@ def main():
     test_render_failure_is_caught_and_never_raises(None)
     test_render_failure_never_wastes_the_one_time_claim()
     test_one_recipients_record_notification_sent_failure_does_not_lose_the_rest()
+    test_send_via_resend_from_address_matches_the_real_ops_fallback_the_docstring_claims()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

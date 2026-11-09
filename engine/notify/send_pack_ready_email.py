@@ -75,11 +75,11 @@ def _render(opts):
 
 
 def _send_via_resend(to, subject, html, text):
-    """Mirrors app/lib/resendEmail.ts's sendTransactionalEmail() - same env vars, same skip-not-fail rule for a missing key, same sender-profile fallback chain (RESEND_FROM_BIDS -> RESEND_FROM_ADDRESS -> a literal default)."""
+    """Mirrors app/lib/resendEmail.ts's sendTransactionalEmail() for the "ops" sender profile - same env vars, same skip-not-fail rule for a missing key, same per-profile fallback (RESEND_FROM_BIDS -> this profile's own hardcoded default). Standing-review fix, 2026-11-09: this used to fall back to RESEND_FROM_ADDRESS (Tier 0's own address) when RESEND_FROM_BIDS was unset, then to a Tier-0-flavoured literal - but the real TS resolveFromAddress() (commit 80d4b6c, which predates this file) resolves each profile's env var independently with NO cross-profile fallback at all; an unset RESEND_FROM_BIDS falls straight to the "ops" profile's own hardcoded default ("Tender Ready Bids <bids@tenderready.app>"), never to RESEND_FROM_ADDRESS. The old chain here never matched that real behaviour, not even on day one - it would have silently sent a pack-ready (Tier 1/bids) email from the Tier 0 address, or an unbranded default, the moment RESEND_FROM_BIDS was ever unset while RESEND_FROM_ADDRESS was still set, a partially-configured state the TS side's own header comment explicitly documents as a supported degraded state."""
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
         return {"status": "skipped_no_api_key"}
-    from_addr = os.environ.get("RESEND_FROM_BIDS") or os.environ.get("RESEND_FROM_ADDRESS") or "Tender Ready <onboarding@resend.dev>"
+    from_addr = os.environ.get("RESEND_FROM_BIDS") or "Tender Ready Bids <bids@tenderready.app>"
     reply_to = os.environ.get("RESEND_REPLY_TO") or "support@tenderready.app"
     body = json.dumps({"from": from_addr, "to": [to], "reply_to": reply_to, "subject": subject, "html": html, "text": text}).encode()
     req = urllib.request.Request(RESEND_URL, data=body, method="POST",
