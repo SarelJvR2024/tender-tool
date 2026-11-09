@@ -214,15 +214,39 @@ export type AskedFor = Record<RequiredBody, string[]>;
  * authenticated user regardless of company - confirmed in 0001's own RLS
  * policies, "readable by authenticated users") fed daily by a dozen+
  * discovery scrapers that already return 268-292 rows EACH from a single
- * buyer in this session's own live-tests (System-Status.md). A plain
- * `.eq("status", "open")` here is not scoped to one company at all - it's
- * every open tender system-wide - which is exactly the shape that silently
- * hits PostgREST's 1000-row db-max-rows cap (lib/supabasePaging.ts,
- * confirmed live 2026-10-23; same bug class as lib/marketPricing.ts PR #111,
- * lib/discoveryPagination.ts, lib/companyReadinessData.ts). Past that cap,
- * registrationsAskedFor() would silently stop surfacing "this tender asks
- * for SACNASP/SAGC/..." badges for whichever open tenders sort past row
- * 1000, understating real demand for a registration on the People page.
+ * buyer in this session's own live-tests (System-Status.md).
+ *
+ * "Still open" is filtered server-side on `closing_date` (`is null or >=
+ * 'now'`, the special Postgres timestamptz literal - deliberately NOT a
+ * client-side `new Date()`/`Date.now()`, which this file's own "'now' only
+ * after the request-time reads" rule below exists to avoid), NEVER on
+ * `tenders.status` (Finding 300, 2026-11-09, standing review). That column
+ * is a one-time, insert-only computation - every insert site (pursue_
+ * discovered_opportunity 0018, manual/private-doc load 0024/0032,
+ * government-listing-changes 0051) sets it once from closing_date at that
+ * moment and nothing anywhere ever revisits it. Confirmed live in a
+ * disposable scratch database: a tender whose closing_date has since
+ * passed still reads status='open' forever (no sweep ever flips it), AND a
+ * tender whose closing_date was later extended by an accepted corrigendum
+ * (accept_tender_update_date(), 0111, which updates closing_date but never
+ * status) can keep reading status='closed' even though it is genuinely
+ * open again - the exact direction that would have made this function
+ * silently UNDER-promote "this tender asks for X registration" for a
+ * freshly-reopened tender, the opposite of the "never a false claim that
+ * nothing needs it" safety margin this file's own comments elsewhere rely
+ * on. `tenders.status` itself is left untouched by this fix - whether to
+ * ever maintain it live is a separate, bigger call (System-Status.md
+ * standing items).
+ *
+ * Filtering on closing_date instead of status also fetches a WIDER row set
+ * (every tender with a non-null, future-or-open closing_date, not just the
+ * subset some insert path happened to tag 'open') - still bounded by
+ * fetchAllRows()'s own 20,000-row cap and still well short of PostgREST's
+ * 1000-rows-per-page db-max-rows cap that cap exists to page past
+ * (lib/supabasePaging.ts, confirmed live 2026-10-23; same bug class as
+ * lib/marketPricing.ts PR #111, lib/discoveryPagination.ts,
+ * lib/companyReadinessData.ts) - a real but smaller cost than returning a
+ * wrong answer for every tender this status drift affects.
  */
 export async function registrationsAskedFor(supabase: SupabaseClient): Promise<AskedFor> {
   const out: AskedFor = { SACNASP: [], SAGC: [], SACAP: [], SACPLAN: [], SACQSP: [], SACPVP: [], PSIRA: [] };
@@ -232,7 +256,7 @@ export async function registrationsAskedFor(supabase: SupabaseClient): Promise<A
         supabase
           .from("tender_requirements")
           .select("position_code, position_description, tenders!inner(id, contract_no, title, status, closing_date)")
-          .eq("tenders.status", "open")
+          .or("closing_date.is.null,closing_date.gte.now", { referencedTable: "tenders" })
           .range(from, to),
       20_000,
     ),
@@ -241,7 +265,7 @@ export async function registrationsAskedFor(supabase: SupabaseClient): Promise<A
         supabase
           .from("tenders")
           .select("id, contract_no, title, closing_date, document_requirements")
-          .eq("status", "open")
+          .or("closing_date.is.null,closing_date.gte.now")
           .not("document_requirements->person_registrations", "is", null)
           .range(from, to),
       20_000,
