@@ -129,6 +129,47 @@ def test_zero_amount_dropped_with_an_explanatory_note():
           any("Withdrawn Co" in n for n in part["notes"]), part["notes"])
 
 
+def test_amount_fallback_never_crosses_to_a_different_winners_source():
+    print("merge()'s winner_amount_zar fallback (SANRAL's own approved-amount field missing/unparseable) "
+          "must not silently pick up a DIFFERENT source's amount for a DIFFERENT named winner")
+    # SANRAL's own awarded-page record: a real winner, but no parseable
+    # approved contract amount (summarize_sanral()'s own "with_contract_amount"
+    # count confirms this field is genuinely sometimes absent on a real
+    # awarded-page record - not every award page carries it).
+    sanral_rec = {"source": "sanral_awarded", "reference": "N.001-002-2026/1", "title": "Test tender",
+                  "awarded_to": "Black Torres Builders CC"}
+    # eTenders' own row for the SAME outcome_key, naming a genuinely
+    # DIFFERENT company (e.g. a re-award SANRAL's page hasn't caught up
+    # with) - its amount belongs to ITS OWN winner, not SANRAL's.
+    portal_rec = {"bid_number": "SANRAL-TEST-1", "title": "Test tender", "buyer": "SANRAL",
+                  "procurement_type": "Open", "awards": [{"supplier": "Delta Roadworks (Pty) Ltd",
+                                                           "amount_zar": 18_500_000.0}]}
+    row = sao.merge("sanral:N.001-002-2026/1",
+                     [sao.part_from_sanral(sanral_rec), sao.part_from_portal(portal_rec)])
+    check("SANRAL's higher-priority winner name is still used",
+          row["winner_name"] == "Black Torres Builders CC", row["winner_name"])
+    check("but eTenders' amount for the DIFFERENT winner (Delta Roadworks) is NOT attached to it",
+          row["winner_amount_zar"] is None, row["winner_amount_zar"])
+    check("an honest note names the excluded source and the other winner it actually belongs to",
+          any("etenders_portal" in n and "Delta Roadworks" in n for n in row["data_notes"]), row["data_notes"])
+
+
+def test_amount_fallback_still_works_for_the_same_winner_spelled_differently():
+    print("mirror case: the legitimate use this fallback exists for - the SAME real winner, spelled "
+          "differently on each source (fixture-confirmed real: SANRAL's 'Black Torres JV' vs eTenders' "
+          "'BLACK TORRES 96' for X.003-080-2024/1) - must still get the other source's amount")
+    sanral_rec = {"source": "sanral_awarded", "reference": "N.002-003-2026/1", "title": "Test tender 2",
+                  "awarded_to": "Build Co (Pty) Ltd"}
+    portal_rec = {"bid_number": "SANRAL-TEST-2", "title": "Test tender 2", "buyer": "SANRAL",
+                  "procurement_type": "Open", "awards": [{"supplier": "BUILD CO LTD", "amount_zar": 9_000_000.0}]}
+    row = sao.merge("sanral:N.002-003-2026/1",
+                     [sao.part_from_sanral(sanral_rec), sao.part_from_portal(portal_rec)])
+    check("the amount still comes through for the SAME (just differently spelled) winner",
+          row["winner_amount_zar"] == 9_000_000.0, row["winner_amount_zar"])
+    check("no spurious mismatch note for a genuine same-company spelling difference",
+          not any("different winner name" in n for n in row["data_notes"]), row["data_notes"])
+
+
 def main():
     test_unrelated_company_sharing_a_first_word_is_not_assumed_the_winner()
     test_exact_name_match_still_sets_the_winner()
@@ -136,6 +177,8 @@ def main():
     test_find_winner_still_returns_the_unconfirmed_candidate_for_diagnostics()
     test_every_row_in_one_batch_carries_the_same_keys()
     test_zero_amount_dropped_with_an_explanatory_note()
+    test_amount_fallback_never_crosses_to_a_different_winners_source()
+    test_amount_fallback_still_works_for_the_same_winner_spelled_differently()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -266,7 +266,29 @@ def merge(key, parts, existing_first_seen=None):
     amount = winner_part.get("winner_amount_zar") if winner_part else None
     winner_count = winner_part.get("winner_count", 0) if winner_part else 0
     if winner_part and not amount:
-        amount = next((p.get("winner_amount_zar") for p in ordered if p.get("winner_amount_zar")), None)
+        # Only a part naming the SAME winner (or naming no winner at all) may
+        # supply the amount here - `winner_amount_zar` is always recorded
+        # alongside a specific company on its OWN source page (see
+        # part_from_sanral()/part_from_portal(): amount and winner come from
+        # the same rec), so an amount sitting on a part that names a
+        # DIFFERENT winner belongs to that OTHER company, not to `winner`.
+        # Real sources really do disagree on the winner's own name for the
+        # SAME tender (fixtures/award_prices/real_outcomes_2026-10-17.json:
+        # SANRAL's "Black Torres JV" vs eTenders' "BLACK TORRES 96" for
+        # X.003-080-2024/1 - same firm, different string - their amounts
+        # happen to agree there, which is exactly why this went unnoticed)
+        # and, less often but just as really, disagree on who won at all (an
+        # appeal or re-award one source's page hasn't caught up with yet).
+        # Falling through to ANY part's amount used to silently publish one
+        # company's rand figure against a different company's name.
+        w = norm_name(winner)
+        mismatched = next((p for p in ordered if p.get("winner_amount_zar") and p.get("winner")
+                           and norm_name(p["winner"]) != w), None)
+        amount = next((p.get("winner_amount_zar") for p in ordered if p.get("winner_amount_zar")
+                       and (not p.get("winner") or norm_name(p["winner"]) == w)), None)
+        if amount is None and mismatched:
+            notes.append(f"{mismatched['source']} records an award amount against a different winner name "
+                         f"({mismatched['winner']!r}) - not used as {winner!r}'s own amount.")
 
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     row = {
