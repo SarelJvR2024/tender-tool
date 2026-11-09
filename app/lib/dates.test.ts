@@ -40,6 +40,27 @@ test("daysUntil: yesterday is already overdue (-1), not -0 or null", () => {
   assert.equal(daysUntil(yesterday.toISOString().slice(0, 10)), -1);
 });
 
+// SA timezone/date-boundary bug, found this pass: "today" must be the real
+// Africa/Johannesburg (SAST, UTC+2, no DST) calendar date, not the host
+// process's own local calendar date - no TZ env var is set anywhere in this
+// repo, and both Vercel's Node runtime and GitHub Actions' ubuntu runners
+// default to UTC. Pre-fix, `new Date(now); .setHours(0,0,0,0)` normalized
+// "today" using the PROCESS's local (UTC on an unconfigured host) midnight,
+// 2 hours behind real SAST midnight - so for the 00:00-02:00 SAST window
+// every day (22:00-24:00 UTC the day before), a date-only value that
+// expired/closed YESTERDAY in real SAST terms still read as 0 days left
+// ("today") instead of -1 ("already overdue").
+test("daysUntil: the SAST calendar day, not the host process's own local day, decides 'today' - even during the 00:00-02:00 SAST window where UTC's own calendar date is still 'yesterday'", () => {
+  // 2026-11-09T23:00:00Z = 2026-11-10 01:00 SAST: already the 10th in South
+  // Africa, still the 9th by a bare UTC clock.
+  const nowDuringWindow = new Date("2026-11-09T23:00:00Z");
+  // A document/tender dated "2026-11-09" has already closed/expired -
+  // yesterday, in real SAST terms - by the time this instant arrives.
+  assert.equal(daysUntil("2026-11-09", nowDuringWindow), -1);
+  // The SAST day itself (the 10th) is correctly still "0 days left", not -1.
+  assert.equal(daysUntil("2026-11-10", nowDuringWindow), 0);
+});
+
 test("closingCountdown: no date on file shows nothing", () => {
   assert.equal(closingCountdown(null), null);
 });

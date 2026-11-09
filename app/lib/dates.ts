@@ -54,6 +54,26 @@ export function formatClosingDateTime(dateStr: string | null | undefined): strin
 // (company vault). Normalizes "today" to midnight first so the count is
 // stable all day rather than decrementing as the clock ticks forward within
 // the same day.
+//
+// That midnight MUST be South African midnight (SAST, UTC+2, no DST), not
+// the host process's own local midnight - this app is SA-only (see
+// SAST_DATE_OPTIONS/closingDayOf() above, both already explicit about it),
+// but nothing pins the server's own TZ: no TZ env var is set anywhere in
+// this repo (checked app/, engine/, every Dockerfile and GitHub Actions
+// workflow), and both Vercel's default Node runtime and GitHub Actions'
+// ubuntu-24.04 runners default to UTC. `new Date(now); .setHours(0,0,0,0)`
+// sets hours in the PROCESS's local TZ, which on an unconfigured UTC host is
+// UTC midnight, not SAST midnight - 2 hours earlier. For the 00:00-02:00
+// SAST window every single day (22:00-24:00 UTC the prior day), that misses
+// the SAST calendar-day rollover: "today" is computed as still yesterday's
+// SAST date, so a date-only value that expired/closed YESTERDAY in real SAST
+// terms reads as 0 days left ("today", not yet overdue) instead of -1
+// ("Expired"/overdue) - confirmed live, same host-TZ-independence bug class
+// the rest of this file already guards against for date-only vs timestamp
+// values, just not yet applied to this function. Fixed by deriving "today"
+// from the real Africa/Johannesburg calendar date instead of the process's
+// own local clock, exactly like closingDayOf() already does for the
+// opposite conversion (timestamp -> SAST calendar day).
 export function daysUntil(dateStr: string | null, now: Date = new Date()): number | null {
   if (!dateStr) return null;
   const target = new Date(dateStr);
@@ -61,8 +81,8 @@ export function daysUntil(dateStr: string | null, now: Date = new Date()): numbe
   // expiryStatus() showed a malformed expiry as "Current" (green). Unknown
   // instead, the same as no date: never a confident wrong answer.
   if (Number.isNaN(target.getTime())) return null;
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
+  const sastYmd = now.toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" }); // "YYYY-MM-DD", host-TZ-independent
+  const today = new Date(`${sastYmd}T00:00:00Z`);
   const msPerDay = 1000 * 60 * 60 * 24;
   return Math.ceil((target.getTime() - today.getTime()) / msPerDay);
 }
