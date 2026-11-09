@@ -117,3 +117,25 @@ export function vaultDocumentMismatchWarning(kind: VaultDocumentKind, filename: 
 // turn it amber a month after issue. 30 days is used for it everywhere: the
 // vault badge, and engine/compliance/watch_deadlines.py's per-field lead time.
 export const BANK_LETTER_RENEW_SOON_DAYS = 30;
+
+/**
+ * Whether a company's SARS Tax Compliance Status PIN is genuinely "on file"
+ * - a document was uploaded, OR the PIN itself was captured, OR an expiry
+ * date was captured (lib/dates.ts's own documentStatus() hasFile rule for
+ * this field - never just "a document path exists", since the PIN is
+ * usually typed in, not uploaded). Was duplicated inline, identically, in
+ * app/app/company/_components/ComplianceDocumentsSection.tsx and
+ * ReadOnlyView.tsx; centralised here (standing review, 2026-11-09, Finding
+ * 240) so a third caller - the dashboard's own setup checklist, which used
+ * to read lib/documentExpiry.ts's date-ONLY `status` field instead and so
+ * called a PIN "not on file" whenever only its expiry date hadn't been
+ * captured yet - uses the exact same real rule rather than a second,
+ * independently-drifted guess at it.
+ */
+export function sarsTcsPinOnFile(company: {
+  sars_tcs_pin_document_path: string | null;
+  sars_tcs_pin: string | null;
+  sars_tcs_pin_expiry: string | null;
+}): boolean {
+  return !!company.sars_tcs_pin_document_path || !!company.sars_tcs_pin || !!company.sars_tcs_pin_expiry;
+}

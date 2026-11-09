@@ -1,7 +1,7 @@
 import type { StatusChip } from "@/lib/dates";
 import { documentStatus, formatDate } from "@/lib/dates";
 import { formatZAR } from "@/lib/formatZAR";
-import { BANK_LETTER_RENEW_SOON_DAYS, beeProofLabel } from "@/lib/vaultDocuments";
+import { BANK_LETTER_RENEW_SOON_DAYS, beeProofLabel, sarsTcsPinOnFile } from "@/lib/vaultDocuments";
 import type { VaultDocumentKind } from "@/lib/vaultDocuments";
 import { ComplianceDocumentsView } from "./ComplianceDocumentsView";
 import { NotStated } from "./shared";
@@ -96,7 +96,7 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: sarsLines,
       detail: sarsLines[0],
       expiry: company.sars_tcs_pin_expiry,
-      status: documentStatus(company.sars_tcs_pin_document_path !== null || !!company.sars_tcs_pin || !!company.sars_tcs_pin_expiry, company.sars_tcs_pin_expiry),
+      status: documentStatus(sarsTcsPinOnFile(company), company.sars_tcs_pin_expiry),
       path: company.sars_tcs_pin_document_path,
       url: docUrls.sars_tcs_pin,
     },

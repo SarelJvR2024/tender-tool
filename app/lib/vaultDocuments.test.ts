@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { VAULT_DOCUMENTS, VAULT_KIND_TO_DOCUMENT_KIND, vaultDocumentMismatchWarning } from "./vaultDocuments.ts";
+import { VAULT_DOCUMENTS, VAULT_KIND_TO_DOCUMENT_KIND, sarsTcsPinOnFile, vaultDocumentMismatchWarning } from "./vaultDocuments.ts";
 import { VAULT_KINDS } from "./onboardingScan.ts";
 
 test("every VAULT_KIND_TO_DOCUMENT_KIND value is a real onboardingScan vault-routable DocumentKind", () => {
@@ -53,4 +53,24 @@ test("vaultDocumentMismatchWarning has no rule for a kind the brief didn't ask f
   for (const kind of ["pi_insurance", "iso_9001", "bank_letter", "cidb"] as const) {
     assert.equal(vaultDocumentMismatchWarning(kind, "anything_at_all.pdf"), null);
   }
+});
+
+// Standing review, 2026-11-09, Finding 240: nothing at all on file -> false,
+// exactly like every one of the three real "something IS on file" shapes
+// below, each individually sufficient (a PIN typed in with no document and
+// no expiry date yet is a completely normal in-progress state, not "missing").
+test("sarsTcsPinOnFile: nothing at all -> false", () => {
+  assert.equal(sarsTcsPinOnFile({ sars_tcs_pin_document_path: null, sars_tcs_pin: null, sars_tcs_pin_expiry: null }), false);
+});
+
+test("sarsTcsPinOnFile: a document path alone is enough", () => {
+  assert.equal(sarsTcsPinOnFile({ sars_tcs_pin_document_path: "companies/x/sars.pdf", sars_tcs_pin: null, sars_tcs_pin_expiry: null }), true);
+});
+
+test("sarsTcsPinOnFile: the PIN typed in with no document and no expiry date yet is enough - the real bug this guards against (dashboard setup checklist used to call this 'not on file')", () => {
+  assert.equal(sarsTcsPinOnFile({ sars_tcs_pin_document_path: null, sars_tcs_pin: "1234567890", sars_tcs_pin_expiry: null }), true);
+});
+
+test("sarsTcsPinOnFile: an expiry date alone is enough", () => {
+  assert.equal(sarsTcsPinOnFile({ sars_tcs_pin_document_path: null, sars_tcs_pin: null, sars_tcs_pin_expiry: "2027-01-01" }), true);
 });

@@ -8,6 +8,7 @@ import { getNotifications } from "@/lib/notifications";
 import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
 import { computeDashboardStats, stageOf } from "@/lib/dashboardStats";
 import { loadDocumentExpiryOverview, type DocumentExpiryStatus } from "@/lib/documentExpiry";
+import { sarsTcsPinOnFile } from "@/lib/vaultDocuments";
 import type { StatusChip } from "@/lib/dates";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
 import { fetchAllRows } from "@/lib/supabasePaging";
@@ -186,7 +187,12 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       .in("verdict", ["strong_fit", "possible", "needs_review"])
       .order("first_seen", { ascending: false })
       .limit(5),
-    supabase.from("companies").select("legal_name, csd_trading_name, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
+    supabase
+      .from("companies")
+      .select(
+        "legal_name, csd_trading_name, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar, sars_tcs_pin, sars_tcs_pin_document_path, sars_tcs_pin_expiry",
+      )
+      .maybeSingle(),
     fetchSavingsCounterSummary(supabase),
     // Vault & Compliance Health / Team & CV Bench widgets (below) - the
     // SAME real rows the Company vault's own "Document expiry" overview
@@ -302,16 +308,29 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // own ring color already uses) gets a fast, 5-item "get set up" checklist
   // instead of a sparse "Closing soon" section with nothing in it. Composed
   // entirely from facts this app already computes - nothing new invented:
-  // company_basics/csd/bee are existing readiness.criteria; the tax PIN
-  // check reuses lib/documentExpiry.ts's own COMPANY_EXPIRY_FIELDS scan
-  // (only "on file or not", same as the other 4 items - its 30-day
-  // expiring-soon window doesn't apply here); the CV check reuses
-  // ReadinessResult's own peopleWithCvCount count, just against a lower bar
-  // (>=1) than the 10-point criterion's own >=2.
+  // company_basics/csd/bee are existing readiness.criteria; the CV check
+  // reuses ReadinessResult's own peopleWithCvCount count, just against a
+  // lower bar (>=1) than the 10-point criterion's own >=2.
+  //
+  // Standing review, 2026-11-09, Finding 240: the tax PIN item used to read
+  // `taxRow.status !== "missing"` off lib/documentExpiry.ts's own
+  // COMPANY_EXPIRY_FIELDS scan - but documentExpiry.ts's "missing" status
+  // means "no expiry DATE on file", not "no document/PIN on file" (see its
+  // own statusFor() - daysLeft === null -> "missing", full stop, regardless
+  // of sars_tcs_pin/sars_tcs_pin_document_path). That conflated "no date
+  // captured yet" with "nothing here at all" - the EXACT bug lib/dates.ts's
+  // own documentStatus() was fixed for on 2026-10-29 (a company that already
+  // entered its SARS TCS PIN or uploaded the letter, but hasn't captured an
+  // expiry date yet, saw this checklist item as "not done" with a "Fix"
+  // link, while the Company vault page's own ComplianceDocumentsSection.tsx/
+  // ReadOnlyView.tsx - reading the SAME company row - correctly called it
+  // "Needs date verification", not "Not on file"). Fixed by using the exact
+  // same hasFile expression those two vault views already use for this
+  // field, not documentExpiry.ts's date-only status.
   const isNewCompany = myRows.length === 0 && readiness.percent < 50;
   let setupChecklistItems: SetupChecklistItem[] = [];
   if (isNewCompany) {
-    const taxRow = documentExpiryRows.find((r) => r.label === "SARS Tax Compliance PIN");
+    const taxPinOnFile = !companyError && !!companyRow && sarsTcsPinOnFile(companyRow);
     const basics = readiness.criteria.find((c) => c.key === "company_basics");
     const csd = readiness.criteria.find((c) => c.key === "csd");
     const bee = readiness.criteria.find((c) => c.key === "bee");
@@ -319,7 +338,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       { key: "company_basics", label: "Company profile completed", done: basics?.satisfied ?? false, href: basics?.href ?? "/company#company-identity" },
       { key: "csd", label: "CSD number on file", done: csd?.satisfied ?? false, href: csd?.href ?? "/company#company-identity" },
       { key: "bee", label: "B-BBEE certificate on file", done: bee?.satisfied ?? false, href: bee?.href ?? "/company#bee-cidb" },
-      { key: "tax_pin", label: "Tax clearance (SARS TCS PIN) on file", done: !!taxRow && taxRow.status !== "missing", href: "/company#compliance-documents" },
+      { key: "tax_pin", label: "Tax clearance (SARS TCS PIN) on file", done: taxPinOnFile, href: "/company#compliance-documents" },
       { key: "people_cvs", label: "At least one person with a CV uploaded", done: readiness.peopleWithCvCount >= 1, href: "/people" },
       {
         // The engine signs SBD 4/SBD 9/Form of Offer off whichever person has

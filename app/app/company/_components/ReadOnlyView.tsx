@@ -1,5 +1,5 @@
 import { documentStatus } from "@/lib/dates";
-import { BANK_LETTER_RENEW_SOON_DAYS } from "@/lib/vaultDocuments";
+import { BANK_LETTER_RENEW_SOON_DAYS, sarsTcsPinOnFile } from "@/lib/vaultDocuments";
 import { CompanyIdentitySection } from "./CompanyIdentitySection";
 import { SizeOfficesSection } from "./SizeOfficesSection";
 import { SavingsBaselineSection } from "./SavingsBaselineSection";
@@ -28,10 +28,7 @@ export function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrl
         : NotStated("Not stated");
   const docStatuses = [
     documentStatus(company.coid_letter_document_path !== null, company.coid_letter_of_good_standing_expiry),
-    documentStatus(
-      company.sars_tcs_pin_document_path !== null || !!company.sars_tcs_pin || !!company.sars_tcs_pin_expiry,
-      company.sars_tcs_pin_expiry,
-    ),
+    documentStatus(sarsTcsPinOnFile(company), company.sars_tcs_pin_expiry),
     documentStatus(company.pi_insurance_document_path !== null || !!company.pi_insurance_policy_number, company.pi_insurance_expiry),
     isoStatus,
     documentStatus(
