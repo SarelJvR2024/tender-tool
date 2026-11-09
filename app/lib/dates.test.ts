@@ -61,6 +61,47 @@ test("daysUntil: the SAST calendar day, not the host process's own local day, de
   assert.equal(daysUntil("2026-11-10", nowDuringWindow), 0);
 });
 
+// Finding 289 (2026-11-09): every test above uses a bare "YYYY-MM-DD"
+// date-only string - which, parsed by `new Date()`, always lands on exact
+// UTC midnight (= 02:00 SAST). That accidentally matched the OLD buggy
+// anchor exactly, so none of them could ever have caught this. A tender's
+// real closing_date/discovered_opportunities.closing_date (both
+// `timestamptz`) and a trial's trial_ends_at (also `timestamptz`) carry a
+// REAL time-of-day instead - the one shape none of the tests above exercise.
+test("daysUntil: a REAL timestamp (not a bare date-only string) closing later TODAY (SAST) is 0 days left, not inflated to 1", () => {
+  // now = 09:00 SAST 2026-11-09; closing = 14:00 SAST 2026-11-09 (later today, not yet closed).
+  const now = new Date("2026-11-09T07:00:00Z");
+  assert.equal(daysUntil("2026-11-09T14:00:00+02:00", now), 0);
+});
+
+test("daysUntil: a REAL timestamp that closed EARLIER today (SAST) is still 0 - a calendar-day count, not yet -1 (that's closingCountdown()/isPast()'s job, not this one's)", () => {
+  // now = 18:00 SAST 2026-11-09; closing = 09:00 SAST 2026-11-09 (closed 9h ago, same SAST day).
+  const now = new Date("2026-11-09T16:00:00Z");
+  assert.equal(daysUntil("2026-11-09T07:00:00Z", now), 0);
+});
+
+test("daysUntil: a REAL timestamp that closed YESTERDAY (SAST) reads -1 the very next SAST day, not still 0", () => {
+  // Real incident this guards against: the pre-fix anchor (UTC midnight of
+  // today's SAST date, 2h after true SAST midnight) made a tender that
+  // closed yesterday evening SAST still read as "0 days left"/"Due today"
+  // for the tender's own ENTIRE next calendar day - live-reproduced via a
+  // full-day sweep around a real closing instant during this pass.
+  const closedYesterdayEvening = "2026-11-08T18:00:00Z"; // 20:00 SAST Nov 8
+  const now = new Date("2026-11-09T08:00:00Z"); // 10:00 SAST Nov 9 - the very next SAST day
+  assert.equal(daysUntil(closedYesterdayEvening, now), -1);
+});
+
+test("daysUntil: a REAL timestamp exactly 7 calendar SAST days out is 7, not 8 (the dispatchTriage.ts regression this bug was already silently baked into)", () => {
+  // Same two instants dispatchTriage.test.ts's own "the 7-day boundary
+  // agrees with daysUntil()" test already uses - that test's own 2026-10-28
+  // comment records daysUntil() reading "8 days left" for a tender genuinely
+  // 7 SAST calendar days out, and made classifyDispatchBucket() agree with
+  // this function rather than questioning this function's own number.
+  const now = new Date("2026-10-28T15:00:00+02:00");
+  const closingDate = "2026-11-04T09:00:00+02:00";
+  assert.equal(daysUntil(closingDate, now), 7);
+});
+
 test("closingCountdown: no date on file shows nothing", () => {
   assert.equal(closingCountdown(null), null);
 });

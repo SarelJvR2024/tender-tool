@@ -51,29 +51,55 @@ export function formatClosingDateTime(dateStr: string | null | undefined): strin
 
 // Shared "N days until a date" math, used anywhere a closing date or expiry
 // date needs a day count: tenders closing (dashboard), documents expiring
-// (company vault). Normalizes "today" to midnight first so the count is
-// stable all day rather than decrementing as the clock ticks forward within
-// the same day.
-//
-// That midnight MUST be South African midnight (SAST, UTC+2, no DST), not
-// the host process's own local midnight - this app is SA-only (see
+// (company vault). A CALENDAR-DAY count - the difference between the target's
+// own South African (SAST, UTC+2, no DST) calendar day and today's SAST
+// calendar day - never a raw elapsed-time division. This app is SA-only (see
 // SAST_DATE_OPTIONS/closingDayOf() above, both already explicit about it),
 // but nothing pins the server's own TZ: no TZ env var is set anywhere in
 // this repo (checked app/, engine/, every Dockerfile and GitHub Actions
 // workflow), and both Vercel's default Node runtime and GitHub Actions'
-// ubuntu-24.04 runners default to UTC. `new Date(now); .setHours(0,0,0,0)`
-// sets hours in the PROCESS's local TZ, which on an unconfigured UTC host is
-// UTC midnight, not SAST midnight - 2 hours earlier. For the 00:00-02:00
-// SAST window every single day (22:00-24:00 UTC the prior day), that misses
-// the SAST calendar-day rollover: "today" is computed as still yesterday's
-// SAST date, so a date-only value that expired/closed YESTERDAY in real SAST
-// terms reads as 0 days left ("today", not yet overdue) instead of -1
-// ("Expired"/overdue) - confirmed live, same host-TZ-independence bug class
-// the rest of this file already guards against for date-only vs timestamp
-// values, just not yet applied to this function. Fixed by deriving "today"
-// from the real Africa/Johannesburg calendar date instead of the process's
-// own local clock, exactly like closingDayOf() already does for the
-// opposite conversion (timestamp -> SAST calendar day).
+// ubuntu-24.04 runners default to UTC.
+//
+// Finding 289 (2026-11-09): a prior version of this function derived
+// "today"'s real SAST calendar day correctly (fixing an earlier, narrower
+// 00:00-02:00 SAST rollover bug - see git history) but then anchored it at
+// UTC midnight of that calendar-day string (`${sastYmd}T00:00:00Z`) and
+// compared the TARGET's raw, un-floored timestamp against it with
+// `Math.ceil()`. That anchor is 2 hours AFTER true SAST midnight (SAST
+// midnight = the PRIOR UTC day's 22:00), so it only ever gave the right
+// answer when `target` itself happened to fall exactly on UTC midnight (SAST
+// 02:00) - true for a bare "YYYY-MM-DD" date-only string (every existing
+// test here used one), but false for any REAL timestamp with a real
+// time-of-day, which is exactly what tenders.closing_date/
+// discovered_opportunities.closing_date/company_subscriptions.trial_ends_at
+// (all `timestamptz`, unlike the company-document expiry columns, which are
+// plain `date`) actually carry. For any such value, `ceil()` of a positive
+// sub-day fraction always rounds UP - so the result was the correct
+// calendar-day count PLUS 1, for every tender/trial on record, confirmed
+// live across a full day sweep around a real closing instant: the function
+// kept reporting "1 day left" for the tender's own entire remaining closing
+// day (not "0"/Due today), then "0 days left"/Due-today for the entire
+// FOLLOWING day after it had actually closed (not "-1"/Closed), only
+// correctly reading "-1" from the second day after closing onward. This had
+// already visibly surfaced once, in dispatchTriage.ts's own 2026-10-28 fix
+// comment/test ("its own chip read daysUntil()'s 8 days left" for a tender
+// that was genuinely 7 calendar days out) - that pass made dispatchTriage.ts
+// agree with this function rather than questioning whether this function's
+// own number was right, so the same +1 was carried into classifyDispatchBucket's
+// 7-day triage boundary too. It also silently shifted every exact-day
+// threshold match a day later than intended: tenderDeadlineReminders()
+// (deadlineReminders.ts), briefingReminderCandidates(),
+// clarificationWindowCandidates(), complianceDigestCandidates() and
+// trialDay7Candidates() (trialLifecycle.ts, the trial_day_7_milestone email)
+// all compare this function's real output against an exact day count.
+// Fixed by converting BOTH sides to their own SAST calendar day first (reusing
+// closingDayOf()'s already-tested timestamp -> "YYYY-MM-DD" conversion for
+// the target, and the same en-CA/Africa-Johannesburg formatter already used
+// here for "today") and then diffing those two calendar-day strings directly -
+// a pure calendar-day count that no longer depends on either side's
+// time-of-day at all. Identical output for every existing (date-only) test
+// case; only changes the answer for a real timestamp with a non-"02:00 SAST"
+// time-of-day, which is every one of them in practice.
 export function daysUntil(dateStr: string | null, now: Date = new Date()): number | null {
   if (!dateStr) return null;
   const target = new Date(dateStr);
@@ -81,18 +107,26 @@ export function daysUntil(dateStr: string | null, now: Date = new Date()): numbe
   // expiryStatus() showed a malformed expiry as "Current" (green). Unknown
   // instead, the same as no date: never a confident wrong answer.
   if (Number.isNaN(target.getTime())) return null;
-  const sastYmd = now.toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" }); // "YYYY-MM-DD", host-TZ-independent
-  const today = new Date(`${sastYmd}T00:00:00Z`);
+  const targetSastYmd = closingDayOf(dateStr); // target's own SAST calendar day, time-of-day stripped
+  const nowSastYmd = now.toLocaleDateString("en-CA", { timeZone: "Africa/Johannesburg" }); // "YYYY-MM-DD", host-TZ-independent
   const msPerDay = 1000 * 60 * 60 * 24;
-  return Math.ceil((target.getTime() - today.getTime()) / msPerDay);
+  return Math.round((new Date(`${targetSastYmd}T00:00:00Z`).getTime() - new Date(`${nowSastYmd}T00:00:00Z`).getTime()) / msPerDay);
 }
 
 // The calendar day (South African time, UTC+2, no DST) a tender closes on,
-// as "YYYY-MM-DD" - for comparing against a document's expiry DATE. Without
-// this, a closing timestamp (e.g. 12:00 SAST = 10:00 UTC) counts as a later
-// day than a date-only expiry on that same day (daysUntil ceil()s the
-// fraction), so a document valid until the closing day was reported as
-// "expires before this tender closes" (2026-10-17 scenario pass).
+// as "YYYY-MM-DD" - for comparing against a document's expiry DATE, and
+// reused by daysUntil() itself (below - defined after this one, but a
+// function declaration, so already available there) to strip a closing
+// timestamp's time-of-day before diffing calendar days. Without this, a
+// closing timestamp (e.g. 12:00 SAST = 10:00 UTC) used to count as a later
+// day than a date-only expiry on that same day, so a document valid until
+// the closing day was reported as "expires before this tender closes"
+// (2026-10-17 scenario pass) - still called explicitly in
+// tenderCompliance.ts (validityAtClosing(), sanralConventionalDocumentChecks())
+// for exactly that reason, ahead of its own daysUntil() call; harmless now
+// that daysUntil() applies the identical conversion internally too (Finding
+// 289) - idempotent on an already-date-only string, so calling both is a
+// no-op, not a double-correction.
 export function closingDayOf(closingDate: string | null): string | null {
   if (!closingDate) return null;
   const t = new Date(closingDate);

@@ -14173,3 +14173,157 @@ computation, no signature change, no call-site change needed.
 live-data/frozen-clock repro run in this session, not a permanent addition to that file). Low
 urgency - flagging for whichever future pass next touches this file, not opening a new standing
 item for it, since the fix itself is already in place and verified.
+
+---
+
+### Finding 289 (CONFIRMED AND FIXED ON `main` - the brief's own "displayed number, not the
+boolean gate" fresh direction: `lib/dates.ts`'s own `daysUntil()` - the single shared "days until a
+tender closes / a document expires" calculation nearly every page and reminder-email trigger in
+this app reads from - silently added exactly 1 day to the real calendar-day count for any
+`timestamptz` value with a genuine time-of-day, confirmed live across a full-day sweep and already
+visible, unnoticed, in a prior pass's own test expectation)
+
+**Where:** `app/lib/dates.ts`'s `daysUntil(dateStr, now)`.
+
+**Task-brief fit.** This is the brief's own first fresh direction, taken literally: "does every
+place that computes/displays a tender's own 'days until closing' countdown agree... this is about
+the DISPLAYED NUMBER, not the boolean gate." Cross-file consistency checking (this session's own
+most productive technique, Findings 72/281/282/284-288) surfaced it: most callers pass a tender's
+real `closing_date`/`discovered_opportunities.closing_date` (both `timestamptz`, confirmed via
+`supabase/migrations/0001_init_schema.sql:163`/`0072_platform_admin_discovered_opportunities.sql:164`)
+or a trial's `trial_ends_at` (`timestamptz`, `0078_company_subscriptions.sql:37`) straight into
+`daysUntil()` and render its number directly - but one file, `lib/tenderCompliance.ts`
+(`validityAtClosing()`/`sanralConventionalDocumentChecks()`), was already visibly working around a
+bug in that same function by pre-converting through `closingDayOf()` first
+(`daysUntil(closingDayOf(closingDate))`, with its own inline comment: "calendar day: valid ON the
+closing day counts") - a real, live cross-file disagreement between callers that know to defend
+against this function's own quirk and the many that don't.
+
+**Root cause, read before assuming severity.** `daysUntil()` derives "today" as the real
+Africa/Johannesburg (SAST) calendar day (`now.toLocaleDateString("en-CA", {timeZone:
+"Africa/Johannesburg"})`) - correctly fixing an earlier, narrower bug (this function's own header
+comment, the 00:00-02:00 SAST rollover case) - but then anchors that day at **UTC midnight**
+(`` `${sastYmd}T00:00:00Z` ``) rather than true **SAST midnight** (2 hours earlier in UTC), and
+compares the target's raw, un-floored timestamp against that anchor with `Math.ceil()`. UTC
+midnight of a SAST calendar day is itself 02:00 SAST - so the only input this ever gave the
+"correct" calendar-day count for was one that happened to parse to exactly UTC midnight: a bare
+`"YYYY-MM-DD"` date-only string (`new Date("2026-11-09")` = `2026-11-09T00:00:00.000Z` exactly) -
+which is every single case in this function's own pre-existing test file
+(`lib/dates.test.ts`, confirmed by reading all of them: every one uses `.toISOString().slice(0,
+10)` or a bare date string). For ANY real timestamp with an actual time-of-day - i.e. every
+`closing_date`/`trial_ends_at` value this app actually stores - the positive sub-day fraction left
+over after subtracting the anchor always gets rounded UP by `ceil()`, so the result was the true
+calendar-day count **plus exactly 1**, for every tender and every trial on record. The only
+exception (frac = 0) would be a value that happens to fall exactly at 02:00 SAST - not a real
+closing/trial-end time in practice.
+
+**Live reproduction - full-day sweep around a real closing instant, not a cherry-picked case.**
+Copied `daysUntil()` verbatim into a standalone Node script (this session's own scratchpad
+directory, never touching the real app or database) for a tender closing `"2026-11-09T10:00:00Z"`
+(= 12:00 SAST on the 9th, an ordinary closing hour) and swept `now` every 3 hours from 36h before to
+36h after that instant, printing the function's own result, the real `isPast()` truth, and the
+label a user would actually see:
+
+```
+now (SAST)      daysUntil() really-closed?  label shown
+08/11 00:00-21:00    2          false       2 days left   (should be 2 - correct, 2 days out)
+09/11 00:00-09:00    1          false       1 day left    (should be 1 - correct, still a day out)
+09/11 12:00-21:00    1           true       1 day left    <- WRONG: already closed, shows "1 day left"
+10/11 00:00-21:00    0           true       Due today     <- WRONG: closed YESTERDAY, shows "Due today"
+11/11 00:00           -1          true       Closed        (only correct from here on)
+```
+
+So for roughly 36 hours after a tender's real deadline - its own entire remaining closing day, PLUS
+the entire following SAST day - this function kept reporting it as still open ("1 day left", then
+"Due today"), not "Closed", wherever a caller displays its raw number with no separate `isPast()`/
+`closingCountdown()` override. Confirmed the same, deterministic `+1` pattern independently against
+a second, unrelated closing instant and for a trial-end timestamp, not just the one swept case.
+
+**This had already visibly surfaced once, unnoticed as a bug.** `lib/dispatchTriage.test.ts`'s own
+2026-10-28 fix ("the 7-day boundary agrees with lib/dates.ts's own daysUntil() - no second,
+disagreeing day count") recorded, in its own comment, that `daysUntil()` read "8 days left" for a
+tender genuinely 7 SAST calendar days out (`2026-10-28T15:00+02:00` -> `2026-11-04T09:00+02:00`) -
+and then made `dispatchTriage.ts`'s own inline day-count match THAT number rather than questioning
+whether it was right, baking the same `+1` into `classifyDispatchBucket()`'s 7-day urgency boundary
+and into that test's own asserted expected value (`8`). That test's own number was never actually
+correct; it was simply two different pieces of code agreeing on the same wrong one.
+
+**Confirmed blast radius - checked column types directly, not assumed.** Grepped every
+`add column .../create table` line in `supabase/migrations/*.sql` for every field this function (or
+a sibling that reuses it) is ever called on:
+- **Affected (`timestamptz`, a real time-of-day in practice):** `tenders.closing_date`,
+  `discovered_opportunities.closing_date`, `company_subscriptions.trial_ends_at`.
+- **NOT affected (plain `date`, PostgREST always returns a bare `"YYYY-MM-DD"`):** every
+  company-vault expiry column (`coid_letter_of_good_standing_expiry`, `cidb_expiry`,
+  `sars_tcs_pin_expiry`, `pi_insurance_expiry`, `iso_9001_expiry`,
+  `bank_confirmation_letter_valid_until`, `bee_proof_expiry`), `people.ecsa_expiry`/
+  `sacpcmp_expiry`, `held_registrations.expiry_date`, `tenders.briefing_date`,
+  `tender_tasks.due_date` - so the Company Vault's own document-expiry overview
+  (`lib/documentExpiry.ts`/`lib/notifications.ts`/`lib/readiness.ts`, all sourced from these
+  columns) was never actually affected, despite calling the same function.
+- **Real, affected consumers of the two `timestamptz` columns, confirmed by reading each one:**
+  tender-closing displays with no separate `isPast()`/`closingCountdown()` override
+  (`app/sanral-schedules/page.tsx`, `app/dashboard/page.tsx`'s "New opportunities for you",
+  `app/analytics/page.tsx`'s "Upcoming deadlines", `lib/tenderTimeline.ts` ->
+  `submission-plan-view.tsx`'s `DeadlineChip`); `lib/dispatchTriage.ts`'s
+  `classifyDispatchBucket()`/`deriveDecisionNeeded()` 7-day triage/escalation boundary;
+  `lib/deadlineReminders.ts`'s own exact-day tender-deadline reminder email trigger; and
+  `lib/trialLifecycle.ts`'s `trialDay7Candidates()` (the `trial_day_7_milestone` nudge email) -
+  all five reminder-threshold families (`deadlineReminders.ts`, `briefingReminders.ts`,
+  `clarificationWindowReminders.ts`, `complianceDigestCandidates.ts`, `trialLifecycle.ts`) compare
+  this function's real output against an exact day count, so the `+1` silently shifted every one of
+  them a real calendar day later than its own stated threshold - though only
+  `deadlineReminders.ts`/`trialLifecycle.ts` are actually fed a `timestamptz` column; the other
+  three (briefing/clarification/compliance-digest) run on `date`-only columns and were unaffected in
+  practice despite sharing the same exact-match code shape.
+  `app/app/pipeline/page.tsx`/`TenderCard` were NOT among the broken displays - both already guard
+  every closing display with an explicit `isPast()` check before ever showing `daysUntil()`'s own
+  number, and already render the actual countdown text from `closingCountdown()` (time-aware), only
+  ever feeding `daysUntil()`'s result into `closingColorClass()`'s colour banding - confirmed by
+  reading both files; this is exactly why this bug stayed invisible on the one screen (Pipeline)
+  that would otherwise have shown it most often.
+
+**Fix.** `daysUntil()` now converts the target to its own SAST calendar day first (reusing
+`closingDayOf()`'s already-tested timestamp -> `"YYYY-MM-DD"` conversion, a function declaration so
+already available despite being defined later in the same file) and diffs that against today's
+already-correct SAST calendar day, as two whole-day instants - a pure calendar-day count no longer
+dependent on either side's time-of-day at all. `closingDayOf()`'s own header comment, which
+documented the original fraction-rounding quirk as the reason `tenderCompliance.ts` has to call it
+ahead of `daysUntil()`, was updated to note this is now harmless/idempotent rather than load-bearing
+(double-applying `closingDayOf()` on an already-date-only string is a no-op).
+
+**Verified before pushing - red then green, not asserted from reading alone.** Added 4 new
+regression cases to `lib/dates.test.ts` (today/earlier-today/yesterday/exactly-7-days, all against
+a REAL timestamp with a non-midnight time-of-day - the one input shape none of this function's
+existing tests exercised) and corrected `lib/dispatchTriage.test.ts`'s own baked-in `8` ->
+`7`/`"radar"` -> `"in_progress"` (with a comment explaining why, not silently). `git stash push --
+lib/dates.ts` to isolate the pre-fix implementation with the new tests still in place: **5 failures**,
+exactly the predicted ones (`1 !== 0`, `1 !== 0`, `-0 !== -1`, `8 !== 7`, `8 !== 7`) -
+`node --experimental-strip-types --test lib/dates.test.ts lib/dispatchTriage.test.ts`, 40 pass / 5
+fail. `git stash pop` to restore the fix: same command, **45/45 pass**. Full suite after restoring:
+`npx vitest run` - **75 files, 612 tests, all passed**; every `*.test.ts` file in the repo run the
+same way CI does (`find . -name "*.test.ts" -not -path "*/node_modules/*"` then
+`node --experimental-strip-types` each one) - all exit 0; `npx tsc --noEmit` (whole `app/` project) -
+0 errors; `npx eslint lib/dates.ts lib/dates.test.ts lib/dispatchTriage.test.ts` - clean. Re-ran the
+original full-day sweep against the fixed code: the pattern now reads "1 day left" through the
+whole prior day, "Due today" for the entire real closing day (matching this function's own
+documented, pre-existing, date-only "today regardless of current time" semantics - unchanged, not
+loosened), and correctly "Closed"/"-1" from the very next SAST day onward, instead of staying wrong
+for 36 hours.
+
+**Fixed directly on `main` - no PR.** Single-file production change (`lib/dates.ts`), plus the two
+test files that needed their own expectations corrected to match the now-correct behaviour. No
+RLS, no payment/money-transaction surface (trial-day-7 is a retention nudge email, not a billing
+charge - PayFast checkout itself, the real payment path, is untouched), no schema, no worker-image
+change, no authz/tenant-isolation angle - this is a pure date-math correctness fix inside a single
+already-heavily-tested helper, every one of whose callers needed no change of their own to pick up
+the fix. **Flagging explicitly, not asking permission:** because this shifts the real calendar day
+on which `deadlineReminders.ts`'s tender-deadline-reminder emails and `trialLifecycle.ts`'s trial-
+day-7 email actually fire (one real day earlier than before, i.e. now firing on the day their own
+threshold constants actually name), Sarel may want to sanity-check the next few days' worth of
+sent reminder logs against this change rather than be surprised by the shift.
+
+**Regression:** `app/lib/dates.ts` (`daysUntil()`'s own body and header comment, plus
+`closingDayOf()`'s header comment) and two test files (`lib/dates.test.ts`,
+`lib/dispatchTriage.test.ts`) - no exported signature change on `daysUntil()` itself, no call-site
+change needed anywhere in either `app/` or the many files that import it.

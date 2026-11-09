@@ -101,11 +101,22 @@ test("classifyDispatchBucket: the 7-day boundary agrees with lib/dates.ts's own 
   // the "in_progress" (Urgent Actions) lane via the inline math (7 days) while
   // its own chip read daysUntil()'s 8 days left - the lane said urgent, the
   // number on the same card said otherwise. Pinning that the two now agree.
+  //
+  // Finding 289 (2026-11-09): that "8" was daysUntil()'s own number, not an
+  // independently-verified correct one - this tender is genuinely 7 SAST
+  // calendar days out (2026-10-28 -> 2026-11-04), not 8. daysUntil() itself
+  // was inflating by exactly 1 day for any real (non-"02:00 SAST") timestamp,
+  // confirmed live and fixed in lib/dates.ts. With the corrected "7", this
+  // tender now correctly crosses classifyDispatchBucket()'s own `<= 7`
+  // escalation threshold into "in_progress" - it did NOT before the fix
+  // (the inflated "8" fell just outside that boundary, one real calendar day
+  // later than the brief's own 7-day urgency window intends). Updated to the
+  // now-correct expectation rather than re-pinning the old bug.
   const now = new Date("2026-10-28T15:00:00+02:00");
   const closingDate = "2026-11-04T09:00:00+02:00";
   const input: ClassifyInput = { ...baseLogistics, closingDate, pipelineStage: "bidding", decisionNeeded: "none" };
-  assert.equal(daysUntil(closingDate, now), 8);
-  assert.equal(classifyDispatchBucket(input, now), "radar"); // 8 days > 7, same boundary daysUntil() itself uses
+  assert.equal(daysUntil(closingDate, now), 7);
+  assert.equal(classifyDispatchBucket(input, now), "in_progress"); // 7 <= 7, same boundary daysUntil() itself uses
 });
 
 test("classifyDispatchBucket: null once the tender is submitted, won or lost - not triaged at all", () => {
