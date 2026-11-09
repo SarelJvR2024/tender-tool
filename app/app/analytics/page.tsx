@@ -5,7 +5,7 @@ import { AppShell } from "../_components/AppShell";
 import { StatCard } from "@/components/tt/stat-card";
 import { EmptyState } from "@/components/tt/empty-state";
 import { ErrorState } from "@/components/tt/error-state";
-import { PIPELINE_STAGES, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { PIPELINE_STAGES, STAGE_META, normalizeStage, type PipelineStage } from "@/lib/pipeline";
 import { daysUntil } from "@/lib/dates";
 import { ECONOMICS_COLUMNS, formatRand, median, toNumber, type PackEconomics } from "@/lib/dealEconomics";
 import { buildWinLossTrend, monthLabel } from "@/lib/analyticsLogic";
@@ -83,7 +83,21 @@ export default async function AnalyticsPage() {
 
   // ----- 1. Own bid activity & outcomes -----
   const byStage = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, 0])) as Record<PipelineStage, number>;
-  for (const { pack } of packed) byStage[pack.pipeline_stage] += 1;
+  // normalizeStage() first - lib/pipeline.ts's own documented contract for
+  // every reader of a RAW stored pipeline_stage value ("MUST go through
+  // this first"): during the real, unknown-length window before migration
+  // 0105 is applied to the live DB by hand, a row can still hold the legacy
+  // 'bidding' value, which has no entry in PIPELINE_STAGES/byStage. Found
+  // 2026-11-09, standing review: indexing byStage with the raw value
+  // directly (as this line did) assigns byStage.bidding = NaN instead of
+  // incrementing a real bucket - that tender then silently drops out of
+  // every stat below (found/being-prepared/awaiting-outcome/won/lost) while
+  // "Tenders tracked" (packed.length) still counts it, exactly the "silently
+  // vanish from dashboards" failure lib/pipeline.ts's own header comment on
+  // LEGACY_BIDDING_STAGE warns every raw reader to avoid. pipeline/page.tsx
+  // (the pipeline board itself) already normalizes before this same kind of
+  // byStage[...] indexing - this page was the one reader that didn't.
+  for (const { pack } of packed) byStage[normalizeStage(pack.pipeline_stage)] += 1;
   const decided = byStage.won + byStage.lost;
   const winRate = decided === 0 ? null : Math.round((byStage.won / decided) * 100);
 
