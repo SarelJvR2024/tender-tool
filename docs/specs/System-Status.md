@@ -15662,6 +15662,47 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-09, standing QA/robustness review): fix - Finding 275, `send-compliance-digest.ts`'s `main()` read `companies` with a plain, unranged `.select()` - the identical PostgREST 1000-row cap already found and fixed in two sibling notification scripts this same day - and this is the sender for the SARS Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP compliance-expiry digest, the one alert `app/company/Notifications.tsx`'s own UI copy promises is "always delivered to keep your submissions compliant"
+
+Oriented from `bfc3d61` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: notify. Having just found and fixed this exact bug class twice in the two immediately-
+preceding cycles (Finding 255, `send-onboarding-nudges.ts`; Finding 266, `send-operational-alerts.ts`
+- both plain unranged `.select()` calls on a table read under the SERVICE ROLE key, summed across
+every company, hitting PostgREST's 1000-row cap), grepped every `scripts/send-*.ts` file directly for
+the same shape instead of reading each one from scratch. `send-discovered-tenders.ts`,
+`send-founder-digest.ts`, `send-returnables-digest.ts` all already correctly paginated. `send-compliance-digest.ts`'s
+own `main()` was not: its `companies` read had no `.range()` and `fetchAllRows`/`supabasePaging` was
+absent from the file's own imports entirely.
+
+Why this one is severe, not just another instance: this is the live sender for the compliance-
+expiry digest (SARS Tax PIN, COID, B-BBEE, CIDB, catalog/property registrations, per-person ECSA/
+SACPCMP, 30/14/7-day escalating thresholds) - its own `lib/complianceDigestCandidates.ts` sibling
+module states these facts "can disqualify an active bid outright," and `Notifications.tsx`'s own UI
+copy promises this exact alert is unconditional. Past the 1000th real company, every later company
+would silently and permanently never receive it at all.
+
+Fix: extracted a new shared `allCompanies(supabase, scopeCompanyId)` helper using the same
+`fetchAllRows()`/`.range()` pattern already established in the two sibling scripts, capped at
+`MAX_COMPANY_ROWS = 20_000`, preserving the existing `--company-id` scoping.
+
+Verified red-then-green: added 2 cases to `send-compliance-digest.spec.ts` - a real multi-page mock
+confirming `allCompanies()` pages through every row (not stopping at 1000), and a scope-filter case.
+**Red:** reverted `send-compliance-digest.ts` only, re-ran - `2 failed | 5 passed`, exactly the new
+cases, the 5 pre-existing (Finding 163's own) cases untouched. **Green:** reapplied, re-ran - `7/7
+pass`. `npx tsc --noEmit` clean project-wide. Broader regression: `npx vitest run scripts/` - all 7
+script spec files, 49/49 pass.
+
+Not escalated to a PR: small, safe, pure-TS fix reusing an already-established pagination pattern,
+applied twice elsewhere in this exact codebase this same day - no RLS, no migration, no money path,
+no worker-image change. Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 266, `send-operational-alerts.ts`'s `runClarificationWindow()` read `tender_tasks` with a plain, unranged `.select()` - the identical PostgREST 1000-row cap this very file's own two sibling stages (print cutoff, briefing countdown) were already paginated for, just never applied to this third stage - past the cap, a clarification-window reminder for any task sorting past row 1000 would silently and permanently never fire
 
 Oriented from `7c77674` (sibling track's own most recent docs commit, confirmed via `git fetch

@@ -43,6 +43,7 @@ import { resendApiKeyConfigured, sendTransactionalEmail } from "../lib/resendEma
 import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 import { complianceDigestCandidatesForCompany, complianceDigestIdempotencyKey, type ComplianceDigestCandidate } from "../lib/complianceDigestCandidates.ts";
 import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
+import { fetchAllRows } from "../lib/supabasePaging.ts";
 
 type ComplianceDigestCompanyOutcome = {
   claimedCount: number;
@@ -163,6 +164,31 @@ export async function processComplianceDigestForCompany(
   return { claimedCount: claimedItems.length, sent, skippedNoRecipients: 0, dryRunRow: null };
 }
 
+// `companies` is read here under the SERVICE ROLE key, summed across EVERY
+// company on the platform at once (unless --company-id scopes a single
+// run) - the same shared-table-under-service-role shape
+// scripts/send-onboarding-nudges.ts's own `companies` reads and
+// scripts/send-operational-alerts.ts's `tender_tasks` read were already
+// found and fixed for (both hit PostgREST's 1000-row db-max-rows cap,
+// lib/supabasePaging.ts). This script's own `companies` read had the
+// identical gap - a plain, unranged `.select()` with no pagination at
+// all - so past the 1000th real company, every one past that row would
+// silently and permanently never receive its SARS Tax PIN/COID/B-BBEE/
+// CIDB/ECSA/SACPCMP compliance-expiry digest. Found this pass
+// (notify rotation, 2026-11-09).
+export const MAX_COMPANY_ROWS = 20_000;
+
+export async function allCompanies(supabase: SupabaseClient, scopeCompanyId: string | null): Promise<{ rows: { id: string; legal_name: string | null }[]; error: string | null }> {
+  return fetchAllRows<{ id: string; legal_name: string | null }>(
+    (from, to) => {
+      let query = supabase.from("companies").select("id, legal_name");
+      if (scopeCompanyId) query = query.eq("id", scopeCompanyId);
+      return query.range(from, to);
+    },
+    MAX_COMPANY_ROWS,
+  );
+}
+
 async function main() {
   const { dryRun, companyId: scopeCompanyId, testRecipient } = parseSenderCliArgs(process.argv.slice(2));
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -174,9 +200,7 @@ async function main() {
   const appUrl = process.env.APP_URL || "https://tender-ready.vercel.app";
   const supabase = createClient(url, serviceKey);
 
-  let companiesQuery = supabase.from("companies").select("id, legal_name");
-  if (scopeCompanyId) companiesQuery = companiesQuery.eq("id", scopeCompanyId);
-  const { data: companies, error: companiesError } = await companiesQuery;
+  const { rows: companies, error: companiesError } = await allCompanies(supabase, scopeCompanyId);
   if (companiesError) {
     console.error("Could not read companies", companiesError);
     process.exit(1);

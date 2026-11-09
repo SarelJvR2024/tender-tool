@@ -24,9 +24,10 @@
 // this file specifically on 2026-11-06 (see docs/specs/System-Status.md's
 // "Did NOT re-open ..." entry that pass) and left for a dedicated fix
 // rather than overridden on the spot.
-import { describe, expect, it } from "vitest";
-import { processComplianceDigestForCompany } from "./send-compliance-digest.ts";
+import { describe, expect, it, vi } from "vitest";
+import { processComplianceDigestForCompany, allCompanies } from "./send-compliance-digest.ts";
 import type { ComplianceDigestCandidate } from "../lib/complianceDigestCandidates.ts";
+import { POSTGREST_PAGE_SIZE } from "../lib/supabasePaging.ts";
 
 type RpcCall = { name: string; params: Record<string, unknown> };
 
@@ -47,6 +48,39 @@ function mockSupabase(responses: Record<string, { data: unknown; error: unknown 
   };
   return { rpc, calls } as unknown as { rpc: typeof rpc; calls: RpcCall[] };
 }
+
+/** A `.from("companies").select(...).range(from, to)` chain (with an optional `.eq()` narrowing) whose `.range()` resolves with the real slice it's asked for - real pagination behaviour, not one canned response, so a test using this actually exercises whether a caller ranges through every page or silently stops at the first. */
+function mockCompaniesTable(allRows: { id: string; legal_name: string | null }[]) {
+  const range = vi.fn(async (from: number, to: number) => ({ data: allRows.slice(from, to + 1), error: null }));
+  const eq = vi.fn(() => ({ range }));
+  const select = vi.fn(() => ({ eq, range }));
+  const from = vi.fn(() => ({ select }));
+  return { client: { from } as unknown as Parameters<typeof allCompanies>[0], range };
+}
+
+describe("allCompanies", () => {
+  it("pages through .range() until every company is read, not just the first PostgREST page (Finding, notify rotation 2026-11-09)", async () => {
+    // Real incident this guards against: main()'s own companies read used
+    // to be a plain, unranged .select() - past PostgREST's 1000-row cap,
+    // every company created after the 1000th silently never got its SARS
+    // Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP compliance-expiry digest, ever.
+    const rows = Array.from({ length: POSTGREST_PAGE_SIZE + 5 }, (_, i) => ({ id: `c${i}`, legal_name: `Company ${i}` }));
+    const { client, range } = mockCompaniesTable(rows);
+    const { rows: result, error } = await allCompanies(client, null);
+    expect(error).toBeNull();
+    expect(result).toHaveLength(POSTGREST_PAGE_SIZE + 5);
+    expect(result[POSTGREST_PAGE_SIZE + 4]).toEqual({ id: `c${POSTGREST_PAGE_SIZE + 4}`, legal_name: `Company ${POSTGREST_PAGE_SIZE + 4}` });
+    expect(range).toHaveBeenCalledTimes(2); // one full 1000-row page, then the 5-row remainder
+  });
+
+  it("still applies the --company-id scope when given one", async () => {
+    const rows = [{ id: "c1", legal_name: "Klipcorp" }];
+    const { client } = mockCompaniesTable(rows);
+    const { rows: result, error } = await allCompanies(client, "c1");
+    expect(error).toBeNull();
+    expect(result).toEqual(rows);
+  });
+});
 
 function candidate(overrides: Partial<ComplianceDigestCandidate> = {}): ComplianceDigestCandidate {
   return {
