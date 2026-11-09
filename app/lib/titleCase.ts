@@ -39,9 +39,17 @@ function titleCaseWord(word: string, isFirst: boolean): string {
   // acceptable limitation of a cosmetic display transform, not a reason to
   // make ordinary short words worse to avoid it.
   if (/\d/.test(word) || KNOWN_ACRONYMS.has(bare)) return word;
-  // Title-case only the first letter of the run of letters, lowercase the
-  // rest, preserving any leading/trailing punctuation (e.g. "(RFQ10419311)").
-  return word.replace(/[A-Za-z]+/, (run) => run.charAt(0).toUpperCase() + run.slice(1).toLowerCase());
+  // Title-case the first letter of EVERY run of letters in the word, not
+  // just the first one, lowercasing the rest of each run - preserving any
+  // leading/trailing/interior punctuation (e.g. "(RFQ10419311)"). The /g
+  // flag matters: a hyphenated word (gov-source titles routinely carry
+  // "RE-ADVERTISED"/"CO-ORDINATION" - state/seen_tenders.json has a real,
+  // live "RE-ADVERTISED" title) has TWO letter runs separated by the
+  // hyphen; without /g only the first run ("RE") was transformed and the
+  // second ("ADVERTISED") was left exactly as scraped - still shouting,
+  // defeating the whole point of this display-only transform for any
+  // multi-run word (found + fixed, standing review).
+  return word.replace(/[A-Za-z]+/g, (run) => run.charAt(0).toUpperCase() + run.slice(1).toLowerCase());
 }
 
 /** True only when the string has at least one letter and no lowercase ones - the "shouted" signal. */

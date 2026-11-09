@@ -38,3 +38,11 @@ test("displayTenderTitle: a reference code with digits is left exactly as-is", (
 test("displayTenderTitle: a title with no letters at all (edge case) is returned unchanged, not crashed on", () => {
   assert.equal(displayTenderTitle("12345"), "12345");
 });
+
+test("displayTenderTitle: a hyphenated word (RE-ADVERTISED, CO-ORDINATION) is title-cased on BOTH sides of the hyphen, not just the first - a real, reachable gov-source shape (state/seen_tenders.json has a live 'RE-ADVERTISED' title)", () => {
+  assert.equal(displayTenderTitle("SCMU 03 - 2026 2027 RE-ADVERTISED"), "Scmu 03 - 2026 2027 Re-Advertised");
+  assert.equal(
+    displayTenderTitle("APPOINTMENT OF SERVICE PROVIDER FOR CO-ORDINATION OF WORKS"),
+    "Appointment of Service Provider for Co-Ordination of Works",
+  );
+});
