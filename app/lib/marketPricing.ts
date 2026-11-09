@@ -203,6 +203,22 @@ function near(a: number, b: number): boolean {
   return Math.abs(a - b) <= Math.max(1, b * 0.001);
 }
 
+/**
+ * The one column this bidder's own amounts array unambiguously prices, on a
+ * batch register (one amounts[] entry per contract column, every row, blank
+ * cells kept as a null amount_zar rather than a shorter array - see
+ * award_outcomes.parse_opening_register()'s own zip(header[1:], r[1:]) loop).
+ * null when the bidder priced zero or more than one column - genuinely
+ * ambiguous, left to the caller's own default.
+ */
+function onlyPricedColumn(b: Bidder): number | null {
+  const priced: number[] = [];
+  b.amounts.forEach((a, i) => {
+    if (typeof a?.amount_zar === "number" && a.amount_zar > 0) priced.push(i);
+  });
+  return priced.length === 1 ? priced[0] : null;
+}
+
 const pct = (a: number | null, b: number | null) => (a !== null && b ? Math.round(((a - b) / b) * 1000) / 10 : null);
 
 /**
@@ -230,6 +246,15 @@ export function ownPosition(outcome: TenderOutcome, companyNames: (string | null
   } else if (byName.length === 1) {
     entry = byName[0];
     found = "name";
+    // No price match, but on a batch register the bidder's own amounts array
+    // can still say unambiguously which contract it priced - found 2026-11-09,
+    // standing review: defaulting to column 0 here (the fallback below, for
+    // the genuinely ambiguous case) silently read a DIFFERENT contract's
+    // field/rank than the one this entry's real data is in whenever that
+    // entry's one priced column wasn't 0 - not a rare shape, since "name,
+    // price differs" is this module's own documented common case (VAT-basis
+    // mismatch, caveat #2, Award-Price-Analysis-Findings.md).
+    column = onlyPricedColumn(entry) ?? 0;
   } else {
     const priced = outcome.bidders.filter((b) => priceHit(b) >= 0);
     const tokens = new Set(companyNames.map(firstToken).filter(Boolean));
@@ -242,6 +267,7 @@ export function ownPosition(outcome: TenderOutcome, companyNames: (string | null
       // "Klipcorp Consulting" for "Klipcorp (Pty) Ltd": shown, never treated as certain.
       entry = similar[0];
       found = "similar_name";
+      column = onlyPricedColumn(entry) ?? 0; // same reasoning as the "name" branch above
     }
   }
   const field = columnField(outcome, Math.min(column, columns - 1));

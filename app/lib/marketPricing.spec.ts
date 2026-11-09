@@ -169,6 +169,46 @@ describe("ownPosition", () => {
     expect(pos.rank).toBe(1);
     expect(pos.of).toBe(4); // 4 real bids on this tender, including yours
   });
+
+  /** A batch-register bidder priced on only SOME of the register's columns -
+   * amount_zar is null for every column it didn't bid on, same shape
+   * award_outcomes.parse_opening_register() produces (one amounts[] entry per
+   * "Amount..." header column, for every row, blank cells included as a null
+   * amount_zar rather than a shorter array) - see that function's own
+   * zip(header[1:], r[1:]) loop. */
+  function amt(v: number | null) {
+    return { column: "Amount", amount_zar: v, amount_raw: v !== null ? String(v) : null };
+  }
+
+  it("on a batch register, a company found by NAME ONLY (its own recorded price doesn't match any column - the documented VAT-basis-mismatch case) reads the contract-1 column by default even when the bidder's own real priced column is a different one, and reports position/rank against the WRONG contract", () => {
+    // Register for a 2-contract batch tender. Contract 1 (column 0): three
+    // cheap bids. Contract 2 (column 1): "You" is the cheapest of four real
+    // bids, priced far higher than contract 1's bids (different scope).
+    const o = outcome(
+      [
+        { name: "A", amounts: [amt(1000), amt(null)] },
+        { name: "B", amounts: [amt(1010), amt(null)] },
+        { name: "C", amounts: [amt(1020), amt(null)] },
+        { name: "D", amounts: [amt(null), amt(5000)] },
+        { name: "E", amounts: [amt(null), amt(5100)] },
+        { name: "F", amounts: [amt(null), amt(5200)] },
+        { name: "You Pty Ltd", amounts: [amt(null), amt(4000)] }, // only ever bid contract 2, and is its lowest bid
+      ],
+      { register_columns: 2 },
+    );
+    // Recorded price is VAT-inclusive (4000 * 1.15); the register amount
+    // above is excl. VAT - the exact "found under your name, price differs"
+    // case the findings doc's own caveat #2 names, not a contrived input.
+    const pos = ownPosition(o, ["You Pty Ltd"], 4600);
+    expect(pos.found).toBe("name");
+    // The bidder's own amounts array has exactly one priced column (index 1,
+    // contract 2) - that is the one unambiguous column this entry could be
+    // read on, not contract 1's.
+    expect(pos.column).toBe(1);
+    expect(pos.price).toBe(4000); // the real, published contract-2 figure for this bidder
+    expect(pos.rank).toBe(1); // lowest of contract 2's 4 real bids
+    expect(pos.of).toBe(4);
+  });
 });
 
 describe("byBuyer / byProvince", () => {
