@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidSaId, needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
+import { idWarnings, isValidSaId, needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
 
 // Regression coverage for Finding 217 (2026-11-08): isValidSaId() used to
 // check only the Luhn checksum, so a 13-digit number whose embedded date is
@@ -37,6 +37,46 @@ describe("isValidSaId", () => {
   it("still rejects a number that isn't 13 digits, or fails the Luhn check", () => {
     expect(isValidSaId("123")).toBe(false);
     expect(isValidSaId("9001010000081")).toBe(false); // last digit changed, breaks Luhn
+  });
+});
+
+// Standing review, 2026-11-09: idWarnings() already cross-checked gender and
+// sa_citizen against parseSaId()'s own decoded output, but never
+// date_of_birth - a free-typed field (company/principals/actions.ts), so a
+// typo or wrong-record paste silently disagreed with the ID-encoded date
+// with no warning, even though the function already calls parseSaId() and
+// had `parsed.birth` sitting right there unused. "9001010000080" is a
+// genuinely Luhn-valid SA ID (YYMMDD=900101, citizenship digit 0) that
+// decodes to birth date "1990-01-01" (1990, not 2090 - the real date, since
+// 2090 is in the future).
+describe("idWarnings", () => {
+  const VALID_ID = "9001010000080"; // decodes to 1990-01-01, SA citizen, female (sequence digits 0000 < 5000)
+
+  it("flags a date_of_birth that disagrees with what the ID number encodes", () => {
+    const warnings = idWarnings({ id_number: VALID_ID, gender: null, sa_citizen: null, date_of_birth: "1990-01-05" });
+    expect(warnings).toContain("Date of birth recorded as 1990-01-05, but the ID number encodes 1990-01-01.");
+  });
+
+  it("does not flag a date_of_birth that matches the ID number", () => {
+    const warnings = idWarnings({ id_number: VALID_ID, gender: null, sa_citizen: null, date_of_birth: "1990-01-01" });
+    expect(warnings).toEqual([]);
+  });
+
+  it("does not flag anything when date_of_birth is not on file at all", () => {
+    const warnings = idWarnings({ id_number: VALID_ID, gender: null, sa_citizen: null, date_of_birth: null });
+    expect(warnings).toEqual([]);
+  });
+
+  it("still flags gender/sa_citizen mismatches too, same as before this check was added", () => {
+    const warnings = idWarnings({ id_number: VALID_ID, gender: "male", sa_citizen: true, date_of_birth: null });
+    expect(warnings).toContain("Gender recorded as male, but the ID number encodes female.");
+    expect(warnings.some((w) => w.includes("permanent resident"))).toBe(false); // real SA citizen digit, sa_citizen=true agrees
+  });
+
+  it("flags nothing for an invalid id_number beyond the existing validity warning - no crash from parseSaId() on bad input", () => {
+    const warnings = idWarnings({ id_number: "0000000000000", gender: null, sa_citizen: null, date_of_birth: "1990-01-01" });
+    expect(warnings).toContain("ID number is not valid - check it against the ID document.");
+    expect(warnings.some((w) => w.includes("Date of birth"))).toBe(false); // parsed.birth is null for this input, so no spurious mismatch
   });
 });
 

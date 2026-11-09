@@ -194,8 +194,28 @@ export function certificationStatus(certifiedOn: string | null, hasCopy: boolean
   return { label: `Certified ${days} days ago - recertify`, tone: "destructive" as const };
 }
 
-/** Mismatches between what the person typed and what their ID number encodes. */
-export function idWarnings(p: Pick<PrincipalRow, "id_number" | "gender" | "sa_citizen">): string[] {
+/**
+ * Mismatches between what the person typed and what their ID number encodes.
+ *
+ * Standing review, 2026-11-09: this already cross-checked gender and
+ * sa_citizen against parseSaId()'s own output, but never date_of_birth,
+ * even though parseSaId() computes `birth` for exactly this purpose and is
+ * already called right here. date_of_birth is a free-typed form field
+ * (company/principals/actions.ts's savePrincipal(), independent of
+ * id_number) with no validation against the ID at all - a typo, a
+ * paste-from-the-wrong-record, or an out-of-date value silently disagreed
+ * with the ID-encoded date and nothing told the user. Not cosmetic:
+ * ageOn(p.date_of_birth ?? parsed.birth) prefers this typed field over the
+ * ID-derived one, and that age feeds migration 0050's own
+ * company_ownership_breakdown view (youth_pct/black_youth_pct, filtered on
+ * age_years between 18 and 35) - a real B-BBEE ownership-demographics
+ * percentage, not just this card's own "Youth" chip. Both sides are
+ * plain "YYYY-MM-DD" calendar-day strings (parseSaId()'s own
+ * Date.UTC()-built ISO slice, same shape Postgres' `date` columns round-trip
+ * as) so this is a direct string comparison, not a timezone-sensitive "now"
+ * calculation - none of this session's naive-UTC-anchor day-count class.
+ */
+export function idWarnings(p: Pick<PrincipalRow, "id_number" | "gender" | "sa_citizen" | "date_of_birth">): string[] {
   const out: string[] = [];
   if (!p.id_number) return out;
   if (!isValidSaId(p.id_number)) out.push("ID number is not valid - check it against the ID document.");
@@ -204,6 +224,9 @@ export function idWarnings(p: Pick<PrincipalRow, "id_number" | "gender" | "sa_ci
     out.push(`Gender recorded as ${p.gender}, but the ID number encodes ${parsed.gender}.`);
   }
   if (p.sa_citizen === true && parsed.citizen === false) out.push("Recorded as an SA citizen, but the ID number is a permanent resident's.");
+  if (p.date_of_birth && parsed.birth && p.date_of_birth !== parsed.birth) {
+    out.push(`Date of birth recorded as ${p.date_of_birth}, but the ID number encodes ${parsed.birth}.`);
+  }
   return out;
 }
 
