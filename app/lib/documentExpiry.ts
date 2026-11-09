@@ -92,7 +92,21 @@ export function byUrgency(a: DocumentExpiryRow, b: DocumentExpiryRow): number {
 }
 
 type HeldRegistrationRow = { id: string; expiry_date: string | null; registration_type_id: string };
-type PersonExpiryRow = { id: string; name: string | null; ecsa_expiry: string | null; sacpcmp_expiry: string | null };
+// Finding 294 (2026-11-09): this used to carry only ecsa_expiry/sacpcmp_expiry,
+// the exact same drift lib/notifications.ts just had fixed - SACNASP/SAGC
+// (added a9a5364, 4 days before this file's own original commit 7e8e8c8) were
+// never picked up here either, so a person's SACNASP/SAGC registration never
+// showed up on the vault's own "N documents need attention" overview even
+// though their People page (lib/personCredentials.ts's PERSON_CREDENTIALS)
+// already showed the identical "Renew soon"/"Expired" chip for it.
+type PersonExpiryRow = {
+  id: string;
+  name: string | null;
+  ecsa_expiry: string | null;
+  sacpcmp_expiry: string | null;
+  sacnasp_expiry: string | null;
+  sagc_expiry: string | null;
+};
 
 /**
  * Standing review, 2026-11-06: 4th sweep blind spot - array/tuple
@@ -123,7 +137,7 @@ export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Prom
     supabase.from("companies").select(companyFields).maybeSingle(),
     supabase.from("held_registrations").select("id, expiry_date, registration_type_id"),
     supabase.from("registration_types").select("id, label"),
-    supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry"),
+    supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry, sacnasp_expiry, sagc_expiry"),
   ]);
   if (companyErr) console.error("companies select failed (document expiry overview)", companyErr);
   if (heldRowsErr) console.error("held_registrations select failed (document expiry overview)", heldRowsErr);
@@ -169,6 +183,8 @@ export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Prom
     for (const [field, label] of [
       ["ecsa_expiry", "ECSA registration"],
       ["sacpcmp_expiry", "SACPCMP registration"],
+      ["sacnasp_expiry", "SACNASP registration"],
+      ["sagc_expiry", "SAGC registration"],
     ] as const) {
       if (!p[field]) continue; // not every person needs these - only show it once someone has one on file
       const daysLeft = daysUntil(p[field]);

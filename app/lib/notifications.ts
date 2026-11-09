@@ -55,18 +55,39 @@ type HeldRegistrationRow = {
   registration_type_id: string;
 };
 
-type PersonExpiryRow = { id: string; name: string | null; ecsa_expiry: string | null; sacpcmp_expiry: string | null };
+type PersonExpiryRow = {
+  id: string;
+  name: string | null;
+  ecsa_expiry: string | null;
+  sacpcmp_expiry: string | null;
+  sacnasp_expiry: string | null;
+  sagc_expiry: string | null;
+};
 
 type DeadlineRow = { id: string; contract_no: string | null; description: string | null; closing_date: string | null };
 
 /**
  * A read-only glance at two things already tracked elsewhere in the app -
  * documents on file that are expiring (company vault + held registrations +
- * per-person ECSA/SACPCMP) and tenders closing soon - so the topbar bell has
- * something real to show, not a placeholder with no data behind it. This is
- * NOT a notification system: nothing here is ever marked read, stored, or
- * pushed; it's recomputed fresh on every page load from the same tables the
- * vault and dashboard already read, via RLS, same as everywhere else.
+ * per-person ECSA/SACPCMP/SACNASP/SAGC) and tenders closing soon - so the
+ * topbar bell has something real to show, not a placeholder with no data
+ * behind it. This is NOT a notification system: nothing here is ever marked
+ * read, stored, or pushed; it's recomputed fresh on every page load from the
+ * same tables the vault and dashboard already read, via RLS, same as
+ * everywhere else.
+ *
+ * Standing review, Finding 294 (2026-11-09): this only ever checked
+ * ecsa_expiry/sacpcmp_expiry for people - SACNASP/SAGC (added in a9a5364,
+ * audit Q5) were never added here, even though that same commit wired them
+ * into engine/compliance/watch_deadlines.py's TRACKED_PERSON_EXPIRY_FIELDS
+ * (the email reminder) and lib/personCredentials.ts's PERSON_CREDENTIALS
+ * (the People page's own renewal chip) - both of which have always covered
+ * all four bodies. A person holding a SACNASP/SAGC registration expiring
+ * soon got an email reminder and a "Renew soon" chip on their own People
+ * page, but the topbar bell - checked on every page, the thing most likely
+ * to actually be seen - silently said nothing. Fixed by adding the other
+ * two fields here, same window/no-"held"-check rule the existing two
+ * already use (matching find_due_person_credentials() exactly).
  */
 export async function getNotifications(supabase: SupabaseClient): Promise<AppNotification[]> {
   const companyFields = COMPANY_EXPIRY_FIELDS.map((f) => f.field).join(", ");
@@ -85,7 +106,7 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
       .not("expiry_date", "is", null)
       .order("expiry_date", { ascending: true }),
     supabase.from("registration_types").select("id, label"),
-    supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry"),
+    supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry, sacnasp_expiry, sagc_expiry"),
     supabase
       .from("tenders")
       .select("id, contract_no, description, closing_date, tender_packs!inner(id)")
@@ -150,6 +171,8 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
     for (const [field, label] of [
       ["ecsa_expiry", "ECSA registration"],
       ["sacpcmp_expiry", "SACPCMP registration"],
+      ["sacnasp_expiry", "SACNASP registration"],
+      ["sagc_expiry", "SAGC registration"],
     ] as const) {
       const left = daysUntil(p[field]);
       if (!withinWindow(left, DOCUMENT_WINDOW_DAYS)) continue;

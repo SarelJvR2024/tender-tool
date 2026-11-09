@@ -71,6 +71,24 @@ describe("complianceDigestCandidatesForCompany", () => {
     expect(candidates.map((c) => c.item.label).sort()).toEqual(["ECSA registration - Jane Doe", "SACPCMP registration - Jane Doe"]);
   });
 
+  // Finding 294 (2026-11-09): this file's own person loop used to hardcode
+  // only ecsa_expiry/sacpcmp_expiry - SACNASP/SAGC were silently never
+  // candidates for the compliance digest email, even though
+  // lib/personCredentials.ts (the People page's own chip) and
+  // engine/compliance/watch_deadlines.py (the separate email reminder
+  // script) have covered all four bodies since a9a5364, 10 days before
+  // this file was written.
+  it("fires for SACNASP and SAGC too, not just ECSA/SACPCMP", async () => {
+    const supabase = stubSupabase({
+      company: { id: "co1", legal_name: "Acme" },
+      held: [], types: [],
+      people: [{ id: "p1", name: "Jane Doe", sacnasp_expiry: daysFromNow(7), sagc_expiry: daysFromNow(7) }],
+    });
+    const candidates = await complianceDigestCandidatesForCompany(supabase, "co1");
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map((c) => c.item.label).sort()).toEqual(["SACNASP registration - Jane Doe", "SAGC registration - Jane Doe"]);
+  });
+
   it("every configured threshold is reachable", () => {
     expect(COMPLIANCE_DIGEST_THRESHOLDS).toEqual([30, 14, 7]);
   });

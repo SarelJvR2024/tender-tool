@@ -14677,3 +14677,103 @@ field, not just the bank letter) is Sarel's own call - not changed here.
 **Regression:** `app/lib/documentExpiry.ts`, `app/app/company/DocumentExpiryOverview.tsx`
 (comments only, no logic change), `app/lib/documentExpiry.spec.ts` (one new test) - no exported
 signature change, no other call site affected.
+
+### Finding 294 (CONFIRMED AND FIXED ON `main` - moderate, a real feature-completeness gap found by
+applying Finding 293's own "a comment claims two things agree - verify it directly" technique to a
+different pair, then discovering a third, independent sibling of the SAME root cause once the first
+fix's own select-column list was read)
+
+**Why checked.** Task brief's own "apply pass eee's exact technique" suggestion: grep for comments
+across `app/` and `engine/` that explicitly claim parity between two files/functions ("mirrors",
+"matches", "identical to", "never disagrees"), then verify a sample directly rather than trusting
+the claim, the same way Finding 293 showed one such claim was false. One of the sampled hits -
+`engine/compliance/watch_deadlines.py:182`'s `DEFAULT_DOC_LEAD_DAYS = 60  # matches
+app/lib/dates.ts's renewSoonWithinDays default` - checked out true (both really are 60, and the
+per-field 30-day bank-letter override is identical on both sides, confirmed by reading
+`TRACKED_EXPIRY_FIELDS` against `lib/companyExpiryFields.ts` entry-by-entry). Checking its sibling,
+`app/lib/personCredentials.ts`'s own "Mirrors engine/compliance/watch_deadlines.py
+TRACKED_PERSON_EXPIRY_FIELDS - same columns" claim, also checked out true for that file - but
+reading `watch_deadlines.py`'s real `TRACKED_PERSON_EXPIRY_FIELDS` list in full surfaced that it
+covers FOUR bodies (ECSA, SACPCMP, SACNASP, SAGC), while `lib/notifications.ts` (the topbar bell),
+read next as a comparison, only ever queries/loops over TWO of them.
+
+**What's actually there.** Three independent, hand-rolled "per-person expiry fields" loops in
+`app/lib`, ALL missing SACNASP/SAGC, despite the canonical source for this exact field list
+(`lib/personCredentials.ts`'s `PERSON_CREDENTIALS`, and `engine/compliance/watch_deadlines.py`'s
+`TRACKED_PERSON_EXPIRY_FIELDS`) having covered all four bodies since commit `a9a5364` (2026-10-17,
+Audit Q5 - "SACNASP/SAGC only when a tender asks"):
+- `lib/notifications.ts`'s `getNotifications()` (the topbar bell) - hardcoded
+  `["ecsa_expiry", "ECSA registration"], ["sacpcmp_expiry", "SACPCMP registration"]` only. File
+  created `c9ef5be`, 2026-10-21 - 4 days AFTER `a9a5364`.
+- `lib/documentExpiry.ts`'s `loadDocumentExpiryOverview()` (the vault's own Document expiry
+  overview, the same file Finding 293 just touched) - the identical two-entry list. File created
+  `7e8e8c8`, 2026-10-21 - also after `a9a5364`.
+- `lib/complianceDigestCandidates.ts`'s `complianceDigestCandidatesForCompany()` (candidate finder
+  for `scripts/send-compliance-digest.ts`'s real outbound email) - the identical two-entry list,
+  with its own header comment explicitly enumerating "per-person ECSA/SACPCMP" as the file's
+  documented coverage. File created `dc9eb06`, 2026-10-27 - a full 10 days after `a9a5364`.
+
+None of the three predates SACNASP/SAGC existing; each is simply a separate, from-scratch
+reimplementation of the same "which person fields have an expiry" list that never looked at the
+one place (`PERSON_CREDENTIALS`) that already had the right answer, drifting from it independently
+three times. Meanwhile `lib/personCredentials.ts`'s own `credentialExpiries()` (the People page's
+renewal chip) and `engine/compliance/watch_deadlines.py`'s `find_due_person_credentials()` (which
+feeds `daily_digest.py`'s live-sent email) both already loop over all four. Net effect: a person
+holding a SACNASP or SAGC registration about to expire got a "Renew soon"/"Expired" chip on their
+own People page and an email via the engine's daily digest - but the in-app topbar bell said
+nothing, the vault's "N documents need attention" overview excluded it from its own count, and the
+separate app-side compliance-digest email script never queued it as a candidate either. Three of
+five real surfaces silently never saw it.
+
+**Live-reproduced, not reasoning-only.** Before fixing anything, wrote a standalone vitest spec
+against the real, unmodified `getNotifications()`, stubbing a person with `sacnasp_expiry`/
+`sagc_expiry` 10 days out (well inside the 60-day window an identical `ecsa_expiry` case already
+flags):
+
+```
+ECSA case:    [ 'person:p1:ecsa_expiry' ]
+SACNASP case: []
+SAGC case:    []
+```
+
+Confirmed concretely: the identical shape, identical window, same `withinWindow()` call - ECSA
+flags, SACNASP/SAGC produce nothing, because the loop's own fixed tuple list never names those two
+columns (and the `select()` call itself doesn't even request them from Postgres). None of
+`lib/notifications.spec.ts`, `lib/documentExpiry.spec.ts` or `lib/complianceDigestCandidates.spec.ts`
+had ANY test exercising a SACNASP/SAGC person before this fix - the gap had zero test coverage
+anywhere, which is exactly how it went unnoticed across three separate files over 10+ days.
+
+**Fixed directly on `main` - no PR.** Added `sacnasp_expiry`/`sagc_expiry` to the Supabase `select()`
+call, the row type, and the per-field loop in all three files (`lib/notifications.ts`,
+`lib/documentExpiry.ts`, `lib/complianceDigestCandidates.ts`), matching the exact column names,
+labels and no-"held"-check rule `watch_deadlines.py`'s `find_due_person_credentials()` already
+uses - a same-shape additive change in each file, no removal, no window/threshold change, no
+RLS/money/schema/worker-image surface, no authz/tenant-isolation angle. One new regression test
+added per file (`notifications.spec.ts`, `documentExpiry.spec.ts`, `complianceDigestCandidates.spec.ts`),
+each asserting SACNASP/SAGC now behave identically to ECSA/SACPCMP for the same person/window.
+Not done here (deliberately out of scope, a bigger refactor than this fix): consolidating all
+three hand-rolled lists into one import of `PERSON_CREDENTIALS` so they can't drift a fourth time -
+flagged as a new standing item below instead.
+
+**Red/green validated.** Reverted the three source-file fixes only (`git stash push` on just those
+3 files, keeping the new tests), reran the 3 new tests: all 3 failed with exactly the predicted
+`expected [] to have/include ...` shape, every pre-existing test in the same 3 files still green
+(30/30, only the 3 new ones red). Restored via `git stash pop` (no `rm`/overwrite), reran: all
+33/33 green again.
+
+**Verified.** `npx vitest run lib/notifications.spec.ts lib/documentExpiry.spec.ts
+lib/complianceDigestCandidates.spec.ts` - 33/33 passed (3 new tests). Full suite:
+`npx vitest run` - **75 files, 619 tests, all passed**. `npx tsc --noEmit -p .` - 0 errors.
+`npx eslint` on all 6 changed files - clean.
+
+**Open standing item added** (see `System-Status.md`'s consolidated list, item 26): whether
+`lib/notifications.ts`, `lib/documentExpiry.ts` and `lib/complianceDigestCandidates.ts` should be
+refactored to import `PERSON_CREDENTIALS` from `lib/personCredentials.ts` directly, rather than
+each hand-rolling its own copy of the same field list a fourth time - a cleanup, not a bug, left
+for Sarel's own call on whether the added import coupling is worth it.
+
+**Regression:** `app/lib/notifications.ts`, `app/lib/documentExpiry.ts`,
+`app/lib/complianceDigestCandidates.ts` (each: 1 new select column pair, 1 new type field pair, 1
+new loop-tuple pair - additive only, no existing entry touched), `app/lib/notifications.spec.ts`,
+`app/lib/documentExpiry.spec.ts`, `app/lib/complianceDigestCandidates.spec.ts` (1 new test each) -
+no exported signature change, no other call site affected.

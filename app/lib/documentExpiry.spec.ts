@@ -83,6 +83,25 @@ describe("loadDocumentExpiryOverview", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: "held:h1", label: "Fire certificate", status: "expired" });
   });
+
+  // Finding 294 (2026-11-09): the person loop below used to hardcode only
+  // ecsa_expiry/sacpcmp_expiry, the exact same gap this pass just fixed in
+  // lib/notifications.ts and lib/complianceDigestCandidates.ts - a person's
+  // SACNASP/SAGC registration never produced a row here, so the vault's own
+  // "N documents need attention" overview silently excluded it even while
+  // that same person's own People page chip (lib/personCredentials.ts)
+  // already showed it as expired/renew soon.
+  it("includes SACNASP and SAGC rows, not just ECSA/SACPCMP", async () => {
+    const supabase = makeSupabase(
+      { data: null, error: null },
+      EMPTY_OK,
+      EMPTY_OK,
+      { data: [{ id: "p1", name: "Jane Doe", sacnasp_expiry: "2020-01-01", sagc_expiry: "2020-01-01" }], error: null },
+    );
+    const { rows } = await loadDocumentExpiryOverview(supabase);
+    expect(rows.map((r) => r.id).sort()).toEqual(["person:p1:sacnasp_expiry", "person:p1:sagc_expiry"]);
+    expect(rows.every((r) => r.status === "expired")).toBe(true);
+  });
 });
 
 function row(overrides: Partial<DocumentExpiryRow>): DocumentExpiryRow {

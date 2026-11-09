@@ -121,3 +121,34 @@ describe("getNotifications - company field windows", () => {
     expect(n!.severity).toBe("destructive");
   });
 });
+
+// Finding 294 (2026-11-09): the person loop below used to hardcode only
+// ecsa_expiry/sacpcmp_expiry - a person holding a SACNASP/SAGC registration
+// about to expire got no bell notification at all, even though their own
+// People page (lib/personCredentials.ts) and the engine's email reminder
+// (watch_deadlines.py's TRACKED_PERSON_EXPIRY_FIELDS) have both covered all
+// four bodies since a9a5364 (2026-10-17), 4 days before this file's own
+// original commit.
+describe("getNotifications - person credential coverage (Finding 294)", () => {
+  it("flags ECSA, SACPCMP, SACNASP and SAGC equally for the same person at the same window", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      people: [
+        {
+          id: "p1",
+          name: "Jane Doe",
+          ecsa_expiry: daysFromNow(10),
+          sacpcmp_expiry: daysFromNow(10),
+          sacnasp_expiry: daysFromNow(10),
+          sagc_expiry: daysFromNow(10),
+        },
+      ],
+    });
+    const notifications = await getNotifications(supabase);
+    const ids = notifications.map((n) => n.id);
+    expect(ids).toContain("person:p1:ecsa_expiry");
+    expect(ids).toContain("person:p1:sacpcmp_expiry");
+    expect(ids).toContain("person:p1:sacnasp_expiry");
+    expect(ids).toContain("person:p1:sagc_expiry");
+  });
+});

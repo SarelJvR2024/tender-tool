@@ -15,8 +15,13 @@
 // while staying safe for a cross-tenant service-role caller.
 //
 // Coverage vs the brief's own list: SARS Tax PIN, COIDA Letter of Good
-// Standing, B-BBEE proof, CIDB registration, and per-person ECSA/SACPCMP -
-// all five via COMPANY_EXPIRY_FIELDS + people. CSD registration is
+// Standing, B-BBEE proof, CIDB registration, and per-person ECSA/SACPCMP/
+// SACNASP/SAGC - all five via COMPANY_EXPIRY_FIELDS + people (SACNASP/SAGC
+// added as Finding 294's fix, 2026-11-09 - this file was written 2026-10-27,
+// 10 days after a9a5364 wired SACNASP/SAGC into
+// lib/personCredentials.ts/engine/compliance/watch_deadlines.py, but never
+// picked the two fields up itself; same root cause as the identical gap
+// just fixed in lib/notifications.ts and lib/documentExpiry.ts). CSD registration is
 // deliberately NOT included - confirmed by reading every migration, this
 // schema has no CSD expiry field anywhere (South Africa's CSD registration
 // isn't a fixed-term certificate the way the others are; see
@@ -45,7 +50,14 @@ export type ComplianceDigestCandidate = {
 type CompanyExpiryRow = Record<string, string | null> & { id: string; legal_name: string | null };
 type HeldRegistrationRow = { id: string; expiry_date: string | null; registration_type_id: string };
 type RegistrationTypeRow = { id: string; label: string };
-type PersonExpiryRow = { id: string; name: string | null; ecsa_expiry: string | null; sacpcmp_expiry: string | null };
+type PersonExpiryRow = {
+  id: string;
+  name: string | null;
+  ecsa_expiry: string | null;
+  sacpcmp_expiry: string | null;
+  sacnasp_expiry: string | null;
+  sagc_expiry: string | null;
+};
 
 function thresholdFor(daysLeft: number): ComplianceDigestThreshold | null {
   return COMPLIANCE_DIGEST_THRESHOLDS.find((t) => t === daysLeft) ?? null;
@@ -63,7 +75,7 @@ export async function complianceDigestCandidatesForCompany(supabase: SupabaseCli
     supabase.from("companies").select(`id, legal_name, ${companyFields}`).eq("id", companyId).maybeSingle(),
     supabase.from("held_registrations").select("id, expiry_date, registration_type_id").eq("company_id", companyId).not("expiry_date", "is", null),
     supabase.from("registration_types").select("id, label"),
-    supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry").eq("company_id", companyId),
+    supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry, sacnasp_expiry, sagc_expiry").eq("company_id", companyId),
   ]);
   // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
   // Promise.all destructures never match "const { data"). A failed read
@@ -117,6 +129,8 @@ export async function complianceDigestCandidatesForCompany(supabase: SupabaseCli
     for (const [field, label] of [
       ["ecsa_expiry", "ECSA registration"],
       ["sacpcmp_expiry", "SACPCMP registration"],
+      ["sacnasp_expiry", "SACNASP registration"],
+      ["sagc_expiry", "SAGC registration"],
     ] as const) {
       const left = daysUntil(p[field]);
       if (left === null) continue;
