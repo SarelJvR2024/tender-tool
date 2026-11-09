@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { TENDER_DOCS_BUCKET, manualPrefix, privatePrefix, type UploadedTenderDocument } from "@/lib/manualTender";
+import { TENDER_DOCS_BUCKET, manualPrefix, parseManualTenderClosing, privatePrefix, type UploadedTenderDocument } from "@/lib/manualTender";
 import { GENERAL_ENGINE, JOBS_TABLE } from "@/lib/generalTender";
 
 /**
@@ -65,19 +65,21 @@ export async function registerManualTender(input: {
   }
   // South African tenders close at a stated SAST time; store it with the
   // +02:00 offset so "days left" and expiry-at-closing checks are right.
-  let closing: string | null = null;
-  if (input.closingDate) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.closingDate)) return { error: "Closing date isn't a valid date." };
-    // No assumed time (Form-Field-Audit 2026-10-18): the form used to pre-fill
-    // 12:00 and this fell back to it - R.396's closing time, not every
-    // tender's (many close at 11:00). The time goes onto the envelope covers
-    // and decides "closed" on the closing day, so it must be the notice's own.
-    if (!/^\d{2}:\d{2}$/.test(input.closingTime)) {
-      await cleanup();
-      return { error: "Enter the closing time from the tender notice (or leave the closing date blank too)." };
-    }
-    closing = `${input.closingDate}T${input.closingTime}:00+02:00`;
+  // parseManualTenderClosing() also catches the closing-TIME-with-no-
+  // closing-DATE direction (previously silently dropped with no error -
+  // QA pass, 2026-11-09) - see its own header comment. Every refusal here
+  // now cleans up the already-uploaded documents, same as every other
+  // refusal in this function: a malformed closingDate used to return
+  // early WITHOUT calling cleanup(), directly contradicting this file's
+  // own "On any refusal the uploaded files are removed again so nothing
+  // is left orphaned" promise above - confirmed live (storage.remove was
+  // never called on that one path) before this fix.
+  const closingResult = parseManualTenderClosing(input.closingDate, input.closingTime);
+  if ("error" in closingResult) {
+    await cleanup();
+    return { error: closingResult.error };
   }
+  const closing = closingResult.closing;
 
   const { data, error } = await supabase.rpc("load_manual_tender", {
     p_company_id: companyId,

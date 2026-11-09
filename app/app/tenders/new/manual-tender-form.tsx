@@ -70,8 +70,17 @@ export function ManualTenderForm({ companyId }: { companyId: string }) {
     const title = String(form.get("title") ?? "").trim();
     const buyer = String(form.get("buyer") ?? "").trim();
     if (!title || !buyer) return setError("Give the tender a title and say who the buyer is.");
-    if (String(form.get("closing_date") ?? "") && !String(form.get("closing_time") ?? ""))
+    const closingDateVal = String(form.get("closing_date") ?? "");
+    const closingTimeVal = String(form.get("closing_time") ?? "");
+    if (closingDateVal && !closingTimeVal)
       return setError("Enter the closing time from the tender notice too (or leave the closing date blank).");
+    // The reverse direction (a closing time typed with no closing date) used
+    // to pass this check silently and then be dropped with no error at all
+    // by the server action - see parseManualTenderClosing()'s own header
+    // comment (QA pass, 2026-11-09). Checked here too so the form fails
+    // fast, before uploading anything, not just on the server round-trip.
+    if (closingTimeVal && !closingDateVal)
+      return setError("Enter the closing date too (or leave the closing time blank).");
     const bad = checkFiles(files);
     if (bad) return setError(bad);
     setError(null);

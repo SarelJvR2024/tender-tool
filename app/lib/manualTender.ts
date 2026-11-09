@@ -38,6 +38,43 @@ export function hasAcceptedExtension(name: string): boolean {
   return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+const CLOSING_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CLOSING_TIME_RE = /^\d{2}:\d{2}$/;
+
+export type ManualTenderClosing = { closing: string | null } | { error: string };
+
+/**
+ * South African tenders close at a stated SAST time; store it with the
+ * +02:00 offset so "days left" and expiry-at-closing checks are right
+ * (same reasoning as the no-assumed-time fix, Form-Field-Audit 2026-10-18 -
+ * the form used to pre-fill 12:00 and silently fall back to it on a bare
+ * date, which this function still rejects below).
+ *
+ * Requires BOTH a date and a time, or neither - previously only the
+ * date-without-time direction was checked (the 2026-10-18 audit); a closing
+ * TIME typed with no closing DATE was never validated at all and fell
+ * straight through registerManualTender()'s own `if (input.closingDate)`
+ * guard with no error, silently discarding the typed time and loading the
+ * tender with no closing date whatsoever (QA pass, 2026-11-09, standing
+ * review). Both directions of the partial-input pair are now rejected here,
+ * in one place, so the client form and the server action can't drift apart
+ * on which half they each check.
+ */
+export function parseManualTenderClosing(date: string, time: string): ManualTenderClosing {
+  if (!date && !time) return { closing: null };
+  if (date && !time) {
+    return { error: "Enter the closing time from the tender notice too (or leave the closing date blank)." };
+  }
+  if (time && !date) {
+    return { error: "Enter the closing date too (or leave the closing time blank)." };
+  }
+  if (!CLOSING_DATE_RE.test(date)) return { error: "Closing date isn't a valid date." };
+  if (!CLOSING_TIME_RE.test(time)) {
+    return { error: "Enter the closing time from the tender notice (or leave the closing date blank too)." };
+  }
+  return { closing: `${date}T${time}:00+02:00` };
+}
+
 // tenders.intake (written by engine/general/process_general_jobs.py's intake step).
 export type TenderIntake = {
   route: "sanral" | "general";
