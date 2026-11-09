@@ -37,9 +37,18 @@ export default function CidbGradeClient({ embedded = false }: { embedded?: boole
   const [classOfWork, setClassOfWork] = useState("CE");
   const [heldGrade, setHeldGrade] = useState<string>("");
 
+  // Standing review, 2026-11-09 (same shape as Finding 262's
+  // BeePreferencePointsClient fix): `Number("")` is 0, not `NaN` - so
+  // clearing this field to blank (a real contract/tender value can never
+  // actually be R0) passed `Number.isFinite` and silently read as a real
+  // R0 value, for which `requiredGradeForValue(0)` correctly-per-the-table
+  // returns Grade 1 (the table's own 0-200 000 band) - showing a false
+  // "Grade 1CE required" answer with no error, instead of the "enter a
+  // value" prompt a blank field should produce. Guarding `> 0` (not just
+  // `>= 0`) catches both the blank-field case and a literally-typed "0".
   const numericValue = Number(value);
   const required = useMemo(
-    () => (Number.isFinite(numericValue) ? requiredGradeForValue(numericValue) : null),
+    () => (Number.isFinite(numericValue) && numericValue > 0 ? requiredGradeForValue(numericValue) : null),
     [numericValue]
   );
   const heldGradeNum = heldGrade === "" ? null : Number(heldGrade);
@@ -84,7 +93,7 @@ export default function CidbGradeClient({ embedded = false }: { embedded?: boole
         </div>
 
         {required === null ? (
-          <p className="text-[13px] text-destructive">Enter a valid, non-negative contract value.</p>
+          <p className="text-[13px] text-destructive">Enter a valid contract value greater than zero.</p>
         ) : (
           <div className="rounded-lg bg-card px-4 py-3.5">
             <div className="mb-1 text-xs text-muted-foreground">Minimum grade required</div>
