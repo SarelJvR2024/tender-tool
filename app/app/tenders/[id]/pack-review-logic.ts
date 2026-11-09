@@ -76,6 +76,52 @@ export function provenanceStatus(status: string): ReviewStatus {
   return PROVENANCE_STATUS_MAP[status] ?? "needs_input";
 }
 
+/**
+ * Whether this tender's closing_date has already passed, as of `now`.
+ *
+ * Standing review finding, 2026-11-09 (Finding 301, following directly from
+ * Finding 300's own honestly-flagged observation): requestSubmissionPack()
+ * (actions.ts) and requestJob()'s generate_pack path (general-actions.ts) -
+ * and the RPCs they both call, request_submission_pack_checked()/
+ * request_general_job_checked() (0115) - never check closing_date at all,
+ * at any of the three layers (UI disabled-reason, Server Action, RPC). So a
+ * company could spend a real, limited pack-quota credit (a trialing company
+ * gets exactly ONE, ever - company_can_request_pack(), 0115) generating a
+ * pack for a tender that can no longer be bid on, with nothing anywhere
+ * telling them so first.
+ *
+ * Deliberately NOT a new hard stop inside requestSubmissionPack()/
+ * requestJob() itself, unlike every other gate in that function
+ * (unfilled position, missing template, Form B7, already-queued): those are
+ * all things that make a generated pack functionally wrong or redundant.
+ * closing_date passing doesn't - and closing_date is itself only as fresh as
+ * the last corrigendum sync (accept_tender_update_date(), 0111), with this
+ * same session's own Finding 300 already having found a SIBLING column
+ * (tenders.status) silently drifting from reality. Hard-blocking the actual
+ * credit-spend on a field that can itself lag a real extension would risk
+ * swapping today's "silently wastes a credit" bug for "silently refuses a
+ * company that genuinely still needs this pack" - a worse failure mode for
+ * a paid, quota-limited action. Returned as a non-blocking "warning"
+ * instead (the same bucket this file's own b7Status/positionStatus already
+ * use for a real, non-disqualifying concern), surfaced inside the SAME
+ * conscious "I've reviewed this" gate (pack_review_confirmations, 0059)
+ * requestSubmissionPack()/requestJob() already require before spending the
+ * credit - so the fact is seen, not hidden, without a new way for stale
+ * data to block a legitimate request. Shared between the SANRAL
+ * (pack-review-data.ts) and general (general-pack-review-data.ts) review
+ * snapshots - this check is generic, not SANRAL-specific, same as
+ * docItemStatus/fieldStatus above.
+ */
+export function closingDateStatus(closingDate: string | null, now: Date): { reviewStatus: ReviewStatus; note: string | null } {
+  if (!closingDate) return { reviewStatus: "confirmed", note: null };
+  const closingMs = new Date(closingDate).getTime();
+  if (Number.isNaN(closingMs) || closingMs > now.getTime()) return { reviewStatus: "confirmed", note: null };
+  return {
+    reviewStatus: "warning",
+    note: "This tender's closing date has already passed - generating a pack now will still spend a bid-pack credit.",
+  };
+}
+
 /** compliance-data.ts's ComplianceStatus ("have"/"missing"/"check") -> this screen's vocabulary and the pre-generation checklist's vocabulary. */
 export function docItemStatus(status: "have" | "missing" | "check"): { reviewStatus: ReviewStatus; checklistStatus: ChecklistStatus } {
   if (status === "have") return { reviewStatus: "confirmed", checklistStatus: "included" };

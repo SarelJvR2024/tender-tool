@@ -4,10 +4,11 @@ import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./
 import { loadB7State } from "./b7-data";
 import { TENDER_TEMPLATES } from "@/lib/tenderTemplates";
 import type { ChecklistRow } from "./pack-checklist";
-import { b7Status, docItemStatus, fieldStatus, humanizeFieldKey, positionStatus, provenanceStatus, signatureStatus, type ReviewStatus } from "./pack-review-logic";
+import { b7Status, closingDateStatus, docItemStatus, fieldStatus, humanizeFieldKey, positionStatus, provenanceStatus, signatureStatus, type ReviewStatus } from "./pack-review-logic";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
 import { classifyComplianceItem } from "./bid-task-status";
 import type { ComplianceItem } from "@/lib/tenderCompliance";
+import { formatDate } from "@/lib/dates";
 
 export type { ReviewStatus } from "./pack-review-logic";
 
@@ -127,6 +128,23 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
   } catch {
     // No confirmation to show is not fatal - the card just shows "not reviewed yet".
     reviewed = null;
+  }
+
+  // --- 0. Tender closing date (Finding 301, 2026-11-09 - see
+  // closingDateStatus()'s own comment in pack-review-logic.ts for why this
+  // is a non-blocking warning, not a new hard stop in
+  // requestSubmissionPack()) - shown first, since "is this tender even
+  // still open to bid on" is the most decision-relevant fact on this
+  // screen, ahead of every other section's own gaps. -----------------------
+  try {
+    const { reviewStatus, note } = closingDateStatus(data.closingDate, new Date());
+    sections.push(
+      section("tender_timing", "Tender closing date", "#submission-pack", "View tender details", [
+        { key: "closing_date", label: "Closing date", value: data.closingDate ? formatDate(data.closingDate) : "Not on file", status: reviewStatus, note },
+      ]),
+    );
+  } catch (err) {
+    sections.push(failedSection("tender_timing", "Tender closing date", "#submission-pack", "View tender details", err));
   }
 
   // --- 1. Company master data (companies table) + 7. Alternative bid options -
