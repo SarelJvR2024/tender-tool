@@ -43,7 +43,7 @@ function num(v: number | string | null | undefined): number | null {
 
 /**
  * Turns one market_trend_for_tags() row into a MarketTrend, or null below
- * the minimum sample. Three gates, not one:
+ * the minimum sample. Four gates, not one:
  *  - the overall award count (`row.n`) must clear MARKET_TREND_MIN_SAMPLE
  *    before anything is shown at all;
  *  - the price-vs-estimate figure is additionally gated on ITS OWN sample
@@ -58,10 +58,28 @@ function num(v: number | string | null | undefined): number | null {
  *    like pct_of_estimate_n; this caller just wasn't applying the gate
  *    it to, so market-context.tsx could show "Typically N bidders" off
  *    a one- or two-award sample even once the headline count looked
- *    big enough).
+ *    big enough);
+ *  - the B-BBEE level distribution is gated the same way again, on the SUM
+ *    of its own counts (standing review, 2026-11-09: migration 0062's
+ *    `bbbee_rows` CTE is filtered to `where winner_bbbee_points is not
+ *    null` - the exact same "thinner than n" shape as bidder_rows/
+ *    pct_rows - but, unlike those two, the SQL function returns no
+ *    `bbbee_level_n` column for it at all, and this caller was passing
+ *    `bbbee_level_counts` through unconditionally; market-context.tsx's own
+ *    render gate was only `bbbeeTotal > 0`, so a tender with n=30 headline
+ *    awards but only 1 of them carrying a recorded B-BBEE level rendered
+ *    "Winning B-BBEE level, 1 award: ..." right next to "Based on 30
+ *    comparable past awards" - the identical bidder-count bug fixed above,
+ *    on the one remaining per-field sample this function wasn't yet
+ *    applying MIN_SAMPLE to. No `bbbee_level_n` column exists to read, so
+ *    the gate sums the counts themselves - exactly what the sole caller
+ *    already did at render time to label the total, just too late to
+ *    suppress a too-thin one).
  */
 export function gateMarketTrend(row: MarketTrendRow | null, minSample = MARKET_TREND_MIN_SAMPLE): MarketTrend | null {
   if (!row || row.n < minSample) return null;
+  const bbbeeLevelCounts = row.bbbee_level_counts ?? {};
+  const bbbeeTotal = Object.values(bbbeeLevelCounts).reduce((s, c) => s + c, 0);
   return {
     n: row.n,
     dateFrom: row.date_from,
@@ -74,6 +92,6 @@ export function gateMarketTrend(row: MarketTrendRow | null, minSample = MARKET_T
       n: row.bidder_count_n,
       median: row.bidder_count_n >= minSample ? num(row.bidder_count_median) : null,
     },
-    bbbeeLevelCounts: row.bbbee_level_counts ?? {},
+    bbbeeLevelCounts: bbbeeTotal >= minSample ? bbbeeLevelCounts : {},
   };
 }

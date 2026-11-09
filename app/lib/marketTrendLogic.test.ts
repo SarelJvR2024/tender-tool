@@ -105,11 +105,29 @@ test("gateMarketTrend: string numerics from Postgres (numeric/percentile_cont) a
   assert.equal(trend!.bidderCount.median, 5.5);
 });
 
-test("gateMarketTrend: B-BBEE level distribution is passed through as-is, defaulting to empty rather than invented", () => {
+test("gateMarketTrend: B-BBEE level distribution is passed through as-is once its OWN sample clears the minimum, defaulting to empty rather than invented", () => {
   const withLevels = gateMarketTrend(row({ n: 6, bbbee_level_counts: { "1": 4, "2": 2 } }));
   assert.deepEqual(withLevels!.bbbeeLevelCounts, { "1": 4, "2": 2 });
   const withoutLevels = gateMarketTrend(row({ n: 6, bbbee_level_counts: null }));
   assert.deepEqual(withoutLevels!.bbbeeLevelCounts, {});
+});
+
+test("gateMarketTrend: overall award count clears the gate but the B-BBEE level sample does not - no level breakdown is shown", () => {
+  // migration 0062's bbbee_rows CTE is filtered to `where winner_bbbee_points
+  // is not null`, the same "often thinner than n" shape as bidder_rows/
+  // pct_rows - most comparable awards have no recorded winning B-BBEE level.
+  // There is no separate `bbbee_level_n` column to check (the SQL function
+  // returns none), so the gate sums the level counts themselves.
+  const trend = gateMarketTrend(row({ n: 30, bbbee_level_counts: { "2": 1 } }));
+  assert.ok(trend);
+  assert.equal(trend!.n, 30);
+  assert.deepEqual(trend!.bbbeeLevelCounts, {}, "never show a B-BBEE level breakdown built on too few recorded levels");
+});
+
+test("gateMarketTrend: B-BBEE level breakdown fires once the SUM of its own counts clears the minimum, independent of n/pct_of_estimate/bidder_count", () => {
+  const trend = gateMarketTrend(row({ n: 20, bbbee_level_counts: { "1": 3, "4": 2 } })); // sums to 5 = MIN_SAMPLE
+  assert.ok(trend);
+  assert.deepEqual(trend!.bbbeeLevelCounts, { "1": 3, "4": 2 });
 });
 
 test("gateMarketTrend: a custom minimum sample is honoured (callers should not need to invent a second constant)", () => {
