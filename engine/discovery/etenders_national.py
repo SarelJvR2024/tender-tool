@@ -275,7 +275,6 @@ def normalize(release):
     period = tender.get("tenderPeriod", {}) or {}
     docs = tender.get("documents", []) or []
     closing_date = period.get("endDate")
-    now = datetime.datetime.now().isoformat()
     # On the live API tender.id is the eTenders portal's internal number
     # (e.g. "174382"), tender.title is the buyer's bid number (e.g.
     # "RFX6000003683") and tender.description is the actual title - checked
@@ -296,7 +295,24 @@ def normalize(release):
         "opening_date": period.get("startDate"),
         # True only when we have a closing date and it has passed - no closing
         # date on file is NOT treated as closed (it's unknown, not expired).
-        "is_closed": bool(closing_date and closing_date <= now),
+        # Uses source_http.is_past() (real aware-datetime comparison), not a
+        # local plain-string compare against now.isoformat() - Finding 288:
+        # the old inline version read closing_date <= now (both ISO strings)
+        # directly. That is NOT equivalent to real chronological comparison:
+        # a naive now.isoformat() never carries a timezone/"Z" suffix, so for
+        # the exact one-second window a tender's own "Z"-tagged closing
+        # instant falls in, the "Z" character (0x5A) always lexically sorts
+        # after a bare "." (0x2E, this process's own fractional-second
+        # separator) or after nothing at all on an exact-second now - making
+        # is_closed read False for that whole second even once the real
+        # deadline has passed. Confirmed live 2026-11-09 against the real
+        # OCDS API (ocds-api.etenders.gov.za, 100 live releases, 49 distinct
+        # endDate values - every one "Z"-tagged UTC, zero offset-tagged
+        # values found) and reproduced directly: is_past() and the old
+        # inline expression agree on every one of those 49 real values at
+        # the real current time, but diverge by design on a contrived
+        # same-second "now" built the same way (datetime.now().isoformat()).
+        "is_closed": sh.is_past(closing_date),
         "documents": [{"title": d.get("title"), "url": d.get("url")} for d in docs],
         "awards": release.get("awards", []),
         "contracts": release.get("contracts", []),

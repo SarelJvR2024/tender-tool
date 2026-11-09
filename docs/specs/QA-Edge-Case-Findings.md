@@ -14042,3 +14042,134 @@ untestable-in-isolation local closure).
 **Regression:** `app/lib/personCredentials.ts` only - one local helper function, 20 lines changed
 (mostly a comment explaining the "why", per this track's own convention), no exported signature
 change, no call-site change needed (`registrationsAskedFor()`'s own callers are unaffected).
+
+---
+
+### Finding 288 (CONFIRMED AND FIXED ON `main` - real but narrow-impact: a second, independent
+plain-string-compare-against-`now.isoformat()` implementation of "is this closed", in the
+national-discovery source Finding 287's own check didn't cover, with a confirmed-live
+one-second-wide discrepancy window per tender rather than Finding 72/287's own multi-hour daily
+window)
+
+**Where:** `engine/discovery/etenders_national.py`'s `normalize()` - its own `is_closed` field,
+computed for every release read from National Treasury's live OCDS API
+(`ocds-api.etenders.gov.za`), consumed directly by `discovery/assess_tender.py`'s `read_release()`
+(skips the real document fetch entirely and returns `depth: "not_fetched"`,
+`confidence: "Document not fetched - this tender's closing date has already passed."` whenever
+`is_closed` is true) - a real, scheduled production path, not a one-off CLI script: both
+`discovery/watch_new_tenders.py` (the `daily-discovery.yml` workflow, `--sources ocds`) and
+`engine/notify/daily_digest.py` (the `daily-digest.yml` workflow) call
+`etenders_national.normalize(r)` directly, with no correction layer in between. (`gov_sources.py`'s
+own `ocds_to_release()` fallback path - used only when the eTenders *portal* read fails - already
+strips `is_closed` from `normalize()`'s output and recomputes it via `source_http.release()`'s
+correct `is_past()`-based logic; this Finding is about the two callers that go straight to
+`normalize()`'s own output, unfiltered.)
+
+**How this was found - the brief's own first fresh direction, re-checked for a second outlier
+after the Finding 287 fix.** The task brief's own point 1 asked, after Finding 287: "verify there
+isn't a SECOND outlier doing the same wrong string-compare pattern elsewhere." Grepped the whole
+`app/` tree per the brief's own suggestion first (clean - see below), then widened the same
+`toISOString()`/string-vs-date-compare pattern search to `engine/*.py` as well, since Finding 72
+(the original instance of this exact bug class) already lived in `engine/`, not `app/`. A
+`closing_date <=`/`< today`-shaped grep across both trees surfaced exactly two Python hits besides
+Finding 72's own already-fixed file: `engine/pack/process_pack_jobs.py:1092` (`closing_date <
+today`, where both sides are real `datetime.date` objects, not strings - confirmed clean by
+reading the surrounding code) and `engine/discovery/etenders_national.py:299`
+(`closing_date <= now`, where `closing_date` is the OCDS API's own raw string and
+`now = datetime.datetime.now().isoformat()` is a second string) - the real second outlier.
+Confirmed `app/` itself has no second instance of Finding 287's own pattern: every
+`toISOString()` call in `app/` either builds a value to WRITE to a DB column (not a comparison),
+feeds a `formatDateTime()`/email-template call, or (`lib/discoveredTendersDigest.ts`) builds a
+PostgREST filter string that Postgres itself parses and compares as a real `timestamptz` server-
+side - none of them is a second local plain-string `>=`/`<=` compare against
+`new Date().toISOString()`.
+
+**Why this looked, at first read, like the same Finding 72/287 bug class - and why it isn't quite,
+once checked against the real API rather than assumed.** `source_http.py`'s own `is_past()` (the
+already-correct, already-tested helper every OTHER discovery source in this codebase uses for
+this exact "is this closed" question, including `etenders_national.py`'s own sibling path through
+`gov_sources.ocds_to_release()`) carries the comment `"unknown is not expired - same rule as
+etenders_national.normalize()"` - a comment that assumes the two implementations already agree.
+They don't: `is_past()` does `parse_sast(value) <= datetime.datetime.now(SAST)` (real aware-
+datetime comparison); `etenders_national.normalize()` did `closing_date <= now.isoformat()`
+(plain string compare, `now` built from a naive, UTC-valued `datetime.datetime.now()` with no
+offset suffix at all). Assumed, before checking, that this would be Finding 72/287's own
+multi-hour SAST-offset-rollover bug again (an `"+02:00"`-tagged value compared against a
+`"Z"`-tagged one). **Checked the real API live instead of assuming:** fetched 100 real live
+releases from the real OCDS endpoint (`GET https://ocds-api.etenders.gov.za/api/OCDSReleases
+?dateFrom=2026-10-01&dateTo=2026-11-09&PageNumber=1&PageSize=100`, HTTP 200) and found all 49
+distinct `tenderPeriod.endDate` values across them are `"Z"`-tagged UTC - **zero** `"+02:00"`-
+offset-tagged values. So the specific SAST-date-rollover failure mode Finding 72/287 both found
+does NOT occur in this file's real live data today (confirmed, not assumed: ran both the buggy
+string compare and the correct `is_past()` against all 49 real values at the real current time -
+**0 mismatches**).
+
+**The real, narrower bug, confirmed by a live repro rather than inferred from the code.** A naive
+`datetime.datetime.now().isoformat()` never carries a `"Z"`/offset suffix, and only appends a
+`.dddddd` fractional-second suffix when the microsecond component is non-zero. Comparing that
+string, character by character, against an OCDS `"...HH:MM:SSZ"` string: for any `now` that falls
+within the exact same whole second as the closing instant, the two strings are identical up to
+and including `"...:SS"`, and the next character decides the whole comparison - the closing
+string's `"Z"` (0x5A) always sorts after the now-string's own next character (either nothing, if
+`now`'s microsecond is exactly 0, since a shorter string that is a true prefix of a longer one
+sorts before it; or `"."` (0x2E), for any non-zero microsecond) - so `closing_date <= now` reads
+**False** (not yet closed) for the *entire one-second window* starting at the real closing
+instant, even once the real deadline has already passed. Reproduced directly with a frozen clock
+(`FrozenDatetime.now()` patched into `source_http.datetime.datetime`, since `is_past()` reads its
+own module's `datetime` reference, not `etenders_national`'s): a release closing at
+`"2026-11-10T12:00:00Z"`, evaluated 0.5s after that real instant, read `is_closed=False` under the
+pre-fix code (confirmed - this is the real, predicted failure, not a guess) and `is_closed=True`
+under `is_past()` (the fix).
+
+**Real-world severity, stated honestly rather than inflated to match Finding 72/287's own
+2-hour/day window.** This is a genuine implementation bug (the inline compare is not, despite the
+sibling comment's claim, "the same rule" as `is_past()`) and it does sit on a real production path
+(`read_release()`'s document-fetch gate, in a workflow that runs **once a day**, per
+`daily-discovery.yml`/`daily-digest.yml`). But the live window where it actually produces a wrong
+answer is exactly one second per tender's own closing instant, not Finding 72/287's own recurring
+multi-hour-every-day window - the odds of a once-daily scheduled run's own wall-clock `now` landing
+inside the specific one-second slot any given tender happens to close in are vanishingly small,
+and no live OCDS data sampled carries an offset-tagged value that could widen that window the way
+Finding 72/287's bug class does elsewhere. Documented and fixed as a genuine correctness/
+consistency bug (two implementations of the same rule quietly disagreeing, the cross-file-
+consistency class this whole pass was looking for), not escalated to Finding 72/287's own severity
+language, since the live reproduction itself shows the practical exposure is not comparable.
+
+**Fix.** Deleted the local `now = datetime.datetime.now().isoformat()` and the inline string
+compare; `is_closed` is now `sh.is_past(closing_date)` - the same already-imported
+(`import source_http as sh`), already-tested helper every other discovery source already uses,
+and the one `gov_sources.ocds_to_release()`'s own fallback path already recomputes with when it
+has to. This is a pure simplification toward the existing shared helper, not a new implementation
+- `is_past()`'s own `None`-safe, "unknown is not expired" behavior is unchanged from what the old
+inline `bool(closing_date and ...)` guard already gave.
+
+**Verified, not asserted.** Red/green with `git stash`: pre-fix code, frozen-clock repro above,
+confirmed `is_closed=False` 0.5s after the real deadline (the predicted bug, reproduced exactly);
+restored the fix (`git stash pop`), same repro now reads `is_closed=True`. Re-ran the 100-real-live-
+release regression check against the FIXED code at the real current time - **0 mismatches** against
+the pre-fix code's own output (confirms the fix changes nothing for any of today's real releases,
+only the dormant one-second edge case). `python3 -m py_compile` - clean. Existing suites, all exit
+0: `discovery/test_etenders_national.py` (`fetch_releases()`'s own 4 cases, ALL PASSED - this file
+had no `is_closed`/`endDate` coverage before or after this fix, a real pre-existing test gap noted
+here rather than silently left as-is, though adding that coverage was judged out of scope for this
+fix itself), `discovery/test_gov_sources.py` (full suite, ALL PASSED, including every
+`etenders_national`-adjacent `gov_sources.*`/`source_http.*` case), `discovery/
+test_watch_tender_updates.py`, `discovery/test_award_outcomes.py`, `discovery/test_award_prices.py`
+(Part 2 skipped, no scratch Postgres - expected, per its own message), `discovery/test_taxonomy.py`
+(same), `discovery/test_assess_tender.py` - all exit 0, no regression.
+
+**Fixed directly on `main` - no PR, per the guardrails.** Single-file, Python-only, no schema/RLS/
+money/worker-image surface, no authz/tenant-isolation angle (this is a discovery-feed read, not a
+per-company/tenant-scoped table), and small (one line changed, plus the comment explaining why).
+Not a document a company signs/submits (this track's own PR-for-document-correctness precedent,
+Findings 284-286, doesn't apply here - this is upstream discovery metadata, several steps removed
+from anything a company ever signs).
+
+**Regression:** `engine/discovery/etenders_national.py`'s `normalize()` only - one field's
+computation, no signature change, no call-site change needed.
+
+**Standing note, not a new backlog item:** `discovery/test_etenders_national.py` has no dedicated
+`is_closed`/`endDate` test coverage (confirmed above - this pass's own regression checks were a
+live-data/frozen-clock repro run in this session, not a permanent addition to that file). Low
+urgency - flagging for whichever future pass next touches this file, not opening a new standing
+item for it, since the fix itself is already in place and verified.
