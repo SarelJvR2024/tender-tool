@@ -1,14 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatClosingDateTime } from "@/lib/dates";
 import { PrintPreviewButton } from "./print-preview-button";
+import { buildOuterEnvelopeLines, deliveryAddressLines } from "./cover-page-lines";
 
 /**
  * Cover-page preview (prompt 10, item 3). Read-only: shows exactly what
  * engine/make_envelope_covers.py prints on the Outer/Envelope covers today
  * (letterhead logo, contract number + NRA reference, description, tenderer
- * block, closing date/time) - all already read elsewhere on this page
- * (tenderFacts) or on the company record, nothing new queried except the
- * company's own logo/legal name.
+ * block, closing date/time, and - Finding 353 - the tender's own tender-box
+ * delivery address when one was found at intake) - all already read
+ * elsewhere on this page (tenderFacts/tenderPack's own `intake`) or on the
+ * company record, nothing new queried except the company's own logo/legal
+ * name.
  *
  * Deliberately NOT editable. Sarel's spec asked for two user-editable
  * fields here (title wording, contact person) - checked `make_outer`/
@@ -28,6 +31,7 @@ export async function CoverPagePreview({
   description,
   buyer,
   closingDate,
+  deliveryAddress,
   company: companyOverride,
 }: {
   contractNo: string | null;
@@ -35,6 +39,13 @@ export async function CoverPagePreview({
   description: string | null;
   buyer: string | null;
   closingDate: string | null;
+  // Finding 353: the tender's own tender-box delivery address, read at
+  // intake from the tender's own Tender Notice (`intake.delivery_address.lines`,
+  // tender_packs.intake taking precedence over tenders.intake - the same
+  // precedence intake-card.tsx's own `ownPack?.intake ?? tender.intake`
+  // already uses) - null/undefined when none was found, which prints (and
+  // here, shows) nothing extra, same as before this fix.
+  deliveryAddress?: string[] | null;
   // Set by the no-signup demo (spec §6) to skip the real company read below
   // and render with a hand-built sample company instead - every other prop
   // here is already plain data, so this is the one place this component
@@ -50,17 +61,17 @@ export async function CoverPagePreview({
 
   const closingText = closingDate ? (formatClosingDateTime(closingDate) ?? "—") : "- no closing date on file";
   const tendererLine = `TENDERER: ${company?.legal_name ?? "No company name on file"}`;
-  const printLines = [
-    company?.logo_storage_path ? "Company logo" : "No logo on file",
-    "OUTER ENVELOPE",
-    "The South African National Roads Agency SOC Limited",
-    `CONTRACT ${contractNo ?? "- no contract number on file"}`,
-    ...(nraReference ? [nraReference] : []),
-    (description ?? "- no description on file").toUpperCase(),
-    `TENDER CLOSES: ${closingText}`,
-    `Client: ${buyer ?? "No client on file"}`,
+  const addressLines = deliveryAddressLines(deliveryAddress);
+  const printLines = buildOuterEnvelopeLines({
+    hasLogo: !!company?.logo_storage_path,
+    contractNo,
+    nraReference,
+    description,
+    closingText,
+    buyer,
     tendererLine,
-  ];
+    deliveryAddress,
+  });
 
   return (
     <div id="cover-page" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
@@ -93,6 +104,9 @@ export async function CoverPagePreview({
         </div>
         <div className="text-[13px] font-bold text-foreground">OUTER ENVELOPE</div>
         <div className="mt-2.5 text-xs text-foreground">The South African National Roads Agency SOC Limited</div>
+        {addressLines.map((line, i) => (
+          <div key={i} className="text-xs text-foreground">{line}</div>
+        ))}
         <div className="mt-2.5 text-xs font-bold text-foreground">CONTRACT {contractNo ?? "- no contract number on file"}</div>
         {nraReference && <div className="text-xs font-bold text-foreground">{nraReference}</div>}
         <div className="text-xs font-bold text-foreground uppercase">{description ?? "- no description on file"}</div>

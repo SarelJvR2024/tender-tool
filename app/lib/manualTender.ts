@@ -93,4 +93,11 @@ export type TenderIntake = {
     positions: { code: string; description: string | null; managerial: boolean; has_alternate: boolean }[];
   };
   fingerprint?: { status: "ok" | "mismatch" | "no_baseline" | "error"; detail: string; changes: string[] };
+  // The tender's own tender-box delivery address (engine/intake/classify_tender.py's
+  // find_delivery_address(), SANRAL route only) - read from the Tender Notice,
+  // printed by engine/make_envelope_covers.py's own envelope covers. Missing
+  // from this type until Finding 353 even though process_general_jobs.py has
+  // written it since 2026-10-18 - the gap that let every real caller of this
+  // type (including cover-page-preview.tsx) silently never read it.
+  delivery_address?: { lines: string[]; quote: string; ambiguous: boolean };
 };

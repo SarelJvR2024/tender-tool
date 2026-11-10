@@ -40,6 +40,7 @@ import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
+import type { TenderIntake } from "@/lib/manualTender";
 import { formatDate, formatDateTime, formatClosingDateTime, closingCountdown, daysUntil } from "@/lib/dates";
 import { DateField } from "@/components/ui/date-field";
 import { formatZAR } from "@/lib/formatZAR";
@@ -78,6 +79,13 @@ type TenderFacts = {
   // general-workspace.tsx already makes.
   document_urls: { url: string | null; title: string | null }[] | null;
   owner_company_id: string | null;
+  // Finding 353: tenders.intake, same column intake-card.tsx's own separate
+  // read already types as TenderIntake - needed here for CoverPagePreview's
+  // own `delivery_address` (tenders.intake is the fallback when this
+  // company has no tender_packs row of its own yet, matching
+  // process_pack_jobs.py's gather() precedence: tender_pack.intake first,
+  // then tender.intake).
+  intake: TenderIntake | null;
 };
 
 type TenderPack = {
@@ -100,6 +108,10 @@ type TenderPack = {
   estimated_transit_hours: number;
   dispatch_status: DispatchStatus;
   courier_contact: string | null;
+  // Finding 353: tender_packs.intake - see TenderFacts.intake's own comment;
+  // this one takes precedence (this company's own private-document re-read
+  // can have refreshed it after the shared tenders.intake was first written).
+  intake: TenderIntake | null;
 };
 
 type ProvenanceRow = {
@@ -245,7 +257,7 @@ export default async function TenderWorkspacePage({
 
   const { data: tender, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source, buyer, document_urls, owner_company_id")
+    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source, buyer, document_urls, owner_company_id, intake")
     .eq("id", id)
     .maybeSingle();
 
@@ -297,7 +309,7 @@ export default async function TenderWorkspacePage({
   const { data: pack, error: packError } = await supabase
     .from("tender_packs")
     .select(
-      "id, status, pipeline_stage, submitted_at, submitted_price_zar, project_completed_at, project_completion_value_rm, project_completion_note, submission_type, delivery_location, estimated_print_hours, estimated_transit_hours, dispatch_status, courier_contact",
+      "id, status, pipeline_stage, submitted_at, submitted_price_zar, project_completed_at, project_completion_value_rm, project_completion_note, submission_type, delivery_location, estimated_print_hours, estimated_transit_hours, dispatch_status, courier_contact, intake",
     )
     .eq("tender_id", id)
     .maybeSingle();
@@ -305,6 +317,11 @@ export default async function TenderWorkspacePage({
   if (packError) console.error("tender_packs select failed for tender", id, packError);
 
   const tenderPack = pack as TenderPack | null;
+  // Finding 353: same tender_pack.intake-over-tender.intake precedence
+  // intake-card.tsx's own `ownPack?.intake ?? tender.intake` already
+  // established (process_pack_jobs.py's gather() reads in the same order) -
+  // feeds CoverPagePreview's own delivery-address line below.
+  const intake = (tenderPack?.intake ?? tenderFacts?.intake) ?? null;
 
   let provenance: ProvenanceRow[] = [];
   let provenanceError: { message: string } | null = null;
@@ -1318,6 +1335,7 @@ export default async function TenderWorkspacePage({
                           description={tenderFacts.description}
                           buyer={tenderFacts.buyer}
                           closingDate={tenderFacts.closing_date}
+                          deliveryAddress={intake?.delivery_address?.lines ?? null}
                         />
                       )}
                       {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
