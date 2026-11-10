@@ -799,7 +799,22 @@ export default async function TenderWorkspacePage({
                 <div className="mt-3.5 border-t border-border pt-3.5">
                   <PrimaryPackActionLink
                     href={showSubmissionPack ? "#submission-pack" : "#general-pack"}
-                    ready={!!tenderPack && !keyPositionsError && (!tenderReadiness || tenderReadiness.thingsLeft === 0) && openPositionsCount === 0}
+                    // Finding 350: this used to require tenderReadiness.thingsLeft
+                    // === 0 - every Provide/unconfirmed-Verify item too, not just
+                    // Fix items. submission-pack.tsx's and general-workspace.tsx's
+                    // own "Generate submission pack" buttons (the REAL control
+                    // this link exists only to jump to - see this component's own
+                    // doc comment below) have gated on fix.length > 0 ONLY since
+                    // PR #40 ("Gate 'Generate submission pack' on open Fix items,
+                    // both tender families") - introduced after this link's own
+                    // thingsLeft gate (PR #39) and never updated to match. So a
+                    // tender with zero Fix items but any open Provide/Verify item
+                    // showed this primary CTA disabled with "N readiness items
+                    // still need confirming first" while the real button one
+                    // scroll down was already enabled and clickable - a false
+                    // "you can't do this yet" blocking an action that was, by the
+                    // app's own rule, already available. Matches fix.length now.
+                    ready={!!tenderPack && !keyPositionsError && (!tenderReadiness || tenderReadiness.fix.length === 0) && openPositionsCount === 0}
                     disabledReason={
                       !tenderPack
                         ? "Start a tender pack first (below) before a submission pack can be generated."
@@ -807,8 +822,8 @@ export default async function TenderWorkspacePage({
                           ? "Couldn't load this tender's key positions - try refreshing before the pack can be generated."
                           : openPositionsCount > 0
                             ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming before the pack can be generated.`
-                            : tenderReadiness && tenderReadiness.thingsLeft > 0
-                              ? `${tenderReadiness.thingsLeft} readiness item${tenderReadiness.thingsLeft === 1 ? "" : "s"} still need confirming first.`
+                            : tenderReadiness && tenderReadiness.fix.length > 0
+                              ? `${tenderReadiness.fix.length} Fix item${tenderReadiness.fix.length === 1 ? "" : "s"} still need fixing before the pack can be generated.`
                               : null
                     }
                   />
