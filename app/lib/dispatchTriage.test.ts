@@ -244,6 +244,25 @@ test("operationalStatusMessage: SUBMISSION OVERDUE once a digital submission's o
   assert.equal(operationalStatusMessage(digital, null, now), "SUBMISSION OVERDUE - the closing time has already passed.");
 });
 
+test("operationalStatusMessage: a PHYSICAL submission already printed and bound doesn't falsely claim CRITICAL either, even inside the 48h print-cutoff window", () => {
+  // Finding 352: the digital-submission branch just below already had this
+  // exact guard (and the test right below proves it) - classifyDispatchBucket()
+  // also already requires notYetDispatched for its own physical-box "critical"
+  // branch (see "not critical once printed and bound, even past the cutoff"
+  // above) - but this function's own physical-box branch never checked
+  // DISPATCHED_STATUSES at all, so a tender already printed_and_bound, still
+  // inside the 48h window on the raw print-cutoff math, got told "CRITICAL ...
+  // Confirm the pack is ready to print" - actively wrong, since it's already
+  // printed - while classifyDispatchBucket() had already stopped calling this
+  // tender "critical". Pinning that the two now agree here too.
+  const now = new Date("2026-10-30T10:00:00+02:00"); // 19h before the 2026-11-01T05:00 cutoff, same window as the plain "critical" case above
+  const printedAndBound: DispatchLogisticsInput = { ...baseLogistics, dispatchStatus: "printed_and_bound" };
+  const classifyInput: ClassifyInput = { ...printedAndBound, pipelineStage: "bidding", decisionNeeded: "none" };
+  assert.notEqual(classifyDispatchBucket(classifyInput, now), "critical");
+  assert.equal(operationalStatusMessage(printedAndBound, "2 returnables are missing.", now), "2 returnables are missing.");
+  assert.equal(operationalStatusMessage(printedAndBound, null, now), "Printed and ready - confirm delivery before the cutoff.");
+});
+
 test("operationalStatusMessage: a digital submission already dispatched doesn't falsely claim CRITICAL, even inside the 48h window", () => {
   const now = new Date("2026-11-05T12:00:00Z");
   const digital: DispatchLogisticsInput = {

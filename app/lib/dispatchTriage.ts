@@ -188,7 +188,19 @@ export function classifyDispatchBucket(input: ClassifyInput, now: Date = new Dat
 export function operationalStatusMessage(input: DispatchLogisticsInput, blockingSummary: string | null, now: Date = new Date()): string | null {
   const deadline = printSignDeadline(input);
   const hoursLeft = hoursUntilPrintSignDeadline(input, now);
-  if (deadline && hoursLeft !== null) {
+  // Finding 352: this branch (physical_box) never checked DISPATCHED_STATUSES
+  // at all, unlike classifyDispatchBucket()'s own notYetDispatched guard and
+  // this same function's digital-submission branch just below (which DOES
+  // check it, and has a dedicated test for it - "a digital submission
+  // already dispatched doesn't falsely claim CRITICAL"). A physical_box
+  // tender already printed_and_bound/out_for_delivery, still inside the 48h
+  // print-cutoff window on the raw date math, got "CRITICAL ... Confirm the
+  // pack is ready to print" here while classifyDispatchBucket() correctly
+  // no longer buckets it "critical" at all - the exact disagreement this
+  // function's own sibling branch's comment ("Mirrored here so the two
+  // can't disagree") was written to prevent, just never carried over to
+  // this, the branch that comment's own "the two" actually refers to.
+  if (deadline && hoursLeft !== null && !DISPATCHED_STATUSES.includes(input.dispatchStatus)) {
     if (hoursLeft <= 0) return "PRINT OVERDUE - the print & sign cutoff has already passed for a physical submission.";
     const hoursText = hoursLeft < 1 ? "under an hour" : `${Math.floor(hoursLeft)} hour${Math.floor(hoursLeft) === 1 ? "" : "s"}`;
     if (hoursLeft <= 48) {
