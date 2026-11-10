@@ -176,8 +176,25 @@ export function maskId(id: string | null): string | null {
   return id.length <= 4 ? "****" : `${"*".repeat(id.length - 4)}${id.slice(-4)}`;
 }
 
-export function isBlack(race: string | null): boolean {
-  return RACES.some((r) => r.value === race && r.black);
+// Found 2026-11-10, standing review (Finding 320): this file's own RACES
+// comment above defines "black people" per the B-BBEE Act as "African,
+// Coloured and Indian South Africans" (plus Chinese South Africans) -
+// citizenship is part of the Act's own definition, not an afterthought -
+// and migration 0050's company_ownership_breakdown view implements exactly
+// that: `race in (...) and coalesce(sa_citizen, true) as is_black`, feeding
+// every black_pct/black_women_pct/black_youth_pct/black_disabled_pct/hdi_pct
+// column it derives from this register. This function used to check only
+// `race`, so a qualifying-race permanent resident (sa_citizen === false) was
+// tagged "Black" on their own card in company/principals/page.tsx while the
+// ownership percentages shown directly above that same card correctly
+// excluded their shares - the chip claimed something the real, server-side
+// B-BBEE calculation right next to it did not. `saCitizen` defaults to
+// `null` (coalesced to true, same as the view) so an unrecorded citizenship
+// status - the common case for a South African-born shareholder who was
+// never asked - still counts as black for a qualifying race, same as before
+// this fix for everyone who already had the right answer.
+export function isBlack(race: string | null, saCitizen: boolean | null = null): boolean {
+  return RACES.some((r) => r.value === race && r.black) && (saCitizen ?? true);
 }
 
 // Certification age: tenders accept certified copies certified within 30

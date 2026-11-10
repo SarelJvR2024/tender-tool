@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { idWarnings, isValidSaId, needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
+import { idWarnings, isBlack, isValidSaId, needsPersonFallbackOption, resolveOwnershipBreakdown, type OwnershipBreakdown } from "./principals";
 
 // Regression coverage for Finding 217 (2026-11-08): isValidSaId() used to
 // check only the Luhn checksum, so a 13-digit number whose embedded date is
@@ -153,5 +153,41 @@ describe("resolveOwnershipBreakdown", () => {
 
   it("returns 'error' even if a failed read somehow still carried a stale/zero-shareholder row alongside its own error", () => {
     expect(resolveOwnershipBreakdown({ ...breakdown, shareholders: 0 }, { message: "timeout" })).toEqual({ kind: "error" });
+  });
+});
+
+// Finding 320 (2026-11-10): isBlack() is this file's own definition of the
+// B-BBEE Act's "black people" test - its own module comment above RACES
+// spells it out as "African, Coloured and Indian South Africans" (plus
+// Chinese South Africans) - but the function itself only ever checked
+// `race`, never citizenship, even though migration 0050's own
+// company_ownership_breakdown view computes the SAME classification as
+// `race in (...) and coalesce(sa_citizen, true)` for every black_pct/
+// black_women_pct/black_youth_pct/black_disabled_pct/hdi_pct column it
+// derives from this register. A qualifying-race permanent resident (
+// sa_citizen === false) was tagged "Black" on their own PrincipalCard while
+// the ownership percentages shown directly above that same card correctly
+// excluded their shares - the same "page keys off the wrong of two
+// closely-related variables" shape as this track's other principals-page
+// findings, just for a boolean pair instead of raw-vs-derived.
+describe("isBlack", () => {
+  it("is true for a qualifying race with sa_citizen left unset (matches the SQL view's own coalesce(sa_citizen, true))", () => {
+    expect(isBlack("african", null)).toBe(true);
+  });
+
+  it("is true for a qualifying race when explicitly recorded as an SA citizen", () => {
+    expect(isBlack("coloured", true)).toBe(true);
+  });
+
+  it("is false for a qualifying race when explicitly recorded as NOT an SA citizen - the gap this finding fixes", () => {
+    expect(isBlack("indian", false)).toBe(false);
+  });
+
+  it("is false for a non-qualifying race regardless of citizenship", () => {
+    expect(isBlack("white", true)).toBe(false);
+  });
+
+  it("is false with no race recorded at all", () => {
+    expect(isBlack(null, null)).toBe(false);
   });
 });

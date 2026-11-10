@@ -172,7 +172,7 @@ function PrincipalCard({
   const age = ageOn(p.date_of_birth ?? parsed.birth);
   const tags: string[] = [];
   if (natural) {
-    if (isBlack(p.race)) tags.push("Black");
+    if (isBlack(p.race, p.sa_citizen)) tags.push("Black");
     if (p.gender === "female") tags.push("Woman");
     if (age !== null && age >= 18 && age <= 35) tags.push("Youth");
     if (p.disability) tags.push("Disability");
