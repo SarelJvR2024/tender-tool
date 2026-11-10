@@ -35,6 +35,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SANRAL_CONVENTIONAL_FAMILY, COMPANY_VAULT_COLUMNS, sanralConventionalDocumentChecks, type CompanyVault } from "./tenderCompliance.ts";
 import { GENERAL_FAMILY, GENERAL_COMPANY_COLUMNS, checkReturnable, type GeneralCompany, type RequirementManifest, type TenderAnswer } from "./generalTender.ts";
+import { closingDayOf } from "./dates.ts";
 
 export const RETURNABLES_DIGEST_MIN_BUSINESS_DAYS = 3;
 export const RETURNABLES_DIGEST_MAX_BUSINESS_DAYS = 5;
@@ -92,7 +93,28 @@ export function returnablesWindowCandidates(
   const out: ReturnablesWindowCandidate[] = [];
   for (const tender of tenderRows) {
     if (!tender.closing_date) continue;
-    const businessDaysLeft = businessDaysBetweenFn(todayStr, tender.closing_date.slice(0, 10));
+    // closingDayOf(), not a raw `.slice(0, 10)` of the UTC timestamptz
+    // PostgREST returns - the identical naive-UTC-slice mistake Findings
+    // 289-292/344/345 already fixed elsewhere (Python engine, then 3+1 TS
+    // sites). The script's own `todayStr` (sastToday()) was already fixed
+    // for this bug class (see send-returnables-digest.ts's own comment on
+    // that call), but this pure function's OTHER date - the tender's real
+    // closing day - was never itself converted, so the "today vs closing"
+    // comparison still mixed a correct SAST day against a naive UTC-sliced
+    // one. For a closing time in the 22:00-23:59 UTC window (SAST
+    // 00:00-01:59 next day - e.g. a SANRAL default-midnight closing, named
+    // in Finding 345's own write-up as the common real-world case), the
+    // naive slice reads one calendar day EARLY, undercounting
+    // businessDaysLeft by (typically) 1 - which shifts the whole 3-5
+    // business-day window a day earlier than the real one: the digest could
+    // fire a business day before a tender has genuinely entered the
+    // critical window (real days left = 6, outside 3-5), and - because the
+    // claim is one-shot-ever (see the script's own idempotency comment) -
+    // never fire again once that early, wrong send has already claimed the
+    // key. `?? tender.closing_date.slice(0, 10)` keeps the old behaviour
+    // only for an unparseable closing_date (closingDayOf() returns null),
+    // never for a normal one.
+    const businessDaysLeft = businessDaysBetweenFn(todayStr, closingDayOf(tender.closing_date) ?? tender.closing_date.slice(0, 10));
     if (businessDaysLeft < RETURNABLES_DIGEST_MIN_BUSINESS_DAYS || businessDaysLeft > RETURNABLES_DIGEST_MAX_BUSINESS_DAYS) continue;
     for (const pack of tender.tender_packs ?? []) {
       if (!pack.company_id) continue;
