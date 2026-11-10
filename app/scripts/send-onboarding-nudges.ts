@@ -192,9 +192,17 @@ export async function runFirstTender(supabase: SupabaseService, appUrl: string):
   return { sent, candidates: candidates.length };
 }
 
-async function companySubscriptions(supabase: SupabaseService): Promise<{ rows: (TrialSubscriptionRow & { legal_name: string | null })[]; packCountByCompany: Map<string, number> }> {
-  const [{ data: subRows, error: subError }, { companyIds: packCompanyIds, error: packError }] = await Promise.all([
-    supabase.from("company_subscriptions").select("company_id, status, trial_ends_at, companies(legal_name)"),
+export async function companySubscriptions(supabase: SupabaseService): Promise<{ rows: (TrialSubscriptionRow & { legal_name: string | null })[]; packCountByCompany: Map<string, number> }> {
+  type SubRow = { company_id: string; status: string; trial_ends_at: string | null; companies: { legal_name: string | null } | null };
+  const [{ rows: subRows, error: subError }, { companyIds: packCompanyIds, error: packError }] = await Promise.all([
+    fetchAllRows<SubRow>(
+      (from, to) =>
+        supabase
+          .from("company_subscriptions")
+          .select("company_id, status, trial_ends_at, companies(legal_name)")
+          .range(from, to) as unknown as PromiseLike<{ data: SubRow[] | null; error: { message: string } | null }>,
+      MAX_COMPANY_ROWS,
+    ),
     allTenderPackCompanyIds(supabase),
   ]);
   if (subError || packError) {
@@ -205,7 +213,7 @@ async function companySubscriptions(supabase: SupabaseService): Promise<{ rows: 
   for (const companyId of packCompanyIds) {
     packCountByCompany.set(companyId, (packCountByCompany.get(companyId) ?? 0) + 1);
   }
-  const rows = ((subRows ?? []) as unknown as { company_id: string; status: string; trial_ends_at: string | null; companies: { legal_name: string | null } | null }[]).map((r) => ({
+  const rows = subRows.map((r) => ({
     company_id: r.company_id,
     status: r.status,
     trial_ends_at: r.trial_ends_at,
