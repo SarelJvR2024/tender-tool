@@ -133,3 +133,80 @@ test("page.tsx's own PrimaryPackActionLink source now gates on fix.length, not t
   assert.match(readyLine, /tenderReadiness\.fix\.length === 0/, "the ready= prop must key off fix.length, matching the real Generate-pack button's own gate");
   assert.doesNotMatch(readyLine, /tenderReadiness\.thingsLeft === 0/, "must no longer use the stricter, pre-PR-#40 thingsLeft gate");
 });
+
+// Finding 351: the exact same thingsLeft-vs-fix.length disagreement Finding
+// 350 fixed for PrimaryPackActionLink, in two sibling sites Finding 350's
+// own pass missed/flagged-but-left in this same file: (1) the tender-facts
+// header card's own readiness-score pill ("Ready to submit" / "N things left
+// before you can submit", right next to PrimaryPackActionLink on the same
+// card), and (2) WorkspaceStatusBadge's identical "Ready to submit" label -
+// explicitly flagged as NOT fixed by Finding 350's own write-up pending
+// "fresh investigation... whether it's deliberately broader". It is not:
+// WorkspaceStatusBadge's own header comment (896f3ae-era) promises it
+// "can't disagree with the readiness score right below it on the same
+// card" - i.e. with site (1) - so both must move together, and PR #40's own
+// commit message ("the same cached Pack Review snapshot the workspace
+// header's readiness score already reads, so this can't disagree with it")
+// says site (1) must agree with the real button too. A third site,
+// `blockingSummary` (the Tender Command Center urgent-dispatch line), has
+// the identical issue by its own comment's explicit goal ("reusing
+// tenderReadiness... already computed above for the facts card and the
+// primary-action disabled reason... rather than... a second summary that
+// could disagree with the first") - fixed alongside the other two.
+test("the facts-card readiness pill and WorkspaceStatusBadge must also agree with the real Generate-pack button's gate (Finding 351)", () => {
+  const sections = [
+    section({
+      items: [
+        { key: "signatory", label: "Who signs this bid", value: null, status: "needs_input", note: "Not chosen" }, // provide
+        { key: "tax", label: "SARS tax compliance", value: "PIN on file", status: "assumed_default", note: "Confirm it's still valid" }, // verify, unconfirmed
+      ],
+    }),
+  ];
+  const readiness = computeTenderReadiness(sections);
+  assert.equal(readiness.fix.length, 0, "no Fix item in this scenario");
+  assert.equal(readiness.thingsLeft, 2, "but 2 things are still left overall");
+
+  const realButtonReady = readiness.fix.length === 0;
+
+  const factsCardReadyOld = readiness.thingsLeft === 0; // pre-Finding-351 formula
+  const factsCardReadyNew = readiness.fix.length === 0; // post-Finding-351 formula
+  assert.notEqual(factsCardReadyOld, realButtonReady, "RED: the old facts-card pill disagreed with the real button");
+  assert.equal(factsCardReadyNew, realButtonReady, "GREEN: the fixed facts-card pill agrees with the real button");
+
+  const badgeReadyOld = readiness.thingsLeft === 0; // WorkspaceStatusBadge's pre-Finding-351 formula
+  const badgeReadyNew = readiness.fix.length === 0; // post-Finding-351 formula
+  assert.notEqual(badgeReadyOld, realButtonReady, "RED: the old WorkspaceStatusBadge disagreed with the real button");
+  assert.equal(badgeReadyNew, realButtonReady, "GREEN: the fixed WorkspaceStatusBadge agrees with the real button");
+});
+
+// Same finding, checked directly against page.tsx's own real source text (not
+// just a logical replica), the same way Finding 350's own second test did,
+// for all 3 sites this fix touches: the facts-card pill, WorkspaceStatusBadge,
+// and blockingSummary.
+test("page.tsx's own facts-card pill, WorkspaceStatusBadge and blockingSummary now gate on fix.length, not thingsLeft (Finding 351)", () => {
+  const src = readFileSync(join(HERE, "page.tsx"), "utf8");
+
+  // (1) The facts-card readiness pill: the block starting at its wrapping
+  // `<div className="mt-2.5 flex items-center gap-2.5...` through the
+  // "Ready to submit" label just below it.
+  const pillTagStart = src.indexOf("<span", src.indexOf('border-t border-border pt-2.5">'));
+  assert.ok(pillTagStart !== -1, "facts-card pill markup must still exist");
+  const pillBlock = src.slice(pillTagStart, pillTagStart + 900);
+  assert.match(pillBlock, /tenderReadiness\.fix\.length === 0\s*\?\s*"bg-success\/10 text-success"/, "the pill's color must key off fix.length");
+  assert.match(pillBlock, /tenderReadiness\.fix\.length === 0\s*\n\s*\?\s*"Ready to submit"/, "the pill's label must key off fix.length");
+  assert.doesNotMatch(pillBlock, /tenderReadiness\.thingsLeft/, "the facts-card pill must no longer read thingsLeft at all");
+
+  // (2) WorkspaceStatusBadge's own "Ready to submit" branch.
+  const badgeStart = src.indexOf("function WorkspaceStatusBadge(");
+  assert.ok(badgeStart !== -1, "WorkspaceStatusBadge must still exist");
+  const badgeBlock = src.slice(badgeStart, badgeStart + 2000);
+  assert.match(badgeBlock, /tenderReadiness && tenderReadiness\.fix\.length === 0/, "the badge's Ready-to-submit branch must key off fix.length");
+  assert.doesNotMatch(badgeBlock, /tenderReadiness\.thingsLeft/, "WorkspaceStatusBadge must no longer read thingsLeft at all");
+
+  // (3) blockingSummary, the Tender Command Center urgent-dispatch line.
+  const blockingStart = src.indexOf("const blockingSummary =");
+  assert.ok(blockingStart !== -1, "blockingSummary must still exist");
+  const blockingBlock = src.slice(blockingStart, blockingStart + 400);
+  assert.match(blockingBlock, /tenderReadiness && tenderReadiness\.fix\.length > 0/, "blockingSummary must key off fix.length");
+  assert.doesNotMatch(blockingBlock, /tenderReadiness\.thingsLeft/, "blockingSummary must no longer read thingsLeft at all");
+});

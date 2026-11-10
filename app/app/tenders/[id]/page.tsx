@@ -480,9 +480,17 @@ export default async function TenderWorkspacePage({
   // openPositionsCount - both already computed above for the facts card and
   // the primary-action disabled reason - rather than calling nextStepFor()
   // again for a second summary that could disagree with the first.
+  //
+  // Finding 351: this comment's own goal ("could disagree with the first")
+  // is exactly why this now reads tenderReadiness.fix - it was thingsLeft
+  // only because, when this was written (896f3ae, 2026-10-23, after PR #40),
+  // "the facts card and the primary-action disabled reason" it names were
+  // both still thingsLeft-based themselves (the still-latent bug this same
+  // Finding/Finding 350 fixed). Now that both those real reference points
+  // read fix.length, this must too, or it becomes the new disagreement.
   const blockingSummary =
-    tenderReadiness && tenderReadiness.thingsLeft > 0
-      ? `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`
+    tenderReadiness && tenderReadiness.fix.length > 0
+      ? `${tenderReadiness.fix.length} Fix item${tenderReadiness.fix.length === 1 ? "" : "s"} still need fixing before the pack can be generated`
       : openPositionsCount > 0
         ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming`
         : null;
@@ -679,22 +687,34 @@ export default async function TenderWorkspacePage({
               </div>
               {tenderReadiness && (
                 <div className="mt-2.5 flex items-center gap-2.5 border-t border-border pt-2.5">
+                  {/* Finding 351: this pill (and its "Ready to submit" label
+                      just below) used to key off tenderReadiness.thingsLeft
+                      - every open Provide item and unconfirmed-but-
+                      non-disqualifying Verify item, not just Fix. PR #40's
+                      own commit message says the real "Generate submission
+                      pack" button's fix.length>0 gate is "the same cached
+                      Pack Review snapshot the workspace header's readiness
+                      score already reads, so this can't disagree with it" -
+                      but PR #40 never touched page.tsx (confirmed, Finding
+                      350), so this pill (added earlier by PR #39) kept the
+                      old, stricter thingsLeft rule and could show "N things
+                      left before you can submit" while the real button one
+                      scroll down was already enabled. Now reads fix.length,
+                      matching the real button exactly - same fix as Finding
+                      350's PrimaryPackActionLink, same file, same root
+                      cause, a second site that fix missed. */}
                   <span
                     className={`inline-flex h-[38px] w-[38px] flex-none items-center justify-center rounded-full text-[13px] font-bold ${
-                      tenderReadiness.thingsLeft === 0
-                        ? "bg-success/10 text-success"
-                        : tenderReadiness.fix.length > 0
-                          ? "bg-destructive/10 text-destructive"
-                          : "bg-warning/10 text-warning"
+                      tenderReadiness.fix.length === 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
                     }`}
                   >
                     {tenderReadiness.score}
                   </span>
                   <div className="min-w-0">
                     <div className="text-[13px] font-semibold text-foreground">
-                      {tenderReadiness.thingsLeft === 0
+                      {tenderReadiness.fix.length === 0
                         ? "Ready to submit"
-                        : `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`}
+                        : `${tenderReadiness.fix.length} Fix item${tenderReadiness.fix.length === 1 ? "" : "s"} still need fixing before the pack can be generated`}
                     </div>
                     {/* Sarel's own brief, 2026-10-31: "{confirmedCount}/{totalCount}
                         Returnables Ready" - the exact confirmedCount/totalCount
@@ -1732,13 +1752,20 @@ function WonProjectCard({
 // page already computes - never a second, independent judgement of "where
 // is this tender" that could disagree with the readiness score right below
 // it on the same card.
+//
+// Finding 351: that comment's own promise ("can't disagree with the
+// readiness score right below it") means this badge's "Ready to submit"
+// condition must track whatever that score pill uses, not define its own
+// rule - it was thingsLeft===0 only because the score pill (fixed just
+// above, same Finding) was too; this is the same fix, carried over to keep
+// the two in the agreement this component's own comment already promises.
 function WorkspaceStatusBadge({
   tenderPack,
   tenderReadiness,
   packStatus,
 }: {
   tenderPack: { pipeline_stage: string } | null;
-  tenderReadiness: { thingsLeft: number } | null;
+  tenderReadiness: { fix: unknown[] } | null;
   packStatus: { label: string; className: string } | null;
 }) {
   let label: string;
@@ -1760,7 +1787,7 @@ function WorkspaceStatusBadge({
     // Same label text as pipeline.ts's own STAGE_META for this stage.
     label = "Briefing / shortlisted";
     className = "bg-success/10 text-success";
-  } else if (tenderReadiness && tenderReadiness.thingsLeft === 0) {
+  } else if (tenderReadiness && tenderReadiness.fix.length === 0) {
     label = "Ready to submit";
     className = "bg-success/10 text-success";
   } else if (tenderPack) {
