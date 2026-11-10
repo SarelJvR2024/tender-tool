@@ -156,7 +156,7 @@ describe("removePrivateTenderDocument - count read genuinely succeeds at zero", 
     const { client, updateCalls, rpcCalls } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }],
       [{ data: { id: "doc-1", storage_path: "private/company-1/tender-1/x.pdf" }, error: null }],
-      [{ data: null, error: null }],
+      [{ data: { id: "doc-1" }, error: null }], // delete genuinely matches (Finding 324 guard)
       [{ data: null, error: null, count: 0 }], // count read succeeds, genuinely 0
       [{ data: { id: "pack-1" }, error: null }],
     ]);
@@ -179,7 +179,7 @@ describe("removePrivateTenderDocument - count read genuinely succeeds above zero
     const { client, updateCalls, rpcCalls } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }],
       [{ data: { id: "doc-1", storage_path: "private/company-1/tender-1/x.pdf" }, error: null }],
-      [{ data: null, error: null }],
+      [{ data: { id: "doc-1" }, error: null }], // delete genuinely matches (Finding 324 guard)
       [{ data: null, error: null, count: 2 }], // count read succeeds, 2 remain
       [{ data: { id: "pack-1" }, error: null }],
     ]);
@@ -195,6 +195,58 @@ describe("removePrivateTenderDocument - count read genuinely succeeds above zero
     expect(resetCalls).toHaveLength(0);
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0].fn).toBe("request_general_job_checked");
+  });
+});
+
+// Finding 324 (standing review): the row delete inside
+// removePrivateTenderDocument() used to be a plain
+// `.delete().eq("id", doc.id)` with only `error` checked - the same "plain
+// delete twin discards a zero-row RLS match" bug Findings 322/323 fixed for
+// deleteCompanyOffice()/deleteTenderComment(). "tender_private_documents:
+// members remove their own" (0032) is `using (is_company_member(company_id))`,
+// the identical USING-only, re-evaluated-at-write-time shape - a membership
+// revoked between the doc select and this delete makes PostgREST return a
+// 2xx with `error: null` and zero rows affected. Worse than a merely
+// misleading redirect here: the pre-fix code went on to delete the real
+// file from Storage anyway, on the strength of a delete that never actually
+// removed the row - leaving the row permanently pointing at a file that no
+// longer exists.
+describe("removePrivateTenderDocument - delete matches zero rows (RLS race)", () => {
+  it("does NOT touch storage and redirects with an error, not the bare success URL, when the row delete matches nothing", async () => {
+    const { client, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: { id: "doc-1", storage_path: "private/company-1/tender-1/x.pdf" }, error: null }], // doc select
+      [{ data: null, error: null }], // delete - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { removePrivateTenderDocument } = await import("./general-actions");
+
+    const url = await expectRedirect(removePrivateTenderDocument(formData("tender-1", "doc-1")));
+
+    expect(url).toContain("/tenders/tender-1?error=");
+    expect(url).toContain("#private-documents");
+    expect(removeCalls).toHaveLength(0);
+  });
+});
+
+describe("removePrivateTenderDocument - delete genuinely succeeds", () => {
+  it("removes the real storage file and redirects to the plain success URL when the delete actually matches", async () => {
+    const { client, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: { id: "doc-1", storage_path: "private/company-1/tender-1/x.pdf" }, error: null }], // doc select
+      [{ data: { id: "doc-1" }, error: null }], // delete - genuinely matches
+      [{ data: null, error: null, count: 0 }], // count read
+      [{ data: { id: "pack-1" }, error: null }], // pack select
+    ]);
+    supabaseState.current = client;
+
+    const { removePrivateTenderDocument } = await import("./general-actions");
+
+    const url = await expectRedirect(removePrivateTenderDocument(formData("tender-1", "doc-1")));
+
+    expect(url).toBe("/tenders/tender-1#private-documents");
+    expect(removeCalls).toEqual([{ bucket: "tender-documents", paths: ["private/company-1/tender-1/x.pdf"] }]);
   });
 });
 

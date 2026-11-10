@@ -66,10 +66,32 @@ export async function clearSubcontractingPlan(formData: FormData) {
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/tenders");
   const supabase = await createClient();
-  const { error } = await supabase.from("tender_subcontracting_plans").delete().eq("company_id", companyId).eq("tender_id", tenderId);
+  // Finding 324 (standing review): same "plain delete twin discards a
+  // zero-row RLS match" bug as Findings 322/323 and their siblings -
+  // "tender_subcontracting_plans: tenant isolation" (0056) is `using
+  // (is_company_member(company_id))`, the identical USING-only,
+  // re-evaluated-at-write-time shape, so a membership revoked mid-request
+  // makes this delete match zero rows with `error: null`. The "Clear this
+  // answer" button (subcontracting-plan.tsx) only renders when a plan is
+  // already saved (`{answered && (...)}`), so a zero-row match here is the
+  // race, not a legitimate "nothing to clear" click. Pre-fix, this still
+  // redirected "?saved=b7" unconditionally, telling the company its Form B7
+  // answer was cleared when the old plan/waiver was still on file, silently
+  // stale for engine/pack/process_pack_jobs.py's own B7 gate until the page
+  // is reloaded.
+  const { data: deletedPlan, error } = await supabase
+    .from("tender_subcontracting_plans")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("tender_id", tenderId)
+    .select("id")
+    .maybeSingle();
   if (error) {
     console.error("tender_subcontracting_plans delete failed", error);
     redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not clear Form B7 - try again. If it keeps happening, let us know.")}#form-b7`);
+  }
+  if (!deletedPlan) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("This Form B7 answer is no longer there - refresh and try again.")}#form-b7`);
   }
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}?saved=b7#form-b7`);

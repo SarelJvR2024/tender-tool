@@ -282,10 +282,32 @@ export async function removePrivateTenderDocument(formData: FormData) {
     .eq("tender_id", tenderId)
     .maybeSingle();
   if (!doc) redirect(`/tenders/${tenderId}#private-documents`);
-  const { error } = await supabase.from("tender_private_documents").delete().eq("id", doc.id as string);
+  // Finding 324 (standing review): `.select("id").maybeSingle()` matters here
+  // exactly as it does on every sibling plain delete already fixed for this
+  // ("plain delete twin discards a zero-row RLS match") bug class (Findings
+  // 322/323 and their own siblings) - "tender_private_documents: members
+  // remove their own" (0032) is `using (is_company_member(company_id))`,
+  // the identical USING-only, re-evaluated-at-write-time shape: a membership
+  // revoked between the select above and this delete makes it match zero
+  // rows with `error: null`, indistinguishable from a real delete by `error`
+  // alone. Checked and redirected with `?error` BEFORE the storage removal
+  // below runs - without this, the old code deleted the real file from
+  // Storage on the strength of a delete that never actually removed the row,
+  // leaving a `tender_private_documents` row permanently pointing at a file
+  // that no longer exists, while telling the user (no `?error` on the final
+  // redirect) that the removal succeeded.
+  const { data: deletedDoc, error } = await supabase
+    .from("tender_private_documents")
+    .delete()
+    .eq("id", doc.id as string)
+    .select("id")
+    .maybeSingle();
   if (error) {
     console.error("tender_private_documents delete failed", error);
     redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not remove this document - try again. If it keeps happening, let us know.")}#private-documents`);
+  }
+  if (!deletedDoc) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("This document is no longer there - refresh and try again.")}#private-documents`);
   }
   await supabase.storage.from("tender-documents").remove([doc.storage_path as string]);
 
