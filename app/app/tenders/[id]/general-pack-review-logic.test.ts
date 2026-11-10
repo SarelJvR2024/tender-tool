@@ -14,8 +14,10 @@ import {
   matchStrengthStatus,
   roleStatus,
   signatureAnswerStatus,
+  specificGoalsLocalityRows,
 } from "./general-pack-review-logic.ts";
 import { docItemStatus } from "./pack-review-logic.ts";
+import { matchLocality, type CompanyOffice, type LocalityRow } from "../../../lib/locality.ts";
 
 test("answerStatus: answered is confirmed", () => {
   assert.deepEqual(answerStatus(true, false), { status: "confirmed", note: null });
@@ -96,6 +98,56 @@ test("localityStatus: no match but not mandatory is only a warning", () => {
   const r = localityStatus({ matchStatus: "no_match", mandatory: false, disqualifies: false });
   assert.equal(r.reviewStatus, "warning");
   assert.equal(r.checklistStatus, "included_warning");
+});
+
+// Finding 343, 2026-11-10: specificGoalsLocalityRows() filters out `kind:
+// "functionality"` rows before they ever reach matchLocality() - see its own
+// comment (general-pack-review-logic.ts) for the real, documented tender
+// (uMlalazi LM) that mixes both kinds for the same area with different
+// points, and what used to go wrong when every row was passed through
+// unfiltered.
+function office(over: Partial<CompanyOffice> = {}): CompanyOffice {
+  return {
+    id: "o1", label: null, office_kind: "head_office", province: "KwaZulu-Natal",
+    district_municipality: null, local_municipality: "uMlalazi", town: null,
+    street_address: null, proof_type: null, proof_date: null, notes: null, ...over,
+  };
+}
+
+test("specificGoalsLocalityRows: drops functionality-kind rows, keeps specific_goals rows", () => {
+  const rows: LocalityRow[] = [
+    { area: "uMlalazi", level: "municipality", province: null, points: 4, system: "80/20", kind: "specific_goals" },
+    { area: "uMlalazi", level: "municipality", province: null, points: 10, system: null, kind: "functionality" },
+  ];
+  const kept = specificGoalsLocalityRows(rows);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].kind, "specific_goals");
+  assert.equal(kept[0].points, 4);
+});
+
+test("specificGoalsLocalityRows: an all-functionality list filters down to empty (nothing to show, not a false match)", () => {
+  const rows: LocalityRow[] = [
+    { area: "uMlalazi", level: "municipality", province: null, points: 10, system: null, kind: "functionality" },
+  ];
+  assert.deepEqual(specificGoalsLocalityRows(rows), []);
+});
+
+test("specificGoalsLocalityRows feeding matchLocality(): a real uMlalazi-shaped dual-kind row set reports the specific-goals points (4), never the functionality criterion's own, unrelated points (10)", () => {
+  const rows: LocalityRow[] = [
+    { area: "uMlalazi", level: "municipality", province: null, points: 4, system: "80/20", kind: "specific_goals" },
+    { area: "uMlalazi", level: "municipality", province: null, points: 10, system: null, kind: "functionality" },
+  ];
+  const offices = [office()];
+  // RED (pre-fix) shape: matchLocality(rows, offices) directly, unfiltered -
+  // confirms the bug is real in the function these rows are actually fed to.
+  const unfiltered = matchLocality(rows, offices);
+  assert.equal(unfiltered.status, "matched");
+  assert.equal(unfiltered.points, 10, "documents the exact pre-fix defect: the functionality row's points won on magnitude alone");
+  // GREEN (this fix): the call site filters first.
+  const fixed = matchLocality(specificGoalsLocalityRows(rows), offices);
+  assert.equal(fixed.status, "matched");
+  assert.equal(fixed.points, 4);
+  assert.equal(fixed.row?.kind, "specific_goals");
 });
 
 test("matchStrengthStatus: no confidence on the item returns null (nothing to show)", () => {

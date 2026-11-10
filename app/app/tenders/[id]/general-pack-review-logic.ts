@@ -40,6 +40,10 @@
 // same "no react/next/@ aliases" spirit pack-review-logic.ts documents
 // about itself.
 import type { ChecklistStatus, ReviewStatus } from "./pack-review-logic";
+// Type-only import (erased entirely at compile/strip time, same reasoning as
+// the "./pack-review-logic" import above) - LocalityRow's own `kind` field
+// is what specificGoalsLocalityRows() below filters on.
+import type { LocalityRow } from "@/lib/locality";
 
 export type { ReviewStatus, ChecklistStatus } from "./pack-review-logic";
 
@@ -119,6 +123,35 @@ export function matchStrengthStatus(confidence: number | null | undefined): { ti
   if (confidence >= 75) return { tier: "strong", label: "Strong match" };
   if (confidence >= 40) return { tier: "check", label: "Check this" };
   return { tier: "low", label: "Low confidence - please verify" };
+}
+
+/**
+ * Which of a tender's own locality rows the "Office location points" item
+ * (general-pack-review-data.ts) should ever hand to lib/locality.ts's
+ * matchLocality() - specific_goals rows only.
+ *
+ * Finding 343, 2026-11-10: a tender can state a locality rule TWICE for the
+ * SAME area under two genuinely different mechanics - a real, documented
+ * example (uMlalazi LM, docs/specs/Tender-Evaluation-Engine-Audit.md "Round
+ * 2", (c)) gives "Enterprise Located within uMlalazi Municipality" as a
+ * 4-point specific-goals preference row AND "Bidder operating within
+ * uMlalazi Municipality (Points = 10)" as a separate 10-point functionality-
+ * scorecard criterion - two different evaluation axes with no points in
+ * common. matchLocality() (and its Python mirror, score_outlook.py's own
+ * match_locality()) picks the single highest-scoring row ANY office
+ * satisfies, with no idea these are two different `kind`s - so, fed every
+ * row regardless of kind (what general-pack-review-data.ts used to do), it
+ * could silently return the FUNCTIONALITY criterion's points as this item's
+ * own "Office location points" value, purely because that number happens to
+ * be larger. engine/discovery/score_outlook.py's own two OTHER call sites
+ * (the specific-goals estimate, and the separate functionality-criterion
+ * summary line) already filter to the one `kind` each cares about before
+ * calling match_locality() - this is that same filter, kept here so it has
+ * its own test coverage (general-pack-review-data.ts has none - it only
+ * reads Supabase).
+ */
+export function specificGoalsLocalityRows(rows: LocalityRow[]): LocalityRow[] {
+  return rows.filter((r) => r.kind !== "functionality");
 }
 
 /** lib/locality.ts's matchLocality() "matched"/"no_match"/"unknown" -> this screen's vocabulary. */

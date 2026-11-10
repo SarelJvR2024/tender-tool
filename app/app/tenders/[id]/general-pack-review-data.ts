@@ -15,7 +15,7 @@ import { matchLocality, COMPANY_OFFICE_COLUMNS, type CompanyOffice, type Localit
 import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
 import { evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
-import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
+import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus, specificGoalsLocalityRows } from "./general-pack-review-logic";
 import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
 
 /**
@@ -314,7 +314,13 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
   // --- 5. Office location -----------------------------------------------------
   try {
     const rules = (tender.evaluation_rules as EvaluationRules | null) ?? null;
-    const locRows = ((rules?.locality?.rows?.length ? rules.locality.rows : manifest.locality.rows) ?? []) as LocalityRow[];
+    const allLocRows = ((rules?.locality?.rows?.length ? rules.locality.rows : manifest.locality.rows) ?? []) as LocalityRow[];
+    // Finding 343, 2026-11-10: this "Office location points" item means
+    // specific-goals locality points - see specificGoalsLocalityRows()'s own
+    // comment (general-pack-review-logic.ts) for why every row used to be
+    // passed to matchLocality() here regardless of `kind`, and what real,
+    // documented tender (uMlalazi LM) that silently got wrong.
+    const locRows = specificGoalsLocalityRows(allLocRows);
     const mandatory = rules?.locality?.mandatory_local_office ?? manifest.locality.mandatory_local_office;
     const items: ReviewItem[] = [];
     if (locRows.length > 0 || mandatory) {

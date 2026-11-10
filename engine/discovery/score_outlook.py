@@ -863,7 +863,33 @@ def estimate_score_outlook(text, depth, profile, cidb_required=None):
     func = _functionality(text)
     evidence = extract_experience_evidence(text)
     offices = profile.get("offices") or []
-    loc_all_match = match_locality(locality, offices) if locality["rows"] else None
+    # Finding 343, 2026-11-10: this used to pass `locality` (EVERY row,
+    # specific_goals AND functionality kinds both) straight to
+    # match_locality(), which picks the single highest-scoring row ANY office
+    # satisfies with no regard for `kind` at all. A real, documented buyer
+    # (uMlalazi LM, docs/specs/Tender-Evaluation-Engine-Audit.md "Round 2",
+    # (c)) states a locality rule TWICE for the same area under two genuinely
+    # different mechanics - a specific-goals preference-points row ("Enterprise
+    # Located within uMlalazi Municipality" = 4) and a separate functionality
+    # scorecard criterion ("Bidder operating within uMlalazi Municipality
+    # (Points = 10)") - extract_locality() correctly keeps both as distinct
+    # rows (see its own dedupe key, which includes `kind`), but this call then
+    # silently picked the functionality row's 10 points as `locality.match`
+    # whenever a company's office matched both, purely because 10 > 4.
+    # `locality.match` is exactly what app/lib/scoreOutlookChips.ts reads for
+    # the Discovery page's "Locality: matched (Xpt)" chip, rendered right next
+    # to the "Specific goals" chip - so a company would be told "Locality:
+    # matched (10pt)" when the real specific-goals locality points are 4, with
+    # the 10 actually belonging to an unrelated functionality-stage criterion
+    # that doesn't even combine with specific goals in the tender's own math.
+    # `_specific_goals()` (above) and the separate functionality-criterion
+    # summary line (below) already filter to the one `kind` each cares about
+    # before calling match_locality() - this call is the one site that never
+    # did. Filtered the same way: specific_goals rows only (what "locality
+    # points" plainly means wherever this value is shown), matching the
+    # precedent those two call sites already set.
+    sg_rows_for_match = [r for r in locality["rows"] if r.get("kind") != "functionality"]
+    loc_all_match = match_locality({"rows": sg_rows_for_match}, offices) if sg_rows_for_match else None
     mand = locality.get("mandatory_local_office")
     if mand:
         mand_ok = match_locality({"rows": [{"area": mand["area"], "level": "municipality", "province": None,

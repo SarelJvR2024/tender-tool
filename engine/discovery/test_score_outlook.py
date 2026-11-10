@@ -137,6 +137,23 @@ Proof: a municipal account not older than 90 days, a lease agreement, or a
 bank letter confirming the business address.
 """
 
+# uMlalazi LM (docs/specs/Tender-Evaluation-Engine-Audit.md "Round 2" (c)):
+# a real, live-fetched tender that states a locality rule TWICE for the same
+# area under two genuinely different mechanics - a specific-goals preference
+# table (4/2/1) AND a separate functionality scorecard criterion (10/5/2),
+# verbatim per that doc's own table.
+UMLALAZI_TEXT = """
+SPECIFIC GOALS
+
+Enterprise Located within uMlalazi Municipality 4
+Enterprise Located within District Municipality 2
+Enterprise Located within the Province 1
+
+FUNCTIONALITY CRITERIA
+
+Bidder operating within uMlalazi Municipality (Points = 10)
+"""
+
 
 def test_extract_locality_flags_registered_office_only_language():
     print("Overberg DM's own real wording (docs/specs/Tender-Evaluation-Engine-Audit.md, 'Round 2': "
@@ -192,6 +209,40 @@ def test_any_office_row_is_unaffected_by_the_fix():
           result["status"] == "matched" and result["points"] == 5, result)
 
 
+def test_extract_locality_keeps_both_kinds_as_separate_rows_for_the_same_area():
+    print("uMlalazi LM: a specific-goals row and a functionality row for the SAME area are both extracted, not deduped")
+    loc = so.extract_locality(UMLALAZI_TEXT)
+    umlalazi_rows = [r for r in loc["rows"] if r["area"] == "uMlalazi"]
+    kinds = sorted(r["kind"] for r in umlalazi_rows)
+    check("both the specific_goals (4) and functionality (10) rows for 'uMlalazi' are present",
+          kinds == ["functionality", "specific_goals"], loc["rows"])
+
+
+def test_estimate_score_outlook_locality_match_does_not_leak_the_functionality_criterions_points():
+    print("Finding 343, 2026-11-10: estimate_score_outlook()'s own `locality.match` - exactly what "
+          "app/lib/scoreOutlookChips.ts reads for the Discovery page's 'Locality: matched (Xpt)' chip, right "
+          "next to the 'Specific goals' chip - used to pick the single highest-scoring locality row ANY "
+          "office satisfies with NO regard for `kind` at all (match_locality() was fed `locality` - every "
+          "row, both kinds - unfiltered). uMlalazi LM states a locality rule twice for the SAME area: a "
+          "4-point specific-goals preference row and a SEPARATE 10-point functionality-scorecard criterion "
+          "- two different evaluation axes with no points in common. A company with an office there used to "
+          "be told 'Locality: matched (10pt)' (the functionality criterion's points, picked purely because "
+          "10 > 4) when the real specific-goals locality points are 4.")
+    office = {"province": "KwaZulu-Natal", "district_municipality": None,
+              "local_municipality": "uMlalazi", "town": None}
+    result = so.estimate_score_outlook(UMLALAZI_TEXT, "full", {"offices": [office]}, None)
+    m = result["locality"]["match"]
+    check("locality.match reports the specific_goals points (4), never the functionality criterion's own 10",
+          m is not None and m["status"] == "matched" and m["points"] == 4.0 and m["row"]["kind"] == "specific_goals", m)
+
+
+def test_estimate_score_outlook_locality_match_is_still_none_with_no_offices():
+    print("control: no offices on file still reports 'unknown' through the fixed call site, same as before")
+    result = so.estimate_score_outlook(UMLALAZI_TEXT, "full", {"offices": []}, None)
+    check("no offices -> unknown, not a crash or a false match",
+          result["locality"]["match"]["status"] == "unknown", result["locality"]["match"])
+
+
 def main():
     test_unrelated_municipalities_do_not_falsely_match()
     test_legitimate_city_of_prefix_still_matches()
@@ -203,6 +254,9 @@ def main():
     test_registered_office_only_row_rejects_a_non_registered_office()
     test_registered_office_only_row_still_matches_the_real_registered_office()
     test_any_office_row_is_unaffected_by_the_fix()
+    test_extract_locality_keeps_both_kinds_as_separate_rows_for_the_same_area()
+    test_estimate_score_outlook_locality_match_does_not_leak_the_functionality_criterions_points()
+    test_estimate_score_outlook_locality_match_is_still_none_with_no_offices()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
