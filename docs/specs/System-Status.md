@@ -17235,6 +17235,36 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): worker/job-queue 2nd pass - genuine negative, plus one small non-Finding doc fix
+
+Rotation: worker/job-queue, 2nd pass. Oriented from `eab824f` (sibling track's own most recent
+commit - fetched clean at start and again immediately before this push, no new sibling commits
+either time).
+
+Non-Finding fix (not assigned a Finding number, per the `corrigendumAlerts.ts` precedent earlier
+this session - purely an internal comment, zero behavioural consequence, so not reported to Sarel
+either): `engine/worker/run_bridges.py`'s own header docstring said "Four are registered by name:"
+and then listed 5, while the real `BRIDGES` dict has 6 - the `narrative` bridge (added 2026-10-25,
+by its own inline comment) was missing from the top-of-file listing entirely. Fixed the count and
+added the missing `narrative` entry. QA: `python3 -m py_compile engine/worker/run_bridges.py`
+clean; `python3 test_poll_loop.py` from `engine/worker/` - all existing tests still pass, confirming
+no behavioural change.
+
+Genuine negative, re-checked adversarially and found sound:
+- `engine/worker/poll_loop.py` - full read, no new issue. Already heavily hardened (lease/claim
+  logic, retry/backoff, stale-lock reclaim) from earlier passes this session.
+- `engine/worker/process_onboarding_jobs.py`'s `fail_stale_uploads()` - already fixed across three
+  earlier dated passes (2026-10-29, 2026-11-01, 2026-11-07), including the self-heal check for its
+  two-step-write architecture. No gap left to find.
+- `engine/worker/process_narrative_jobs.py`'s `fail_stale_jobs()`/`process_one()` - confirmed its
+  write pattern is a single atomic PATCH, structurally different from onboarding's two separate
+  writes, so onboarding's self-heal fix correctly does not apply here. Confirmed its own test file
+  is wired into `bridge-worker-ci.yml` (so a real regression there would be caught in CI).
+
+Backlog: unchanged - nothing here rose to a numbered Finding or a backlog item.
+
+---
+
 ## This pass (2026-11-10, standing QA/robustness review): fix - Finding 341, `app/company/Notifications.tsx`'s "Email notifications" toggle told a real customer, in product copy, an exhaustive-sounding list of which alerts bypass it - 3 categories - that omitted a 4th script (`send-compliance-digest.ts`, SARS PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP expiry) which joined the same bypass mechanism 3 weeks after this card's own copy was written and never revisited
 
 Oriented from `0b48fd2` (sibling track's own most recent commit, confirmed via `git fetch origin

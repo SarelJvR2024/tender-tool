@@ -2,7 +2,7 @@
 Runs every async bridge script on a schedule, in one process, so nobody has
 to type a command for a queued CV or pack request to get fulfilled.
 
-What it drives: any script that follows the bridge contract below. Four are
+What it drives: any script that follows the bridge contract below. Six are
 registered by name:
 
     cv       engine/cv/process_cv_jobs.py           (generated_cvs)
@@ -15,6 +15,9 @@ registered by name:
     onboarding engine/onboarding/process_onboarding_jobs.py (onboarding_uploads ->
                                                      onboarding_document_results; needs
                                                      ANTHROPIC_API_KEY once a document is queued)
+    narrative engine/narrative/process_narrative_jobs.py (narrative_documents ->
+                                                     generated_documents: cover letter /
+                                                     methodology statement drafting)
 
 pack and general poll the SAME table (pack_generation_jobs - one queue), each
 claiming only its own `engine` value.
