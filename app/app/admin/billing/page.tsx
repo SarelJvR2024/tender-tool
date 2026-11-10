@@ -175,7 +175,25 @@ export default async function AdminBillingPage() {
                         </td>
                         <td className="px-4.5 py-2 text-muted-foreground">{r.has_payfast_token ? "On file" : "Never charged"}</td>
                         <td className="whitespace-nowrap px-4.5 py-2 text-muted-foreground">
-                          {r.effectiveStatus === "trialing" ? formatDate(r.trial_ends_at) ?? "-" : formatDate(r.current_period_end) ?? "-"}
+                          {/*
+                            Keyed off the RAW stored `status` (whether this
+                            row was ever a real trial), not `effectiveStatus`
+                            (whether that trial has since lapsed) - a trial
+                            that lapsed with no payment on file keeps
+                            `status='trialing'` in the DB forever (nothing
+                            rewrites it, see lib/billing.ts's own header
+                            comment) while `effectiveStatus` correctly flips
+                            to "past_due" for the status chip/stat cards
+                            above. Before this fix, that flip ALSO switched
+                            this cell from `trial_ends_at` to
+                            `current_period_end` - which is NULL for a
+                            never-paid trial (0078's insert only ever sets
+                            `trial_ends_at`) - so the one row Sarel most
+                            wants a date on (a lapsed trial he should chase)
+                            showed a blank "-" instead of the real, already-
+                            fetched date it lapsed on. Finding 316.
+                          */}
+                          {r.status === "trialing" ? formatDate(r.trial_ends_at) ?? "-" : formatDate(r.current_period_end) ?? "-"}
                         </td>
                       </tr>
                     );
