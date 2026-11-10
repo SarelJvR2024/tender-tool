@@ -361,7 +361,24 @@ def _find(idx, r, family):
     # "NRA 2026/0021" and its lot "NRA 2026/0021 (B)" separately).
     cands = [m for m in cands if m.get("source") != r.get("source")
              and (not family or family.search(m.get("buyer") or ""))]
-    return cands[0] if cands else None
+    if not cands:
+        return None
+    # Finding 330: more than one base-list (portal/OCDS) release can share a
+    # ref key for real - tender_changes.relistings() exists specifically
+    # because a buyer can legitimately list the SAME bid number twice as
+    # two different, both-still-"Published" releases (its own docstring,
+    # "Seen live 2026-10-17") - `idx` above is already a {key: [release,...]}
+    # list for exactly this reason. Plain `cands[0]` used to fold the
+    # direct-site release's own richer data (documents, province, closing-
+    # date-disagreement check) into whichever of the two happened to come
+    # first in `by_source[source]`'s own iteration order - an accident of
+    # that order, not a deliberate pick, and backwards from what matters
+    # whenever it picked the stale, superseded listing instead of the live
+    # one. Same (published_date, ocid) "most recent wins" tie-break
+    # eskom_notices() (engine/discovery/tender_changes.py, Finding 329)
+    # already uses for the identical duplicate-key universe, deliberately
+    # kept consistent rather than inventing a second rule in this codebase.
+    return max(cands, key=lambda m: (m.get("published_date") or "", m.get("ocid") or ""))
 
 
 def merge(by_source, portal_closed=None):

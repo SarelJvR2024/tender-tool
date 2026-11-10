@@ -511,6 +511,57 @@ def test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision():
           [r["ocid"] for r in plain_rels])
 
 
+def test_merge_find_picks_newest_candidate_on_relisted_ref():
+    # Finding 330: merge()'s own _find() does `cands[0]` when more than one
+    # base-list (portal/OCDS) release shares a ref key - but tender_changes.
+    # relistings() exists specifically because a buyer can legitimately list
+    # the SAME bid number twice as two different, both-still-"Published"
+    # releases with different ocids/closing dates (its own docstring: "Seen
+    # live 2026-10-17", Eastern Cape Transport's SCMU10-26/27-0017). This is
+    # the exact same duplicate-key universe over the exact same `releases`/
+    # base-list data Findings 328/329 already fixed for readvertisements()/
+    # eskom_notices() in tender_changes.py, one file over: `_index()` here
+    # already groups by key into a LIST (not a single-value dict), proving
+    # the collision is anticipated, but the one real consumer, `_find()`,
+    # then discarded every candidate but the first one it happened to see,
+    # with no rule for which is "right" - an accident of `by_source[source]`
+    # iteration order, not a deliberate choice. Reproduced directly: the
+    # SAME two relisted portal releases (old closing 26 Oct, new closing
+    # 6 Nov, same contract_number, different ocid) plus one DBSA direct-site
+    # release for the same bid, fed in old-then-new and new-then-old - the
+    # direct site's own documents landed on whichever portal release
+    # happened to be listed FIRST, not on the live one, flipping with the
+    # input order.
+    print("gov_sources.merge: _find() picks the newest of several same-ref base candidates, not cands[0]")
+
+    def portal_row(id_, closing):
+        return etenders_portal.normalize({
+            "id": id_, "tender_No": "RFP185/2026", "description": "Scholar transport services",
+            "category": "Services", "type": "Request for Proposal",
+            "organ_of_State": "Development Bank of Southern Africa",
+            "status": "Published", "closing_Date": closing, "date_Published": "2026-10-01T00:00:00",
+            "briefingSession": False, "province": "Gauteng", "supportDocument": [], "cancelled": None,
+        })
+
+    old = portal_row(910001, "2026-10-26T12:00:00")  # the stale, superseded listing
+    new = portal_row(910002, "2026-11-06T12:00:00")  # the live relisting
+    direct = dict(old, source="dbsa_procurement", ocid="dbsa-procurement:RFP185/2026",
+                 listing_sources=[{"source": "dbsa_procurement", "url": "https://dbsa.org/RFP185-2026"}],
+                 documents=[{"title": "Addendum 1.pdf", "url": "https://dbsa.org/addendum1.pdf"}])
+
+    for order_name, portal_order in (("old-then-new", [old, new]), ("new-then-old", [new, old])):
+        merged = gov_sources.merge({"etenders_portal": portal_order, "dbsa_procurement": [direct]})
+        by_ocid = {m["ocid"]: m for m in merged}
+        enriched = [m for m in merged if m.get("ocid") != direct["ocid"]
+                   and any(s["source"] == "dbsa_procurement" for s in m["listing_sources"])]
+        check(f"[{order_name}] exactly one portal release picked up the DBSA fold (not zero, not both)",
+              len(enriched) == 1, [m["ocid"] for m in merged])
+        check(f"[{order_name}] the LIVE relisting ({new['ocid']}) got the DBSA documents, not the stale one",
+              enriched and enriched[0]["ocid"] == new["ocid"], enriched[0]["ocid"] if enriched else None)
+        check(f"[{order_name}] the stale listing stayed portal-only, no DBSA documents folded in",
+              by_ocid[old["ocid"]]["documents"] == [], by_ocid[old["ocid"]]["documents"])
+
+
 def test_new_sources_are_in_buyer_family():
     # QA-Edge-Case-Findings.md, 2026-10-18 (fourteenth run): sars_procurement/
     # cidb_tenders/dbsa_procurement shipped without a BUYER_FAMILY entry.
@@ -848,6 +899,7 @@ if __name__ == "__main__":
     test_new_sources()
     test_sars_reused_ref_gets_distinct_ocids_not_dropped()
     test_dbsa_reused_ref_gets_distinct_ocids_not_a_collision()
+    test_merge_find_picks_newest_candidate_on_relisted_ref()
     test_new_sources_are_in_buyer_family()
     test_merge()
     test_fold_copies_published_opening_category()
