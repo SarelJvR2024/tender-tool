@@ -24,6 +24,7 @@ import {
   provenanceStatus,
   reviewStatusToBidTask,
   signatureStatus,
+  tenderCvUsable,
 } from "./pack-review-logic.ts";
 
 test("fieldStatus: a required field on file is confirmed", () => {
@@ -59,6 +60,21 @@ test("docItemStatus maps compliance-data.ts's have/check/missing onto the review
   assert.deepEqual(docItemStatus("have"), { reviewStatus: "confirmed", checklistStatus: "included" });
   assert.deepEqual(docItemStatus("check"), { reviewStatus: "needs_input", checklistStatus: "included_warning" });
   assert.deepEqual(docItemStatus("missing"), { reviewStatus: "missing", checklistStatus: "not_included" });
+});
+
+test("tenderCvUsable: Finding 305 - status='ready' alone is not enough, storage_path_pdf must be set too", () => {
+  // The real, live-reachable failure mode (process_cv_jobs.py): LibreOffice's
+  // docx->pdf conversion fails, the job still completes as 'ready', but
+  // storage_path_pdf is left null - both pack-build engines' own cv-gathering
+  // loops (process_pack_jobs.py, process_general_jobs.py) require BOTH
+  // fields, so this must too, or the review screen promises a CV the real
+  // pack build will not actually include.
+  assert.equal(tenderCvUsable({ status: "ready", storage_path_pdf: null }), false);
+  assert.equal(tenderCvUsable({ status: "ready", storage_path_pdf: "co1/people/p1/generated/cv.pdf" }), true);
+  assert.equal(tenderCvUsable({ status: "requested", storage_path_pdf: null }), false);
+  assert.equal(tenderCvUsable({ status: "failed", storage_path_pdf: null }), false);
+  assert.equal(tenderCvUsable(null), false);
+  assert.equal(tenderCvUsable(undefined), false);
 });
 
 test("positionStatus: no confirmed person is 'missing', not included", () => {

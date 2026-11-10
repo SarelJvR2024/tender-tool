@@ -83,6 +83,27 @@ export function docItemStatus(status: "have" | "missing" | "check"): { reviewSta
   return { reviewStatus: "missing", checklistStatus: "not_included" };
 }
 
+/**
+ * Whether a generated_cvs row is actually usable by a pack build - both
+ * engines' own cv-gathering loops (engine/pack/process_pack_jobs.py's
+ * SANRAL `cvs` loop, engine/general/process_general_jobs.py's general-
+ * family `gather_pack_inputs()`) only treat one as usable once BOTH
+ * status === "ready" AND storage_path_pdf is set - the single shared place
+ * both Pack Review screens (this file's own positionStatus() consumer,
+ * general-pack-review-logic.ts's roleStatus() consumer) must check it, so
+ * neither can drift from the other or from the real pack build again.
+ * engine/cv/process_cv_jobs.py can legitimately finish a job 'ready' with
+ * storage_path_pdf left null (LibreOffice's docx->pdf conversion failed;
+ * only the .docx was delivered, a system_alerts "cv" warning raised) -
+ * before this (standing review, 2026-11-10, Finding 305), both screens
+ * keyed off status alone and showed a confirmed/included CV for a position
+ * or role the real pack build would silently generate with no CV at all
+ * (no as-is cv_uploads row to fall back to).
+ */
+export function tenderCvUsable(tenderCv: { status: string; storage_path_pdf: string | null } | null | undefined): boolean {
+  return !!(tenderCv && tenderCv.status === "ready" && tenderCv.storage_path_pdf);
+}
+
 /** One key position's status, given whether it has a confirmed person, a CV, and a role-fit warning. */
 export function positionStatus(input: {
   hasConfirmedPerson: boolean;
