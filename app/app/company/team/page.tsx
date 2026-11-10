@@ -40,8 +40,21 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     { data: labels, error: labelsError },
   ] = await Promise.all([
     companyId ? supabase.from("company_members").select("id, user_id, role").eq("company_id", companyId).order("created_at") : Promise.resolve({ data: [], error: null }),
+    // Finding 319: accepted_at is null alone isn't "pending" - an invite
+    // whose expires_at has already passed can never be accepted again
+    // either (redeem_company_invite() refuses it, and invite_preview()
+    // shows "Invite expired" on its own link) - same two-part test
+    // create_company_invite_checked()'s own seat-cap count now uses (0128).
+    // Without the expires_at filter, a dead link nobody ever clicked sat
+    // here forever, indistinguishable from a real, still-usable invite.
     isAdmin && companyId
-      ? supabase.from("company_invites").select("id, email, role, token, created_at, expires_at, linked_person_id").eq("company_id", companyId).is("accepted_at", null).order("created_at", { ascending: false })
+      ? supabase
+          .from("company_invites")
+          .select("id, email, role, token, created_at, expires_at, linked_person_id")
+          .eq("company_id", companyId)
+          .is("accepted_at", null)
+          .gt("expires_at", new Date().toISOString())
+          .order("created_at", { ascending: false })
       : Promise.resolve({ data: [], error: null }),
     isAdmin && companyId ? supabase.from("people").select("id, name").eq("company_id", companyId).order("name") : Promise.resolve({ data: [], error: null }),
     isAdmin ? supabase.rpc("company_member_labels") : Promise.resolve({ data: [], error: null }),
