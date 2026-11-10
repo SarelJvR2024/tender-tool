@@ -17,7 +17,8 @@ import { sastToday } from "@/lib/publicHolidays";
 
 
 /**
- * GET /api/billing/checkout?plan=starter|professional|business&interval=monthly|yearly
+ * POST /api/billing/checkout (body: plan=starter|professional|business,
+ * interval=monthly|yearly)
  *
  * Returns a self-submitting HTML form (PayFast's own documented onsite/
  * process pattern - their "process" endpoint is a page, not a JSON API) that
@@ -26,10 +27,39 @@ import { sastToday } from "@/lib/publicHolidays";
  * (PAYFAST_CHECKOUT_FIELD_ORDER) - see lib/payfast.ts's own header comment
  * on why that consistency, not any particular order, is what actually has
  * to be true.
+ *
+ * POST, not GET (standing review finding, 2026-11-10): this handler's own
+ * very first real step - before PayFast is ever involved - is
+ * start_payfast_checkout() (0078/0117), a SECURITY DEFINER RPC that writes
+ * the company's plan_tier/billing_interval/max_users/max_packs_per_month
+ * onto its LIVE company_subscriptions row immediately, synchronously, with
+ * no confirmation step. A GET handler with that real a side effect is
+ * reachable by a plain top-level cross-site navigation (a crafted link, an
+ * auto-submitting <meta refresh>, window.location from another origin) -
+ * SameSite=Lax (this app's own cookie default, via @supabase/ssr) allows
+ * cookies on exactly that shape of request, since a simple GET-method
+ * top-level navigation is treated as "safe". A paying company's own quota/
+ * seat cap could be forced to change - most harmfully, silently downgraded,
+ * shrinking max_users/max_packs_per_month below what the company is
+ * actually using - by nothing more than getting a signed-in member to open
+ * one crafted link, with no payment ever involved and no confirmation UI
+ * shown first. POST closes this: SameSite=Lax does NOT send cookies on a
+ * cross-site POST (only a true top-level GET/HEAD navigation qualifies), so
+ * a forged cross-origin form submission (the only way to script a POST
+ * without a click) arrives with no session, and start_payfast_checkout()'s
+ * own auth.uid()-is-null path already returns "no company for the signed-in
+ * user" exactly as it would for any other unauthenticated call. The
+ * existing /billing page is this route's only real caller - switched to a
+ * same-origin <form method="post"> below, same two fields, same gate
+ * (isBillingSandboxed()) before either the plan/interval is even read.
+ * Deliberately does NOT change WHEN a legitimate click's own write takes
+ * effect (that is the separate, already-standing, Sarel's-own-call
+ * "grants-before-ITN" item) - only WHO/WHAT can reach this handler at all.
  */
-export async function GET(request: NextRequest) {
-  const plan = request.nextUrl.searchParams.get("plan") as PlanTier | null;
-  const interval = (request.nextUrl.searchParams.get("interval") as BillingInterval | null) ?? "monthly";
+export async function POST(request: NextRequest) {
+  const form = await request.formData();
+  const plan = form.get("plan") as PlanTier | null;
+  const interval = (form.get("interval") as BillingInterval | null) ?? "monthly";
 
   if (plan !== "starter" && plan !== "professional" && plan !== "business") {
     return NextResponse.redirect(new URL("/billing?error=Choose+a+plan+to+subscribe+to.", request.url));
