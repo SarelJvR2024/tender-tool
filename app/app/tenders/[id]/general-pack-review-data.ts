@@ -15,7 +15,7 @@ import { matchLocality, COMPANY_OFFICE_COLUMNS, type CompanyOffice, type Localit
 import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
 import { evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
-import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
+import { answerStatus, localityStatus, questionAnswerStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
 import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
 
 /**
@@ -137,6 +137,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     reviewed = null;
   }
 
+  const packId = (ownPack?.id as string | undefined) ?? null;
   const [
     { data: companyRow, error: companyRowErr },
     { data: answerRows, error: answerRowsErr },
@@ -144,6 +145,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     { data: roleRows, error: roleRowsErr },
     { data: tagRows, error: tagRowsErr },
     { data: officeRows, error: officeRowsErr },
+    { data: provRows, error: provRowsErr },
   ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
@@ -151,6 +153,17 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
     supabase.from("person_role_eligibility").select("person_id, role_code"),
     supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
+    // field_provenance (Finding 285): only meaningful once a pack has been
+    // generated at least once for THIS company's own tender_pack row - see
+    // general-pack-review-logic.ts's questionAnswerStatus() for why this is
+    // safe to join on field_key for SBD-question fields specifically. Not
+    // gated behind a try/catch of its own: a failed read here just leaves
+    // provByKey empty, so every question falls back to answerStatus()'s own
+    // base result unchanged - the same safe direction this module's other
+    // sections already document for a failed read (never a false "fixed").
+    packId
+      ? supabase.from("field_provenance").select("field_key, status, reason").eq("tender_pack_id", packId)
+      : Promise.resolve({ data: null, error: null }),
   ]);
   if (companyRowErr) console.error("companies select failed (general pack review)", companyRowErr);
   if (answerRowsErr) console.error("tender_answers select failed (general pack review)", answerRowsErr);
@@ -158,12 +171,16 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
   if (roleRowsErr) console.error("tender_roles select failed (general pack review)", roleRowsErr);
   if (tagRowsErr) console.error("person_role_eligibility select failed (general pack review)", tagRowsErr);
   if (officeRowsErr) console.error("company_offices select failed (general pack review)", officeRowsErr);
+  if (provRowsErr) console.error("field_provenance select failed (general pack review)", provRowsErr);
   const company = (companyRow as unknown as GeneralCompany | null) ?? null;
   const answers = (answerRows ?? []) as TenderAnswer[];
   const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null }[];
   const roles = (roleRows ?? []) as TenderRole[];
   const tags = (tagRows ?? []) as { person_id: string; role_code: string }[];
   const offices = (officeRows ?? []) as CompanyOffice[];
+  const provByKey = new Map<string, { status: string; reason: string | null }>(
+    ((provRows ?? []) as { field_key: string; status: string; reason: string | null }[]).map((r) => [r.field_key, { status: r.status, reason: r.reason }]),
+  );
 
   // --- 1. Form answers: company details, tender questions, signature -------
   try {
@@ -180,7 +197,10 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
         items.push({ key: `question-${q.key}`, label: q.label, value: sig.value, status: sig.reviewStatus, note: sig.note });
         continue;
       }
-      const { status, note } = answerStatus(answered, q.optional ?? false);
+      // Finding 285: reconciled with field_provenance when this exact
+      // SBD-question field_key has a row (only once a pack has actually
+      // been generated) - see questionAnswerStatus()'s own doc comment.
+      const { status, note } = questionAnswerStatus(answered, q.optional ?? false, provByKey.get(q.key) ?? null);
       items.push({ key: `question-${q.key}`, label: q.label, value, status, note });
     }
     sections.push(section("general_answers", "Company details, questions & signature", "#general-questions", "Confirm or change", items));
