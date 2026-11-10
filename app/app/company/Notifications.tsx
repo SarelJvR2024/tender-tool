@@ -13,13 +13,22 @@ import { Button } from "@/components/ui/button";
  *
  * Narrowed to "new opportunities only" (Sarel, 2026-10-30), after finding
  * this one flag was ALSO gating corrigenda/addenda alerts, the returnables-
- * blocker digest and closing-deadline reminders - all 3 critical, bid-
+ * blocker digest and closing-deadline reminders - all critical, bid-
  * protecting alerts, not a discretionary digest - and that 32 of 33 real
- * companies had never turned it on. Those 3 now bypass this flag entirely
+ * companies had never turned it on. Those now bypass this flag entirely
  * (lib/notificationRecipients.ts's criticalBidRecipients(), used by
  * scripts/send-corrigendum-alerts.ts, send-returnables-digest.ts and
  * send-deadline-reminders.ts) - this toggle only ever controlled
  * scripts/send-discovered-tenders.ts from here on.
+ *
+ * scripts/send-compliance-digest.ts (SARS PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP
+ * expiry) joined the same criticalBidRecipients() bypass list later
+ * (Finding 163, 2026-11-07) but this card's own user-facing copy below was
+ * never updated to say so - found standing QA pass, 2026-11-10 (notify
+ * rotation): a user reading "addenda/corrigenda, returnable checklists, and
+ * closing deadline reminders... are always delivered" would reasonably but
+ * wrongly conclude a lapsing SARS PIN/COID letter still depends on this
+ * toggle, when it has not for weeks. Fixed below to name all 4.
  *
  * Self-contained server component, same reason as OfficeLocations.tsx: does
  * its own read under RLS, so company/page.tsx only mounts it.
@@ -59,9 +68,10 @@ export async function Notifications() {
             this sets only your own preference, not the whole company&apos;s.
           </div>
           <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            Active bid alerts (addenda/corrigenda, returnable checklists, and closing deadline
-            reminders for tenders you are actively bidding on) are always delivered to keep your
-            submissions compliant.
+            Active bid alerts (addenda/corrigenda, returnable checklists, closing deadline reminders,
+            and compliance-expiry warnings for your SARS PIN, COID letter, B-BBEE proof, CIDB
+            registration and other on-file documents) are always delivered to keep your submissions
+            compliant.
           </div>
         </div>
         <form action={setDailyDigestOptIn}>

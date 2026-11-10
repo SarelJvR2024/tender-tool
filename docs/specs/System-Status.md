@@ -17075,6 +17075,50 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): fix - Finding 341, `app/company/Notifications.tsx`'s "Email notifications" toggle told a real customer, in product copy, an exhaustive-sounding list of which alerts bypass it - 3 categories - that omitted a 4th script (`send-compliance-digest.ts`, SARS PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP expiry) which joined the same bypass mechanism 3 weeks after this card's own copy was written and never revisited
+
+Oriented from `0b48fd2` (sibling track's own most recent commit, confirmed via `git fetch origin
+main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: notify. Surveyed `NotificationsBell.tsx`/`lib/notifications.ts` first - both already
+thoroughly hardened by recent sibling fixes; traced `getNotifications()`'s own unguarded
+`Promise.all` call site in `dashboard/page.tsx` and confirmed the enclosing `DashboardPage`'s own
+top-level `try/catch` genuinely catches a thrown read failure (not a stale claim - read the real
+code, not just the comment). Moved to `Notifications.tsx`: both its header comment and its rendered
+user-facing copy make a dated, falsifiable claim about which alert categories "bypass this flag
+entirely" / "are always delivered." Grepped every real caller of `criticalBidRecipients()` (the
+actual bypass mechanism) directly: 5 files mention the name, but `send-onboarding-nudges.ts` only
+in a comment about a different function (confirmed false positive by reading the call site). The 4
+genuine callers are `send-corrigendum-alerts.ts`, `send-returnables-digest.ts`,
+`send-deadline-reminders.ts`, and `send-compliance-digest.ts` - the last one switched to this
+resolver by Finding 163 (2026-11-07), a week after this card's own 2026-10-30 copy was written and
+never revisited.
+
+Why this matters: the card's own copy uses an enumerate-and-conjoin phrasing that reads as
+exhaustive, not illustrative. A user deciding whether the toggle is safe to leave off would
+reasonably conclude nothing outside the 3 named categories is guaranteed - but the missing 4th
+category (compliance-expiry) is described by its own sibling module as covering facts that "can
+disqualify an active bid outright." A user who correctly trusted this card's own words had no
+reason to believe that digest was unconditional, when it has been for weeks.
+
+Fix: updated the card's rendered copy to name all 4 categories, and updated the header comment to
+record when/why the 4th joined, so a future caller addition has a visible prompt to come back and
+update this copy again.
+
+Verified by direct, exhaustive comparison, not a red/green test cycle (no test harness in this
+codebase renders static-JSX-text server components, and there's no logic here to exercise - the fix
+is to the text itself): the new copy's 4 named categories now map one-to-one onto the 4 real
+`criticalBidRecipients()` callers found via grep + direct read. `npx tsc --noEmit` and `npx eslint`
+both clean on the touched file.
+
+Not escalated to a PR: a text-only change to one component's copy and its own comment - no logic,
+no RLS, no migration, no money path, no worker-image change. Pushed directly to `main`.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-10, standing QA/robustness review): compliance/reminders rotation - no new behavioral bug found after genuinely adversarial effort; confirmed the SACNASP/SAGC drift bug class (Finding 294's own shape) is now closed everywhere in this area, and `watch_deadlines.py`'s own `supabase_request()` already paginates fully
 
 Oriented from `efaea7d` (sibling track's own most recent commit, confirmed via `git fetch origin
