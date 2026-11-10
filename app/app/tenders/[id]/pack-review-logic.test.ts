@@ -158,9 +158,25 @@ test("b7Status: applies, answered cleanly is confirmed / included", () => {
 });
 
 test("humanizeFieldKey drops the owning-script prefix and title-cases the rest", () => {
-  assert.equal(humanizeFieldKey("a_forms.A8.litigation"), "A8 Litigation");
   assert.equal(humanizeFieldKey("financial_hours.Roadworks.A.PL"), "Roadworks A PL");
-  assert.equal(humanizeFieldKey("signatory_person_id"), "Signatory Person Id");
+});
+
+// Finding 310 (2026-11-10): this used to be a second copy of page.tsx's own
+// humanizeFieldKey, and had silently drifted from it - the override table
+// and the "a_forms.A8.litigation" -> "Form A8 - Litigation" special case
+// both existed only in page.tsx's copy, so this file's version (feeding the
+// Pack Review card) showed a raw internal identifier for the exact same
+// field_key the Readiness card (page.tsx) already showed correctly. page.tsx
+// now imports this one instead of keeping its own copy, so these two cases
+// - which this test used to assert the STALE, pre-fix output for - are the
+// regression guard against that drift happening again.
+test("humanizeFieldKey: the a_forms special case and the override table (both used to be page.tsx-only)", () => {
+  assert.equal(humanizeFieldKey("a_forms.A8.litigation"), "Form A8 - Litigation");
+  assert.equal(humanizeFieldKey("a_forms.A12"), "Form A12");
+  assert.equal(humanizeFieldKey("signatory_person_id"), "Signatory");
+  assert.equal(humanizeFieldKey("company.bee_level"), "B-BBEE level");
+  assert.equal(humanizeFieldKey("contract_data.client_name"), "Client name (Contract Data form)");
+  assert.equal(humanizeFieldKey("financial_hours.summary"), "Financial & hours workbook");
 });
 
 test("reviewStatusToBidTask: confirmed and assumed_default are Verify, missing is Fix, needs_input and warning are Provide", () => {

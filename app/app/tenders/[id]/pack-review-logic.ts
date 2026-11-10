@@ -173,17 +173,48 @@ export function signatureStatus(input: {
 
 // field_key is a dotted path like "a_forms.A8.litigation" (0002_field_provenance.sql)
 // - no display-name table exists, so this is a best-effort drop-prefix +
-// title-case, kept identical to the Readiness card's own copy (page.tsx's
-// humanizeFieldKey) so the same field reads the same way in both places.
-export function humanizeFieldKey(fieldKey: string): string {
-  const parts = fieldKey.split(".");
-  const rest = parts.length > 1 ? parts.slice(1) : parts;
-  return rest
-    .join(" ")
+// title-case, plus a small override table for the keys that read as raw
+// internal identifiers under the generic pass alone (QA finding,
+// 2026-10-26: "signatory_person_id" -> "Signatory Person Id", a raw DB
+// column suffix, not a real-world name; "company.bee_level" -> "Bee
+// Level", losing the B-BBEE term entirely).
+//
+// This used to be a second copy of page.tsx's own humanizeFieldKey,
+// commented "kept identical ... so the same field reads the same way in
+// both places" - found 2026-11-10 to have silently drifted: that fix and
+// the "a_forms.A8.litigation" -> "Form A8 - Litigation" special case both
+// landed only in page.tsx's copy, never here, so the Pack Review card
+// (pack-review-data.ts, below) kept showing the raw, unfixed label for the
+// exact same field the Readiness card (page.tsx) showed correctly. Now the
+// single source of truth - page.tsx imports this instead of keeping its
+// own copy.
+export const FIELD_KEY_LABELS: Record<string, string> = {
+  signatory_person_id: "Signatory",
+  "company.bee_level": "B-BBEE level",
+  "contract_data.client_name": "Client name (Contract Data form)",
+  "financial_hours.summary": "Financial & hours workbook",
+};
+
+function titleCaseWords(s: string): string {
+  return s
     .replace(/_/g, " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(" ")
     .filter(Boolean)
     .map((w) => (w.length <= 3 && w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1)))
     .join(" ");
+}
+
+export function humanizeFieldKey(fieldKey: string): string {
+  if (FIELD_KEY_LABELS[fieldKey]) return FIELD_KEY_LABELS[fieldKey];
+  const parts = fieldKey.split(".");
+  // "a_forms.A8.litigation" -> "Form A8 - Litigation", matching this app's
+  // own "Form A12"/"Form B6" convention for a real SANRAL document code
+  // (compliance-report.tsx) rather than silently dropping the word "Form".
+  if (parts[0] === "a_forms" && parts.length > 1) {
+    const rest = parts.slice(2);
+    return rest.length > 0 ? `Form ${parts[1]} - ${titleCaseWords(rest.join(" "))}` : `Form ${parts[1]}`;
+  }
+  const rest = parts.length > 1 ? parts.slice(1) : parts;
+  return titleCaseWords(rest.join(" "));
 }
