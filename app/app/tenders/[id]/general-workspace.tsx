@@ -30,7 +30,7 @@ import { PrivateDocuments, type PrivateDoc } from "./private-documents";
 import { GeneralPackReview, MatchStrengthBadge } from "./general-pack-review";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
-import { formatDate, formatDateTime, type StatusChip } from "@/lib/dates";
+import { closingDayOf, formatDate, formatDateTime, type StatusChip } from "@/lib/dates";
 import { RequirementRow } from "@/components/tt/requirement-row";
 import { QuickBlockerDrawer } from "./quick-blocker-drawer";
 import { VAULT_DRAWER_CONFIG } from "./quick-fix-config";
@@ -328,11 +328,16 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   // itself already returns for its own read failure, rather than `null`,
   // makes that existing branch catch this case too instead of silently
   // dropping it.
+  // Finding 344, 2026-11-10: `closingDate.slice(0, 10)` naively sliced the
+  // UTC timestamptz PostgREST returns instead of converting it to its real
+  // SAST calendar day - the identical naive-UTC-slice mistake Findings
+  // 289-292 already fixed repeatedly on the engine/ (Python) side.
+  // closingDayOf() is the already-tested helper built specifically for this.
   const experience = chosen
     ? company?.id
       ? await findMatchingExperience(supabase, company.id, {
           ...(chosen.rule.window_years ? { completedWithinYears: chosen.rule.window_years } : {}),
-          ...(closingDate ? { asOf: closingDate.slice(0, 10) } : {}),
+          ...(closingDayOf(closingDate) ? { asOf: closingDayOf(closingDate)! } : {}),
         })
       : { items: [], error: "Your company record couldn't be read for this check." }
     : null;

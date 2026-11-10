@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { closingDayOf } from "@/lib/dates";
 import {
   SANRAL_CONVENTIONAL_FAMILY,
   checkMinimumRequirement,
@@ -209,7 +210,16 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   const keyPersonMinimums = evaluationRules?.key_person_minimums ?? null;
   const taxonomy = await loadDisciplineTaxonomy(supabase);
   const companyId = (company?.id as string | undefined) ?? null;
-  const asOf = closingDate ? closingDate.slice(0, 10) : undefined;
+  // Finding 344, 2026-11-10: this used to be `closingDate.slice(0, 10)` - a
+  // raw string slice of the UTC timestamptz PostgREST always returns, not
+  // the tender's own real South African (SAST) calendar day. The identical
+  // naive-UTC-slice mistake Findings 289-292 already fixed repeatedly on
+  // the engine/ (Python) side - closingDayOf() (lib/dates.ts) is the
+  // already-tested helper that exists specifically for this conversion,
+  // and is already used a few lines below (qualitySystemFromVault()/
+  // beeProofValidAtClosing() via validityAtClosing()'s own closingDayOf()
+  // call) - this is the one call in this file that never used it.
+  const asOf = closingDayOf(closingDate) ?? undefined;
   const experience = companyId
     ? await findMatchingExperience(supabase, companyId, {
         // a group stands for every discipline in it (0040): experience

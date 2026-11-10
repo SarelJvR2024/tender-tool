@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { closingDayOf } from "@/lib/dates";
 import {
   GENERAL_COMPANY_COLUMNS,
   checkReturnable,
@@ -273,9 +274,15 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
         });
       } else {
         const rule = evidenceRules[0];
+        // Finding 344, 2026-11-10: `closingDate.slice(0, 10)` naively sliced
+        // the UTC timestamptz PostgREST returns instead of converting it to
+        // its real SAST calendar day - the identical naive-UTC-slice mistake
+        // Findings 289-292 already fixed repeatedly on the engine/ (Python)
+        // side. closingDayOf() (lib/dates.ts) is the already-tested helper
+        // built specifically for this conversion.
         const experience = await findMatchingExperience(supabase, company.id, {
           ...(rule.window_years ? { completedWithinYears: rule.window_years } : {}),
-          ...(closingDate ? { asOf: closingDate.slice(0, 10) } : {}),
+          ...(closingDayOf(closingDate) ? { asOf: closingDayOf(closingDate)! } : {}),
         });
         if (experience.error) {
           // Same shape, the other read that can fail without throwing
