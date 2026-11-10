@@ -291,14 +291,38 @@ def fill_a8_litigation_table(doc, company, log):
 
 
 def mark_sbd4_no_answers(doc, company, log):
-    """The A11/SBD4 simple yes/no table and the 4.1-4.4 restricted-supplier /
-    tender-defaulter / fraud-conviction / contract-termination table. Marked No
-    on every row - nothing on file indicates otherwise - but every one of these
-    is also a specific checklist verification item, not just filled and
-    forgotten."""
+    """The A11/SBD4 4.1-4.4 restricted-supplier / tender-defaulter /
+    fraud-conviction / contract-termination table. Marked No on every row -
+    nothing on file indicates otherwise - but every one of these is also a
+    specific checklist verification item, not just filled and forgotten.
+
+    Standing review, 2026-11-10 (Finding 361): this function used to ALSO
+    mark a "No" into whichever table's header row looked like
+    ["YES", "", "", "NO", ""], believing that shape identified the A11
+    "employed by the state" yes/no answer. Checked against all 6 real SANRAL
+    A_Forms.docx templates on file (templates/forms/*/A_Forms.docx): every
+    one of them has EXACTLY ONE table with that header shape, and in every
+    one it is the POPIA personal-information-processing CONSENT
+    acknowledgement ("Respondents are required to provide consent below:
+    ... the Respondent is hereby consenting to the processing of their
+    personal information ..."), nowhere near Form A11 at all - confirmed by
+    walking each template's own body elements in document order. The real
+    "employed by the state" question (and its two siblings, 2.2/2.3) are
+    plain paragraphs ending in the literal text "YES/NO", not a table, and
+    were NEVER filled by this module - left as raw "YES/NO" placeholder text
+    in every real SANRAL submission this pipeline has ever built, with
+    nothing on the checklist to say so (the code believed it had already
+    handled this field, just under the wrong table). Meanwhile the POPIA
+    consent table - which the document's own text says MUST be answered Yes
+    to submit at all ("Respondents are required to provide consent
+    below") - was being marked "No" (not consenting), a second, independent
+    wrong answer written onto the actual document a company signs. Split
+    into fill_popia_consent() (the real owner of that table, below) and
+    fill_a11_declaration_questions() (the real paragraph-based A11
+    questions, below); this function now only does the 4.1-4.4 table it was
+    always actually right about.
+    """
     reasons = {
-        "a_forms.A11.employed_by_state":
-            "Nothing on file shows the bidder or its directors are employed by the state.",
         "a_forms.A11.restricted_supplier_register":
             f"Nothing on file shows {company} or its directors on National Treasury's Restricted Suppliers Database - not independently checked against the live register today.",
         "a_forms.A11.tender_defaulters_register":
@@ -314,10 +338,6 @@ def mark_sbd4_no_answers(doc, company, log):
     ])
     for t in doc.tables:
         header = [c.text.strip() for c in t.rows[0].cells]
-        if header[:2] == ["YES", ""] and "NO" in header:
-            t.rows[0].cells[header.index("NO")].text = "X"
-            log.assumed_default("a_forms.A11.employed_by_state", "No",
-                                 reasons["a_forms.A11.employed_by_state"])
         if header and header[0] in ("4.1", "4.1"):
             for row in t.rows:
                 cells = row.cells
@@ -330,6 +350,69 @@ def mark_sbd4_no_answers(doc, company, log):
                             if key:
                                 log.assumed_default(key, "No", reasons[key])
                             break
+
+
+def fill_popia_consent(doc, log):
+    """The POPIA personal-information-processing consent acknowledgement
+    (Finding 361) - the ONLY table in any of the 6 real SANRAL A_Forms.docx
+    templates on file whose header row is exactly ["YES", "", "", "NO", ""],
+    immediately below "Respondents are required to provide consent below:".
+    The template's own wording makes this effectively mandatory to submit at
+    all ("... the Respondent is hereby consenting to the processing of their
+    personal information for the purpose of this RFP ...") - there is no
+    real company fact to check here, so this is confirmed, not an assumed
+    default the way the A11 "known by absence" answers below are."""
+    for t in doc.tables:
+        header = [c.text.strip() for c in t.rows[0].cells]
+        if header[:2] == ["YES", ""] and "NO" in header:
+            t.rows[0].cells[header.index("YES")].text = "X"
+            log.confirmed(
+                "a_forms.popia_consent",
+                "Yes - consents to SANRAL processing personal information submitted with this bid, per POPIA s 5",
+            )
+
+
+# The real A11/SBD4 "Bidder's declaration" yes/no questions (2.1-2.3) - each
+# a plain paragraph ending in the literal text "YES/NO", never a table (see
+# mark_sbd4_no_answers()'s own header comment for how this was found).
+# question_re must match ONLY that one paragraph, not any of A11's own
+# "Notes to tenderer"/definitions prose above it - checked against all 6 real
+# templates on file; none repeats this exact question text elsewhere.
+A11_DECLARATION_QUESTIONS = [
+    ("a_forms.A11.employed_by_state", r"employed\s+by\s+the\s+state\s*\?",
+     "Nothing on file shows the bidder or its directors are employed by the state."),
+    ("a_forms.A11.procuring_institution_relationship", r"employed\s+by\s+the\s+procuring\s+institution\s*\?",
+     "Nothing on file shows a relationship between the bidder (or anyone connected to it) and an employee of the procuring institution."),
+    ("a_forms.A11.related_enterprise_interest", r"interest\s+in\s+any\s+other\s+related\s+enterprise",
+     "Nothing on file shows the bidder or its directors having an interest in another related enterprise."),
+]
+
+
+def fill_a11_declaration_questions(doc, log):
+    """Marks SANRAL Form A11's own 3 real yes/no declaration paragraphs
+    (2.1-2.3) - see A11_DECLARATION_QUESTIONS and mark_sbd4_no_answers()'s
+    own header comment (Finding 361). Appends the answer after the
+    paragraph's own "YES/NO" text rather than touching it, same proven
+    pattern engine/general/fill_sbd_docx.py's answer_yes_no() already uses
+    for the identical paragraph-layout case on the general-tender side -
+    this file doesn't import that one (a different pipeline, its own
+    sys.path), but the shape - and the reason to mark this way rather than
+    rewrite the question's own "?...YES/NO" text - is the same."""
+    for field_key, question_re, reason in A11_DECLARATION_QUESTIONS:
+        rx = re.compile(question_re, re.IGNORECASE)
+        matched = False
+        for p in doc.paragraphs:
+            text = p.text
+            if not rx.search(text) or not re.search(r"YES\s*/\s*NO", text, re.IGNORECASE):
+                continue
+            run = p.add_run("  (No)")
+            run.bold = True
+            matched = True
+            break
+        if matched:
+            log.assumed_default(field_key, "No", reason)
+        else:
+            log.missing(field_key, f"This edition's A11 form wasn't in the expected layout - {reason.rstrip('.')}; answer it by hand.")
 
 
 def fill_a10_no_deviations(doc, company, log):
@@ -430,6 +513,8 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     fill_a8_litigation_table(d, company, log)
     fill_a10_no_deviations(d, company, log)
     mark_sbd4_no_answers(d, company, log)
+    fill_popia_consent(d, log)
+    fill_a11_declaration_questions(d, log)
     fill_a16_addenda(d, log, profile.get("tender_updates"))
 
     # A7: CSD registration - mechanical fields only, inline after the label.

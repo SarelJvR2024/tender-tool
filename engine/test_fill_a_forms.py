@@ -23,15 +23,19 @@ verbatim, with no backslash processing at all.
 
 Run: python3 engine/test_fill_a_forms.py
 """
+import glob
 import os
 import sys
 
 import docx
+from docx.oxml.ns import qn
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import fill_a_forms as fa  # noqa: E402
 from provenance import ProvenanceLog  # noqa: E402
+
+REAL_TEMPLATES = sorted(glob.glob(os.path.join(HERE, "..", "templates", "forms", "*", "A_Forms.docx")))
 
 FAILS = []
 
@@ -160,11 +164,145 @@ def test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the
         check("append_after_label() does not raise on a control character", False, f"{type(e).__name__}: {e}")
 
 
+def _popia_consent_table_cells(doc):
+    """Locates the POPIA-consent table by its real, content-based context
+    (the paragraph right above it saying 'consent below'), not by its
+    header-cell text - that text is exactly what Finding 361's bug flips."""
+    body = doc.element.body
+    elems = list(body.iterchildren())
+    tbl_idx = -1
+    for i, child in enumerate(elems):
+        if child.tag == qn("w:tbl"):
+            tbl_idx += 1
+            j = i - 1
+            while j >= 0:
+                c = elems[j]
+                if c.tag == qn("w:p"):
+                    txt = "".join(t.text or "" for t in c.iter(qn("w:t")))
+                    if txt.strip():
+                        if "consent below" in txt.lower():
+                            return [cell.text.strip() for cell in doc.tables[tbl_idx].rows[0].cells]
+                        break
+                j -= 1
+    return None
+
+
+def _paragraph_containing(doc, needle):
+    for p in doc.paragraphs:
+        if needle.lower() in p.text.lower():
+            return p.text
+    return None
+
+
+def test_mark_sbd4_no_answers_leaves_the_popia_consent_table_alone_and_the_real_a11_helpers_fill_the_right_things():
+    """Finding 361 (standing review, 2026-11-10): mark_sbd4_no_answers() used
+    to mark "No" into whatever table's header row looked like
+    ["YES", "", "", "NO", ""], believing that shape meant Form A11's
+    "employed by the state" yes/no answer. On every one of the 6 real
+    SANRAL A_Forms.docx templates this pipeline actually ships
+    (templates/forms/*/A_Forms.docx), that exact shape belongs to the POPIA
+    personal-information-processing CONSENT table instead (nowhere near Form
+    A11) - so every real SANRAL pack ever built got a "No" (not consenting)
+    marked on a mandatory consent question, while Form A11's own real
+    yes/no declarations (2.1 "employed by the state", 2.2 "relationship with
+    a procuring-institution employee", 2.3 "interest in a related
+    enterprise") - plain paragraphs ending in literal "YES/NO" text, not a
+    table at all - were left completely blank, with no checklist item
+    saying so either."""
+    print("Finding 361: the POPIA consent table is left alone by mark_sbd4_no_answers(), "
+          "and fill_popia_consent()/fill_a11_declaration_questions() answer the real questions")
+    if not REAL_TEMPLATES:
+        check("at least one real A_Forms.docx template is on file to test against", False)
+        return
+    for path in REAL_TEMPLATES:
+        label = os.path.basename(os.path.dirname(path))
+
+        d = docx.Document(path)
+        before = _popia_consent_table_cells(d)
+        if before is None:
+            check(f"[{label}] POPIA consent table found", False)
+            continue
+        log = ProvenanceLog(source="test")
+        fa.mark_sbd4_no_answers(d, "Acme (Pty) Ltd", log)
+        after = _popia_consent_table_cells(d)
+        check(f"[{label}] mark_sbd4_no_answers() does not touch the POPIA consent table",
+              after == before, f"before={before!r} after={after!r}")
+        check(f"[{label}] mark_sbd4_no_answers() does not log a_forms.A11.employed_by_state "
+              "(it never actually reaches that question)",
+              not any(e["field_key"] == "a_forms.A11.employed_by_state" for e in log.entries))
+
+        d2 = docx.Document(path)
+        log2 = ProvenanceLog(source="test")
+        fa.fill_popia_consent(d2, log2)
+        after2 = _popia_consent_table_cells(d2)
+        yes_idx, no_idx = before.index("YES"), before.index("NO")
+        check(f"[{label}] fill_popia_consent() marks the YES cell",
+              after2 is not None and after2[yes_idx] == "X", repr(after2))
+        check(f"[{label}] fill_popia_consent() leaves the NO cell alone",
+              after2 is not None and after2[no_idx] == "NO", repr(after2))
+        check(f"[{label}] fill_popia_consent() logs a_forms.popia_consent",
+              any(e["field_key"] == "a_forms.popia_consent" for e in log2.entries))
+
+        d3 = docx.Document(path)
+        log3 = ProvenanceLog(source="test")
+        fa.fill_a11_declaration_questions(d3, log3)
+        employed = _paragraph_containing(d3, "employed by the state")
+        procuring = _paragraph_containing(d3, "employed by the procuring institution")
+        related = _paragraph_containing(d3, "interest in any other related enterprise")
+        check(f"[{label}] Form A11's 'employed by the state' question (2.1) is answered",
+              employed is not None and "(No)" in employed, repr(employed))
+        check(f"[{label}] Form A11's procuring-institution-relationship question (2.2) is answered",
+              procuring is not None and "(No)" in procuring, repr(procuring))
+        check(f"[{label}] Form A11's related-enterprise-interest question (2.3) is answered",
+              related is not None and "(No)" in related, repr(related))
+        keys3 = {e["field_key"] for e in log3.entries}
+        check(f"[{label}] all 3 real A11 declaration questions are logged with their own field key",
+              {"a_forms.A11.employed_by_state", "a_forms.A11.procuring_institution_relationship",
+               "a_forms.A11.related_enterprise_interest"} <= keys3, keys3)
+
+
+def test_main_runs_end_to_end_against_every_real_template_with_no_crash():
+    """Smoke test: fill_a_forms.main() against every real template on file,
+    with a minimal-but-real profile - the new fill_popia_consent()/
+    fill_a11_declaration_questions() calls must not crash main() on any
+    edition, and the 4.1-4.4 table (mark_sbd4_no_answers()'s own real
+    remaining job) must still be filled."""
+    print("main() runs end-to-end, with no crash, against every real A_Forms.docx template on file")
+    if not REAL_TEMPLATES:
+        check("at least one real A_Forms.docx template is on file to test against", False)
+        return
+    import json
+    import tempfile
+    profile = {
+        "company": {"legal_name": "Acme Roads (Pty) Ltd", "csd_supplier_number": "MAAA123456"},
+        "key_people": [{"name": "Thandi Nkosi", "signatory_capacity": "Director"}],
+    }
+    for path in REAL_TEMPLATES:
+        label = os.path.basename(os.path.dirname(path))
+        with tempfile.TemporaryDirectory() as out_dir:
+            profile_path = os.path.join(out_dir, "profile.json")
+            with open(profile_path, "w") as f:
+                json.dump(profile, f)
+            try:
+                out_path, log = fa.main(path, profile_path, out_dir, "Contract X", "NRA 2026/0001")
+            except Exception as e:
+                check(f"[{label}] main() does not raise", False, f"{type(e).__name__}: {e}")
+                continue
+            check(f"[{label}] main() does not raise", True)
+            check(f"[{label}] main() wrote the filled docx", os.path.exists(out_path))
+            check(f"[{label}] the 4.1-4.4 restricted-supplier table is still filled",
+                  any(e["field_key"] == "a_forms.A11.restricted_supplier_register" for e in log.entries))
+            check(f"[{label}] the POPIA consent table is marked (not the wrong employed_by_state key)",
+                  any(e["field_key"] == "a_forms.popia_consent" for e in log.entries))
+
+
 def main():
     test_undersigned_blank_with_an_ordinary_name_is_filled_as_before()
     test_a_name_with_a_literal_backslash_backreference_is_not_silently_corrupted()
     test_a_name_with_an_invalid_backslash_escape_does_not_crash_the_whole_fill()
     test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the_whole_fill()
+    test_mark_sbd4_no_answers_leaves_the_popia_consent_table_alone_and_the_real_a11_helpers_fill_the_right_things()
+    test_main_runs_end_to_end_against_every_real_template_with_no_crash()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
