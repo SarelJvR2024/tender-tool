@@ -417,6 +417,40 @@ describe("discardCvExtraction - real update still succeeds", () => {
   });
 });
 
+describe("retryCvExtraction - matches zero rows (membership revoked mid-request, or already moved on)", () => {
+  it("does not redirect as if the retry was queued", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: null, error: null }], // update().select("id").maybeSingle() - zero-row match
+    ]);
+    supabaseState.current = client;
+
+    const { retryCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      retryCvExtraction(formDataWith({ person_id: "person-1", cv_upload_id: "upload-1" })),
+    );
+
+    expect(url).toContain("/people/person-1?error=");
+  });
+});
+
+describe("retryCvExtraction - real update still succeeds", () => {
+  it("redirects back to the person's page with no error when the retry genuinely matches", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "upload-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { retryCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      retryCvExtraction(formDataWith({ person_id: "person-1", cv_upload_id: "upload-1" })),
+    );
+
+    expect(url).toBe("/people/person-1");
+  });
+});
+
 // deleteProject() used to check NOTHING at all on the delete - not even
 // `error` (the same "worst instance" shape experience/actions.ts's
 // deleteExperience() had before its own fix). No destructive consequence

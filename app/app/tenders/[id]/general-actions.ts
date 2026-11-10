@@ -250,14 +250,30 @@ export async function saveSignatoryCapacity(formData: FormData) {
   const capacity = (formData.get("signatory_capacity") as string | null)?.trim() || null;
   if (!tenderId || !personId) redirect("/dashboard");
 
-  const { error } = await supabase
+  // .select("id").maybeSingle() matters here exactly as it does on every
+  // sibling plain `people`/company-scoped update elsewhere in this codebase
+  // (e.g. people/actions.ts's savePerson()): PostgREST returns a 2xx with
+  // `error: null` and zero rows affected when RLS's own "people: tenant
+  // isolation" (0001, `using (is_company_member(company_id))`, re-evaluated
+  // against the OLD row) no longer matches - e.g. a membership revoked
+  // between this card rendering its own form and the submit landing -
+  // indistinguishable from a real update by `error` alone. Without this
+  // check the redirect below always claimed "?saved=signatory" even when
+  // the field never actually changed, which fill_flat_pdf.py's SBD 4/SBD 9
+  // designation and Form of Offer capacity fields source directly (standing
+  // review, 2026-11-10).
+  const { data: updated, error } = await supabase
     .from("people")
     .update({ signatory_capacity: capacity })
     .eq("id", personId)
-    .eq("company_id", companyId);
-  if (error) {
+    .eq("company_id", companyId)
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) {
     console.error("people signatory_capacity update failed", error);
-    redirect(back(tenderId, `?error=${encodeURIComponent("Could not save signatory capacity - try again. If it keeps happening, let us know.")}`));
+    redirect(back(tenderId, `?error=${encodeURIComponent(error
+      ? "Could not save signatory capacity - try again. If it keeps happening, let us know."
+      : "That person is no longer there - refresh and try again.")}`));
   }
   revalidatePath(`/tenders/${tenderId}`);
   redirect(back(tenderId, "?saved=signatory"));

@@ -392,6 +392,20 @@ export async function uploadCv(formData: FormData) {
  * company scope on the update itself) - clears the old error and claim
  * timestamp and puts it back where extract_cv_fields.py's own queue picks
  * it up (status extraction_requested, same as a fresh upload).
+ *
+ * `.select("id").maybeSingle()` matters here the same way it does on every
+ * sibling write this standing review has already fixed (Findings 322-325):
+ * "cv_uploads: tenant isolation" (0008) is
+ * `for all to authenticated using (is_company_member(company_id)) with check (is_company_member(company_id))`
+ * - a USING clause re-evaluated against the row at write time, not at page
+ * load. A membership revocation (removeMember()) between this row rendering
+ * its own retry button and the submit landing makes `is_company_member`
+ * false at write time even though every `.eq()` filter above still matches
+ * the row by id/company/status. Pre-fix, PostgREST's real behaviour on that
+ * race is a 2xx `UPDATE` with `error: null` and zero rows affected -
+ * checking only `error` (as this did) redirects with no `?error`, telling
+ * the user the retry was queued when the row never moved and
+ * extract_cv_fields.py's queue will never pick it up.
  */
 export async function retryCvExtraction(formData: FormData) {
   const companyId = await requireCompanyId();
@@ -401,15 +415,19 @@ export async function retryCvExtraction(formData: FormData) {
   const personId = str(formData, "person_id");
   if (!uploadId || !personId) redirect("/people");
 
-  const { error } = await supabase
+  const { data: retried, error } = await supabase
     .from("cv_uploads")
     .update({ status: "extraction_requested", extraction_error: null, extraction_claimed_at: null, extraction_completed_at: null })
     .eq("id", uploadId)
     .eq("company_id", companyId)
-    .eq("status", "extraction_failed");
-  if (error) {
+    .eq("status", "extraction_failed")
+    .select("id")
+    .maybeSingle();
+  if (error || !retried) {
     console.error("cv_uploads retry update failed", error);
-    redirect(`/people/${personId}?error=${encodeURIComponent("Could not retry this CV - try again. If it keeps happening, let us know.")}`);
+    redirect(`/people/${personId}?error=${encodeURIComponent(error
+      ? "Could not retry this CV - try again. If it keeps happening, let us know."
+      : "That CV upload is no longer there to retry - refresh and try again.")}`);
   }
 
   revalidatePath(`/people/${personId}`);

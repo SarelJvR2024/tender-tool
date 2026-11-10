@@ -304,3 +304,52 @@ describe("saveGeneralAnswers - companies update genuinely succeeds", () => {
     expect(url).toBe("/tenders/tender-1?saved=answers#general-preparation");
   });
 });
+
+// Finding 327 (standing review, 2026-11-10): saveSignatoryCapacity() checked
+// only `error`, the same "plain update twin discards a zero-row RLS match"
+// shape fixed on every sibling write in this codebase (Findings 322-325 and
+// this same file's own saveGeneralAnswers() a few lines above).
+function signatoryCapacityFormData(tenderId: string, personId: string, capacity: string) {
+  const fd = new FormData();
+  fd.set("tender_id", tenderId);
+  fd.set("person_id", personId);
+  fd.set("signatory_capacity", capacity);
+  return fd;
+}
+
+describe("saveSignatoryCapacity - people update matches zero rows (RLS race)", () => {
+  it("redirects with an error, not the bare '?saved=signatory', when the people update matches no row", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: null, error: null }], // people update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { saveSignatoryCapacity } = await import("./general-actions");
+
+    const url = await expectRedirect(
+      saveSignatoryCapacity(signatoryCapacityFormData("tender-1", "person-1", "Director")),
+    );
+
+    expect(url).toContain("/tenders/tender-1?error=");
+    expect(url).not.toBe("/tenders/tender-1?saved=signatory#general-preparation");
+  });
+});
+
+describe("saveSignatoryCapacity - people update genuinely succeeds", () => {
+  it("redirects to the real success URL when the update actually matches", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember
+      [{ data: { id: "person-1" }, error: null }], // people update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { saveSignatoryCapacity } = await import("./general-actions");
+
+    const url = await expectRedirect(
+      saveSignatoryCapacity(signatoryCapacityFormData("tender-1", "person-1", "Director")),
+    );
+
+    expect(url).toBe("/tenders/tender-1?saved=signatory#general-preparation");
+  });
+});
