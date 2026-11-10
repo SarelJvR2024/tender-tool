@@ -308,6 +308,105 @@ def test_gather_pack_inputs_signatory_fallback():
           "does not crash", signatory4 is None, signatory4)
 
 
+class TableFakeClient(FakeClient):
+    """Same shape as FakeClient, but keyed by table name - FakeClient.select()
+    ignores `table` entirely and just filters self.rows by the given keys, which
+    is fine everywhere else in this file because no two tables share both a
+    filter shape AND overlapping row keys. generated_cvs and cv_uploads do:
+    both are queried as {person_id, company_id} (gather_pack_inputs' own CV
+    lookup, process_general_jobs.py) - a generated_cvs row would otherwise also
+    satisfy the cv_uploads query. Needed only for
+    test_gather_pack_inputs_cv_lookup_is_scoped_to_this_tender below."""
+
+    def __init__(self, tables):
+        self.tables = tables
+
+    def select(self, table, filters=None, order=None):
+        return [r for r in self.tables.get(table, []) if all(r.get(k) == v for k, v in (filters or {}).items())]
+
+    def download(self, bucket, path, dest):
+        return dest  # gather_pack_inputs only needs the returned "local path" string back
+
+
+def test_gather_pack_inputs_cv_lookup_is_scoped_to_this_tender():
+    print("gather_pack_inputs(): a person's CV lookup never binds a DIFFERENT tender's tender-specific CV")
+    # Finding 342, 2026-11-10: generated_cvs rows with tender_id set are
+    # tender-specific (engine/cv/generate_cv.py's add_cover_page prints THAT
+    # tender's own contract number and position-match rationale on the cover
+    # page). This query used to have no tender_id filter at all - unlike
+    # engine/pack/process_pack_jobs.py's sibling SANRAL CV lookup, which scopes
+    # its own generated_cvs select to tender_id=THIS tender from the start -
+    # so "newest ready row" could silently bind another tender's own CV
+    # (wrong contract number on the cover page) into this tender's pack.
+    job = {"company_id": "co-a", "tender_id": "t-cur"}
+    tender = {"id": "t-cur"}
+    manifest = {"experience_evidence": {}, "roles": [{"role_code": "r.site_agent"}]}
+    company = {"id": "co-a", "legal_name": "Test Co"}
+
+    # Case 1: a newer OTHER-tender CV must lose to an older generic (tender_id
+    # is None) one, not win on recency alone.
+    tables = {
+        "companies": [company],
+        "people": [{"id": "p-1", "company_id": "co-a", "name": "J Smith"}],
+        "person_role_eligibility": [{"company_id": "co-a", "role_code": "r.site_agent", "person_id": "p-1"}],
+        "generated_cvs": [
+            {"id": "gen-wrong-tender", "company_id": "co-a", "person_id": "p-1", "status": "ready",
+             "tender_id": "t-other-tender", "storage_path_pdf": "co-a/people/p-1/generated/wrong_tender.pdf",
+             "requested_at": "2026-11-05T00:00:00Z"},
+            {"id": "gen-generic", "company_id": "co-a", "person_id": "p-1", "status": "ready",
+             "tender_id": None, "storage_path_pdf": "co-a/people/p-1/generated/generic.pdf",
+             "requested_at": "2026-10-01T00:00:00Z"},
+        ],
+        "cv_uploads": [],
+    }
+    _, _, _, _, _, cvs = pgj.gather_pack_inputs(TableFakeClient(tables), job, tender, manifest, "/tmp")
+    check("the other tender's newer CV is excluded; the older generic CV is used instead",
+          len(cvs) == 1 and cvs[0]["path"].endswith("generic.pdf"), cvs)
+
+    # Case 2: a CV genuinely generated for THIS tender still wins, even over a
+    # newer but unrelated-tender one.
+    tables2 = {
+        "companies": [company],
+        "people": [{"id": "p-1", "company_id": "co-a", "name": "J Smith"}],
+        "person_role_eligibility": [{"company_id": "co-a", "role_code": "r.site_agent", "person_id": "p-1"}],
+        "generated_cvs": [
+            # Listed newest-first, as "order=requested_at.desc" would really
+            # come back from Postgres (FakeClient/TableFakeClient don't sort
+            # for `order` themselves - same as this file's existing fixtures).
+            {"id": "gen-other-newer", "company_id": "co-a", "person_id": "p-1", "status": "ready",
+             "tender_id": "t-other-tender", "storage_path_pdf": "co-a/people/p-1/generated/other_tender.pdf",
+             "requested_at": "2026-11-10T00:00:00Z"},
+            {"id": "gen-this-tender", "company_id": "co-a", "person_id": "p-1", "status": "ready",
+             "tender_id": "t-cur", "storage_path_pdf": "co-a/people/p-1/generated/this_tender.pdf",
+             "requested_at": "2026-11-09T00:00:00Z"},
+        ],
+        "cv_uploads": [],
+    }
+    _, _, _, _, _, cvs2 = pgj.gather_pack_inputs(TableFakeClient(tables2), job, tender, manifest, "/tmp")
+    check("this tender's own tender-specific CV wins over a newer but unrelated-tender CV",
+          len(cvs2) == 1 and cvs2[0]["path"].endswith("this_tender.pdf"), cvs2)
+
+    # Case 3: only another tender's CV exists -> falls back to the as-is
+    # upload, never the wrong-tender generated one.
+    tables3 = {
+        "companies": [company],
+        "people": [{"id": "p-1", "company_id": "co-a", "name": "J Smith"}],
+        "person_role_eligibility": [{"company_id": "co-a", "role_code": "r.site_agent", "person_id": "p-1"}],
+        "generated_cvs": [
+            {"id": "gen-other", "company_id": "co-a", "person_id": "p-1", "status": "ready",
+             "tender_id": "t-other-tender", "storage_path_pdf": "co-a/people/p-1/generated/other_tender.pdf",
+             "requested_at": "2026-11-10T00:00:00Z"},
+        ],
+        "cv_uploads": [
+            {"id": "up-1", "company_id": "co-a", "person_id": "p-1",
+             "storage_path": "co-a/people/p-1/uploads/asis.pdf", "created_at": "2026-10-01T00:00:00Z"},
+        ],
+    }
+    _, _, _, _, _, cvs3 = pgj.gather_pack_inputs(TableFakeClient(tables3), job, tender, manifest, "/tmp")
+    check("with only another tender's generated CV on file, falls back to the as-is upload",
+          len(cvs3) == 1 and cvs3[0]["path"].endswith("asis.pdf"), cvs3)
+
+
 def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
     print("poll_once(): a crash on one job's own claim does not skip every OTHER pending job")
     # Finding (2026-11-04): process_job()'s own claim (client.update(...))
@@ -385,6 +484,7 @@ def main():
     test_within_malformed_completion_date_alert_carries_company_id()
     test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()
     test_gather_pack_inputs_signatory_fallback()
+    test_gather_pack_inputs_cv_lookup_is_scoped_to_this_tender()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 
     print(f"\n{len(FAILS)} failure(s)")
