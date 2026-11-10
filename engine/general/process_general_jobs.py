@@ -737,9 +737,25 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
             person = (client.select("people", {"id": tag["person_id"], "company_id": job["company_id"]}) or [None])[0]
             if person is None:
                 continue
+            # tender_id scoping (Finding 342, 2026-11-10): a generated_cvs row
+            # with tender_id set is a TENDER-SPECIFIC CV whose cover page
+            # prints that other tender's own contract number and position-
+            # match rationale (engine/cv/generate_cv.py's add_cover_page) -
+            # the same mechanism PR #211/Finding 305 already found this exact
+            # query missing a "status='ready' AND a PDF actually exists"
+            # check for. Before this fix the query here had no tender_id
+            # filter at all (unlike engine/pack/process_pack_jobs.py's own
+            # sibling CV lookup, which selects generated_cvs scoped to
+            # tender_id=THIS tender from the start) - so a person's most
+            # recently generated tender-specific CV for a DIFFERENT tender
+            # (e.g. an older SANRAL bid) would win "newest first" and get
+            # bound into THIS general tender's own submission pack, with the
+            # wrong tender's name printed on its own cover page. Keep every
+            # generic standard CV (tender_id is None) plus any CV genuinely
+            # generated for this tender; drop every other tender's.
             gen = [g for g in client.select("generated_cvs", {"person_id": tag["person_id"], "company_id": job["company_id"],
                                                               "status": "ready"}, order="requested_at.desc")
-                   if g.get("storage_path_pdf")]
+                   if g.get("storage_path_pdf") and g.get("tender_id") in (None, tender["id"])]
             up = client.select("cv_uploads", {"person_id": tag["person_id"], "company_id": job["company_id"]},
                                order="created_at.desc")
             title = f"CV - {person.get('name', 'unknown')} ({role['role_code'].split('.', 1)[-1].replace('_', ' ')})"
