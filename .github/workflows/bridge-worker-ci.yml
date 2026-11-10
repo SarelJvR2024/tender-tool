@@ -318,6 +318,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/alerts/test_system_alerts.py
 
+      - name: System alerts - app/lib/adminHealthGroups.ts's own "every real source is in exactly one group" invariant, checked by AST-walking every real engine/ call site (not another manual sweep - this invariant was missed by 3 of those in a row, Findings 2026-11-06/2026-11-09/354)
+        if: ${{ !cancelled() }}
+        run: python3 engine/alerts/test_system_alerts_sources_exhaustive.py
+
       - name: Form-field audit - no Klipcorp-shaped default on any SANRAL/general form field (real templates, un-Klipcorp-like company)
         if: ${{ !cancelled() }}
         run: python3 engine/test_form_field_audit.py
