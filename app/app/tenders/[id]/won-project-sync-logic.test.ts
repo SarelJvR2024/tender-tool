@@ -9,7 +9,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { staleSyncedProjectRows } from "./won-project-sync-logic.ts";
+import { shouldClearWonProjectSync, staleSyncedProjectRows } from "./won-project-sync-logic.ts";
 
 test("first sync ever: no existing rows, nothing is stale", () => {
   const confirmed = [{ position_code: "PL", confirmed_person_id: "henning" }];
@@ -60,4 +60,30 @@ test("a position with two never-realistic duplicate existing rows: both are chec
   ];
   const stale = staleSyncedProjectRows(confirmed, existing);
   assert.deepEqual(stale.map((r) => r.id).sort(), ["row1", "row2"]);
+});
+
+// shouldClearWonProjectSync() - Finding 360: syncWonProjectToTeam() only ever
+// checked the FORWARD direction (pipeline_stage === "won" before syncing);
+// nothing checked the reverse (leaving "won") to clear what it already wrote.
+
+test("Finding 360: leaving won for lost (OutcomeForm's own 'Mark Lost' correction) must clear the stale sync", () => {
+  assert.equal(shouldClearWonProjectSync("won", "lost"), true);
+});
+
+test("Finding 360: leaving won for submitted (the board's own '← Back' mis-click fixer) must clear the stale sync", () => {
+  assert.equal(shouldClearWonProjectSync("won", "submitted"), true);
+});
+
+test("Finding 360: staying won (re-submitting OutcomeForm's own 'Mark Awarded' to correct outcome text) must NOT clear anything", () => {
+  assert.equal(shouldClearWonProjectSync("won", "won"), false);
+});
+
+test("Finding 360: a pack that was never won has nothing to clear, whatever it moves to", () => {
+  assert.equal(shouldClearWonProjectSync("submitted", "lost"), false);
+  assert.equal(shouldClearWonProjectSync("found", "assessing"), false);
+});
+
+test("Finding 360: no existing pack row at all (first-ever move) has nothing to clear", () => {
+  assert.equal(shouldClearWonProjectSync(null, "assessing"), false);
+  assert.equal(shouldClearWonProjectSync(undefined, "assessing"), false);
 });
