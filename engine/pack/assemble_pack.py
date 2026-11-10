@@ -284,6 +284,30 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
         if b7_errors:
             raise ValueError("Form B7 subcontracting plan: " + "; ".join(b7_errors)
                              + " - correct it on the Tender Workspace (Form B7 card).")
+    elif b7_applies["needs_plan"] and not legacy_te:
+        # Finding 362 (standing QA/robustness review, 2026-11-10): this module's
+        # own docstring, and process_pack_jobs.py's (line ~52: "a pack job
+        # hard-stops when Form B7 applies and the company hasn't answered
+        # it"), both claim a hard stop here - but with no plan captured at
+        # all (as opposed to one captured with errors), this `if b7_plan:`
+        # block was skipped entirely and nothing raised. Live-reproduced:
+        # complete_co (QSE) against the real R.343-020-2025.1F sample
+        # (category 3, required for every size) built a "ready" pack with
+        # no plan given at all - the only trace was one line buried in
+        # manifest["warnings"] ("Form B7 is not in this pack: REQUIRED but
+        # not answered..."), the same job that fires the "Bid Pack
+        # Compilation Complete" email. The Tender Workspace's own UI
+        # blocker (b7-data.ts's `blocker`, enforced by actions.ts:154)
+        # normally prevents requesting the pack in this state, but that
+        # blocker reads a cached tenders.sanral_b7_setup column while this
+        # reads the uploaded workbook's SETUP sheet fresh - exactly the kind
+        # of divergence b7-data.ts's own 2026-11-06 comment assumes "the
+        # engine then fails loudly" for, which it didn't. Fixed to actually
+        # hard-stop, matching the documented contract; legacy_te (handled
+        # above, via b7_filled) is its own accepted pre-Workspace fallback
+        # and deliberately not raised on here.
+        raise ValueError("Form B7 (subcontracting to Targeted Enterprises) applies and hasn't been answered: "
+                         + b7_applies["reason"] + " - give your plan on the Tender Workspace (Form B7 card).")
     # The filler reads the plan from its pack.yaml: a copy with it added, used
     # for the Technical workbook fill only (the other steps keep the confirmed
     # pack.yaml and its pack_suggestions.json sibling).
@@ -513,12 +537,10 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
         warnings.append("Form B7: SANRAL asks for a duplicate hard copy signed by both the tenderer and each "
                         "Targeted Enterprise / sub-contractor, with each one's B-BBEE proof (and proof of address "
                         "for one based in the project's province).")
-    elif b7_applies["needs_plan"]:
-        b7_reason = ("REQUIRED but not answered - " + b7_applies["reason"]
-                     + ". Give your subcontracting plan on the Tender Workspace (Form B7 card)")
-        sections.append(sec("Form B7 - Subcontracting to Targeted Enterprises", TECHNICAL, None, b7_reason))
-        warnings.append("Form B7 is not in this pack: " + b7_reason + ".")
     else:
+        # b7_applies["needs_plan"] with no plan and no legacy_te is now caught
+        # earlier (the hard-stop above) and never reaches this point - the
+        # "REQUIRED but not answered" case this branch used to also handle.
         sections.append(sec("Form B7 - Subcontracting to Targeted Enterprises", TECHNICAL, None,
                             b7_applies["reason"][:1].upper() + b7_applies["reason"][1:]))
 
