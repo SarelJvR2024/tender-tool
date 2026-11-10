@@ -8,7 +8,7 @@
 -- documents for the SAME (tender_id, kind). A document that is still
 -- 'generating' is invisible to it.
 --
--- This was flagged (QA-Edge-Case-Findings.md Finding 86, and again in
+-- This was flagged (QA-Edge-Case-Findings.md Finding 66, and again in
 -- System-Status.md) as "safe today, but a real TOCTOU gap if it's ever run
 -- as more than one concurrent worker" - at the time, process_narrative_jobs.py
 -- was not yet wired into engine/worker/run_bridges.py's BRIDGES registry and
