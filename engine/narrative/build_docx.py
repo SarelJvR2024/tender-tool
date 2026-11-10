@@ -88,9 +88,24 @@ def build_docx(
         rule_run.font.color.rgb = color
         rule_run.font.size = Pt(8)
     if subtitle:
-        subtitle_paragraph = document.add_paragraph(_safe_text(subtitle))
-        subtitle_paragraph.runs[0].italic = True
-        subtitle_paragraph.runs[0].font.size = Pt(11)
+        # Finding 66 (2026-10-23) made this safe against a control character
+        # anywhere IN a subtitle that keeps some real text either side of it
+        # (contract_no, a direct unsanitized passthrough, confirmed to carry
+        # exactly that shape of corruption). It did not cover a subtitle that
+        # is non-empty but turns out to be NOTHING BUT control bytes (even a
+        # single stray NUL, "\x00", is already truthy and passes the `if
+        # subtitle:` check above) - _safe_text() then strips it down to "",
+        # and python-docx's own add_paragraph("") adds a paragraph with ZERO
+        # runs (it only calls paragraph.add_run(text) when text is truthy),
+        # so the very next line's runs[0] raised IndexError, failing the
+        # whole job. Finding 367 (2026-11-10). Skip the subtitle paragraph
+        # entirely once sanitizing leaves nothing real to show - there is
+        # nothing to italicize or size, and no point adding a blank line.
+        safe_subtitle = _safe_text(subtitle)
+        if safe_subtitle:
+            subtitle_paragraph = document.add_paragraph(safe_subtitle)
+            subtitle_paragraph.runs[0].italic = True
+            subtitle_paragraph.runs[0].font.size = Pt(11)
 
     for section in sections:
         document.add_heading(_safe_text(section["heading"]), level=1)
