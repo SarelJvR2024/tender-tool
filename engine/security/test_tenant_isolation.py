@@ -1066,6 +1066,36 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_invite_seat_cap_excludes_expired(db):
+    """Finding 319, 0128: create_company_invite_checked()'s own seat-cap
+    count (0113) used to be `where accepted_at is null` with no expires_at
+    check - an invite nobody ever accepted within its 14-day window
+    (0077) is dead (redeem_company_invite() itself refuses it once expired,
+    and invite_preview() shows "Invite expired"), yet kept charging a seat
+    forever. Standalone (not a cross-tenant check, unlike [19] above) -
+    same company throughout, checking the seat arithmetic itself."""
+    print("\n[20] create_company_invite_checked() (0128): an expired, never-accepted invite doesn't count as a seat")
+    i = {k: str(uuid.uuid4()) for k in ("uOwner", "C")}
+    uOwner, C = i["uOwner"], i["C"]
+    db.one(f"""
+insert into auth.users (id, email) values ('{uOwner}', 'iso20@example.test');
+insert into companies (id, legal_name) values ('{C}', 'Iso20 Co');
+insert into company_members (company_id, user_id, role) values ('{C}', '{uOwner}', 'owner');
+update company_subscriptions set max_users = 2 where company_id = '{C}';
+select 1;""")
+
+    ghost = db.one(f"select create_company_invite_checked('{C}', 'ghost@example.test', 'member', null)", uOwner)
+    db.one(f"update company_invites set expires_at = now() - interval '1 day' where id = '{ghost}'")
+
+    # 1 real member (the owner) + 1 DEAD invite, cap is 2: must still succeed.
+    ok, _, err = db.run(f"select create_company_invite_checked('{C}', 'real@example.test', 'member', null)", uOwner)
+    check(ok, f"an expired, never-accepted invite doesn't block a new one at the seat cap ({err.splitlines()[0] if err else 'ok'})")
+
+    # Now 1 member + 1 genuinely LIVE pending invite, cap is 2: must be refused.
+    bad, _ = refused(db, f"select create_company_invite_checked('{C}', 'onemore@example.test', 'member', null)", uOwner)
+    check(bad, "a real, still-live pending invite still counts toward the seat cap (fix isn't over-corrected)")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1075,6 +1105,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_invite_seat_cap_excludes_expired(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
