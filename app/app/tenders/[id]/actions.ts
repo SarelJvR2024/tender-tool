@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { closingDayOf } from "@/lib/dates";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
 import { advanceFoundToAssessing } from "@/lib/pipeline";
@@ -387,12 +388,25 @@ export async function ensureClosingMilestone(tenderId: string, closingDate: stri
   // "const { data" pattern (standing review, 2026-11-06). A failed seed here
   // just means the "Tender closes" reminder task doesn't appear this page
   // load - re-attempted idempotently (ignoreDuplicates) on the next.
+  //
+  // Finding 345, 2026-11-10: `due_date` used to be `closingDate.slice(0,
+  // 10)` - a raw string slice of the UTC timestamptz PostgREST always
+  // returns for tenders.closing_date, not the tender's own real SAST
+  // calendar day. The identical naive-UTC-slice mistake Findings 289-292/344
+  // already fixed elsewhere - closingDayOf() (lib/dates.ts) is the
+  // already-tested helper built specifically for this conversion. Unlike
+  // Finding 344's 3 display/RPC-argument call sites (recomputed fresh on
+  // every read), this value is PERSISTED into a plain `date` column via an
+  // idempotent upsert (ignoreDuplicates) - once a day-early due_date is
+  // written here, every later page view's own upsert attempt is silently
+  // ignored as a duplicate and the wrong value is never corrected.
+  const dueDate = closingDayOf(closingDate) ?? closingDate.slice(0, 10);
   const { error } = await supabase.from("tender_tasks").upsert(
     {
       company_id: companyId,
       tender_id: tenderId,
       description: "Tender closes",
-      due_date: closingDate.slice(0, 10),
+      due_date: dueDate,
       kind: "closing",
       is_standard: true,
     },
