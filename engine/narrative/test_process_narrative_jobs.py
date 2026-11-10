@@ -107,6 +107,36 @@ class FakeDB:
         raise ValueError(f"FakeDB does not support {method}")
 
 
+class FakeDBWithGeneratingUniqueIndex(FakeDB):
+    """Same as FakeDB, but also enforces migration 0130's own real
+    constraint: at most one row of narrative_documents may hold
+    status='generating' for a given (tender_id, kind) at a time. A PATCH
+    that would create a second one raises RuntimeError the same shape
+    supabase_request() itself raises on an HTTPError (claim_job() greps the
+    message for '23505' and the index name - this mirrors that exact
+    string), so claim_job()'s own except branch is exercised for real
+    rather than assumed. Only narrative_documents is guarded; every other
+    resource behaves exactly like plain FakeDB."""
+
+    def __call__(self, url, key, method, path, body=None):
+        resource = path.split("?", 1)[0]
+        if resource == "narrative_documents" and method == "PATCH" and (body or {}).get("status") == "generating":
+            to_patch = [r for r in self.tables.get(resource, [])
+                        if _row_matches(r, _parse_filters(path.partition("?")[2]))]
+            for row in to_patch:
+                clash = any(
+                    other is not row and other.get("status") == "generating"
+                    and other.get("tender_id") == row.get("tender_id") and other.get("kind") == row.get("kind")
+                    for other in self.tables.get(resource, [])
+                )
+                if clash:
+                    raise RuntimeError(
+                        "PATCH narrative_documents failed: 409 "
+                        '{"code":"23505","message":"duplicate key value violates unique constraint '
+                        '\\"narrative_documents_one_generating_per_tender_kind\\""}')
+        return super().__call__(url, key, method, path, body)
+
+
 def test_claim_job_is_atomic_a_second_claim_on_the_same_row_fails():
     db = FakeDB({"narrative_documents": [{"id": "job-1", "status": "requested"}]})
     original = pnj.supabase_request
@@ -123,6 +153,46 @@ def test_claim_job_is_atomic_a_second_claim_on_the_same_row_fails():
           db.tables["narrative_documents"][0]["status"] == "generating")
     check("started_at was stamped by the successful claim",
           db.tables["narrative_documents"][0].get("started_at") is not None)
+
+
+def test_claim_job_defers_not_fails_when_a_different_company_already_holds_the_same_tender_kind_slot():
+    """Standing review, 2026-11-10 (migration 0130): the anti-collusion
+    uniqueness check (uniqueness.py) only ever compares a new draft against
+    OTHER companies' already-'ready' documents for the same (tender_id,
+    kind) - a job still 'generating' is invisible to it. Once narrative was
+    wired into run_bridges.py (2026-10-25) and this repo's own documented
+    deployment model allows a hosted worker and a hand-run --once to
+    overlap, two companies' jobs for the SAME tender+kind could both reach
+    'generating' at once (reproduced live against a real replayed Postgres
+    schema - see 0130's own migration header) and neither would ever see
+    the other's in-flight draft. The fix is a partial unique index; this
+    test exercises claim_job()'s own handling of the 23505 it now produces:
+    a second company's claim for a DIFFERENT row sharing the same
+    (tender_id, kind) as one already 'generating' must be deferred - treated
+    exactly like 'already claimed by another worker' - never recorded as a
+    job failure (the job is fine, it just has to wait its turn)."""
+    db = FakeDBWithGeneratingUniqueIndex({"narrative_documents": [
+        {"id": "alpha-job", "company_id": "alpha", "tender_id": "tender-1", "kind": "cover_letter",
+         "status": "generating"},  # another company's job already won this tender+kind's slot
+        {"id": "beta-job", "company_id": "beta", "tender_id": "tender-1", "kind": "cover_letter",
+         "status": "requested"},
+        {"id": "unrelated-job", "company_id": "gamma", "tender_id": "tender-2", "kind": "cover_letter",
+         "status": "requested"},  # different tender_id - must be unaffected
+    ]})
+    original = pnj.supabase_request
+    pnj.supabase_request = db
+    try:
+        beta_claimed = pnj.claim_job("url", "key", {"id": "beta-job"})
+        unrelated_claimed = pnj.claim_job("url", "key", {"id": "unrelated-job"})
+    finally:
+        pnj.supabase_request = original
+    check("beta's claim is deferred (False), not raised as an exception", beta_claimed is False)
+    check("beta's row is left exactly as 'requested' - not corrupted, not marked failed",
+          db.tables["narrative_documents"][1]["status"] == "requested")
+    check("a DIFFERENT tender_id's claim is unaffected by the index and still succeeds",
+          unrelated_claimed is True)
+    check("the unrelated row really did move to 'generating'",
+          db.tables["narrative_documents"][2]["status"] == "generating")
 
 
 def test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_alone():
@@ -511,6 +581,7 @@ def main():
     test_build_context_assembles_the_shape_generate_narrative_expects()
     test_process_one_never_leaks_a_raw_exception_to_the_customer()
     test_claim_job_is_atomic_a_second_claim_on_the_same_row_fails()
+    test_claim_job_defers_not_fails_when_a_different_company_already_holds_the_same_tender_kind_slot()
     test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_alone()
     test_process_one_happy_path_writes_ready_with_every_generation_field()
     test_process_one_transient_error_requeues_quietly_but_setup_error_requeues_and_raises()

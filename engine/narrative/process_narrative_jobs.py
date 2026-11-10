@@ -120,11 +120,33 @@ def storage_upload(url, service_key, bucket, object_path, local_path, content_ty
 
 def claim_job(url, key, job):
     """Atomically requested -> generating, same shape as process_cv_jobs.py's
-    claim_job() - an empty result means another worker already took it."""
-    claimed = supabase_request(
-        url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}&status=eq.requested",
-        {"status": "generating", "started_at": _now_iso()},
-    )
+    claim_job() - an empty result means another worker already took it.
+
+    Standing review, 2026-11-10: migration 0130 added a partial unique index
+    - narrative_documents (tender_id, kind) where status = 'generating' - so
+    at most one company's job for the same tender+kind can ever be
+    mid-generation at once, closing the anti-collusion uniqueness check's
+    own cross-process TOCTOU gap (this bridge was wired into
+    run_bridges.py's always-on poll list on 2026-10-25, and this repo's own
+    documented deployment model allows a hosted worker and a hand-run
+    --once to overlap - see 0130's own header for the full finding). A
+    claim for a DIFFERENT row that shares the same (tender_id, kind) as one
+    already 'generating' now hits that index and gets a real 23505
+    unique-violation from Postgres instead of silently succeeding - caught
+    here and treated exactly like "already claimed by another worker": skip
+    this cycle, retry next poll, never a job failure. The job itself is
+    fine; it only has to wait for the other company's job for the SAME
+    tender+kind to leave 'generating' first, so its own uniqueness check can
+    then actually see it as a 'ready' peer."""
+    try:
+        claimed = supabase_request(
+            url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}&status=eq.requested",
+            {"status": "generating", "started_at": _now_iso()},
+        )
+    except RuntimeError as e:
+        if "23505" in str(e) and "narrative_documents_one_generating_per_tender_kind" in str(e):
+            return False
+        raise
     return bool(claimed)
 
 
