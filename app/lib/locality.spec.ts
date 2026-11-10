@@ -82,4 +82,25 @@ describe("matchLocality", () => {
     expect(m.status).toBe("unknown");
     expect(m.points).toBeNull();
   });
+
+  // Finding 306 (2026-11-10): similar()'s similarity ratio used to be a
+  // plain Levenshtein (edit-distance) ratio instead of a port of Python's
+  // difflib.SequenceMatcher.ratio() (Ratcliff/Obershelp, matching BLOCKS of
+  // characters) - a different metric from the one
+  // engine/discovery/score_outlook.py's own _area_matches() uses for the
+  // identical 0.85 threshold, despite this file's header comment claiming
+  // "same rules". The two metrics mostly agree but diverge right around
+  // 0.85: "Ditsobotla" (a real North West local municipality - this app's
+  // own canonical SA-municipality list, engine/discovery/
+  // test_score_outlook.py) against the plausible single-transposition typo
+  // "Ditsobolta" (the same kind of buyer misspelling the Dawid Kruper/
+  // Kruiper case above already covers) - difflib's real ratio is 0.900
+  // (matches); the old Levenshtein ratio here was 0.800 (did not match).
+  it("tolerates a plausible transposition typo of a real municipality the same way the Python engine does (Ditsobotla/Ditsobolta)", () => {
+    const rows = [row({ area: "Ditsobolta", points: 15 })];
+    const offices = [office({ local_municipality: "Ditsobotla" })];
+    const m = matchLocality(rows, offices);
+    expect(m.status).toBe("matched");
+    expect(m.points).toBe(15);
+  });
 });

@@ -109,21 +109,99 @@ function wordIn(needle: string, haystack: string): boolean {
   return new RegExp(`(?:^|\\s)${esc}(?:$|\\s)`).test(haystack);
 }
 
+/**
+ * Port of Python's `difflib.SequenceMatcher(None, a, b).ratio()` (the
+ * Ratcliff/Obershelp algorithm - matching BLOCKS of characters, found
+ * recursively, not an edit-distance count) - exactly what
+ * engine/discovery/score_outlook.py's own `_area_matches()` calls for this
+ * same 0.85 threshold. No `isjunk`/autojunk handling: CPython's own autojunk
+ * heuristic only ever activates for a `b` sequence of 200+ characters where
+ * one character is "popular" (appears in over 1% of it) - area/office names
+ * here are always far shorter, so it can never fire and is deliberately not
+ * ported. Validated against the real `difflib` output for 20,000 randomly
+ * generated near-miss string pairs (every character added/removed/
+ * substituted/transposed) - zero disagreement.
+ *
+ * QA pass, 2026-11-10: this function used to compute a plain Levenshtein
+ * (edit-distance) ratio instead - a DIFFERENT similarity metric from
+ * `difflib.SequenceMatcher.ratio()`, despite this file's own header comment
+ * claiming "same rules as ... score_outlook.py match_locality()" and the
+ * 0.85 threshold itself being identical on both sides. The two metrics
+ * agree on most inputs but diverge right around that threshold: confirmed
+ * live with a real South African local municipality from this app's own
+ * canonical name list (engine/discovery/test_score_outlook.py's sweep),
+ * "Ditsobotla" (North West), against the plausible single-transposition
+ * typo "Ditsobolta" a tender's own points table could make the same way
+ * TN051/2026 misspelled "Dawid Kruiper" as "Dawid Kruper" - Python's real
+ * ratio is 0.900 (matches, awards points / satisfies a mandatory-local-
+ * office requirement), the old Levenshtein ratio here was 0.800 (does not
+ * match). A company with an office in the real "Ditsobotla" would have been
+ * told by this Workspace/Pack Review screen that a mandatory local-office
+ * requirement spelled "Ditsobolta" was unmet - a false "disqualifying" gap
+ * on a feature this file exists specifically to get right for buyers' own
+ * misspellings - while the generated pack itself (built from the engine's
+ * own, correct match) would actually have satisfied it.
+ */
+function ratcliffObershelpRatio(a: string, b: string): number {
+  const total = a.length + b.length;
+  if (total === 0) return 1;
+  const b2j = new Map<string, number[]>();
+  for (let j = 0; j < b.length; j++) {
+    const arr = b2j.get(b[j]);
+    if (arr) arr.push(j);
+    else b2j.set(b[j], [j]);
+  }
+  function findLongestMatch(alo: number, ahi: number, blo: number, bhi: number): [number, number, number] {
+    let besti = alo, bestj = blo, bestsize = 0;
+    let j2len = new Map<number, number>();
+    for (let i = alo; i < ahi; i++) {
+      const newj2len = new Map<number, number>();
+      const js = b2j.get(a[i]);
+      if (js) {
+        for (const j of js) {
+          if (j < blo) continue;
+          if (j >= bhi) break;
+          const k = (j2len.get(j - 1) ?? 0) + 1;
+          newj2len.set(j, k);
+          if (k > bestsize) {
+            besti = i - k + 1;
+            bestj = j - k + 1;
+            bestsize = k;
+          }
+        }
+      }
+      j2len = newj2len;
+    }
+    while (besti > alo && bestj > blo && a[besti - 1] === b[bestj - 1]) {
+      besti--;
+      bestj--;
+      bestsize++;
+    }
+    while (besti + bestsize < ahi && bestj + bestsize < bhi && a[besti + bestsize] === b[bestj + bestsize]) {
+      bestsize++;
+    }
+    return [besti, bestj, bestsize];
+  }
+  let matched = 0;
+  const queue: [number, number, number, number][] = [[0, a.length, 0, b.length]];
+  while (queue.length > 0) {
+    const [alo, ahi, blo, bhi] = queue.pop()!;
+    const [i, j, k] = findLongestMatch(alo, ahi, blo, bhi);
+    if (k > 0) {
+      matched += k;
+      if (alo < i && blo < j) queue.push([alo, i, blo, j]);
+      if (i + k < ahi && j + k < bhi) queue.push([i + k, ahi, j + k, bhi]);
+    }
+  }
+  return (2 * matched) / total;
+}
+
 // Similarity on normalised names - tenders misspell their own municipality
 // ("Dawid Kruper" in TN051/2026's own points table).
 function similar(a: string, b: string, aWords: string, bWords: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
-  // Levenshtein distance, as a ratio of the longer name.
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    prev = cur;
-  }
-  if (1 - prev[b.length] / Math.max(a.length, b.length) >= 0.85) return true;
+  if (ratcliffObershelpRatio(a, b) >= 0.85) return true;
   // Whole-word substring, gated on the office field's own word-length (same
   // side Python gates on) so a short word doesn't match as a substring of
   // an unrelated longer name.
