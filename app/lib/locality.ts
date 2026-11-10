@@ -60,6 +60,14 @@ export type LocalityRow = {
   system: "80/20" | "90/10" | null;
   kind: "specific_goals" | "functionality";
   quote?: string;
+  // Set by engine/discovery/score_outlook.py's extract_locality() (standing
+  // review, 2026-11-10) when the buyer's own nearby wording verifies
+  // locality from the CIPC-registered address specifically (e.g. Overberg
+  // DM: "District, province; registered office only" - docs/specs/Tender-
+  // Evaluation-Engine-Audit.md "Round 2" - vs. Cape Winelands' own "any
+  // office" rule on the next row of the same table). See areaMatches()'s
+  // own comment for the full finding this closes.
+  requires_registered_office?: boolean;
 };
 
 export type LocalityMatch = {
@@ -223,6 +231,22 @@ export function matchLocality(rows: LocalityRow[], offices: CompanyOffice[]): Lo
   let best: { row: LocalityRow; office: CompanyOffice } | null = null;
   for (const row of rows) {
     for (const o of offices) {
+      // Standing review finding, 2026-11-10: migration 0015_company_offices.sql's
+      // own header comment says plainly "the kind of office ... matters" and
+      // names the real example - Overberg DM's own locality rule is "verified
+      // from the CIPC registered-office address" (District, province;
+      // registered office only), unlike Cape Winelands' own "any office" rule
+      // right next to it in the same buyer-wording table. office_kind exists
+      // on CompanyOffice specifically to let that distinction be enforced, but
+      // this function (and its Python mirror, score_outlook.py's
+      // match_locality()) never read it - every row matched against ANY
+      // office of ANY kind, so a mere branch/site/head office (not the
+      // company's CIPC-registered one) was reported "matched" and awarded
+      // real locality points for a rule that specifically requires the
+      // registered address. Now enforced: a row flagged requires_registered_
+      // office (set server-side by extract_locality()) only matches an office
+      // whose office_kind is literally "registered_office".
+      if (row.requires_registered_office && o.office_kind !== "registered_office") continue;
       const ok = row.level === "province" ? !!row.province && o.province === row.province : areaMatches(row.area, o);
       if (ok && (!best || row.points > best.row.points)) best = { row, office: o };
     }

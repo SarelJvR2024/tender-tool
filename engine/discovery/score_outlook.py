@@ -529,6 +529,41 @@ MANDATORY_LOCAL_OFFICE_RE = re.compile(
 TRAILING_POINTS_RE = re.compile(r"\s(\d{1,2}(?:[.,]\d{1,2})?)\s*\|?\s*$")
 FUNC_POINTS_RE = re.compile(r"\(?\s*Points?\s*=\s*(\d{1,2})\s*\)?", re.IGNORECASE)
 
+# Standing review finding, 2026-11-10: migration 0015_company_offices.sql's
+# own header comment says plainly "the kind of office ... matters" and names
+# the real example - "Overberg DM: ... verified from the CIPC registered-
+# office address" (docs/specs/Tender-Evaluation-Engine-Audit.md, "Round 2":
+# "District, province; registered office only", vs. Cape Winelands' own
+# "any office" rule on the very next row of the same table) - and the
+# office_kind column exists, and is populated ('registered_office' is one of
+# its 4 real values), specifically so this distinction COULD be enforced.
+# It never was: neither this function's own row-building below nor
+# match_locality()/_area_matches() has ever read office_kind at all - every
+# locality row, including Overberg's, currently matches against ANY office
+# of ANY kind. A company whose only office in the Overberg district is a
+# mere branch/site office (not its CIPC-registered address, which could be
+# anywhere) was reported "matched" and awarded the real 6 points, exactly
+# the kind of over-claiming this project exists to catch (same bug CLASS as
+# the SANRAL B7 >100%-of-the-contract warning and Finding 226's own live-
+# preview-vs-server-check divergence, just in a different subsystem nobody
+# had checked against this specific angle before). Detected here from the
+# buyer's own nearby wording (the verbatim quote above is the real
+# documented case - "CIPC/CIPRO" together is specific jargon essentially
+# unique to this exact proof-of-registration context, and "address of
+# registered office"/"registered office address" is likewise a specific
+# enough phrase that it is not expected to appear incidentally next to an
+# unrelated locality clause); match_locality() below now actually enforces
+# it once set. Heuristic, like every other regex in this module - a tender
+# that states the same rule in different words without hitting either
+# phrase near its locality row is not caught by this detection (recall, not
+# precision, is the open risk) - but detecting it is a strict improvement
+# over never checking office_kind at all, and makes no existing match any
+# stricter unless this specific language is actually present.
+REGISTERED_OFFICE_ONLY_RE = re.compile(
+    r"CIPC\s*/?\s*CIPRO|address\s+of\s+(?:its\s+|the\s+)?registered\s+office|registered\s+office\s+address",
+    re.IGNORECASE)
+REGISTERED_OFFICE_WINDOW_LINES = 4
+
 
 def _norm_area(s):
     s = re.sub(r"\b(the|boundaries|of|municipal|municipality|area|jurisdiction|local|district|metropolitan|metro|province)\b",
@@ -661,8 +696,11 @@ def extract_locality(text):
             if key in seen or (system is None and any(k[0] == key[0] and k[2] == kind for k in seen)):
                 continue
             seen.add(key)
+            nearby = "\n".join(lines[max(0, j - REGISTERED_OFFICE_WINDOW_LINES):
+                                      min(len(lines), j + REGISTERED_OFFICE_WINDOW_LINES + 1)])
             rows.append({"area": area, "level": level, "province": prov, "points": pts, "system": system,
-                         "kind": kind, "quote": _flat(seg)[:200]})
+                         "kind": kind, "quote": _flat(seg)[:200],
+                         "requires_registered_office": bool(REGISTERED_OFFICE_ONLY_RE.search(nearby))})
     # An unnamed "within District Municipality" row (uMlalazi's first table)
     # takes the district another row of the same document names, if exactly one.
     named = {r["area"] for r in rows if r["level"] == "district" and not r["area"].startswith("the buyer")}
@@ -706,8 +744,15 @@ def _word_in(needle, haystack):
 
 def match_locality(loc, offices):
     """Best locality row any company office satisfies. offices: list of
-    {province, district_municipality, local_municipality, town, derived?}.
-    Returns {"status": "matched"|"no_match"|"unknown", "points", "row", "office", "reason"}."""
+    {province, district_municipality, local_municipality, town, office_kind?, derived?}.
+    Returns {"status": "matched"|"no_match"|"unknown", "points", "row", "office", "reason"}.
+
+    A row flagged requires_registered_office (extract_locality() above, e.g.
+    Overberg DM's own "verified from the CIPC registered-office address")
+    only matches an office whose office_kind is literally 'registered_office'
+    - any other office kind (branch/head/site) is skipped for that row,
+    regardless of how well its area otherwise matches. See
+    REGISTERED_OFFICE_ONLY_RE's own comment for the full finding."""
     rows = loc.get("rows") or []
     if not offices:
         return {"status": "unknown", "points": None, "row": None, "office": None,
@@ -715,6 +760,8 @@ def match_locality(loc, offices):
     best = None
     for row in rows:
         for o in offices:
+            if row.get("requires_registered_office") and o.get("office_kind") != "registered_office":
+                continue
             ok = (row["level"] == "province" and row.get("province") and o.get("province") == row["province"]) \
                  or (row["level"] != "province" and _area_matches(row["area"], o))
             if ok and (best is None or row["points"] > best[0]["points"]):

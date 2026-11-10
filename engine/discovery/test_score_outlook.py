@@ -115,12 +115,94 @@ def test_no_sweep_collisions_among_real_municipality_names():
           hits == [], hits)
 
 
+OVERBERG_TEXT = """
+LOCALITY / PREFERENCE POINTS
+
+Within the boundaries of Overberg District Municipality 6
+Within the boundaries of the Western Cape Province 4
+
+Proof of locality will be verified from the CIPC/CIPRO company registration
+documents - Address of registered office.
+"""
+
+CAPE_WINELANDS_TEXT = """
+LOCALITY PREFERENCE POINTS
+
+An enterprise whose head office or primary place of business or regional
+or satellite office is located within the boundaries of the Cape Winelands
+District Municipal Area 5
+Within the boundaries of the Western Cape Province 5
+
+Proof: a municipal account not older than 90 days, a lease agreement, or a
+bank letter confirming the business address.
+"""
+
+
+def test_extract_locality_flags_registered_office_only_language():
+    print("Overberg DM's own real wording (docs/specs/Tender-Evaluation-Engine-Audit.md, 'Round 2': "
+          "'verified from the CIPC/CIPRO ... Address of registered office') - 'registered office only'")
+    loc = so.extract_locality(OVERBERG_TEXT)
+    check("both rows extracted", len(loc["rows"]) == 2, loc["rows"])
+    check("both rows flagged requires_registered_office",
+          all(r["requires_registered_office"] for r in loc["rows"]), loc["rows"])
+
+
+def test_extract_locality_does_not_flag_any_office_language():
+    print("Cape Winelands DM's own real wording ('...head office or primary place of business or regional "
+          "or satellite office...') - deliberately 'any office', never registered-office-only")
+    loc = so.extract_locality(CAPE_WINELANDS_TEXT)
+    check("both rows extracted", len(loc["rows"]) == 2, loc["rows"])
+    check("neither row flagged requires_registered_office",
+          not any(r["requires_registered_office"] for r in loc["rows"]), loc["rows"])
+
+
+def test_registered_office_only_row_rejects_a_non_registered_office():
+    print("Finding (standing review, 2026-11-10): a row flagged requires_registered_office used to match ANY "
+          "office_kind at all - office_kind/proof_type exist on company_offices (migration 0015's own header: "
+          "'the kind of office ... matters ... Overberg only accepts the CIPC registered office') but neither "
+          "match_locality() nor _area_matches() ever read office_kind. Reproduced live: a mere 'branch' office in "
+          "the exact right district used to be reported 'matched' and awarded the real points for Overberg's own "
+          "registered-office-only rule.")
+    loc = so.extract_locality(OVERBERG_TEXT)
+    branch = {"province": "Western Cape", "district_municipality": "Overberg District",
+              "local_municipality": None, "town": None, "office_kind": "branch"}
+    result = so.match_locality(loc, [branch])
+    check("a branch office (not the registered one) no longer satisfies a registered-office-only row",
+          result["status"] == "no_match", result)
+
+
+def test_registered_office_only_row_still_matches_the_real_registered_office():
+    print("the fix's own other half: the company's real registered_office in the right district still matches")
+    loc = so.extract_locality(OVERBERG_TEXT)
+    registered = {"province": "Western Cape", "district_municipality": "Overberg District",
+                  "local_municipality": None, "town": None, "office_kind": "registered_office"}
+    result = so.match_locality(loc, [registered])
+    check("the real registered office still matches and still scores the full points",
+          result["status"] == "matched" and result["points"] == 6, result)
+
+
+def test_any_office_row_is_unaffected_by_the_fix():
+    print("control: a row with no registered-office-only language (Cape Winelands' own 'any office' rule) "
+          "still matches a plain branch office, exactly as before")
+    loc = so.extract_locality(CAPE_WINELANDS_TEXT)
+    branch = {"province": "Western Cape", "district_municipality": "Cape Winelands District",
+              "local_municipality": None, "town": None, "office_kind": "branch"}
+    result = so.match_locality(loc, [branch])
+    check("a branch office still satisfies a rule that genuinely accepts any office kind",
+          result["status"] == "matched" and result["points"] == 5, result)
+
+
 def main():
     test_unrelated_municipalities_do_not_falsely_match()
     test_legitimate_city_of_prefix_still_matches()
     test_exact_name_match_still_works()
     test_renamed_municipality_still_matches()
     test_no_sweep_collisions_among_real_municipality_names()
+    test_extract_locality_flags_registered_office_only_language()
+    test_extract_locality_does_not_flag_any_office_language()
+    test_registered_office_only_row_rejects_a_non_registered_office()
+    test_registered_office_only_row_still_matches_the_real_registered_office()
+    test_any_office_row_is_unaffected_by_the_fix()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

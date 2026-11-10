@@ -103,4 +103,35 @@ describe("matchLocality", () => {
     expect(m.status).toBe("matched");
     expect(m.points).toBe(15);
   });
+
+  // Standing review finding, 2026-11-10: migration 0015_company_offices.sql's
+  // own header comment says the kind of office held matters and names the
+  // real example (Overberg DM: "registered office only", verified from the
+  // CIPC registered address) - but neither this function nor its Python
+  // mirror (score_outlook.py's match_locality()) ever read office_kind at
+  // all, so a row flagged requires_registered_office used to match a mere
+  // branch/head/site office exactly like Cape Winelands' own genuine
+  // "any office" rule. Reproduced directly on the TS mirror.
+  it("does not credit a non-registered office for a row that requires the registered office (Overberg DM's own rule)", () => {
+    const rows = [row({ area: "Overberg District", points: 6, requires_registered_office: true })];
+    const offices = [office({ office_kind: "branch", district_municipality: "Overberg District" })];
+    const m = matchLocality(rows, offices);
+    expect(m.status).toBe("no_match");
+  });
+
+  it("still credits the real registered office for the same requires_registered_office row", () => {
+    const rows = [row({ area: "Overberg District", points: 6, requires_registered_office: true })];
+    const offices = [office({ office_kind: "registered_office", district_municipality: "Overberg District" })];
+    const m = matchLocality(rows, offices);
+    expect(m.status).toBe("matched");
+    expect(m.points).toBe(6);
+  });
+
+  it("leaves an ordinary row (no requires_registered_office flag) matching any office kind, unchanged", () => {
+    const rows = [row({ area: "Cape Winelands District", points: 5 })];
+    const offices = [office({ office_kind: "branch", district_municipality: "Cape Winelands District" })];
+    const m = matchLocality(rows, offices);
+    expect(m.status).toBe("matched");
+    expect(m.points).toBe(5);
+  });
 });
