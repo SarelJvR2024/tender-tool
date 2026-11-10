@@ -631,6 +631,63 @@ def test_sync_tender_requirements_mid_batch_insert_failure_does_not_strand_a_ten
         ppj.Workbook, ppj.read_required_positions, ppj.system_alerts.record = real_workbook, real_reader, real_record
 
 
+def test_cv_download_target_uses_the_safe_storage_path_not_the_raw_original_filename():
+    print("Finding 311: cv_download_target() (gather()'s own CV-source/destination choice) builds "
+          "the as-is-upload branch's local filename from the upload's real storage_path, not its "
+          "raw, unbounded original_filename - the identical unbounded-filename-length OSError "
+          "crash class Finding 306 already fixed once in company_documents.py, recurring here.")
+    work = tempfile.mkdtemp(prefix="test_cv_download_target_")
+    try:
+        # The generated-CV branch (sibling, never buggy): storage_path_pdf wins.
+        g = {"storage_path_pdf": "co/gen/abc.pdf", "format": "cv_two_page", "detail": "cv_two_page"}
+        target = ppj.cv_download_target(work, "PL", g, None)
+        check("generated-CV branch: bucket is cv-documents", target[0] == "cv-documents", target)
+        check("generated-CV branch: remote path is storage_path_pdf", target[1] == "co/gen/abc.pdf", target)
+        check("generated-CV branch: local dest basename comes from storage_path_pdf",
+              os.path.basename(target[2]) == "abc.pdf", target)
+
+        # The as-is-upload branch: a short, safe storage_path (safeFileName.ts's
+        # own .slice(0, 120) output, real-world shape) alongside a deliberately
+        # unbounded original_filename (never length-capped on the TS side -
+        # app/app/my-cv/actions.ts's uploadMyCv() stores file.name verbatim).
+        long_name = "A" * 5000 + ".docx"
+        u = {"storage_path": "co/uploads/short-name.docx", "original_filename": long_name}
+        target = ppj.cv_download_target(work, "DS1", None, u)
+        check("as-is branch: remote path is the real storage_path", target[1] == u["storage_path"], target)
+        check("as-is branch: local dest basename comes from storage_path, NOT original_filename",
+              os.path.basename(target[2]) == "short-name.docx", target)
+        check("as-is branch: the long original_filename never reaches the local filesystem path at all",
+              long_name not in target[2], target[2][:80] + "...")
+
+        # Real crash, reproduced directly (same style as Finding 306's own
+        # repro): building the OLD destination (os.path.basename(original_
+        # filename)) and actually opening it for write hits the real OS
+        # filename-length limit; building today's FIXED destination does not.
+        old_dest = os.path.join(work, "cvs", "DS1", os.path.basename(u["original_filename"]))
+        crashed = False
+        try:
+            os.makedirs(os.path.dirname(old_dest), exist_ok=True)
+            open(old_dest, "wb").close()
+        except OSError:
+            crashed = True
+        check("the OLD (pre-fix) destination path really does crash a real write with OSError",
+              crashed, old_dest[:80] + "...")
+
+        new_dest = target[2]
+        try:
+            os.makedirs(os.path.dirname(new_dest), exist_ok=True)
+            open(new_dest, "wb").close()
+            new_ok = True
+        except OSError:
+            new_ok = False
+        check("the NEW (fixed) destination path writes cleanly - no OSError", new_ok, new_dest)
+
+        # No ready generated CV and no as-is upload at all: nothing to download.
+        check("neither g nor u: no download target", ppj.cv_download_target(work, "PL", None, None) is None)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
@@ -644,6 +701,7 @@ def main():
     test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id()
     test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id()
     test_sync_tender_requirements_mid_batch_insert_failure_does_not_strand_a_tender_on_a_partial_position_list()
+    test_cv_download_target_uses_the_safe_storage_path_not_the_raw_original_filename()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

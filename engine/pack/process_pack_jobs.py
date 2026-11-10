@@ -526,6 +526,45 @@ def _suggested_person_label(assignment, index_of):
     return f"person_{index_of[sid]}" if sid in index_of else sid
 
 
+def cv_download_target(work, code, g, u):
+    """Which CV to use for a confirmed position (the newest ready generated
+    CV if its PDF conversion actually succeeded, else the newest as-is
+    upload) and where `gather()` should download it to locally. Extracted
+    out of `gather()`'s own CV loop so this choice - and Finding 311's own
+    fix below - is unit-testable without `gather()`'s much larger set of
+    requirements (a real xlsm SETUP sheet, a confirmed signatory, B7, etc).
+
+    Finding 311, standing review 2026-11-10: the as-is branch used to build
+    its local destination filename from `u["original_filename"]` - raw,
+    free-text, and NEVER length-capped on the TypeScript side (only the
+    real storage path is, via safeFileName.ts's own `.slice(0, 120)` - see
+    app/app/my-cv/actions.ts's/app/app/people/actions.ts's own CV-upload
+    actions, which all set `original_filename: file.name` verbatim). An
+    extremely long original_filename - the identical crafted-multipart-POST
+    reachability Finding 306 already confirmed for company_documents.py's
+    OWN unbounded-filename bug - crashed this with `OSError: File name too
+    long` the instant `download()` tried to open the local destination,
+    which (same as Finding 306) has no try/except around this call in
+    `gather()`'s own loop, failing the whole SANRAL pack job rather than
+    just that one CV. Its sibling branch immediately above (the `g` /
+    generated-CV case) was never at risk - `storage_path_pdf` is an
+    engine-written path, already safe - and its own general-engine sibling
+    (process_general_jobs.py's run_pack(), the non-SANRAL pack build) never
+    had this bug either: it already builds its local filename from
+    `up[0]["storage_path"]`, not `original_filename`. This now does the
+    same, for the same reason: `storage_path` is what safeFileName.ts
+    actually sanitized and bounded before it was ever written to storage."""
+    if g:
+        return ("cv-documents", g["storage_path_pdf"],
+                os.path.join(work, "cvs", code, os.path.basename(g["storage_path_pdf"])),
+                f"generated {g['format']}/{g['detail']}, tender-specific")
+    if u:
+        return ("cv-documents", u["storage_path"],
+                os.path.join(work, "cvs", code, os.path.basename(u["storage_path"])),
+                "uploaded CV, used as-is")
+    return None
+
+
 def gather(client, job, work):
     """Downloads/reads everything for one job into `work`. Returns the kwargs
     for build_submission_pack() plus the path of the confirmed pack.yaml."""
@@ -701,17 +740,12 @@ def gather(client, job, work):
             g = next((g for g in gen if g["position_code"] == p["code"] and g["person_id"] == pid
                       and g.get("storage_path_pdf")), None)
             u = next((u for u in uploads if u["person_id"] == pid), None)
-            if g:
-                own_path(g["storage_path_pdf"], company["id"], f"Generated CV for {p['code']}")
-                local = client.download("cv-documents", g["storage_path_pdf"],
-                                        os.path.join(work, "cvs", p["code"], os.path.basename(g["storage_path_pdf"])))
-                cvs[p["code"]] = {"path": local, "person": name,
-                                  "source": f"generated {g['format']}/{g['detail']}, tender-specific"}
-            elif u:
-                own_path(u["storage_path"], company["id"], f"Uploaded CV for {p['code']}")
-                local = client.download("cv-documents", u["storage_path"],
-                                        os.path.join(work, "cvs", p["code"], os.path.basename(u["original_filename"])))
-                cvs[p["code"]] = {"path": local, "person": name, "source": "uploaded CV, used as-is"}
+            target = cv_download_target(work, p["code"], g, u)
+            if target:
+                bucket, remote, dest, source = target
+                own_path(remote, company["id"], f"{'Generated' if g else 'Uploaded'} CV for {p['code']}")
+                local = client.download(bucket, remote, dest)
+                cvs[p["code"]] = {"path": local, "person": name, "source": source}
             else:
                 cvs[p["code"]] = {"reason": f"no ready tender CV and no as-is CV upload for {name}"}
 
