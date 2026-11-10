@@ -16,7 +16,8 @@ import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
 import { evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
-import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
+import { closingDateStatus, docItemStatus, type ReviewStatus } from "./pack-review-logic";
+import { formatDate } from "@/lib/dates";
 
 /**
  * checkReturnable's own `strength: "required" | "mentioned"` is this file's
@@ -135,6 +136,21 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     }
   } catch {
     reviewed = null;
+  }
+
+  // --- 0. Tender closing date (Finding 301, 2026-11-09) - same shared,
+  // non-blocking warning as pack-review-data.ts's own SANRAL section; see
+  // closingDateStatus()'s own comment (pack-review-logic.ts) for why this
+  // isn't a new hard stop in requestJob()'s generate_pack path. -------------
+  try {
+    const { reviewStatus, note } = closingDateStatus(closingDate, new Date());
+    sections.push(
+      section("tender_timing", "Tender closing date", "#general-pack", "View tender details", [
+        { key: "closing_date", label: "Closing date", value: closingDate ? formatDate(closingDate) : "Not on file", status: reviewStatus, note },
+      ]),
+    );
+  } catch (err) {
+    sections.push(failedSection("tender_timing", "Tender closing date", "#general-pack", "View tender details", err));
   }
 
   const [

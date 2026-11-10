@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   b7Status,
+  closingDateStatus,
   docItemStatus,
   fieldStatus,
   humanizeFieldKey,
@@ -155,6 +156,37 @@ test("b7Status: applies, answered cleanly is confirmed / included", () => {
   const r = b7Status({ appliesStatus: "unknown", blocker: null, warnings: [], planMode: "waived_by_tender" });
   assert.equal(r.applies, true);
   assert.deepEqual(r, { applies: true, reviewStatus: "confirmed", checklistStatus: "included", value: "waived_by_tender", note: null });
+});
+
+// Finding 301, 2026-11-09: requestSubmissionPack()/requestJob() never check
+// closing_date before spending a pack-quota credit, at any of the UI/Server
+// Action/RPC layers - closingDateStatus() is the fix, a non-blocking warning
+// surfaced inside the existing Pack Review "I've reviewed this" gate (0059)
+// rather than a new hard stop (see its own doc comment for why).
+test("closingDateStatus: no closing_date on file is confirmed (nothing to warn about yet)", () => {
+  assert.deepEqual(closingDateStatus(null, new Date("2026-06-15T10:00:00.000Z")), { reviewStatus: "confirmed", note: null });
+});
+
+test("closingDateStatus: a closing_date still in the future is confirmed", () => {
+  const r = closingDateStatus("2026-06-20T12:00:00.000Z", new Date("2026-06-15T10:00:00.000Z"));
+  assert.deepEqual(r, { reviewStatus: "confirmed", note: null });
+});
+
+test("closingDateStatus: a closing_date already in the past is a non-blocking warning naming the real cost", () => {
+  const r = closingDateStatus("2026-06-10T12:00:00.000Z", new Date("2026-06-15T10:00:00.000Z"));
+  assert.equal(r.reviewStatus, "warning");
+  assert.match(r.note ?? "", /closing date has already passed/);
+  assert.match(r.note ?? "", /bid-pack credit/);
+});
+
+test("closingDateStatus: closing at the exact instant of `now` counts as passed (ms <= now, same convention as lib/dates.ts's closingCountdown)", () => {
+  const now = new Date("2026-06-15T10:00:00.000Z");
+  const r = closingDateStatus("2026-06-15T10:00:00.000Z", now);
+  assert.equal(r.reviewStatus, "warning");
+});
+
+test("closingDateStatus: an unparseable closing_date fails safe (confirmed, not a false warning)", () => {
+  assert.deepEqual(closingDateStatus("not-a-real-date", new Date("2026-06-15T10:00:00.000Z")), { reviewStatus: "confirmed", note: null });
 });
 
 test("humanizeFieldKey drops the owning-script prefix and title-cases the rest", () => {
