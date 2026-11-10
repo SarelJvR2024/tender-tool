@@ -111,6 +111,29 @@ class PsqlClient:
         out = json.loads(self.sql(q))
         return out[0] if not isinstance(row, list) and out else out
 
+    def upsert(self, table, rows, on_conflict):
+        # Finding 332: process_job() (Finding 190, 2026-11-07) calls
+        # client.upsert() for field_provenance on every successful SANRAL
+        # pack build, the same way process_general_jobs.py's own general-
+        # family sibling already did - but this real-SQL stand-in never
+        # grew an upsert() of its own, so every job that reaches that far
+        # crashed with AttributeError instead of exercising the real path
+        # (System-Status.md standing item 13). Same real-INSERT shape as
+        # insert() above, via json_populate_recordset, plus PostgREST's own
+        # "Prefer: resolution=merge-duplicates" semantics expressed as a
+        # real ON CONFLICT ... DO UPDATE (falling back to DO NOTHING only
+        # if every column is part of the conflict key, so there is nothing
+        # left to update).
+        cols = list(rows[0])
+        conflict_cols = [c.strip() for c in on_conflict.split(",")]
+        update_cols = [c for c in cols if c not in conflict_cols]
+        do = ("do update set " + ", ".join(f"{c} = excluded.{c}" for c in update_cols)) if update_cols else "do nothing"
+        q = (f"with i as (insert into {table} ({', '.join(cols)}) select {', '.join(cols)} from "
+             f"json_populate_recordset(null::{table}, {lit(json.dumps(rows))}::json) "
+             f"on conflict ({', '.join(conflict_cols)}) {do} returning *) "
+             f"select coalesce(json_agg(i), '[]') from i")
+        return json.loads(self.sql(q))
+
     def download(self, bucket, path, dest):
         src = os.path.join(self.storage, bucket, path)
         if not os.path.exists(src):
