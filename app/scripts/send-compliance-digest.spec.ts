@@ -180,4 +180,33 @@ describe("processComplianceDigestForCompany", () => {
     expect(supabase.calls.some((c) => c.name === "claim_notification")).toBe(false);
     expect(result.dryRunRow?.status).toBe("Skipped (no recipients)");
   });
+
+  // Finding 347: --test-recipient is documented (lib/senderCliArgs.ts's own
+  // header) as safe specifically because "using the real key here would
+  // permanently burn that one-time claim, and the real recipient would
+  // never get the real notification later" - but the CLAIM call itself
+  // (the one that actually inserts the permanent notification_claims row)
+  // used the real, untouched complianceDigestIdempotencyKey() regardless of
+  // testRecipient; only the later record_notification_sent call used
+  // testIdempotencyKey(). A --test-recipient run therefore permanently
+  // burns the real company's real one-shot compliance-expiry claim - the
+  // exact outcome the design comment says this flag exists to prevent.
+  it("--test-recipient must claim under the TEST-prefixed key, never the real one (Finding 347)", async () => {
+    const supabase = mockSupabase({
+      company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+      claim_notification: { data: true, error: null },
+      record_notification_sent: { data: null, error: null },
+    });
+
+    await processComplianceDigestForCompany(supabase as never, company, [candidate()], "https://app.example", {
+      dryRun: false,
+      testRecipient: "qa@example.com",
+    });
+
+    const claimCall = supabase.calls.find((c) => c.name === "claim_notification");
+    expect(claimCall).toBeDefined();
+    const claimedKey = claimCall!.params.p_idempotency_key as string;
+    expect(claimedKey.startsWith("test-")).toBe(true);
+    expect(claimedKey).not.toBe("compliance-digest-company-1-sars_tax_pin-30");
+  });
 });
