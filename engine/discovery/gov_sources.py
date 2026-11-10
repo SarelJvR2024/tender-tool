@@ -339,18 +339,40 @@ def _index(rels):
     return idx
 
 
-def _lot_conflict(k, m):
-    """k = 'NRA:2026/21' (no lot letter); m's own keys include 'NRA:2026/21B':
-    m is one LOT of that bid, not the bid - not a match (SANRAL lists the bid
-    and each lot separately)."""
+def _nra_lot_letters(release, bare_key):
+    """The lot letter(s), if any, `release`'s OWN ref_keys() attach to the
+    same bare SANRAL bid number as `bare_key` ('NRA:2026/21' -> {'B'} if this
+    release also carries 'NRA:2026/21B', e.g. from its contract_number while
+    its scm_reference independently supplied the bare key)."""
+    return {o[len(bare_key):] for o in ref_keys(release) if o.startswith(bare_key) and o[len(bare_key):].isalpha()}
+
+
+def _lot_conflict(k, r, m):
+    """True when `r` and `m` are two DIFFERENT, specific lots of the same
+    SANRAL bid - matched only because they share the bare bid number `k`
+    (no lot letter), not because they're the same lot or the bid as a whole.
+    SANRAL lists the bid and each lot separately, so neither direction is a
+    match: a bare bid folding into one specific lot (Finding 330's own
+    'NRA:2026/21' vs 'NRA:2026/21B' case), OR one specific lot folding into a
+    DIFFERENT release that is itself bare or a different lot (the identical
+    gap in the other direction - `_lot_conflict` used to only ever look at
+    `m`'s own keys, never `r`'s, so a lot-specific `r` matched to a bare `m`
+    via their shared bare key, e.g. the base portal row, slipped through
+    with no conflict detected at all, silently folding two distinct lots -
+    each with their own scope/closing date/documents - into one release).
+    Two releases are compatible (no conflict) only when neither carries a
+    lot letter for this bid, or both carry exactly the same one(s)."""
     if not k.startswith("NRA:") or k[-1].isalpha():
         return False
-    return any(o.startswith(k) and o[len(k):].isalpha() for o in ref_keys(m))
+    r_letters, m_letters = _nra_lot_letters(r, k), _nra_lot_letters(m, k)
+    if not r_letters and not m_letters:
+        return False
+    return r_letters != m_letters
 
 
 def _find(idx, r, family):
     keys = ref_keys(r)
-    cands = [m for k in keys for m in idx.get(k, []) if not _lot_conflict(k, m)]
+    cands = [m for k in keys for m in idx.get(k, []) if not _lot_conflict(k, r, m)]
     if not cands and not any(k.startswith(("SC:", "NRA:")) for k in keys):
         # "One reference contains the other" only when there are no
         # structured SANRAL ids to go on (they're exact, and a containment

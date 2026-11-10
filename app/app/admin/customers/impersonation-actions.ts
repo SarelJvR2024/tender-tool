@@ -8,10 +8,26 @@ import { mintTargetSession, setImpersonationCookie, clearImpersonationCookie, re
  * "View Tenant Workspace" (Admin Command Center Phase 4). Both Server
  * Actions here use `createClient({ bypassImpersonation: true })` - this is
  * inherently "the real admin's own identity" territory (starting or ending
- * a session), never something that should run under an already-active
- * impersonation session (which, in practice, can't reach this page at all -
- * /admin/layout.tsx's own is_platform_admin() guard already locks out
- * anyone signed in as an ordinary company member, impersonated or not).
+ * a session). The comment this replaced claimed an already-active
+ * impersonation session "can't reach this page at all" because of
+ * /admin/layout.tsx's own is_platform_admin() guard - true for a fresh page
+ * RENDER, but a Server Action is invoked by its own reference id, not by
+ * re-running the page/layout tree first, so a stale /admin/customers tab
+ * (or the back/forward cache) still has CustomerRow.tsx's own "View Tenant
+ * Workspace" `<form>`s live in the DOM, each one submitting straight to
+ * THIS function regardless of what impersonation session is already open.
+ *
+ * Finding (standing review pass, 2026-11-10): started twice in a row this
+ * way, startImpersonation() used to overwrite the one impersonation cookie
+ * with no regard for whatever audit_log_id it already held - permanently
+ * orphaning the first session's impersonation_audit_logs row (ended_at
+ * stuck at null forever, unreachable by anything, not the honest "still
+ * open"/"expired" state migration 0102's own column comment describes).
+ * Fixed: read the cookie first and close out any dangling session's audit
+ * row before opening a new one - the same best-effort, logged-not-surfaced
+ * bookkeeping endImpersonation() (below) and signOut() (Finding 357)
+ * already use - so switching targets is always end-then-start, never a
+ * silent overwrite.
  */
 export async function startImpersonation(formData: FormData) {
   const companyId = String(formData.get("company_id") ?? "");
@@ -21,6 +37,12 @@ export async function startImpersonation(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
   if (!companyId) redirect(`/admin/customers?error=${encodeURIComponent("Missing company.")}`);
+
+  const dangling = await readImpersonationCookie();
+  if (dangling) {
+    const { error: closeDanglingError } = await supabase.rpc("platform_admin_end_impersonation", { p_audit_log_id: dangling.auditLogId });
+    if (closeDanglingError) console.error("platform_admin_end_impersonation failed while closing a dangling session before starting a new one", closeDanglingError);
+  }
 
   const { data, error } = await supabase.rpc("platform_admin_start_impersonation", {
     p_company_id: companyId,

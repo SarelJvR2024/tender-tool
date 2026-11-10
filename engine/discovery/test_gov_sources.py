@@ -659,6 +659,32 @@ def test_merge():
     m2 = gov_sources.merge({"etenders_portal": [lot], "sanral": [sanral_site("NRA 2026/0021", "2026-09-21T12:00:00+02:00", slug="nra-2026-0021")]})
     check("a bid number without a lot letter doesn't swallow one of its lots",
           len([x for x in m2 if x["ocid"] == "ocds-9t57fa-900002"][0]["listing_sources"]) == 1)
+
+    # _lot_conflict()'s own gap in the OTHER direction (standing review,
+    # 2026-11-10): it used to only ever inspect the CANDIDATE's own keys for
+    # a lettered variant, never the release being matched - so a lot-
+    # specific SANRAL release, found via its own bare key (real and
+    # reachable: SANRAL's scm_reference for a lot is often the bare bid
+    # number with no letter, exactly like sanral_site()'s own `scm=` usage
+    # elsewhere in this test), could still fold into a BARE base portal row
+    # with no conflict ever detected - the direction the original fix never
+    # covered. Two genuinely different lots (different closing dates here,
+    # proving it) then silently collapsed into the ONE base row instead of
+    # staying their own tenders.
+    bare_portal = etenders_portal.normalize(dict(PORTAL_SANRAL_0756C, id=900003, tender_No="NRA 2026/0021",
+                                                  description="RRM LIMPOPO BATCH 3", closing_Date="2027-01-01T12:00:00"))
+    lot_a = sanral_site("NRA 2026/0021 (A)", "2027-01-01T12:00:00+02:00", scm="2026/0021", slug="nra-2026-0021-a")
+    lot_b = sanral_site("NRA 2026/0021 (B)", "2027-01-15T12:00:00+02:00", scm="2026/0021", slug="nra-2026-0021-b")
+    m3 = gov_sources.merge({"etenders_portal": [bare_portal], "sanral": [lot_a, lot_b]})
+    check("a bare base row doesn't swallow a lot found via ITS OWN bare key",
+          len(m3) == 3)
+    base3 = [x for x in m3 if x["ocid"] == "ocds-9t57fa-900003"][0]
+    check("...the bare base row itself stays unfolded (its own listing_sources unchanged)",
+          len(base3["listing_sources"]) == 1)
+    check("...and both lots stay their own releases, each keeping its own closing date",
+          {x["ocid"]: x["closing_date"] for x in m3 if x["ocid"].startswith("sanral:")} ==
+          {"sanral:nra-2026-0021-a": "2027-01-01T12:00:00+02:00", "sanral:nra-2026-0021-b": "2027-01-15T12:00:00+02:00"})
+
     check("SANRAL ids: contract + bid number", gov_sources.sanral_ids("BID NUMBER: NRA 2026/0754 (B) CONTRACT SANRAL N.011-010-2017/1F")
           == {"NRA:2026/754B", "SC:N01101020171F"})
 
