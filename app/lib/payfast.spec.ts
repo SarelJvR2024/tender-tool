@@ -7,6 +7,7 @@ import {
   isBillingSandboxed,
   nextPeriodEnd,
   signCheckoutFields,
+  sourceIpFromForwardedFor,
   verifyItnSignature,
 } from "./payfast";
 
@@ -176,6 +177,52 @@ describe("isBillingSandboxed", () => {
     vi.stubEnv("PAYFAST_MODE", "live");
     vi.stubEnv("NEXT_PUBLIC_PAYFAST_SANDBOX", "false");
     expect(isBillingSandboxed()).toBe(false);
+  });
+});
+
+// Standing review, 2026-11-10 (Finding 331): X-Forwarded-For is a
+// comma-separated list where every hop *appends* the address it saw to the
+// right - so the LEFT end is exactly as attacker-controlled as any other
+// request header (a raw HTTP client can simply send its own value), while
+// the RIGHT end is whatever this app's own edge/reverse proxy (Vercel)
+// itself appended, which the request's own sender could not have set.
+// sourceIpLooksLikePayfast() in the ITN route used to read index [0]
+// (the spoofable end) before this fix.
+describe("sourceIpFromForwardedFor", () => {
+  it("returns null when the header is absent", () => {
+    expect(sourceIpFromForwardedFor(null)).toBeNull();
+    expect(sourceIpFromForwardedFor(undefined)).toBeNull();
+  });
+
+  it("returns null for an empty/whitespace-only header", () => {
+    expect(sourceIpFromForwardedFor("")).toBeNull();
+    expect(sourceIpFromForwardedFor("   ")).toBeNull();
+  });
+
+  it("returns the single entry unchanged for the one real-world case (a direct call, no prior hop)", () => {
+    // This is the ONLY shape a genuine PayFast ITN call produces: PayFast's
+    // own server calls notify_url directly, with no X-Forwarded-For of its
+    // own, so the reverse proxy in front of this app appends exactly one
+    // entry. Confirming this matches the OLD (first-entry) behaviour too
+    // is the "zero regression for real traffic" guarantee this fix relies on.
+    expect(sourceIpFromForwardedFor("197.242.90.10")).toBe("197.242.90.10");
+    expect(sourceIpFromForwardedFor(" 197.242.90.10 ")).toBe("197.242.90.10");
+  });
+
+  it("returns the LAST entry, not the first, when multiple hops are present", () => {
+    // Exact exploit shape: an attacker sends their own forged
+    // X-Forwarded-For claiming to be one of PayFast's documented IPs; the
+    // reverse proxy appends the attacker's own real, observed IP to the
+    // end rather than overwriting the header. The first entry is the
+    // attacker's own lie; the last is the only part they could not set.
+    const forged = "197.242.90.10, 203.0.113.77";
+    expect(sourceIpFromForwardedFor(forged)).toBe("203.0.113.77");
+    expect(sourceIpFromForwardedFor(forged)).not.toBe("197.242.90.10");
+  });
+
+  it("ignores stray empty hops from a malformed/trailing-comma header", () => {
+    expect(sourceIpFromForwardedFor("203.0.113.77,")).toBe("203.0.113.77");
+    expect(sourceIpFromForwardedFor("203.0.113.5, , 203.0.113.77")).toBe("203.0.113.77");
   });
 });
 
