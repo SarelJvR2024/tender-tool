@@ -1,11 +1,14 @@
 """
 Workflow heartbeats: "did this GitHub Actions workflow actually run, and did
 it succeed" (Notification Command Center brief, Phase 1, 2026-10-27). Wired
-as the FIRST and LAST steps of each of the 10 notification-sending workflows
-(see .github/workflows/*.yml - grep for "record_heartbeat.py start" there to
-recount; QA pass, 2026-11-04 found this comment undercounted by one) - never
-inside the business-logic scripts themselves, so adding this instrumentation
-can never touch tested send logic.
+as the FIRST and LAST steps of each of the 11 cron-scheduled workflows this
+product relies on (see .github/workflows/*.yml - grep for
+"record_heartbeat.py start" there to recount; QA pass, 2026-11-04 found this
+comment undercounted by one, and the 2026-11-10 "Finding 333" pass added the
+11th, tender-update-watch.yml - the one workflow here that only WRITES the
+data another workflow, corrigendum-alerts.yml, then sends) - never inside
+the business-logic scripts themselves, so adding this instrumentation can
+never touch tested send logic.
 
     python3 engine/notify/record_heartbeat.py start --key compliance_digest
     python3 engine/notify/record_heartbeat.py finish --key compliance_digest --status success

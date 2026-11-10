@@ -1,0 +1,142 @@
+# Runs the pursued-tender update watch (engine/discovery/watch_tender_updates.py)
+# every 2 hours during SA business hours. This is the ONE script that re-reads
+# a pursued tender's own eTenders/SANRAL source, records any new document
+# (addendum, clarification, moved closing/briefing date, cancellation) in
+# tender_watched_documents, and writes the per-company "this is new to you"
+# rows in tender_update_notifications - the table corrigendum-alerts.yml's own
+# send step (scripts/send-corrigendum-alerts.ts) and daily_digest.py's "Tender
+# updates" section (pending_digest_updates()) both read and ONLY read, per
+# both files' own header comments.
+#
+# Finding 333 (standing review pass, 2026-11-10): nothing in this repo had
+# EVER scheduled this script - confirmed by grepping every workflow under
+# .github/workflows/*.yml for "watch_tender_updates" and reading each hit:
+# bridge-worker-ci.yml only runs its unit test (test_watch_tender_updates.py,
+# a fully in-memory FakeClient, never touches a real tender or a real row);
+# corrigendum-alerts.yml's own header comment already says, correctly, "run
+# separately, unchanged" - but nothing anywhere was that "separately". The
+# result: tender_update_notifications has never had a real row written to it
+# in production, so corrigendum-alerts.yml's send step finds nothing to send,
+# every single run, and goes green - indistinguishable from "working, nothing
+# new to report" - while the feature Sarel asked for (2026-10-17: "we need to
+# monitor any new documents... warn them... changes of closing dates") has
+# never actually run once. Exactly the same shape of gap daily-discovery.yml
+# (this file's own template) was created to close for watch_new_tenders.py on
+# 2026-10-22 - see that workflow's own header comment.
+#
+# Deliberately its OWN workflow, not folded into corrigendum-alerts.yml's
+# existing job: this step WRITES to the real database (tender_watched_documents,
+# tender_update_notifications, tenders.closing_date/briefing_date, tender_tasks
+# milestones - see watch_tender_updates.py's own module docstring) and downloads
+# documents from live eTenders/SANRAL sources; corrigendum-alerts.yml's own job
+# is deliberately read-only (renders and sends what is already written). Kept
+# separate so either one's own failure mode (a scrape error vs a send error)
+# gets its own heartbeat and its own clear log, the same separation
+# daily-discovery.yml/daily-digest.yml already use for the discovery watch vs
+# its own digest email.
+#
+# Scheduled to finish well before each corrigendum-alerts.yml firing (same 7
+# business-hour slots, 50 minutes earlier) so the alert it's about
+# to send is never more than one slot stale - the module's own docstring says
+# this watch only touches actively-pursued tenders (a handful of one-day OCDS
+# windows and SANRAL pages per run), so it is "cheap to run every couple of
+# hours", same cadence corrigendum-alerts.yml's own send step already uses.
+#
+# Needs the same 2 repository secrets daily-discovery.yml/corrigendum-alerts.yml
+# already use (Settings > Secrets and variables > Actions) - nothing new to add:
+#   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+#
+# lxml install step: watch_tender_updates.py's own read_new_document() lazily
+# imports engine/general/requirements.py only when an actual non-baseline
+# document needs reading - that module imports tender_enrichment.py ->
+# boq_extraction.py -> engine/sanral_fill.py `from lxml import etree`
+# unconditionally. Same exact gap daily-discovery.yml's own comment documents
+# hitting live on 2026-10-24 for the identical import chain - installed here
+# up front rather than letting the first real new document crash that one
+# tender's check (caught per-tender by run()'s own isolation, so it wouldn't
+# fail the whole job, but it would silently mean no real document is ever
+# read - the same "always green, never actually works" shape this workflow
+# exists to close).
+name: tender-update-watch
+
+on:
+  schedule:
+    # 04:10-16:10/2 UTC = 06:10-18:10 SAST (no DST in South Africa), Mon-Fri -
+    # 50 minutes ahead of corrigendum-alerts.yml's own "0 5-17/2 * * 1-5" (05:00-
+    # 17:00 UTC), so each of its 7 daily firings reads data no older than the
+    # watch run that just finished for it. Minute 10, not on-the-hour, for the
+    # same reason daily-discovery.yml/daily-digest.yml stagger their own
+    # minutes: GitHub runs a lot of on-the-hour cron jobs across every repo,
+    # which can delay a run scheduled for exactly :00/:30.
+    - cron: "10 4-16/2 * * 1-5"
+  workflow_dispatch: {} # manual test run, e.g. right after adding the secrets above
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tender-update-watch
+  cancel-in-progress: false # let a running check finish rather than cutting it off mid-write
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Heartbeat (Notification Command Center, migration 0099) - the start
+      # step fires before anything else can fail, so a dead runner still
+      # leaves a "running" row the admin UI can flag as stuck. Zero-dep
+      # stdlib script, no pip install needed for this step itself.
+      - name: Record heartbeat (start)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py start --key tender_update_watch
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install lxml (sanral_fill.py's own XML dependency, pulled in by read_new_document's requirements.py import chain)
+        run: pip install lxml==6.1.3
+
+      - name: Run the tender-update watch (re-reads every actively pursued tender, records new documents/dates)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/discovery/watch_tender_updates.py --out tender_updates_report.json
+
+      # Two steps, not one if: always() - GitHub Actions has no single "did
+      # the job pass" value available mid-job, only the success()/failure()
+      # context functions on separate steps. failure() alone misses a
+      # CANCELLED run (a concurrency-group supersede, a manual cancel,
+      # GitHub's own workflow timeout) - neither success() nor failure() is
+      # true then, so this heartbeat's own "finish" call never fired, leaving
+      # its start row stuck showing "running" until the admin UI's own
+      # staleness check eventually flags it as generically stuck rather than
+      # correctly as cancelled, even though GitHub already told us exactly
+      # what happened. Same two-step shape every other workflow here uses.
+      - name: Record heartbeat (success)
+        if: success()
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key tender_update_watch --status success
+
+      - name: Record heartbeat (failure)
+        if: failure() || cancelled()
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key tender_update_watch --status failed --error "One or more steps in this job failed or the run was cancelled - see the run log"
+
+      - name: Upload the run's own alert report JSON (debugging aid, kept a week)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tender_updates_report
+          path: tender_updates_report.json
+          retention-days: 7
+          if-no-files-found: ignore

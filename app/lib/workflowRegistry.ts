@@ -6,11 +6,25 @@
 // workflows/*.yml, that's a real bug to fix here, not a sign the DB needs
 // its own copy of the cron string too.
 //
-// 10 workflows, not 6 - the Notification Command Center brief assumed 6;
-// the repo actually has 10 cron-scheduled senders today (confirmed by
+// 11 workflows, not 6 - the Notification Command Center brief assumed 6;
+// the repo actually has 11 cron-scheduled senders today (confirmed by
 // reading .github/workflows/ directly, 2026-10-27, most recently
 // returnables-digest.yml, Phase 6). Shown as-is rather than arbitrarily
 // dropped to match a number from before this list was audited.
+//
+// Finding 333 (standing review pass, 2026-11-10): tender_update_watch added -
+// engine/discovery/watch_tender_updates.py's own writer (the script that
+// re-reads a pursued tender's eTenders/SANRAL source and writes
+// tender_watched_documents/tender_update_notifications) had never been
+// wired into any scheduled workflow at all - confirmed by grepping every
+// file under .github/workflows/*.yml, not assumed. corrigendum_alerts
+// (below) only ever renders and sends what this script would have written;
+// with nothing ever calling it, that table stayed empty in production and
+// corrigendum_alerts went green every run with nothing to send - exactly
+// the kind of silent, always-"healthy" gap this registry page exists to
+// surface, except this one had no row at all to even read, in either
+// direction. See .github/workflows/tender-update-watch.yml's own header for
+// the full writeup and docs/specs/QA-Edge-Case-Findings.md's Finding 333.
 export type WorkflowCadenceKind = "cron" | "event_driven";
 
 export type WorkflowRegistryEntry = {
@@ -127,6 +141,16 @@ export const WORKFLOW_REGISTRY: WorkflowRegistryEntry[] = [
     cadenceSast: "Daily, 07:00 SAST",
     targetAudience: "Sarel only (ADMIN_NOTIFICATION_EMAIL) - new signups, conversions, platform-wide counts",
     scriptPaths: ["scripts/send-founder-digest.ts"],
+  },
+  {
+    key: "tender_update_watch",
+    workflowName: "Tender Update Watch",
+    workflowFile: "tender-update-watch.yml",
+    kind: "cron",
+    cronUtc: "10 4-16/2 * * 1-5",
+    cadenceSast: "Every 2h, 06:10-18:10 SAST, Mon-Fri",
+    targetAudience: "No direct recipient - writes tender_watched_documents/tender_update_notifications that corrigendum_alerts (above) and the daily digest's own 'Tender updates' section both read",
+    scriptPaths: ["engine/discovery/watch_tender_updates.py"],
   },
 ];
 

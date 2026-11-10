@@ -10,9 +10,17 @@
 # range end, QA pass, 2026-11-09, comment-only, no behavioural change).
 #
 # This workflow only renders and sends what engine/discovery/watch_tender_updates.py
-# (run separately, unchanged) has already found and written to
-# tender_update_notifications - it does not re-scrape or re-classify
-# anything itself. See that script's own header for the full reasoning.
+# has already found and written to tender_update_notifications - it does not
+# re-scrape or re-classify anything itself. See that script's own header for
+# the full reasoning.
+#
+# Finding 333 (standing review pass, 2026-11-10): "run separately, unchanged"
+# above used to mean exactly that - nothing anywhere actually scheduled
+# watch_tender_updates.py, so this workflow always found an empty
+# tender_update_notifications and went green with nothing to send, every
+# run, since the day it was created. Now run on its own schedule by
+# tender-update-watch.yml, 1h50m ahead of each of this workflow's own 7
+# daily firings - see that workflow's own header for the full writeup.
 #
 # Needs the same repository secrets operational-alerts.yml already uses:
 # NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY,
