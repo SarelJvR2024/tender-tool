@@ -36,7 +36,7 @@
 # its own digest email.
 #
 # Scheduled to finish well before each corrigendum-alerts.yml firing (same 7
-# business-hour slots, 1 hour and 50 minutes earlier) so the alert it's about
+# business-hour slots, 50 minutes earlier) so the alert it's about
 # to send is never more than one slot stale - the module's own docstring says
 # this watch only touches actively-pursued tenders (a handful of one-day OCDS
 # windows and SANRAL pages per run), so it is "cheap to run every couple of
@@ -62,7 +62,7 @@ name: tender-update-watch
 on:
   schedule:
     # 04:10-16:10/2 UTC = 06:10-18:10 SAST (no DST in South Africa), Mon-Fri -
-    # 1h50m ahead of corrigendum-alerts.yml's own "0 5-17/2 * * 1-5" (05:00-
+    # 50 minutes ahead of corrigendum-alerts.yml's own "0 5-17/2 * * 1-5" (05:00-
     # 17:00 UTC), so each of its 7 daily firings reads data no older than the
     # watch run that just finished for it. Minute 10, not on-the-hour, for the
     # same reason daily-discovery.yml/daily-digest.yml stagger their own
