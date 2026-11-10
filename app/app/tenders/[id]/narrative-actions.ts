@@ -143,12 +143,13 @@ export async function uploadNarrativeFinal(formData: FormData) {
   // but a clear message here is friendlier than a generic failure).
   const { data: row } = await supabase
     .from("narrative_documents")
-    .select("id")
+    .select("id, final_storage_path")
     .eq("id", docId)
     .eq("company_id", companyId)
     .eq("tender_id", tenderId)
     .maybeSingle();
   if (!row) fail("That document wasn't found.");
+  const previousFinalPath = (row.final_storage_path as string | null | undefined) ?? null;
 
   const safeName = safeFileName(file.name);
   // Fixed, deterministic path (no random suffix) so re-uploading a
@@ -186,6 +187,26 @@ export async function uploadNarrativeFinal(formData: FormData) {
     fail(updateError
       ? `Uploaded, but couldn't save it against the document: ${updateError.message}`
       : "That document is no longer there - it may have been removed. Refresh and try again.");
+  }
+
+  // Clean up the PREVIOUS final upload once the row genuinely points at the
+  // new one - same "fetch old path before, upload new, delete old only
+  // after the DB write that points at the new one succeeds" discipline
+  // every other file-replace action in this codebase follows (e.g.
+  // general-actions.ts's uploadTenderDocument, company/actions.ts's vault
+  // upload). storagePath is deterministic (filename-based, not a random
+  // suffix) specifically so a re-upload under the SAME filename overwrites
+  // the same object via `upsert: true` above - but a re-upload under a
+  // DIFFERENT filename (the normal case: the company downloads the draft,
+  // edits it in Word, and saves/re-uploads it under its own new name) built
+  // a genuinely different storagePath and, before this fix, never removed
+  // the old one - an orphaned final document silently left in the
+  // `narrative-documents` bucket forever, every single time someone
+  // corrected a final upload under a new filename, with nothing upstream
+  // ever referencing or cleaning it up again. Found in a standing review
+  // pass, 2026-11-10.
+  if (previousFinalPath && previousFinalPath !== storagePath) {
+    await supabase.storage.from(NARRATIVE_BUCKET).remove([previousFinalPath]);
   }
 
   revalidatePath(`/tenders/${tenderId}`);

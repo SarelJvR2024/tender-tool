@@ -34,7 +34,9 @@ function makeChain(queue: Resp[]) {
 
 function makeSupabase(fromQueues: Resp[][]) {
   let fromCallIndex = 0;
+  const removedPaths: string[][] = [];
   return {
+    removedPaths,
     client: {
       auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
       from: () => {
@@ -45,6 +47,10 @@ function makeSupabase(fromQueues: Resp[][]) {
       storage: {
         from: () => ({
           upload: async () => ({ data: null, error: null }),
+          remove: async (paths: string[]) => {
+            removedPaths.push(paths);
+            return { data: null, error: null };
+          },
         }),
       },
     },
@@ -130,5 +136,67 @@ describe("uploadNarrativeFinal - narrative_documents update genuinely succeeds",
     const url = await expectRedirect(uploadNarrativeFinal(uploadFormData("tender-1", "doc-1")));
 
     expect(url).toBe("/tenders/tender-1#narrative-documents");
+  });
+});
+
+// Standing review, 2026-11-10: the storagePath this action uploads to is
+// deterministic (filename-based, no random suffix) so a re-upload under the
+// SAME filename naturally overwrites the same object via `upsert: true`.
+// But the "row" query, pre-fix, only ever selected `id` - never the row's
+// existing `final_storage_path` - so a re-upload under a DIFFERENT filename
+// (the normal case: the company edits the draft in Word and re-saves it
+// under its own new name) produced a genuinely different storagePath, and
+// the previous final object was never deleted - orphaned in the
+// `narrative-documents` bucket forever, with nothing upstream left pointing
+// at it. Every OTHER file-replace action in this codebase (e.g.
+// general-actions.ts's uploadTenderDocument) fetches the old path first and
+// removes it once the new one is confirmed saved - this action alone did
+// not.
+describe("uploadNarrativeFinal - cleans up the previous final upload", () => {
+  it("removes the OLD storage object when the new filename produces a different path", async () => {
+    const { client, removedPaths } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "doc-1", final_storage_path: "company-1/tenders/tender-1/doc-1/final-old-name.docx" }, error: null }], // row ownership check - carries the OLD final path
+      [{ data: { id: "doc-1" }, error: null }], // narrative_documents update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { uploadNarrativeFinal } = await import("./narrative-actions");
+
+    await expectRedirect(uploadNarrativeFinal(uploadFormData("tender-1", "doc-1")));
+
+    // uploadFormData's file is named "final.docx" -> new path ends in
+    // final-final.docx, genuinely different from the old final-old-name.docx.
+    expect(removedPaths).toEqual([["company-1/tenders/tender-1/doc-1/final-old-name.docx"]]);
+  });
+
+  it("does NOT call remove when there was no previous final upload", async () => {
+    const { client, removedPaths } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "doc-1", final_storage_path: null }, error: null }], // row ownership check - no prior final upload
+      [{ data: { id: "doc-1" }, error: null }], // narrative_documents update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { uploadNarrativeFinal } = await import("./narrative-actions");
+
+    await expectRedirect(uploadNarrativeFinal(uploadFormData("tender-1", "doc-1")));
+
+    expect(removedPaths).toEqual([]);
+  });
+
+  it("does NOT call remove when the re-upload reuses the exact same filename (same path)", async () => {
+    const { client, removedPaths } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "doc-1", final_storage_path: "company-1/tenders/tender-1/doc-1/final-final.docx" }, error: null }], // same path as the new upload will produce
+      [{ data: { id: "doc-1" }, error: null }], // narrative_documents update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { uploadNarrativeFinal } = await import("./narrative-actions");
+
+    await expectRedirect(uploadNarrativeFinal(uploadFormData("tender-1", "doc-1")));
+
+    expect(removedPaths).toEqual([]);
   });
 });
