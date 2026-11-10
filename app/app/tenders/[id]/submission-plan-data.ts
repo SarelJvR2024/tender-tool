@@ -190,7 +190,26 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
           // before it will actually use a generated CV - this check now
           // agrees with the real pack-build engine instead of just the row's
           // status column.
-          supabase.from("generated_cvs").select("person_id, storage_path_pdf").in("person_id", taggedIds).eq("status", "ready"),
+          //
+          // QA finding, 2026-11-10 (Finding 355): a generated_cvs row is
+          // ALWAYS tender-specific once it exists at all - requestTenderCv()
+          // (actions.ts) never inserts one without a tender_id, and 0008's
+          // own check constraint ((tender_id is null) = (position_code is
+          // null)) guarantees a role-tagged row (position_code set) always
+          // carries a real tender_id too. Without this .eq, a person's CV
+          // generated and built with a DIFFERENT tender's own requirement-
+          // matching cover page (generate_cv.py's --tender/--position,
+          // scored against THAT tender's tender_pack_assignments row) was
+          // silently counted as "has a CV" here for THIS tender as well -
+          // the identical generated_cvs tender-scoping gap Finding 342/PR
+          // #221 found and is fixing on the engine side
+          // (process_general_jobs.py's own gather_pack_inputs(), still
+          // unmerged) and standing item 29 already flags as unfixed on
+          // general-pack-review-data.ts (left there deliberately - PR #211
+          // already touches those exact lines for a different rule). This
+          // file is untouched by both PR #211 and PR #221, so fixing it here
+          // creates no collision with either.
+          supabase.from("generated_cvs").select("person_id, storage_path_pdf").in("person_id", taggedIds).eq("status", "ready").eq("tender_id", tenderId),
           supabase.from("cv_uploads").select("person_id").in("person_id", taggedIds),
         ]);
         if (genErr) console.error("generated_cvs select failed (submission plan roles)", genErr);
