@@ -36,7 +36,7 @@ import { BidTaskBadge } from "@/components/tt/bid-task-badge";
  * tender-workspace color-migration pieces.
  */
 
-type GuardRow = { label: string; status: BidTaskStatus; detail: string };
+export type GuardRow = { label: string; status: BidTaskStatus; detail: string };
 
 const STATUS_LABEL: Record<BidTaskStatus, string> = {
   fix: "Would disqualify",
@@ -45,6 +45,102 @@ const STATUS_LABEL: Record<BidTaskStatus, string> = {
 };
 
 export type DisqualificationGuardResult = { content: React.ReactNode; fixCount: number };
+
+type SanralComplianceData = Awaited<ReturnType<typeof loadTenderCompliance>>;
+type SubmissionPlanData = Awaited<ReturnType<typeof loadSubmissionPlan>>;
+
+/**
+ * Pure derivation of the Guard's own 7-check rows from already-fetched data -
+ * no I/O in here at all, so this is directly unit-testable and safely
+ * reusable from a second caller without a second, possibly-disagreeing read
+ * of the same facts. Split out of DisqualificationGuard() below (standing
+ * review finding, 2026-10-27, closed out this pass - see Finding writeup):
+ * that entry flagged `lib/dispatchDashboard.ts`'s own `loadDispatchCards()`
+ * as using a much broader signal (`tenderNextStep.ts`'s `nextStepFor()` -
+ * "the one concrete, unfinished thing", true for ANY open Provide/Verify
+ * item too, not just a genuine Fix) in place of this Guard's own real
+ * fixCount for `deriveDecisionNeeded()`'s `hasRealFixBlocker`, and said a
+ * correct fix needed exactly this extraction. The logic itself is
+ * byte-for-byte identical to what DisqualificationGuard() used to compute
+ * inline - only the two `await` calls (and the JSX) stayed behind in that
+ * function; this takes their already-resolved results instead.
+ */
+export function disqualificationGuardRows(input: {
+  isSanralFamily: boolean;
+  isGeneralFamily: boolean;
+  compliance: SanralComplianceData | null;
+  plan: SubmissionPlanData | null;
+}): { mapped: boolean; rows: GuardRow[] } {
+  const rows: GuardRow[] = [];
+  let mapped = false;
+
+  if (input.isSanralFamily && input.compliance?.mapped) {
+    mapped = true;
+    const data = input.compliance;
+    const byKey = (k: string) => data.docItems.find((i) => i.key === k);
+    const push = (label: string, item: ReturnType<typeof byKey>) => {
+      if (!item) return;
+      const task = classifyComplianceItem(item);
+      rows.push({ label, status: task.status, detail: task.reason });
+    };
+    push("Tax compliance (SARS TCS PIN)", byKey("tax"));
+    push("CSD registration number", byKey("csd"));
+    push("B-BBEE certificate or affidavit (valid at closing)", byKey("bbbee"));
+
+    if (data.positionRows.length > 0) {
+      // status === "ready" alone isn't enough: engine/pack/process_pack_jobs.py's
+      // own CV loop only treats a generated_cvs row as usable once
+      // storage_path_pdf is also set (process_cv_jobs.py can finish a job
+      // "ready" with that column left null when LibreOffice's docx->pdf
+      // conversion fails) - same gap as Finding 305/308 on the sibling
+      // Pack Review/Submission Plan screens, found here on the
+      // Disqualification Guard itself: without this check, a position
+      // whose CV generation produced no usable PDF read as "Clear" on the
+      // one screen meant to flag a real disqualification risk, while the
+      // actual pack build would silently fall back to the as-filed
+      // upload or include no CV at all. Written as its own inline
+      // condition (not importing pack-review-logic.ts's tenderCvUsable())
+      // since that helper is still only on open PR #211, unmerged - adopt
+      // the shared helper here once that PR lands.
+      const incomplete = data.positionRows.filter(
+        (p) => !p.person || !(p.cv || (p.tenderCv?.status === "ready" && p.tenderCv.storage_path_pdf)),
+      );
+      const noPerson = data.positionRows.some((p) => !p.person);
+      rows.push({
+        label: "Key personnel CVs",
+        status: incomplete.length === 0 ? "verify" : noPerson ? "fix" : "provide",
+        detail:
+          incomplete.length === 0
+            ? "Every key position has a confirmed person with a CV on file."
+            : `${incomplete.length} of ${data.positionRows.length} key position(s) still need a confirmed person or a CV.`,
+      });
+    }
+  } else if (input.isGeneralFamily && input.plan?.mapped) {
+    mapped = true;
+    const plan = input.plan;
+    const byId = (id: string) => plan.steps.find((s) => s.id === id);
+    const push = (label: string, step: ReturnType<typeof byId>) => {
+      if (!step) return;
+      rows.push({ label, status: step.bidTaskStatus, detail: step.note });
+    };
+    push("Tax compliance (SARS TCS PIN)", byId("returnable:tax_compliance"));
+    push("CSD registration number", byId("returnable:csd_report"));
+    push("B-BBEE certificate or affidavit (valid at closing)", byId("returnable:bbbee_proof"));
+    push("CIDB grade meets this tender's requirement", byId("cidb_grading"));
+
+    const roleSteps = plan.steps.filter((s) => s.category === "role");
+    if (roleSteps.length > 0) {
+      const gaps = roleSteps.filter((s) => s.bidTaskStatus !== "verify");
+      rows.push({
+        label: "Key personnel CVs",
+        status: gaps.some((s) => s.bidTaskStatus === "fix") ? "fix" : gaps.length > 0 ? "provide" : "verify",
+        detail: gaps.length === 0 ? "Every required role is tagged with a CV." : gaps.map((s) => s.title).join("; "),
+      });
+    }
+  }
+
+  return { mapped, rows };
+}
 
 /**
  * Phase 2 completion pass (2026-10-23, Sarel's own explicit brief): this
@@ -64,78 +160,9 @@ export async function DisqualificationGuard({
   isSanralFamily: boolean;
   isGeneralFamily: boolean;
 }): Promise<DisqualificationGuardResult> {
-  const rows: GuardRow[] = [];
-  let mapped = false;
-
-  if (isSanralFamily) {
-    const data = await loadTenderCompliance(tenderId);
-    if (data?.mapped) {
-      mapped = true;
-      const byKey = (k: string) => data.docItems.find((i) => i.key === k);
-      const push = (label: string, item: ReturnType<typeof byKey>) => {
-        if (!item) return;
-        const task = classifyComplianceItem(item);
-        rows.push({ label, status: task.status, detail: task.reason });
-      };
-      push("Tax compliance (SARS TCS PIN)", byKey("tax"));
-      push("CSD registration number", byKey("csd"));
-      push("B-BBEE certificate or affidavit (valid at closing)", byKey("bbbee"));
-
-      if (data.positionRows.length > 0) {
-        // status === "ready" alone isn't enough: engine/pack/process_pack_jobs.py's
-        // own CV loop only treats a generated_cvs row as usable once
-        // storage_path_pdf is also set (process_cv_jobs.py can finish a job
-        // "ready" with that column left null when LibreOffice's docx->pdf
-        // conversion fails) - same gap as Finding 305/308 on the sibling
-        // Pack Review/Submission Plan screens, found here on the
-        // Disqualification Guard itself: without this check, a position
-        // whose CV generation produced no usable PDF read as "Clear" on the
-        // one screen meant to flag a real disqualification risk, while the
-        // actual pack build would silently fall back to the as-filed
-        // upload or include no CV at all. Written as its own inline
-        // condition (not importing pack-review-logic.ts's tenderCvUsable())
-        // since that helper is still only on open PR #211, unmerged - adopt
-        // the shared helper here once that PR lands.
-        const incomplete = data.positionRows.filter(
-          (p) => !p.person || !(p.cv || (p.tenderCv?.status === "ready" && p.tenderCv.storage_path_pdf)),
-        );
-        const noPerson = data.positionRows.some((p) => !p.person);
-        rows.push({
-          label: "Key personnel CVs",
-          status: incomplete.length === 0 ? "verify" : noPerson ? "fix" : "provide",
-          detail:
-            incomplete.length === 0
-              ? "Every key position has a confirmed person with a CV on file."
-              : `${incomplete.length} of ${data.positionRows.length} key position(s) still need a confirmed person or a CV.`,
-        });
-      }
-    }
-  } else if (isGeneralFamily) {
-    const plan = await loadSubmissionPlan(tenderId);
-    if (plan.mapped) {
-      mapped = true;
-      const byId = (id: string) => plan.steps.find((s) => s.id === id);
-      const push = (label: string, step: ReturnType<typeof byId>) => {
-        if (!step) return;
-        rows.push({ label, status: step.bidTaskStatus, detail: step.note });
-      };
-      push("Tax compliance (SARS TCS PIN)", byId("returnable:tax_compliance"));
-      push("CSD registration number", byId("returnable:csd_report"));
-      push("B-BBEE certificate or affidavit (valid at closing)", byId("returnable:bbbee_proof"));
-      push("CIDB grade meets this tender's requirement", byId("cidb_grading"));
-
-      const roleSteps = plan.steps.filter((s) => s.category === "role");
-      if (roleSteps.length > 0) {
-        const gaps = roleSteps.filter((s) => s.bidTaskStatus !== "verify");
-        rows.push({
-          label: "Key personnel CVs",
-          status: gaps.some((s) => s.bidTaskStatus === "fix") ? "fix" : gaps.length > 0 ? "provide" : "verify",
-          detail: gaps.length === 0 ? "Every required role is tagged with a CV." : gaps.map((s) => s.title).join("; "),
-        });
-      }
-    }
-  }
-
+  const compliance = isSanralFamily ? await loadTenderCompliance(tenderId) : null;
+  const plan = isGeneralFamily ? await loadSubmissionPlan(tenderId) : null;
+  const { mapped, rows } = disqualificationGuardRows({ isSanralFamily, isGeneralFamily, compliance, plan });
   const fixCount = rows.filter((r) => r.status === "fix").length;
 
   const content = (
