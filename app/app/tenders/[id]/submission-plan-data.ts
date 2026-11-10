@@ -178,12 +178,27 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
       let withCv = 0;
       if (taggedIds.length > 0) {
         const [{ data: gen, error: genErr }, { data: up, error: upErr }] = await Promise.all([
-          supabase.from("generated_cvs").select("person_id").in("person_id", taggedIds).eq("status", "ready"),
+          // status='ready' alone isn't enough: process_cv_jobs.py writes
+          // status='ready' with storage_path_pdf left null when LibreOffice's
+          // docx->pdf conversion fails on an otherwise-'ready' job (same gap
+          // Finding 305, 2026-11-10, already fixed on the Pack Review screens
+          // via tenderCvUsable() - this Submission Plan role check reads the
+          // identical generated_cvs table but is a separate query this app
+          // doesn't yet have a shared helper on `main` for, since that fix is
+          // still only on open PR #211). process_general_jobs.py's own
+          // gather_pack_inputs() (line ~740) requires storage_path_pdf too
+          // before it will actually use a generated CV - this check now
+          // agrees with the real pack-build engine instead of just the row's
+          // status column.
+          supabase.from("generated_cvs").select("person_id, storage_path_pdf").in("person_id", taggedIds).eq("status", "ready"),
           supabase.from("cv_uploads").select("person_id").in("person_id", taggedIds),
         ]);
         if (genErr) console.error("generated_cvs select failed (submission plan roles)", genErr);
         if (upErr) console.error("cv_uploads select failed (submission plan roles)", upErr);
-        const haveCv = new Set([...(gen ?? []).map((g) => g.person_id as string), ...(up ?? []).map((u) => u.person_id as string)]);
+        const haveCv = new Set([
+          ...(gen ?? []).filter((g) => g.storage_path_pdf).map((g) => g.person_id as string),
+          ...(up ?? []).map((u) => u.person_id as string),
+        ]);
         withCv = taggedPeople.filter((p) => haveCv.has(p.id)).length;
       }
       const { reviewStatus, note } = roleStatus({ taggedCount: taggedPeople.length, taggedWithCvCount: withCv });
