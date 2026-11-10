@@ -16760,6 +16760,35 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): intake rotation - no new behavioral bug found after genuinely adversarial effort
+
+Oriented from `7e9b354` (sibling track's own most recent commit, confirmed via `git fetch origin
+main` - clean, no new sibling commits either at start or immediately before this write-up).
+
+Checked `app/app/onboarding/actions.ts`'s `createCompanyBasics()` - its one `.update()` call
+(`companies`, right after `create_company_and_join()` creates the row) looked at first like another
+instance of the "zero-row RLS-match discarded" bug class this session's sibling track has been
+finding repeatedly - but `companyId` there is the RPC's own just-created, trusted return value, not
+user-supplied or racing another actor, so there's no stale-ID/TOCTOU window for it to silently miss.
+
+Read `lib/onboardingScan.ts` in full, including `cidbNameMismatchWarning()`'s own fuzzy name-overlap
+heuristic - traced its real caller (`app/company/document-scan/review.tsx`) end to end, confirming
+`companyLegalName` is genuinely passed the company's own `legal_name` (`document-scan/page.tsx`),
+not left undefined. Checked `intake-card.tsx`'s `FP_STYLE` lookup (keyed by the intake fingerprint's
+own `status` field) for a TS-side/Python-side enum drift - the exact bug class Findings 302/315
+found elsewhere this session - against `classify_tender.py`'s `check_fingerprint()`, the function
+that actually produces this value: all 4 status strings it can ever return ("error", "no_baseline",
+"mismatch", "ok") are present in `FP_STYLE`, no drift. Also noted (not a fresh finding - already
+established, accepted technical debt per earlier passes this session) that `discoveryReassessment.ts`'s
+`ACTIVE_PURSUIT_STAGES` still carries the retired `"bidding"` pipeline-stage literal alongside the
+current values - harmless, since no real row has that value anymore.
+
+Clean, reportable negative - no code touched this pass, so no suite re-run needed.
+
+Backlog: unchanged.
+
+---
+
 ## This pass (2026-11-10, standing QA/robustness review): CV rotation - no new behavioral bug found after genuinely adversarial effort; confirmed Finding 306's own filename-length-bounding bug class is now fully closed in this area (the sibling track independently found and fixed its CV-side twin, Finding 311, in the same window)
 
 Oriented from `33cf4fa` (sibling track's own most recent docs commit, confirmed via `git fetch
