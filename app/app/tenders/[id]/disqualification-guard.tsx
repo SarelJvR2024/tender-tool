@@ -82,7 +82,23 @@ export async function DisqualificationGuard({
       push("B-BBEE certificate or affidavit (valid at closing)", byKey("bbbee"));
 
       if (data.positionRows.length > 0) {
-        const incomplete = data.positionRows.filter((p) => !p.person || !(p.cv || p.tenderCv?.status === "ready"));
+        // status === "ready" alone isn't enough: engine/pack/process_pack_jobs.py's
+        // own CV loop only treats a generated_cvs row as usable once
+        // storage_path_pdf is also set (process_cv_jobs.py can finish a job
+        // "ready" with that column left null when LibreOffice's docx->pdf
+        // conversion fails) - same gap as Finding 305/308 on the sibling
+        // Pack Review/Submission Plan screens, found here on the
+        // Disqualification Guard itself: without this check, a position
+        // whose CV generation produced no usable PDF read as "Clear" on the
+        // one screen meant to flag a real disqualification risk, while the
+        // actual pack build would silently fall back to the as-filed
+        // upload or include no CV at all. Written as its own inline
+        // condition (not importing pack-review-logic.ts's tenderCvUsable())
+        // since that helper is still only on open PR #211, unmerged - adopt
+        // the shared helper here once that PR lands.
+        const incomplete = data.positionRows.filter(
+          (p) => !p.person || !(p.cv || (p.tenderCv?.status === "ready" && p.tenderCv.storage_path_pdf)),
+        );
         const noPerson = data.positionRows.some((p) => !p.person);
         rows.push({
           label: "Key personnel CVs",

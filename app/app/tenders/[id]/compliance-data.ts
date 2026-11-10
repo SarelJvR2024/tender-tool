@@ -33,7 +33,7 @@ type Assignment = { position_code: string; confirmed_person_id: string | null; s
 type PersonRow = PersonFacts & { id: string };
 type ProjectRow = SanralProject & { person_id: string };
 type CvUpload = { person_id: string; mode: "as_is" | "ai_extract"; original_filename: string; created_at: string };
-type GeneratedCvRow = { position_code: string | null; status: string };
+type GeneratedCvRow = { position_code: string | null; status: string; storage_path_pdf: string | null };
 
 export const loadTenderCompliance = cache(async (tenderId: string) => {
   const supabase = await createClient();
@@ -156,7 +156,18 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
       supabase.from("people").select(`id, name, ecsa_level, ecsa_number, initial_graduated, sacpcmp_number, sacpcmp_expiry, ${CONDITIONAL_REGISTRATION_COLUMNS}` as const).in("id", personIds),
       supabase.from("projects").select("person_id, client_type, project_type, position_code, start_date, end_date").in("person_id", personIds),
       supabase.from("cv_uploads").select("person_id, mode, original_filename, created_at").in("person_id", personIds).order("created_at", { ascending: false }),
-      supabase.from("generated_cvs").select("position_code, status").eq("tender_id", tenderId),
+      // storage_path_pdf: engine/pack/process_pack_jobs.py's own CV loop
+      // only treats a generated_cvs row as usable once status='ready' AND
+      // storage_path_pdf is set (that loop's "g.get('storage_path_pdf')"
+      // filter) - process_cv_jobs.py can legitimately finish a job 'ready'
+      // with this left null when LibreOffice's docx->pdf conversion fails
+      // (the .docx still delivered, a system_alerts 'cv' warning raised).
+      // Selected here, not just status, so every reader of `tenderCv` on
+      // this shared data (disqualification-guard.tsx included) can check
+      // the real usable condition instead of status alone - see Finding
+      // 305/308's bug class (2026-11-10) on the sibling Pack Review/
+      // Submission Plan screens.
+      supabase.from("generated_cvs").select("position_code, status, storage_path_pdf").eq("tender_id", tenderId),
     ]);
     if (pplErr) console.error("people select failed (tender compliance)", pplErr);
     if (prjErr) console.error("projects select failed (tender compliance)", prjErr);
