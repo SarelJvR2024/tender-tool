@@ -23,6 +23,7 @@ verbatim, with no backslash processing at all.
 
 Run: python3 engine/test_fill_a_forms.py
 """
+import glob
 import os
 import sys
 
@@ -32,6 +33,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import fill_a_forms as fa  # noqa: E402
 from provenance import ProvenanceLog  # noqa: E402
+
+REPO_ROOT = os.path.dirname(HERE)
+REAL_TEMPLATES = sorted(glob.glob(os.path.join(REPO_ROOT, "templates", "forms", "*", "A_Forms.docx")))
 
 FAILS = []
 
@@ -160,11 +164,69 @@ def test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the
         check("append_after_label() does not raise on a control character", False, f"{type(e).__name__}: {e}")
 
 
+def test_fill_footer_position_regex_does_not_match_position_as_a_substring_of_another_word():
+    """Finding 362, 2026-11-10: position_re's trailing colon in fill_footer() is
+    deliberately optional (the real "Position" footer label has no colon in any
+    of the 6 real SANRAL templates on file, just dotted blanks right after the
+    bare word) - but with no colon required and no word boundary, "Position"
+    (case-insensitive) matched as a bare SUBSTRING of any unrelated word
+    containing it too, e.g. "positions". Reproduced directly against a
+    synthetic fixture first (no real template needed to show the mechanism),
+    then confirmed as live-reachable against every real template below."""
+    print("fill_footer() does not splice the signatory's position into the middle of an "
+          "unrelated word that merely contains 'position' as a substring (e.g. 'positions')")
+    d = docx.Document()
+    d.add_paragraph("Tenderers shall note that signatures appended to each returnable form "
+                     "represents a declaration for the specified key positions.")
+    log = ProvenanceLog(source="test")
+    fa.fill_footer(d, "Jane Signatory", "Managing Director", "Acme (Pty) Ltd", log)
+    text = d.paragraphs[0].text
+    check("the unrelated sentence is untouched byte-for-byte",
+          text == "Tenderers shall note that signatures appended to each returnable form "
+                  "represents a declaration for the specified key positions.", repr(text))
+    check("the signatory's capacity was NOT spliced into the middle of 'positions'",
+          "Managing Director" not in text, repr(text))
+
+    # Control: the real "Name:...Position..." footer shape (no colon, dots
+    # directly after the bare word) must still be filled exactly as before -
+    # the fix must not make position_re stop matching the real label.
+    d2 = docx.Document()
+    d2.add_paragraph("Name:……………………….……………Position……………………………………………….")
+    log2 = ProvenanceLog(source="test")
+    fa.fill_footer(d2, "Jane Signatory", "Managing Director", "Acme (Pty) Ltd", log2)
+    check("the real, colon-less 'Position' footer label is still filled",
+          "Managing Director" in d2.paragraphs[0].text, repr(d2.paragraphs[0].text))
+
+
+def test_fill_footer_does_not_corrupt_the_real_boilerplate_sentences_on_every_real_template():
+    """Finding 362 (continued): confirmed live-reachable, not just a synthetic
+    fixture - every one of the 6 real SANRAL A_Forms.docx templates on file
+    contains "...for the specified key positions." at least once, and
+    R.352-020 additionally has "...the individual positions of the key
+    personnel...". Before the fix, fill_footer() spliced the signatory's
+    capacity into the middle of 'positions' in both sentences, on every
+    template on file."""
+    check("at least the 6 known real A_Forms.docx templates are present to test against",
+          len(REAL_TEMPLATES) >= 6, f"found {len(REAL_TEMPLATES)}: {REAL_TEMPLATES}")
+    for path in REAL_TEMPLATES:
+        rel = os.path.relpath(path, REPO_ROOT)
+        d = docx.Document(path)
+        log = ProvenanceLog(source="test")
+        fa.fill_footer(d, "Jane Signatory", "Managing Director", "Acme (Pty) Ltd", log)
+        corrupted = [p.text for p in d.paragraphs
+                     if "Managing Director" in p.text
+                     and ("specified key position" in p.text or "individual position" in p.text)]
+        check(f"{rel}: no boilerplate 'position(s)' sentence corrupted",
+              not corrupted, corrupted)
+
+
 def main():
     test_undersigned_blank_with_an_ordinary_name_is_filled_as_before()
     test_a_name_with_a_literal_backslash_backreference_is_not_silently_corrupted()
     test_a_name_with_an_invalid_backslash_escape_does_not_crash_the_whole_fill()
     test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the_whole_fill()
+    test_fill_footer_position_regex_does_not_match_position_as_a_substring_of_another_word()
+    test_fill_footer_does_not_corrupt_the_real_boilerplate_sentences_on_every_real_template()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
