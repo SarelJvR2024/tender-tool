@@ -297,6 +297,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/pack/test_assemble_pack.py
 
+      - name: SANRAL pack assembly - Form B7 required-but-unanswered hard-stops instead of building (Finding 362)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_b7_hard_stop.py
+
       - name: Pack bridge - pack_suggestions_positions() drops a stale assignment the current workbook no longer asks for (2026-10-28 incident)
         # Standing-review-pass finding, 2026-11-06: a repo-wide sweep found 9
         # engine/test_*.py files that pass clean standalone but had never once
