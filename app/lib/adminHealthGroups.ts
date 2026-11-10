@@ -58,8 +58,26 @@
 // incomplete, not just this export. Same invisible-on-both-dashboards
 // consequence as the 2026-11-06 gaps this list's own comment above already
 // describes.
+//
+// Standing review pass, 2026-11-10 (Finding 354): the 2026-11-06/2026-11-09
+// sweeps' own "every real call site" accounting still missed one -
+// "requirements" (engine/general/requirements.py's own collect_documents(),
+// the decompression-bomb guard added 2026-11-03: a zip in a tender pack
+// that decompresses past the per-file/total-size cap). That file already
+// had a DIFFERENT, correctly-covered call site ("ocr", its OCR-crash
+// branch) - every prior sweep's own file-by-file accounting stopped at
+// finding that one and never checked whether the same file raises a SECOND,
+// distinct source too. Confirmed the only other `"requirements"` literal in
+// `engine/` is an unrelated local work-directory path
+// (process_pack_jobs.py's own `os.path.join(work_root, "requirements", ...)`
+// - not a system_alerts source at all). Same invisible-on-both-dashboards
+// consequence as every prior gap this list's own comments describe: a real,
+// live, warning-severity alert for a genuinely risky event (a would-be
+// decompression bomb inside an uploaded tender pack) read as "no open
+// alerts"/green on both /admin and /admin/telemetry, in every group, no
+// matter how many of these had actually fired.
 export const HEALTH_SOURCE_GROUPS: Record<string, string[]> = {
   "Scraper / Discovery feed": ["discovery", "scraper", "tender_changes", "tender_updates"],
-  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "ocr", "onboarding", "onboarding_scan", "worker"],
+  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "ocr", "onboarding", "onboarding_scan", "requirements", "worker"],
   "Deadline watch & daily digest": ["deadlines", "digest", "digest_send"],
 };

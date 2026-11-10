@@ -24,6 +24,15 @@ import { HEALTH_SOURCE_GROUPS } from "./adminHealthGroups";
 //   engine/onboarding/process_onboarding_jobs.py,
 //   engine/onboarding/classify_documents.py               -> "onboarding_scan"
 //   engine/pack/process_pack_jobs.py                      -> "pack"
+//   engine/general/requirements.py's own collect_documents()
+//     (added 2026-11-10 - a SECOND, distinct source this file already had
+//     alongside "ocr" above: its decompression-bomb guard - a zip in a
+//     tender pack that decompresses past the per-file/total-size cap -
+//     records under "requirements", not "ocr". Missed by every prior sweep
+//     here because the comment line right above already named this exact
+//     file for its OTHER call site, so grepping by file name alone found
+//     "ocr" and moved on without checking for a second, different literal
+//     in the same file)                                   -> "requirements"
 //   engine/discovery/tender_changes.py                    -> "tender_changes"
 //   engine/discovery/watch_tender_updates.py              -> "tender_updates"
 //   engine/worker/run_bridges.py                          -> "worker", and (its
@@ -45,6 +54,7 @@ const REAL_SYSTEM_ALERT_SOURCES = [
   "onboarding",
   "onboarding_scan",
   "pack",
+  "requirements",
   "tender_changes",
   "tender_updates",
   "worker",
