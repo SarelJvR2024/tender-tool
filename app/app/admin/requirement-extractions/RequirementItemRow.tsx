@@ -108,6 +108,7 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
         verdict,
         correctedValueRaw: verdict === "corrected" ? correctedValueRaw : null,
         note: note || null,
+        companyId: row.companyId,
       });
       if (!result.ok) {
         setError(result.error);

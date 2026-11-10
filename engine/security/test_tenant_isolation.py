@@ -1066,6 +1066,62 @@ select 1;""")
     check(ok, f"B's owner can invite into B's own company ({err.splitlines()[0] if err else 'ok'})")
 
 
+def part2_requirement_review_company_scope(db):
+    """Finding 335 (0128): platform_admin_low_confidence_requirement_items()'s
+    own exclusion (added by 0127/Finding 318) matched an already-reviewed
+    item by (tender_id, item_key) alone - item_key (0076) has no company_id
+    in its own hash, and requirement_extraction_reviews carried no
+    company_id column either. So reviewing ONE company's own private-
+    document-override copy of an item silently retired the IDENTICAL item
+    for every OTHER company's own override on the same tender, and for the
+    shared manifest too - none of which were actually reviewed, and whose
+    own confidence/quote never changes by any other mechanism (requirements.
+    py's _apply_past_corrections(), the only other consumer, only ever lowers
+    a DIFFERENT future item's confidence, never this one's). 0128 added
+    company_id to both the review table and the exclusion's join condition.
+    This is the common case, not an edge case: 0032's own header says a
+    company's override is built by reading the SAME shared buyer documents
+    plus that company's own private ones, so most "forms"/"buyer_forms"/
+    "returnables"/"roles" items are byte-identical across the shared
+    manifest and every company's own override."""
+    print("\n[20] Admin Quality Scout review queue: reviewing A's own copy of an item doesn't silently retire B's identical copy or the shared manifest's")
+    i = {k: str(uuid.uuid4()) for k in ("uAdmin", "A", "B", "t")}
+    uAdmin, A, B, t = i["uAdmin"], i["A"], i["B"], i["t"]
+    item = '{"document": "MBD 1", "quote": "Ambiguous clause about BEE status", "confidence": 40, "confidence_reason": "x"}'
+    manifest = f'{{"forms": [{item}]}}'
+    key = db.one(f"select md5('{t}' || '|forms|MBD 1|Ambiguous clause about BEE status')")
+    db.one(f"""
+insert into auth.users (id, email) values ('{uAdmin}', 'iso20admin@example.test');
+insert into platform_admins (user_id) values ('{uAdmin}');
+insert into companies (id, legal_name) values ('{A}', 'Iso20 A'), ('{B}', 'Iso20 B');
+insert into tenders (id, slug, title, family, document_requirements) values
+  ('{t}', 'iso20-{t[:8]}', 'Iso20 shared tender', 'general', '{manifest}'::jsonb);
+insert into tender_packs (company_id, tender_id, document_requirements) values
+  ('{A}', '{t}', '{manifest}'::jsonb), ('{B}', '{t}', '{manifest}'::jsonb);
+select 1;""")
+
+    def queue_rows():
+        out = db.one(f"select coalesce(string_agg(coalesce(company_id::text, 'shared'), ',' order by company_id), '') "
+                     f"from platform_admin_low_confidence_requirement_items(60::smallint, 200) where tender_id = '{t}'", uAdmin)
+        return set(out.split(",")) if out else set()
+
+    before = queue_rows()
+    check(before == {"shared", A, B}, f"before any review: shared manifest + both companies' copies all queued (got {before})")
+
+    db.one(f"select submit_requirement_extraction_review('{t}', '{key}', 'forms', '{item}'::jsonb, "
+          f"'false_positive', null, 'reviewed only in A''s own context', '{A}')", uAdmin)
+    after_a = queue_rows()
+    check(A not in after_a, "A's own copy leaves the queue once A's copy is reviewed")
+    check(B in after_a, "B's identical, never-reviewed copy is NOT silently retired by A's review (Finding 335)")
+    check("shared" in after_a, "the shared manifest's identical, never-reviewed copy is NOT silently retired by A's review (Finding 335)")
+
+    db.one(f"select submit_requirement_extraction_review('{t}', '{key}', 'forms', '{item}'::jsonb, "
+          f"'correct', null, 'shared manifest reviewed too', null)", uAdmin)
+    after_shared = queue_rows()
+    check("shared" not in after_shared, "the shared manifest's own copy leaves the queue once IT is reviewed (Finding 318 non-regression)")
+    check(after_shared == {B}, f"only B's own, still-unreviewed copy remains queued (got {after_shared})")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1075,6 +1131,7 @@ def main():
         part2_deletion(Db(psql))
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
+        part2_requirement_review_company_scope(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")

@@ -23,6 +23,13 @@ export async function submitRequirementReview(input: {
   verdict: "correct" | "corrected" | "false_positive";
   correctedValueRaw: string | null; // only meaningful when verdict is "corrected"
   note: string | null;
+  // Which manifest this verdict is actually about - null for the shared
+  // manifest, a company id for that company's own private-document
+  // override (0032). Finding 335/0128: item_key alone has no company_id in
+  // its own hash, so without this the review queue's own exclusion
+  // (0127/Finding 318) silently retired a DIFFERENT company's (or the
+  // shared manifest's) identical, never-reviewed copy of the same item.
+  companyId: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -50,6 +57,7 @@ export async function submitRequirementReview(input: {
     p_verdict: input.verdict,
     p_corrected_value: correctedValue,
     p_note: input.note?.trim() || null,
+    p_company_id: input.companyId,
   });
   if (error) {
     console.error("submit_requirement_extraction_review rpc failed", error);
