@@ -293,6 +293,29 @@ def produce(document_type, template, facts, out_dir, log, company=None, logo_pat
             log.missing(f"{document_type}.uploaded", reason)
             return {"status": "failed", "path": None, "reason": reason, "method": "uploaded"}
         fname = re.sub(r"[^A-Za-z0-9._ ()-]+", "_", template.get("original_filename") or os.path.basename(src))
+        # Same class of bug as generate_cv.py's _safe_name() (Finding 227):
+        # sanitizing characters is not the same as bounding length. The
+        # TypeScript side (app/company/actions.ts's saveDocumentTemplate())
+        # stores the raw, untruncated upload filename verbatim as
+        # original_filename - only the STORAGE PATH goes through
+        # safeFileName.ts's own .slice(0, 120); this column doesn't. An
+        # upload whose name is thousands of characters long (plausible: a
+        # crafted multipart request need not go through a real browser file
+        # picker's own practical length limits) sailed straight through the
+        # character-only regex above and produced an OSError: File name too
+        # long the instant shutil.copyfile() tried to create it - and
+        # assemble_pack.py's own call into this function has no try/except
+        # around it (same exposure the write_docx() control-character fix,
+        # just above, already documents for this exact call path), so this
+        # crashed the WHOLE SANRAL pack build, not just this one letter.
+        # 120, matching safeFileName.ts's own convention exactly (not
+        # generate_cv.py's 80 - that function returns only a name PORTION
+        # with more suffixes appended after it; here the sanitized name IS
+        # the whole filename). Extension kept intact so downstream PDF
+        # conversion still recognises the file type.
+        if len(fname) > 120:
+            stem, ext = os.path.splitext(fname)
+            fname = stem[:120 - len(ext)] + ext
         dest = os.path.join(out_dir, f"{document_type}__{fname}")
         shutil.copyfile(src, dest)
         if _sha256(dest) != _sha256(src):

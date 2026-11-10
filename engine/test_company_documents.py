@@ -231,6 +231,40 @@ def run(out):
         check("Routine ad-hoc maintenance" in got and "R396 Section 1" in got,
               f"the real text either side of the control character survives, just the control char removed ({got!r})")
 
+    print("6d. An extremely long uploaded filename does not crash the whole SANRAL pack build")
+    # Finding (2026-11-10, SANRAL pack rotation): same bug class as
+    # generate_cv.py's _safe_name() (Finding 227) - sanitizing CHARACTERS is
+    # not the same as bounding LENGTH. app/company/actions.ts's
+    # saveDocumentTemplate() stores the raw, untruncated upload filename
+    # verbatim into company_document_templates.original_filename - only the
+    # STORAGE PATH goes through safeFileName.ts's own .slice(0, 120), this
+    # column doesn't. A crafted multipart request (no real browser file
+    # picker required) can set that filename to any length. produce()'s own
+    # character-only regex let it through unbounded, and
+    # assemble_pack.py's own call to produce_letter() has no try/except
+    # around it, so an OSError: File name too long here crashed the WHOLE
+    # SANRAL pack build, not just the authority letter - the identical
+    # "no try/except on this one call path" exposure 6c just demonstrated
+    # for a control character.
+    own_long = os.path.join(out, "long_name_src.docx")
+    d = docx.Document()
+    d.add_paragraph("Board resolution text.")
+    d.save(own_long)
+    p = profile("Long Filename Engineers (Pty) Ltd")
+    p["document_templates"] = {"authority_to_sign": {
+        "mode": "uploaded", "path": own_long, "original_filename": ("A" * 5000) + ".docx"}}
+    log = ProvenanceLog("test")
+    try:
+        r = fill_authority_letter.produce_letter(p, os.path.join(out, "long_name"), p["key_people"][0], TENDER, RFP, log)
+        crashed = False
+    except OSError:
+        crashed = True
+    check(not crashed, "an extremely long uploaded filename must not crash with OSError: File name too long")
+    if not crashed:
+        check(r["status"] == "uploaded", f"the letter is still produced ({r.get('status')})")
+        check(r["path"].endswith(".docx"), f"the .docx extension survives truncation ({r['path']})")
+        check(len(os.path.basename(r["path"])) <= 255, f"the final filename fits a real filesystem ({len(os.path.basename(r['path']))} chars)")
+
 
 def run_db(psql, out):
     sys.path.insert(0, os.path.join(HERE, "intake"))

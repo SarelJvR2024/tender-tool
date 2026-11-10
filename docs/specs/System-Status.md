@@ -16552,6 +16552,56 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): fix - Finding 306, `engine/company_documents.py`'s `produce()` sanitized an uploaded company letter's filename by CHARACTER only, never by LENGTH - the identical bug class already fixed once in this exact engine (`generate_cv.py`'s `_safe_name()`, Finding 227) but present, unfixed, in a different file - an extremely long `original_filename` crashes with `OSError: File name too long`, and `assemble_pack.py`'s own call into this function has no try/except around it, so this crashes the WHOLE SANRAL pack build, not just the authority letter
+
+Oriented from `da6972d` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this push).
+
+Rotation: SANRAL pack. Mention-count survey put `fill_authority_letter.py` (17 mentions, 83 lines)
+lowest - a thin CLI wrapper calling `company_documents.py` for the real logic, so moved there next.
+That module's own comments already document an extensive history (a SAST-date fix, Finding 227's
+own filename-truncation precedent cited BY NAME, and a 2026-11-06 control-character fix explicitly
+noting "assemble_pack.py's own call to produce_letter() has no try/except around it" for a
+DIFFERENT code path in the same function family). Reading `produce()`'s "uploaded" branch with that
+exact exposure already proven true elsewhere in the same file: its filename sanitizer,
+`re.sub(r"[^A-Za-z0-9._ ()-]+", "_", ...)`, strips forbidden characters but never bounds length -
+the identical gap Finding 227 already fixed once in this engine, in a different function
+(`generate_cv.py`'s `_safe_name()`), just not here.
+
+Traced to its real source: `app/company/actions.ts`'s `saveDocumentTemplate()` stores the raw,
+untruncated `file.name` into `company_document_templates.original_filename` - only the storage path
+goes through `safeFileName.ts`'s own `.slice(0, 120)`. A crafted multipart request need not come
+from a real browser file picker. Confirmed live: a real `.docx` source plus `original_filename:
+"A"*5000 + ".docx"` into the real, unmodified `produce()` - pre-fix, `OSError: File name too long`
+from `shutil.copyfile()`, propagating straight out of `assemble_pack.py`'s own unprotected call site
+(every other failure path in this function returns normally with a `status` field, so there was
+never a reason to wrap this call) and aborting the whole SANRAL pack build for that company.
+
+Fix: cap the sanitized filename at 120 characters (matching `safeFileName.ts`'s own convention
+exactly, not `generate_cv.py`'s smaller 80 - that function returns only a name portion with further
+suffixes appended after it), splitting the extension off first and re-appending it after truncating
+the stem so it survives intact (downstream PDF conversion relies on it).
+
+Verified red-then-green: added case "6d." to `test_company_documents.py`, right next to the
+sibling "6c." control-character case, same style. **Red:** reverted `company_documents.py` only,
+re-ran `python3 test_company_documents.py` - `1 failure(s)`, exactly the new case. **Green:**
+reapplied, re-ran - `0 failure(s)`. `python3 -m py_compile` clean. Regression: `test_assemble_pack.py`/
+`test_process_pack_jobs.py` (the two real callers) both re-run directly, both `0 failure(s)`.
+
+Not escalated to a PR: small, safe, self-contained Python fix (one length cap on one existing
+sanitizer, no new failure branch) - no RLS, no migration, no money path, no worker-image change.
+Pushed directly to `main`.
+
+Left as-is, not fixed this pass: the TS-side `original_filename` column itself is still stored raw
+by `saveDocumentTemplate()` - a related, smaller inconsistency, but the engine-side fix here already
+prevents the crash regardless of what that column ever holds, so widening its own write path is a
+separate TS-side call this pass didn't need to make.
+
+Backlog: unchanged. `git fetch origin main` immediately before writing this entry and again
+immediately before pushing, both clean - no sibling commit landed in between.
+
+---
+
 ## This pass (2026-11-09, standing QA/robustness review): fix - Finding 295, `engine/discovery/download_documents.py`'s `download_one()` built its failure `error` field with `.get("html", "no link returned")` - a default that only fires when the key is ABSENT, not when it's present-but-null - and `main()`'s own status-line formatting hit the identical trap a second time, crashing the WHOLE batch run with a bare `TypeError` outside any per-slug handling the moment a response is shaped `{"success": false, "html": null}`
 
 Oriented from `b9126b6` (sibling track's own most recent docs commit, confirmed via `git fetch
