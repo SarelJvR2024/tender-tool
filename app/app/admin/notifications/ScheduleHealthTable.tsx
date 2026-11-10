@@ -25,10 +25,10 @@ export function ScheduleHealthTable({ rows }: { rows: ScheduleRow[] }) {
   return (
     <>
       <p className="mb-4 text-[13px] text-muted-foreground">
-        All 9 GitHub Actions workflows this product relies on to send a notification - not 6 (the brief&apos;s own
-        assumption didn&apos;t match this repo). Status is a heartbeat each workflow writes to itself (migration
-        0099) as its own first and last step - not a live read of the GitHub Actions API, which the deployed app
-        has no credential for.
+        All {rows.length} GitHub Actions workflows this product relies on to send a notification - not 6 (the
+        brief&apos;s own assumption didn&apos;t match this repo). Status is a heartbeat each workflow writes to
+        itself (migration 0099) as its own first and last step - not a live read of the GitHub Actions API, which
+        the deployed app has no credential for.
       </p>
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="overflow-x-auto">
