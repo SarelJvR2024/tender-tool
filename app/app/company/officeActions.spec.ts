@@ -148,3 +148,41 @@ describe("saveCompanyOffice - new office (insert branch, no zero-row check neede
     expect(url).toBe("/company?saved=office#offices");
   });
 });
+
+// Finding 322: deleteCompanyOffice() had the identical "plain update/delete
+// twin" shape as saveCompanyOffice() above - "company_offices: tenant
+// isolation" (0015) is the same USING-only policy, so the same
+// membership-revoked-mid-request race makes a zero-row-match delete
+// indistinguishable from a real one by `error` alone. The update branch
+// (saveCompanyOffice, tested above) was swept for this on 2026-11-07; the
+// delete branch in the same file was missed until now.
+describe("deleteCompanyOffice - membership revoked mid-request (company_offices delete matches zero rows)", () => {
+  it("does not report success when the delete matches zero rows", async () => {
+    supabaseState.current = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()'s own company_members read
+      [{ data: null, error: null }], // delete().eq("id", id).select("id").maybeSingle() - zero-row RLS match
+    ]);
+
+    const { deleteCompanyOffice } = await import("./officeActions");
+
+    const url = await expectRedirect(deleteCompanyOffice(formDataWith({ office_id: "office-1" })));
+
+    expect(url).not.toContain("saved=office");
+    expect(url).toContain("/company?error=");
+  });
+});
+
+describe("deleteCompanyOffice - real delete still succeeds", () => {
+  it("removes the office normally when the delete genuinely matches the row", async () => {
+    supabaseState.current = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "office-1" }, error: null }], // real match
+    ]);
+
+    const { deleteCompanyOffice } = await import("./officeActions");
+
+    const url = await expectRedirect(deleteCompanyOffice(formDataWith({ office_id: "office-1" })));
+
+    expect(url).toBe("/company?saved=office#offices");
+  });
+});

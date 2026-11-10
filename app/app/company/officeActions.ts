@@ -90,10 +90,22 @@ export async function deleteCompanyOffice(formData: FormData) {
   const supabase = await createClient();
   const id = str(formData, "office_id");
   if (!id) redirect("/company");
-  const { error } = await supabase.from("company_offices").delete().eq("id", id);
+  // .select("id").maybeSingle() matters here exactly as it does on the
+  // update branch above (see its own comment): "company_offices: tenant
+  // isolation" (0015) is USING-only and re-evaluated against the row at
+  // delete time, so the same membership-revoked-mid-request race makes a
+  // zero-row-match delete indistinguishable from a real one by `error`
+  // alone. This delete branch was missed when the update branch above was
+  // swept for this (standing review, 2026-11-07) - without the check, a
+  // delete silently blocked by RLS still redirected with `saved=office`,
+  // telling the user the office was removed when it was not.
+  const { data: deleted, error } = await supabase.from("company_offices").delete().eq("id", id).select("id").maybeSingle();
   if (error) {
     console.error("company_offices delete failed", error);
     fail("Could not delete this office - try again. If it keeps happening, let us know.");
+  }
+  if (!deleted) {
+    fail("That office is no longer there - it may have been removed. Refresh and try again.");
   }
   revalidatePath("/company");
   redirect("/company?saved=office#offices");
