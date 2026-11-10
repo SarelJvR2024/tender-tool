@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { IMPERSONATION_COOKIE } from "@/lib/impersonation";
 
 /**
  * Refreshes the Supabase session cookie on every request, redirects
@@ -15,6 +16,29 @@ import { NextResponse, type NextRequest } from "next/server";
  * two real screens (spec v3 Batch 3: Screen 1 creates the company, Screen 2
  * is the optional "add documents" step right after) and sends a member
  * anywhere else straight to /dashboard.
+ *
+ * Finding 356, standing review pass 2026-11-10: the company_members check
+ * below always authenticates against the REAL signed-in user's own `sb-*`
+ * cookies, by design - correct, and NOT the already-documented impersonation
+ * session-refresh gap (that one is about the impersonated session's OWN
+ * tokens going stale, a separate problem in lib/supabase/server.ts). But
+ * during an active "View Tenant Workspace" impersonation session (Admin
+ * Command Center Phase 4), the real signed-in user IS the platform admin -
+ * and platform_admins (migration 0043) is deliberately "Not a customer
+ * role - a company owner is NOT a platform admin", so a dedicated admin
+ * account genuinely has no company_members row of its own. With no guard
+ * here, that force-redirected EVERY guarded request made while
+ * impersonating (i.e. every page "View Tenant Workspace" exists to let an
+ * admin view) to /onboarding - which itself renders via the swapped-in
+ * IMPERSONATED session (lib/supabase/server.ts's createClient(), unlike
+ * this middleware, DOES honor the tt_impersonation cookie) and, once the
+ * target company's own onboarding is already done, redirects straight back
+ * to the original guarded path - an infinite redirect loop, breaking
+ * impersonation entirely for any admin account with no company of its own.
+ * Skipped here while impersonating: the identity this check cares about is
+ * the real admin's, who is never the one being onboarded; the impersonated
+ * session's own onboarding state needs no re-check - platform_admin_start_
+ * impersonation() only ever targets a company that already has a member.
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -66,7 +90,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && guarded) {
+  const impersonating = Boolean(request.cookies.get(IMPERSONATION_COOKIE)?.value);
+
+  if (user && guarded && !impersonating) {
     const { data: membership } = await supabase
       .from("company_members")
       .select("company_id")
