@@ -277,6 +277,48 @@ def test_readvertisement_duplicate_title_picks_most_recent_cancellation():
           len(single) == 1 and single[0]["old_value"]["contract_number"] == "OLD-001", single)
 
 
+def test_eskom_notice_matches_the_live_relisting_not_an_arbitrary_duplicate():
+    print("Finding 329: the SAME buyer reference can legitimately appear twice in `releases` "
+          "- relistings() (this same module) exists specifically because a buyer can list the "
+          "same bid number again under a new ocid with a later closing date, both still "
+          "'Published'. eskom_notices() reads that exact same `releases` list and normalizes "
+          "the exact same contract_number field, so an Eskom award/bidders-list/regret notice "
+          "must attach to the MOST RECENT (live) listing, not whichever duplicate happened to "
+          "come first in `releases`' own order")
+    ref = "E1234GXMWP-2026"
+
+    def dated_release(ocid, published_date, closing_date):
+        r = _release(ocid=ocid, contract_number=ref, closing_date=closing_date)
+        r["published_date"] = published_date
+        return r
+
+    old = dated_release("ocds-old-1", "2026-08-01T10:00:00+02:00", "2026-10-01T10:00:00+02:00")
+    new = dated_release("ocds-new-2", "2026-11-01T10:00:00+02:00", "2026-12-01T10:00:00+02:00")
+
+    notice = {"notice_kind": "award", "refers_to_reference": ref,
+              "published_date": "2026-11-05T09:00:00+02:00", "title": "Award notice",
+              "source_url": "https://bulletin/1", "source_id": "n1", "contract_number": ref + "award"}
+
+    out_old_first = tc.eskom_notices([notice], [old, new])
+    out_new_first = tc.eskom_notices([notice], [new, old])
+    check("old-listing-first input still matches the NEW (live) release",
+          out_old_first and out_old_first[0]["release_key"] == new["ocid"],
+          out_old_first[0]["release_key"] if out_old_first else "no event")
+    check("new-listing-first input matches the same NEW (live) release - not order-dependent",
+          out_new_first and out_new_first[0]["release_key"] == new["ocid"],
+          out_new_first[0]["release_key"] if out_new_first else "no event")
+
+    # Single, non-duplicated reference must still match exactly as before.
+    single = tc.eskom_notices([notice], [new])
+    check("single matching release still matches (no regression from list-grouping)",
+          single and single[0]["release_key"] == new["ocid"], single)
+
+    # No matching release at all must still fall back to the notice's own identity.
+    orphan = tc.eskom_notices([notice], [])
+    check("no matching release falls back to the notice itself, not a crash",
+          orphan and orphan[0]["release_key"] == f"None:{ref}award", orphan)
+
+
 def main():
     test_oscillating_closing_date_every_occurrence_reported()
     test_same_day_retry_still_deduplicates()
@@ -285,6 +327,7 @@ def main():
     test_same_day_multiple_real_oscillations_all_reported()
     test_cancelled_tab_fetch_failure_alerts_sarel()
     test_readvertisement_duplicate_title_picks_most_recent_cancellation()
+    test_eskom_notice_matches_the_live_relisting_not_an_arbitrary_duplicate()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

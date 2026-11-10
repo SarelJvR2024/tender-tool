@@ -344,10 +344,33 @@ def portal_bidders(closed_rels):
 
 def eskom_notices(notices, releases):
     """Eskom notices -> events on the tender each one refers to (by
-    reference), or on the notice itself when that tender isn't in the feed."""
+    reference), or on the notice itself when that tender isn't in the feed.
+
+    Grouped into a list per reference, not idx.setdefault(key, r) (the
+    first-wins lookup this replaced): relistings() (this same module, a few
+    functions up) exists specifically because the SAME buyer can list the
+    SAME bid number twice as two different, genuinely live releases (ocid
+    differs, closing date differs - "Seen live 2026-10-17" there) - this
+    function reads that exact same `releases` list and normalizes the exact
+    same contract_number field (sh.norm_ref), so it hits the identical
+    duplicate-key universe, with no handling at all. The old setdefault()
+    silently kept whichever duplicate happened to come FIRST in `releases`
+    order - an artifact of that source's own read/merge order, not a
+    deliberate "most relevant" choice - so an Eskom award/bidders-list/
+    regret notice could silently attach to a stale, superseded listing
+    while the actual current relisting never gets it. Reproduced directly:
+    two same-reference releases (old listing published Aug, superseded by a
+    Dec relisting under a new ocid) - the old setdefault() matched the OLD
+    one whenever it happened to read first, and matched the NEW one if the
+    same two releases were simply read in the other order - purely a
+    function of input order, not of which listing is actually live. Fixed
+    by picking the most recently published candidate (same (published_date,
+    ocid) tie-break relistings() already uses to find its own "newest" -
+    deliberately consistent with that convention rather than inventing a
+    second one in the same file)."""
     idx = {}
     for r in releases:
-        idx.setdefault(sh.norm_ref(r.get("contract_number")), r)
+        idx.setdefault(sh.norm_ref(r.get("contract_number")), []).append(r)
     out = []
     cutoff = datetime.datetime.now(sh.SAST) - NOTICE_LOOKBACK
     for n in notices:
@@ -355,7 +378,9 @@ def eskom_notices(notices, releases):
         published = sh.parse_sast(n.get("published_date"))
         if not ctype or (published and published < cutoff):
             continue
-        target = idx.get(sh.norm_ref(n.get("refers_to_reference"))) or n
+        candidates = idx.get(sh.norm_ref(n.get("refers_to_reference"))) or []
+        target = max(candidates, key=lambda r: (r.get("published_date") or "", r.get("ocid") or "")) \
+            if candidates else n
         base = dict(target)
         label = n["notice_kind"].replace("_", " ")
         out.append(_event(base, ctype,
