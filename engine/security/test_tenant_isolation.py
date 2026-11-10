@@ -1122,6 +1122,66 @@ select 1;""")
     check(after_shared == {B}, f"only B's own, still-unreviewed copy remains queued (got {after_shared})")
 
 
+def part2_engine_telemetry_latency_scope(db):
+    """Finding 336 (0129): platform_admin_engine_telemetry() (0101) has no
+    GROUP BY, so each of its 5 UNION ALL branches - a plain aggregate query -
+    always returns exactly one row, even when its own `where ... and
+    is_platform_admin()` matches zero rows (count(*) filter over a
+    zero-row-matching WHERE is 0, not absent). That correctly zeroes
+    queued_count/active_count/completed_24h_count/failed_24h_count for a
+    non-admin, since each is itself a count(*) filter over that same WHERE -
+    but avg_latency_seconds in every branch was a SEPARATE scalar subquery
+    with no is_platform_admin() check inside it at all, so it ran
+    unconditionally against the real table and returned the real,
+    platform-wide average to anyone signed in, admin or not."""
+    print("\n[22] Engine telemetry: avg_latency_seconds can't leak the real platform-wide average to a non-admin")
+    i = {k: str(uuid.uuid4()) for k in ("uNonAdmin", "A", "pA", "t", "packA")}
+    uNonAdmin, A, pA, t, packA = i["uNonAdmin"], i["A"], i["pA"], i["t"], i["packA"]
+    db.one(f"""
+insert into auth.users (id, email) values ('{uNonAdmin}', 'iso22@example.test');
+insert into companies (id, legal_name) values ('{A}', 'Iso22 A');
+insert into company_members (company_id, user_id, role) values ('{A}', '{uNonAdmin}', 'owner');
+insert into people (id, company_id, name) values ('{pA}', '{A}', 'Iso22 Person');
+insert into tenders (id, slug, title, closing_date, family) values
+  ('{t}', 'iso22-{t[:8]}', 'Iso22 tender', now() + interval '30 days', 'Conventional Consultant Tender');
+insert into tender_packs (id, company_id, tender_id) values ('{packA}', '{A}', '{t}');
+insert into pack_generation_jobs (company_id, tender_id, tender_pack_id, engine, status, requested_at, completed_at) values
+  ('{A}', '{t}', '{packA}', 'sanral', 'ready', now() - interval '2 hours', now() - interval '1 hour');
+insert into generated_cvs (company_id, person_id, format, detail, status, requested_at, completed_at) values
+  ('{A}', '{pA}', 'world_bank', 'summary', 'ready', now() - interval '2 hours', now() - interval '1 hour');
+select 1;""")
+
+    check(db.one("select is_platform_admin()::text", uNonAdmin) == "false", "the probing user is genuinely not a platform admin")
+    real_avg = db.one(f"select avg(extract(epoch from (completed_at - requested_at)))::text "
+                      f"from pack_generation_jobs where engine = 'sanral' and status = 'ready' "
+                      f"and completed_at >= now() - interval '7 days'")
+    check(real_avg not in ("", "null"), f"sanity: a real platform-wide average exists to probe for ({real_avg})")
+
+    for key in ("pack_sanral", "cv"):
+        row = db.one(f"select coalesce(queued_count::text, 'null') || '|' || coalesce(avg_latency_seconds::text, 'null') "
+                     f"from platform_admin_engine_telemetry() where queue_key = '{key}'", uNonAdmin)
+        count_part, avg_part = row.split("|", 1)
+        check(count_part == "0", f"{key}: a non-admin's queued_count is zeroed, not leaked ({count_part})")
+        check(avg_part == "null", f"{key}: a non-admin's avg_latency_seconds is null, not the real platform-wide average (Finding 336, got {avg_part})")
+
+    # The real admin check, with a genuinely separate admin user so this
+    # can't be confused with the non-admin probe above - also guards against
+    # an over-tight fix that would null out avg_latency_seconds for everyone.
+    uAdmin = str(uuid.uuid4())
+    db.one(f"insert into auth.users (id, email) values ('{uAdmin}', 'iso22admin@example.test'); "
+          f"insert into platform_admins (user_id) values ('{uAdmin}'); select 1;")
+    for key in ("pack_sanral", "cv"):
+        row = db.one(f"select coalesce(completed_24h_count::text, 'null') || '|' || coalesce(avg_latency_seconds::text, 'null') "
+                     f"from platform_admin_engine_telemetry() where queue_key = '{key}'", uAdmin)
+        count_part, avg_part = row.split("|", 1)
+        # Not an exact-equality check: this scratch database accumulates real
+        # rows from every earlier part2_* test run against the same tables,
+        # so "at least this test's own seeded row" (>= 1), not "exactly 1",
+        # is what actually proves the admin isn't being over-blocked.
+        check(count_part.isdigit() and int(count_part) >= 1, f"{key}: a real platform admin still sees a real, non-zero completed_24h_count, not over-blocked ({count_part})")
+        check(avg_part not in ("null", ""), f"{key}: a real platform admin still sees the real avg_latency_seconds, not over-blocked ({avg_part})")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -1132,6 +1192,7 @@ def main():
         part2_employee_role(Db(psql))
         part2_team_billing_rpcs(Db(psql))
         part2_requirement_review_company_scope(Db(psql))
+        part2_engine_telemetry_latency_scope(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
