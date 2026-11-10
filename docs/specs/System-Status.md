@@ -16552,6 +16552,51 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): non-SANRAL pack rotation - no new behavioral bug found after genuinely adversarial effort; one already-fixed pattern (filename length-bounding, Finding 306's own bug class) confirmed to already be correctly applied everywhere else in this area
+
+Oriented from `aaaaf25` (own immediately-preceding pass: Finding 306, `company_documents.py`'s
+filename-length crash). `git fetch origin main` found no new sibling commits either before starting
+or immediately before writing this entry - `main` stayed at `aaaaf25` throughout.
+
+Swept the least-covered files in the area first: `general-pack-review-actions.ts` (59 lines, clean -
+a simple upsert into the shared `pack_review_confirmations` table, no gap), `general-pack-review.tsx`
+(231 lines, clean - its "I've reviewed this" button being unconditional on outstanding "Fix" items
+is deliberate, confirmed via `general-actions.ts`'s own comment: "Additive to every existing check
+above... this only blocks an UNREVIEWED compile", the real content gate lives elsewhere). Re-checked
+`general-pack-review-logic.ts` (unchanged since the Finding 234 cycle's own full read) - nothing new.
+
+Read `engine/general/submission_plan.py` (261 lines) in full - a pure, already-well-hardened
+function with its own dated history (the CIDB-generic-vs-dedicated-step false-"ready" fix,
+2026-10-26; the by-hand-vs-attach form-status fix, same date) - every status value assigned
+anywhere in `compile_plan()` was cross-checked against `STATUS_ORDER` (the list `steps.sort()`
+indexes into, which would raise `ValueError` on a stray unlisted status) and all 6 are consistent.
+
+Checked `fill_flat_pdf.py`'s overlay-placement boundary handling (`_fit()`, used to auto-shrink text
+to fit a form cell or dotted-line run) - already correctly returns `None` on "even at minimum size,
+doesn't fit", and every one of its 3 call sites already checks for that and falls back to a clean
+"not_placed: too long for the cell/dotted line" result rather than crashing. Checked its own
+`_pdf_str()` cp1252/WinAnsiEncoding fix (already closes the smart-quotes/em-dash gap its own comment
+documents) - the remaining "truly unencodable character becomes '?'" fallback is an inherent
+limit of this font-metrics-table-only (no real font library) architecture, not a fresh, actionably
+fixable gap. Cross-checked the two independent SA-phone-number-splitting regexes
+(`fill_flat_pdf.py`'s cell-splitting, `fill_sbd_docx.py`'s `fill_phone_cells()`) for the exact kind
+of "two copies of the same logic drift apart" bug this session has repeatedly found elsewhere -
+both accept the identical `0\d{2}` 3-digit-code shape, no divergence.
+
+Specifically checked whether Finding 306's own bug class (character-only sanitization, no length
+bound) recurs anywhere else in this area, since that's exactly the kind of once-fixed-elsewhere gap
+this session's sibling-comparison technique keeps finding: `build_general_pack.py`'s own two
+filename-building sites (lines 408/440) already apply `[:60]` after their character-sanitizing
+regex - confirmed already correct, not a second instance of the gap Finding 306 just closed in
+`company_documents.py`. The general (non-SANRAL) engine does not call `company_documents.py` at all
+(confirmed via grep - zero hits), so Finding 306's own fix has no bearing here either way.
+
+Clean, reportable negative - no code touched this pass, so no suite re-run needed.
+
+Backlog: unchanged.
+
+---
+
 ## This pass (2026-11-10, standing QA/robustness review): fix - Finding 306, `engine/company_documents.py`'s `produce()` sanitized an uploaded company letter's filename by CHARACTER only, never by LENGTH - the identical bug class already fixed once in this exact engine (`generate_cv.py`'s `_safe_name()`, Finding 227) but present, unfixed, in a different file - an extremely long `original_filename` crashes with `OSError: File name too long`, and `assemble_pack.py`'s own call into this function has no try/except around it, so this crashes the WHOLE SANRAL pack build, not just the authority letter
 
 Oriented from `da6972d` (sibling track's own most recent docs commit, confirmed via `git fetch
