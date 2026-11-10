@@ -68,4 +68,26 @@ describe("returnablesWindowCandidates", () => {
       expect(returnablesWindowCandidates([active], "2026-10-27", businessDaysBetweenFn)).toHaveLength(1);
     }
   });
+
+  // Finding 346: the function's own `endDateStr` argument to
+  // businessDaysBetweenFn must be the tender's real SAST calendar closing
+  // day (closingDayOf()), never a raw `.slice(0, 10)` of the UTC
+  // timestamptz PostgREST returns. A closing instant of 2026-11-13T23:00:00Z
+  // is SAST 2026-11-14T01:00 - its real SAST closing day is "2026-11-14",
+  // but a naive UTC slice of the raw string reads "2026-11-13", one
+  // calendar day early.
+  it("passes the tender's real SAST closing day to businessDaysBetweenFn, not a naive UTC slice of a late-UTC closing instant", () => {
+    const lateUtcClosing: ReturnablesWindowTenderRow = {
+      ...tender,
+      id: "tender-late-utc",
+      closing_date: "2026-11-13T23:00:00+00:00",
+    };
+    let capturedEndDateStr: string | null = null;
+    const capturingFn = (_startDateStr: string, endDateStr: string) => {
+      capturedEndDateStr = endDateStr;
+      return 4; // inside the window regardless, so the candidate is produced either way
+    };
+    returnablesWindowCandidates([lateUtcClosing], "2026-11-10", capturingFn);
+    expect(capturedEndDateStr).toBe("2026-11-14");
+  });
 });

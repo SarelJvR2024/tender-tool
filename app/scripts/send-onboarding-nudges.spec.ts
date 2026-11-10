@@ -14,7 +14,7 @@
 // the very next day's run no longer matches, and nothing in the logs would
 // ever show why.
 import { describe, expect, it, vi } from "vitest";
-import { lifecycleRecipients, unsubscribeUrlFor, allCompanies } from "./send-onboarding-nudges.ts";
+import { lifecycleRecipients, unsubscribeUrlFor, allCompanies, companySubscriptions } from "./send-onboarding-nudges.ts";
 import { POSTGREST_PAGE_SIZE } from "../lib/supabasePaging.ts";
 
 function mockSupabase(rpcResponses: Record<string, { data: unknown; error: unknown }>) {
@@ -59,6 +59,46 @@ describe("allCompanies", () => {
     const { rows: result, error } = await allCompanies(client, "id");
     expect(error).toBeNull();
     expect(result).toEqual(rows);
+  });
+});
+
+describe("companySubscriptions", () => {
+  it("pages through company_subscriptions beyond PostgREST's 1000-row cap - Finding (standing review, 2026-11-10)", async () => {
+    // Real incident this guards against: company_subscriptions has exactly
+    // one row per company (migration 0078: `company_id ... unique`), the
+    // identical shape allCompanies()/allTenderPackCompanyIds() were already
+    // fixed for in this same file (Finding 255) - but companySubscriptions()
+    // itself still read company_subscriptions with a plain, unranged
+    // `.select()`. Past 1000 companies, every company whose subscription row
+    // sorts past row 1000 would silently drop out of ALL THREE trial-
+    // lifecycle nudges (trial_day_7_milestone, trial_expiring_48h,
+    // trial_expired) with no error and no retry.
+    const subRows = Array.from({ length: POSTGREST_PAGE_SIZE + 5 }, (_, i) => ({
+      company_id: `c${i}`,
+      status: "trialing",
+      trial_ends_at: "2026-11-20T00:00:00Z",
+      companies: { legal_name: `Company ${i}` },
+    }));
+    const subsRange = vi.fn(async (from: number, to: number) => ({ data: subRows.slice(from, to + 1), error: null }));
+    const subsSelect = vi.fn(() => ({ range: subsRange }));
+    const packsRange = vi.fn(async () => ({ data: [], error: null }));
+    const packsSelect = vi.fn(() => ({ range: packsRange }));
+    const from = vi.fn((table: string) => {
+      if (table === "company_subscriptions") return { select: subsSelect };
+      if (table === "tender_packs") return { select: packsSelect };
+      throw new Error(`unexpected table ${table}`);
+    });
+    const supabase = { from } as unknown as Parameters<typeof companySubscriptions>[0];
+
+    const { rows } = await companySubscriptions(supabase);
+
+    expect(rows).toHaveLength(POSTGREST_PAGE_SIZE + 5);
+    expect(rows[POSTGREST_PAGE_SIZE + 4]).toEqual({
+      company_id: `c${POSTGREST_PAGE_SIZE + 4}`,
+      status: "trialing",
+      trial_ends_at: "2026-11-20T00:00:00Z",
+      legal_name: `Company ${POSTGREST_PAGE_SIZE + 4}`,
+    });
   });
 });
 
