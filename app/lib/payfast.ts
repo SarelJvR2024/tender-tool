@@ -76,6 +76,44 @@ export const PAYFAST_ITN_HOSTNAMES = [
   "w2w.payfast.co.za",
 ];
 
+/**
+ * Picks the one entry of a (possibly absent/multi-hop) `X-Forwarded-For`
+ * header that this app's own edge/reverse proxy (Vercel) actually observed
+ * as the connecting client - i.e. the LAST entry, not the first.
+ *
+ * `X-Forwarded-For` is a comma-separated list where every hop *appends* the
+ * address it saw to the right (the de-facto standard this header has used
+ * since it predates RFC 7239, and Vercel's own edge network follows it: it
+ * appends the real connecting IP to whatever value, if any, the inbound
+ * request already carried, rather than overwriting it) - so the LEFT end of
+ * the list is exactly as attacker-controlled as any other request header: a
+ * raw HTTP client can simply send its own `X-Forwarded-For: <anything>` and
+ * have it survive as the first entry. Only the RIGHTMOST entry is something
+ * the request's own sender could not have set themselves.
+ *
+ * Standing review, 2026-11-10 (Finding 331): the ITN route's own
+ * `sourceIpLooksLikePayfast()` used to read `forwardedFor?.split(",")[0]`
+ * - the spoofable end - which a forged
+ * `X-Forwarded-For: <one-of-PAYFAST_ITN_HOSTNAMES'-own-ip>, <attacker-ip>`
+ * request would pass. Moved out of the route handler (which, per
+ * `nextPeriodEnd()`'s own precedent above, may only export HTTP method
+ * handlers in the App Router, so a private helper there has no test
+ * coverage) and fixed to read the last entry instead - for the one real,
+ * single-hop case this endpoint actually sees (PayFast's own server calling
+ * `notify_url` directly, with no `X-Forwarded-For` of its own on the
+ * inbound request), the first and last entries are the same single value,
+ * so this is a strictly safer read with zero behavioural change for
+ * genuine PayFast traffic.
+ */
+export function sourceIpFromForwardedFor(headerValue: string | null | undefined): string | null {
+  if (!headerValue) return null;
+  const hops = headerValue
+    .split(",")
+    .map((hop) => hop.trim())
+    .filter((hop) => hop.length > 0);
+  return hops.length > 0 ? hops[hops.length - 1] : null;
+}
+
 // PayFast's actual rule, confirmed by reading the official SDK's own
 // signing code (github.com/PayFast/payfast-php-sdk, lib/Auth.php,
 // generateSignature()) rather than assumed from (conflicting) third-party

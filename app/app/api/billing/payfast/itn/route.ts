@@ -5,6 +5,7 @@ import {
   decodePlanInterval,
   nextPeriodEnd,
   payfastValidateUrl,
+  sourceIpFromForwardedFor,
   verifyItnSignature,
 } from "@/lib/payfast";
 
@@ -106,7 +107,12 @@ export async function POST(request: NextRequest) {
 
 async function sourceIpLooksLikePayfast(request: NextRequest): Promise<boolean> {
   const forwardedFor = request.headers.get("x-forwarded-for");
-  const sourceIp = forwardedFor?.split(",")[0]?.trim();
+  // sourceIpFromForwardedFor() reads the LAST (proxy-appended, trustworthy)
+  // hop, not the first (client-spoofable) one - see its own doc comment in
+  // lib/payfast.ts (Finding 331). A forged `X-Forwarded-For` header can no
+  // longer smuggle one of PAYFAST_ITN_HOSTNAMES' own IPs past this check by
+  // putting it first.
+  const sourceIp = sourceIpFromForwardedFor(forwardedFor);
   if (!sourceIp) {
     // No IP to check (e.g. a local/dev request with no proxy header) -
     // logged, not hard-blocked: signature + server confirmation are both
