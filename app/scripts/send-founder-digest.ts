@@ -46,6 +46,19 @@ type SupabaseService = SupabaseClient;
 // business number, not a cosmetic gap.
 const MAX_TENDER_PACK_ROWS = 20_000;
 
+// `company_subscriptions` has exactly one row per company (migration 0078:
+// `company_id ... unique`) - it grows in exact 1:1 lockstep with `companies`,
+// the identical table Finding 255/348 (`scripts/send-onboarding-nudges.ts`)
+// already named as liable to cross PostgREST's 1000-row db-max-rows cap on a
+// plain, unranged `.select()`. `countActiveSubscriptions()` below used to be
+// exactly that: `supabase.from("company_subscriptions").select(...).eq("status",
+// "active")` with no `.range()` at all. Past 1000 companies, every company
+// whose subscription row sorts past row 1000 would silently drop out of this
+// count - a wrong "active paid subscriptions" number in Sarel's own 07:00
+// SAST inbox, the exact same shape Finding 160 already fixed the error-path
+// half of (null vs 0) without ever noticing this row-cap half.
+const MAX_COMPANY_SUBSCRIPTION_ROWS = 20_000;
+
 // "Active bid" = the same pipeline_stage set migration 0048/0106 already
 // treats as "still being worked" (found/assessing/building/submitted) -
 // never won/lost. 'bidding' is the pre-0105 legacy value (lib/pipeline.ts's
@@ -79,13 +92,23 @@ export async function countActiveSubscriptions(supabase: SupabaseService): Promi
   // companies resource - same "fetch broad, filter in TypeScript" style
   // scripts/send-operational-alerts.ts already uses throughout, rather than
   // relying on untested-in-this-codebase embedded-column filter syntax.
-  const { data, error } = await supabase.from("company_subscriptions").select("company_id, status, companies(is_test_company)").eq("status", "active");
+  // Paginated via fetchAllRows(), not a plain `.select()` - see
+  // MAX_COMPANY_SUBSCRIPTION_ROWS's own comment above for why this table is
+  // exactly as liable to hit PostgREST's 1000-row cap as `companies` itself.
+  const { rows: data, error } = await fetchAllRows<{ company_id: string; status: string; companies: { is_test_company: boolean } | null }>(
+    (from, to) =>
+      supabase
+        .from("company_subscriptions")
+        .select("company_id, status, companies(is_test_company)")
+        .eq("status", "active")
+        .range(from, to) as unknown as PromiseLike<{ data: { company_id: string; status: string; companies: { is_test_company: boolean } | null }[] | null; error: { message: string } | null }>,
+    MAX_COMPANY_SUBSCRIPTION_ROWS,
+  );
   if (error) {
     console.error("founder-digest: could not count active subscriptions", error);
     return null;
   }
-  const rows = (data ?? []) as unknown as { company_id: string; status: string; companies: { is_test_company: boolean } | null }[];
-  return rows.filter((r) => !r.companies?.is_test_company).length;
+  return data.filter((r) => !r.companies?.is_test_company).length;
 }
 
 export async function countClosingWithin48h(supabase: SupabaseService, now: Date): Promise<number | null> {

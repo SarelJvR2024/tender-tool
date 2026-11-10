@@ -10,6 +10,7 @@
 // load" value rather than "0".
 import { describe, expect, it, vi } from "vitest";
 import { countActiveSubscriptions, countClosingWithin48h, countNewSignups24h, countScoutBacklog } from "./send-founder-digest.ts";
+import { POSTGREST_PAGE_SIZE } from "../lib/supabasePaging.ts";
 
 /** Thenable, chainable query-builder stub good enough for every .from()
  * shape these 4 functions use (a head-count select, a direct awaited
@@ -72,6 +73,43 @@ describe("countActiveSubscriptions", () => {
       },
     });
     expect(await countActiveSubscriptions(supabase)).toBe(1);
+  });
+
+  it("pages through company_subscriptions beyond PostgREST's 1000-row cap - Finding (standing review, 2026-11-10)", async () => {
+    // Real incident this guards against: company_subscriptions has exactly
+    // one row per company (migration 0078: `company_id ... unique`), the
+    // identical lockstep-with-`companies` shape Finding 255/348 already
+    // fixed in scripts/send-onboarding-nudges.ts - but this file's own
+    // countActiveSubscriptions() still read company_subscriptions with a
+    // plain, unranged `.select()`. Past 1000 real companies, every company
+    // whose active-subscription row sorts past row 1000 would silently drop
+    // out of this count - a wrong "active paid subscriptions" number in
+    // Sarel's own 07:00 SAST founder digest, with no error and no retry.
+    //
+    // Unlike makeBuilder() above (a single canned response good enough for
+    // the error/small-success cases), this mock's own `.range(from, to)`
+    // resolves with the REAL slice of a 1005-row dataset it is asked for -
+    // genuine multi-page pagination behaviour, not a single response capped
+    // the way PostgREST's real server-side db-max-rows cap would silently
+    // cap an unranged `.select()` at exactly 1000.
+    const allRows = Array.from({ length: POSTGREST_PAGE_SIZE + 5 }, (_, i) => ({
+      company_id: `c${i}`,
+      status: "active",
+      companies: { is_test_company: false },
+    }));
+    const range = vi.fn(async (from: number, to: number) => ({ data: allRows.slice(from, to + 1), error: null }));
+    const eq = vi.fn(() => ({ range }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn((table: string) => {
+      if (table !== "company_subscriptions") throw new Error(`unexpected table ${table}`);
+      return { select };
+    });
+    const supabase = { from } as unknown as Parameters<typeof countActiveSubscriptions>[0];
+
+    const result = await countActiveSubscriptions(supabase);
+
+    expect(result).toBe(POSTGREST_PAGE_SIZE + 5);
+    expect(range).toHaveBeenCalledTimes(2); // one full 1000-row page, then the 5-row remainder
   });
 });
 
