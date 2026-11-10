@@ -16628,6 +16628,47 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): CV rotation - no new behavioral bug found after genuinely adversarial effort; confirmed Finding 306's own filename-length-bounding bug class is now fully closed in this area (the sibling track independently found and fixed its CV-side twin, Finding 311, in the same window)
+
+Oriented from `33cf4fa` (sibling track's own most recent docs commit, confirmed via `git fetch
+origin main` - clean, no new sibling commits either at start or immediately before this write-up).
+
+Swept the least-covered CV-area files: `bulk-cv-upload.tsx`'s own `bestPersonMatch()`/
+`guessNameFromFilename()` heuristics - both pre-fill-only, fully visible and correctable in the same
+row before any submission (unlike Finding 244's own hidden-checkbox shape), so a wrong auto-match
+is a minor UX nuisance, not a silent-data-loss risk; not pursued further. `cv-review.tsx`'s own
+default-tick logic for a proposed project's checkbox (`defaultChecked={proj.verified && !dup}`) -
+checked whether a project with `verified: true` but an empty `client_and_number` could default-tick
+and then fail `applyCvExtraction()`'s own server-side validation, discarding the whole submission;
+traced to `extract_cv_fields.py`'s own project-building loop (`client = (p.get("client_and_number")
+or "").strip(); if not client: continue`) - a project with no client/title text is already dropped
+before it ever reaches the proposal, so this path is safe. `standardCvQueue.ts`'s own documented
+TOCTOU gap (two concurrent "confirm this CV extraction" calls for the SAME extraction can't both
+queue standard CVs - `apply_cv_extraction_checked()`'s own `for update` lock and re-check already
+serialize that - but `applyCvExtraction()`/`applyMyCvExtraction()` confirming TWO DIFFERENT
+extractions for the SAME person at nearly the same moment still could, per the file's own detailed
+header comment) - this is already explicitly documented, analyzed and left open as a judgment call
+in the code's own comments, not a fresh discovery; re-litigating an already-flagged, deliberately-
+deferred risk isn't this pass's job.
+
+Specifically checked whether Finding 306's own bug class (a filename sanitizer missing a length
+bound) recurs anywhere in the CV path, since that's exactly the kind of once-fixed-elsewhere gap
+this session's sibling-comparison technique keeps finding - and found that the sibling track had
+already found and fixed its CV-side twin in this same window: `engine/pack/process_pack_jobs.py`'s
+`cv_download_target()`, Finding 311 ("the identical crafted-multipart-POST reachability Finding 306
+already confirmed for company_documents.py's OWN unbounded-filename bug"), explicitly ruling out
+`process_general_jobs.py`'s own non-SANRAL CV path as never having had the bug (it already builds
+its local filename from `storage_path`, not `original_filename`). Grepped every remaining
+`original_filename` use site across `engine/` for a third instance: `onboarding/
+process_onboarding_jobs.py`'s own use is a pure label passed to an LLM call, never a filesystem path
+component - not the same bug class. This bug class is now exhausted across the CV/pack engines.
+
+Clean, reportable negative - no code touched this pass, so no suite re-run needed.
+
+Backlog: unchanged.
+
+---
+
 ## This pass (2026-11-10, standing QA/robustness review): non-SANRAL pack rotation - no new behavioral bug found after genuinely adversarial effort; one already-fixed pattern (filename length-bounding, Finding 306's own bug class) confirmed to already be correctly applied everywhere else in this area
 
 Oriented from `aaaaf25` (own immediately-preceding pass: Finding 306, `company_documents.py`'s
