@@ -105,11 +105,52 @@ def test_real_text_with_no_control_characters_is_unchanged():
     check("no-op on clean text", mec._safe_text(real) == real, mec._safe_text(real))
 
 
+def test_nra_ref_made_entirely_of_control_characters_does_not_crash():
+    print("make_outer(): an nra_ref that sanitizes down to an EMPTY string (not just containing "
+          "one stray control character - entirely made of them, a more extreme but still real "
+          "OCR-misread shape) must not crash cover generation with IndexError on p.runs[0]")
+    with tempfile.TemporaryDirectory() as out_dir:
+        try:
+            path = mec.make_outer(
+                _profile(), None, out_dir, "SANRAL R.396-010-2025/1F",
+                "\x01\x02\x03",  # sanitizes to "" - the real bug
+                "Routine maintenance of R396 Section 1", "2026-10-22", "12:00",
+            )
+            check("make_outer() does not crash on an nra_ref that is entirely control characters", True)
+            check("the cover file was actually written", os.path.exists(path), path)
+            d = mec.docx.Document(path)
+            text = "\n".join(p.text for p in d.paragraphs)
+            check("the real contract number and description still printed correctly either side of the dropped line",
+                  "SANRAL R.396-010-2025/1F" in text and "ROUTINE MAINTENANCE OF R396 SECTION 1" in text, text)
+        except Exception as e:
+            check("make_outer() does not crash on an nra_ref that is entirely control characters", False,
+                  f"{type(e).__name__}: {e}")
+
+
+def test_description_made_entirely_of_control_characters_does_not_crash_an_inner_cover():
+    print("make_inner(): a description that sanitizes down to an EMPTY string must not crash "
+          "cover generation with IndexError on p.runs[0] either")
+    with tempfile.TemporaryDirectory() as out_dir:
+        try:
+            path = mec.make_inner(
+                _profile(), None, out_dir, "SANRAL R.396-010-2025/1F", "NRA 2026/0071",
+                "\x0b\x0c\x0e",  # sanitizes to "" - the real bug, on the description side
+                "2026-10-22", "12:00", 1, "TECHNICAL SUBMISSION", "CONTAINS NO PRICING INFORMATION",
+            )
+            check("make_inner() does not crash on a description that is entirely control characters", True)
+            check("the cover file was actually written", os.path.exists(path), path)
+        except Exception as e:
+            check("make_inner() does not crash on a description that is entirely control characters", False,
+                  f"{type(e).__name__}: {e}")
+
+
 def main():
     test_control_character_in_description_does_not_crash_the_outer_cover()
     test_control_character_in_delivery_address_does_not_crash_an_inner_cover()
     test_control_character_in_company_fields_does_not_crash()
     test_real_text_with_no_control_characters_is_unchanged()
+    test_nra_ref_made_entirely_of_control_characters_does_not_crash()
+    test_description_made_entirely_of_control_characters_does_not_crash_an_inner_cover()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
