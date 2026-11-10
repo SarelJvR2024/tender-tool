@@ -78,6 +78,42 @@ describe("idWarnings", () => {
     expect(warnings).toContain("ID number is not valid - check it against the ID document.");
     expect(warnings.some((w) => w.includes("Date of birth"))).toBe(false); // parsed.birth is null for this input, so no spurious mismatch
   });
+
+  // Found 2026-11-10, standing review (Finding 321, same day as/immediately
+  // following Finding 320): the sa_citizen check above is one-directional -
+  // it only ever fires for sa_citizen===true && parsed.citizen===false
+  // ("recorded as a citizen, ID says permanent resident"). Every OTHER
+  // mismatch idWarnings() checks (gender, date_of_birth) is symmetric - any
+  // disagreement in either direction is flagged. The un-checked direction
+  // here (sa_citizen===false recorded, but the ID's own citizenship digit
+  // says the person really is a citizen) is not a theoretical gap: isBlack()
+  // (fixed by Finding 320, same file) takes sa_citizen at face value
+  // (`saCitizen ?? true`), and migration 0050's company_ownership_breakdown
+  // view does the identical `coalesce(cp.sa_citizen, true)` - so a
+  // wrongly-recorded sa_citizen=false on a qualifying-race shareholder whose
+  // real SA ID proves citizenship silently UNDER-counts that shareholder out
+  // of black_pct/black_women_pct/black_youth_pct/black_disabled_pct/hdi_pct,
+  // with idWarnings() - the one place built specifically to catch exactly
+  // this class of typed-vs-ID-encoded mistake - saying nothing at all.
+  it("flags a recorded permanent-resident status that disagrees with the ID's own citizenship digit (the un-checked direction)", () => {
+    const warnings = idWarnings({ id_number: VALID_ID, gender: null, sa_citizen: false, date_of_birth: null });
+    expect(warnings).toContain("Recorded as a permanent resident, but the ID number encodes an SA citizen.");
+  });
+
+  it("still does not flag the already-checked direction (recorded citizen, ID says permanent resident)", () => {
+    // Same YYMMDD/sequence as VALID_ID, citizenship digit flipped to '1'
+    // (permanent resident) with its own re-computed, genuinely Luhn-valid check digit.
+    const PR_ID = "9001010000189";
+    const warnings = idWarnings({ id_number: PR_ID, gender: null, sa_citizen: true, date_of_birth: null });
+    expect(warnings).toContain("Recorded as an SA citizen, but the ID number is a permanent resident's.");
+    expect(warnings.some((w) => w.includes("Recorded as a permanent resident"))).toBe(false);
+  });
+
+  it("does not flag anything when sa_citizen agrees with the ID in either direction", () => {
+    expect(idWarnings({ id_number: VALID_ID, gender: null, sa_citizen: true, date_of_birth: null })).toEqual([]);
+    const PR_ID = "9001010000189";
+    expect(idWarnings({ id_number: PR_ID, gender: null, sa_citizen: false, date_of_birth: null })).toEqual([]);
+  });
 });
 
 // Regression coverage for the Directors & shareholders register data-loss

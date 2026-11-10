@@ -240,7 +240,22 @@ export function idWarnings(p: Pick<PrincipalRow, "id_number" | "gender" | "sa_ci
   if (p.gender && parsed.gender && p.gender !== "other" && p.gender !== parsed.gender) {
     out.push(`Gender recorded as ${p.gender}, but the ID number encodes ${parsed.gender}.`);
   }
+  // Found 2026-11-10, standing review (Finding 321, immediately following
+  // Finding 320 in the same file): this used to only check ONE of the two
+  // possible sa_citizen/ID disagreements (recorded citizen, ID says
+  // permanent resident) - the gender and date_of_birth checks right next to
+  // it are both genuinely symmetric (any mismatch, either direction, is
+  // flagged), so this was a real asymmetry, not a deliberate design choice.
+  // The un-checked direction matters just as much: isBlack() (Finding 320)
+  // and migration 0050's company_ownership_breakdown view both take
+  // sa_citizen at face value (`saCitizen ?? true` / `coalesce(sa_citizen,
+  // true)`) - a wrongly-recorded sa_citizen=false on a qualifying-race
+  // shareholder whose real SA ID proves citizenship silently UNDER-counts
+  // them out of black_pct/black_women_pct/black_youth_pct/black_disabled_pct/
+  // hdi_pct, with this function - built specifically to catch exactly this
+  // class of typed-vs-ID-encoded mistake - saying nothing about it.
   if (p.sa_citizen === true && parsed.citizen === false) out.push("Recorded as an SA citizen, but the ID number is a permanent resident's.");
+  if (p.sa_citizen === false && parsed.citizen === true) out.push("Recorded as a permanent resident, but the ID number encodes an SA citizen.");
   if (p.date_of_birth && parsed.birth && p.date_of_birth !== parsed.birth) {
     out.push(`Date of birth recorded as ${p.date_of_birth}, but the ID number encodes ${parsed.birth}.`);
   }
