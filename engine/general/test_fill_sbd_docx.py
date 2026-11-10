@@ -292,6 +292,41 @@ def test_a_value_with_a_literal_backslash_is_placed_verbatim_not_corrupted_or_cr
               bad_value in d.paragraphs[0].text, repr(d.paragraphs[0].text))
 
 
+def test_sbd4_footer_fills_the_real_blank_line_not_the_caption_below_it():
+    print("fill_footer_designation_and_bidder(): SBD4's own 'Designation ... Name of "
+          "bidder' footer - a blank dotted line, with its caption on the paragraph BELOW "
+          "it (Treasury/Tourism/DSTI/SSA/Mthashana's own real shape, Finding 363) - fills "
+          "the real blank, not the caption naming it")
+    for position_label in ("Designation", "Position"):  # both real spellings sampled
+        d = docx.Document()
+        d.add_paragraph("…………………………\t……………………………………")  # the real blank line
+        d.add_paragraph(f"\t{position_label}\tName of bidder")  # its caption, below it
+        pos_n, bidder_n = sbd.fill_footer_designation_and_bidder(
+            d, r"Designation|Position", "Director", "Klipcorp Civil Engineering (Pty) Ltd")
+        check(f"[{position_label}] exactly one blank-line position filled", pos_n == 1, pos_n)
+        check(f"[{position_label}] exactly one blank-line bidder name filled", bidder_n == 1, bidder_n)
+        check(f"[{position_label}] the value is on the BLANK LINE (paragraph 0), not the caption",
+              "Director" in d.paragraphs[0].text and "Klipcorp" in d.paragraphs[0].text,
+              repr(d.paragraphs[0].text))
+        check(f"[{position_label}] the caption paragraph itself is left completely untouched",
+              d.paragraphs[1].text == f"\t{position_label}\tName of bidder",
+              repr(d.paragraphs[1].text))
+
+
+def test_sbd4_footer_without_two_real_blanks_above_does_not_fire():
+    print("fill_footer_designation_and_bidder(): a caption with no genuine two-blank "
+          "dotted line directly above it (e.g. prose, or a caption at the very top of "
+          "the document) is left alone rather than guessed at")
+    d = docx.Document()
+    d.add_paragraph("Some unrelated heading")
+    d.add_paragraph("\tDesignation\tName of bidder")
+    pos_n, bidder_n = sbd.fill_footer_designation_and_bidder(
+        d, r"Designation|Position", "Director", "Acme (Pty) Ltd")
+    check("no position filled (no real blank line above)", pos_n == 0, pos_n)
+    check("no bidder name filled (no real blank line above)", bidder_n == 0, bidder_n)
+    check("the caption is still untouched", d.paragraphs[1].text == "\tDesignation\tName of bidder")
+
+
 def main():
     test_separate_yes_no_cells()
     test_yes_slash_no_cell()
@@ -306,6 +341,8 @@ def main():
     test_fill_cells_prefill_ok_lets_a_known_prefix_through()
     test_whitespace_only_value_is_never_placed_or_confirmed()
     test_a_value_with_a_literal_backslash_is_placed_verbatim_not_corrupted_or_crashed()
+    test_sbd4_footer_fills_the_real_blank_line_not_the_caption_below_it()
+    test_sbd4_footer_without_two_real_blanks_above_does_not_fire()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
