@@ -4,7 +4,7 @@ import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./
 import { loadB7State } from "./b7-data";
 import { TENDER_TEMPLATES } from "@/lib/tenderTemplates";
 import type { ChecklistRow } from "./pack-checklist";
-import { b7Status, docItemStatus, fieldStatus, humanizeFieldKey, positionStatus, provenanceStatus, signatureStatus, type ReviewStatus } from "./pack-review-logic";
+import { b7Status, docItemStatus, fieldStatus, humanizeFieldKey, positionStatus, provenanceStatus, signatureStatus, tenderCvUsable, type ReviewStatus } from "./pack-review-logic";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
 import { classifyComplianceItem } from "./bid-task-status";
 import type { ComplianceItem } from "@/lib/tenderCompliance";
@@ -182,7 +182,8 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
     const items: ReviewItem[] = data.positionRows.map((p) => {
       const confirmedName = p.person?.name ?? null;
       const suggestedName = p.suggested?.name ?? null;
-      const hasCv = !!(p.tenderCv?.status === "ready" || p.cv);
+      const usableTenderCv = tenderCvUsable(p.tenderCv);
+      const hasCv = usableTenderCv || !!p.cv;
       const fitWarning = p.fit.status !== "have" ? p.fit.detail : null;
       const { reviewStatus, checklistStatus, note } = positionStatus({ hasConfirmedPerson: !!confirmedName, hasCv, fitWarning });
 
@@ -203,13 +204,22 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
           note: "Confirm a key person for this position before the pack can be generated.",
         };
       }
-      const cvStatus = p.tenderCv?.status ?? (p.cv ? "ready" : null);
-      const cvNote =
-        cvStatus === "ready"
-          ? "Tender-specific CV ready."
-          : cvStatus === "requested" || cvStatus === "generating"
+      // usableTenderCv (above, via tenderCvUsable()) is the hasCv-feeding
+      // check; cvNote additionally distinguishes the "ready but no PDF" case
+      // from a genuinely ready one, since the two must never share the same
+      // "Tender-specific CV ready." wording (Finding 305) - a status='ready'
+      // row with no PDF is reported here exactly like process_pack_jobs.py
+      // treats it: not usable.
+      const tenderCvPdfMissing = p.tenderCv?.status === "ready" && !p.tenderCv.storage_path_pdf;
+      const cvNote = usableTenderCv
+        ? "Tender-specific CV ready."
+        : tenderCvPdfMissing
+          ? p.cv
+            ? `Tender-specific CV finished without a PDF (conversion failed) - the pack will use the as-filed CV upload (${p.cv.original_filename}) instead.`
+            : "Tender-specific CV finished without a PDF (conversion failed) - no CV will be included in the pack until it's requested again or a CV is uploaded."
+          : p.tenderCv?.status === "requested" || p.tenderCv?.status === "generating"
             ? "Tender-specific CV is being generated."
-            : cvStatus === "failed"
+            : p.tenderCv?.status === "failed"
               ? "Tender-specific CV generation failed - request it again."
               : p.cv
                 ? `Using the as-filed CV upload (${p.cv.original_filename}).`

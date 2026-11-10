@@ -16,7 +16,7 @@ import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
 import { evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
-import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
+import { docItemStatus, tenderCvUsable, type ReviewStatus } from "./pack-review-logic";
 
 /**
  * checkReturnable's own `strength: "required" | "mentioned"` is this file's
@@ -215,12 +215,20 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
       let withCv = 0;
       if (taggedIds.length > 0) {
         const [{ data: gen, error: genErr }, { data: up, error: upErr }] = await Promise.all([
-          supabase.from("generated_cvs").select("person_id").in("person_id", taggedIds).eq("status", "ready"),
+          // storage_path_pdf selected so tenderCvUsable() (pack-review-logic.ts,
+          // Finding 305) can apply the same "status='ready' AND a PDF actually
+          // came out" rule process_general_jobs.py's own gather_pack_inputs()
+          // uses - not status alone, which used to count a role as having a
+          // usable CV even when the only generated row was 'ready' with no PDF
+          // (LibreOffice's docx->pdf conversion failed, process_cv_jobs.py) and
+          // the real pack build would fall back to a cv_uploads row or, with
+          // none, include no CV for that person at all.
+          supabase.from("generated_cvs").select("person_id, status, storage_path_pdf").in("person_id", taggedIds).eq("status", "ready"),
           supabase.from("cv_uploads").select("person_id").in("person_id", taggedIds),
         ]);
         if (genErr) console.error("generated_cvs select failed (general pack review roles)", genErr);
         if (upErr) console.error("cv_uploads select failed (general pack review roles)", upErr);
-        const haveCv = new Set([...(gen ?? []).map((g) => g.person_id as string), ...(up ?? []).map((u) => u.person_id as string)]);
+        const haveCv = new Set([...(gen ?? []).filter((g) => tenderCvUsable(g)).map((g) => g.person_id as string), ...(up ?? []).map((u) => u.person_id as string)]);
         withCv = taggedPeople.filter((p) => haveCv.has(p.id)).length;
       }
       const { reviewStatus, note } = roleStatus({ taggedCount: taggedPeople.length, taggedWithCvCount: withCv });
