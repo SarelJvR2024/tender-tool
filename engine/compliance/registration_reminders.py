@@ -248,7 +248,7 @@ PROPERTY_DOCUMENT_LABELS = {
     "building_insurance": "Building insurance",
     "nbr_compliance": "National Building Regulations compliance certificate",
     "accessibility_compliance": "Disability accessibility compliance certificate",
-    "floor_plan": "Floor plan / layout",
+    "floor_plan": "Floor plan / layout with measurements",
     "maintenance_plan": "Building maintenance plan",
 }
 
