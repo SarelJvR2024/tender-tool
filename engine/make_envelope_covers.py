@@ -95,8 +95,31 @@ def _addressee_block(d, delivery_address=None):
 
 
 def _tender_block(d, contract_no, nra_ref, description, closing_date, closing_time):
+    # `nra_ref`/`description` are read straight out of a tender's own
+    # scanned/OCR'd document text (same reachability as _safe_text()'s own
+    # header comment) - _safe_text() strips invalid XML control characters,
+    # but if ONE of these fields is made up ENTIRELY of such characters (not
+    # just containing a stray one, the case Finding 125 already fixed), the
+    # sanitized result is an EMPTY string. python-docx's own add_paragraph()
+    # only adds a run when its `text` argument is truthy, so `d.add_paragraph("")`
+    # silently returns a paragraph with ZERO runs - and the very next line,
+    # `p.runs[0].bold = True`, then raises IndexError, crashing the whole pack
+    # build exactly the way Finding 125's own fix describes (no try/except
+    # around assemble_pack.py's envelope-covers step). Confirmed live:
+    # nra_ref="\x01\x02\x03" raised `IndexError: list index out of range`
+    # before this fix. `contract_no`/`closing_date`/`closing_time` can't hit
+    # this - each is always wrapped in fixed literal text ("CONTRACT "/
+    # "TENDER CLOSES: "/" AT ") that keeps the line non-empty regardless of
+    # what the variable itself sanitizes down to. Skipping a line that
+    # sanitizes to nothing (rather than printing a blank bold paragraph)
+    # matches this file's own established "only print what's really there"
+    # convention (_bidder_block's optional address/CIPC lines, _addressee_block's
+    # "No address on file = no address printed, never a guess"). QA pass, 2026-11-10.
     for line in [f"CONTRACT {contract_no}", nra_ref, description.upper()]:
-        p = d.add_paragraph(_safe_text(line))
+        text = _safe_text(line)
+        if not text:
+            continue
+        p = d.add_paragraph(text)
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.runs[0].bold = True
     d.add_paragraph()
