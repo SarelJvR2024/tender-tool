@@ -514,3 +514,50 @@ describe("deletePerson - real delete still succeeds", () => {
     expect(regRemove?.paths).toContain("company-1/registrations/person-1/cert.pdf");
   });
 });
+
+// Finding 325: saveRoleEligibility()'s own toRemove delete had the same
+// "plain delete twin discards a zero-row RLS match" bug as this bug class's
+// other confirmed sites (officeActions.ts's deleteCompanyOffice(),
+// comment-actions.ts's deleteTenderComment(), etc.) - "person_role_eligibility:
+// tenant isolation" (migration 0016) is `using (is_company_member(company_id))`,
+// the same USING-only, re-evaluated-at-write-time shape. Every matched row
+// shares the same company_id, so the race is all-or-nothing: the delete
+// either removes every role_code in toRemove, or (membership revoked
+// mid-request) none of them - never a partial match.
+describe("saveRoleEligibility - membership revoked mid-request (person_role_eligibility delete matches zero rows)", () => {
+  it("does not report success when the delete matches zero rows", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: [{ role_code: "position_a" }, { role_code: "position_b" }], error: null }], // current read
+      [{ data: [], error: null }], // delete(...).select("role_code") - zero-row RLS match
+    ]);
+    supabaseState.current = client;
+
+    const { saveRoleEligibility } = await import("./actions");
+
+    // Unchecking position_b only - toRemove = ["position_b"], toAdd = [].
+    const fd = formDataWith({ person_id: "person-1", role_code: "position_a" });
+    const url = await expectRedirect(saveRoleEligibility(fd));
+
+    expect(url).not.toContain("roles_saved=1");
+    expect(url).toContain("/people/person-1?error=");
+  });
+});
+
+describe("saveRoleEligibility - real delete still succeeds", () => {
+  it("saves normally when the delete genuinely matches every removed row", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: [{ role_code: "position_a" }, { role_code: "position_b" }], error: null }],
+      [{ data: [{ role_code: "position_b" }], error: null }], // real match
+    ]);
+    supabaseState.current = client;
+
+    const { saveRoleEligibility } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", role_code: "position_a" });
+    const url = await expectRedirect(saveRoleEligibility(fd));
+
+    expect(url).toBe("/people/person-1?roles_saved=1");
+  });
+});

@@ -868,10 +868,27 @@ export async function saveRoleEligibility(formData: FormData) {
   const toAdd = [...wanted].filter((c) => !have.has(c));
 
   if (toRemove.length > 0) {
-    const { error } = await supabase.from("person_role_eligibility").delete().eq("person_id", personId).in("role_code", toRemove);
+    // .select("role_code") + a count check matters here the same way
+    // .select("id").maybeSingle() does on every single-row sibling in this
+    // bug class: "person_role_eligibility: tenant isolation" (0016) is
+    // `using (is_company_member(company_id))` - USING-only, re-evaluated
+    // against these rows at delete time. If this caller's own company
+    // membership is revoked (another admin's concurrent removeMember()
+    // call) between the `current` read above and this delete,
+    // is_company_member() re-evaluates false and the delete matches zero
+    // rows - a 2xx with error: null, indistinguishable from a real delete
+    // by `error` alone. Every row here shares the same company_id, so this
+    // is all-or-nothing, never a partial match: the removed count is either
+    // toRemove.length (real) or 0 (blocked). Pre-fix, this still fell
+    // through to `?roles_saved=1` either way, telling the user the
+    // unchecked tags were removed when they were still on file.
+    const { data: removed, error } = await supabase.from("person_role_eligibility").delete().eq("person_id", personId).in("role_code", toRemove).select("role_code");
     if (error) {
       console.error("person_role_eligibility delete failed", error);
       redirect(`/people/${personId}?error=${encodeURIComponent("Could not save these role tags - try again. If it keeps happening, let us know.")}`);
+    }
+    if ((removed?.length ?? 0) !== toRemove.length) {
+      redirect(`/people/${personId}?error=${encodeURIComponent("Could not save these role tags - refresh and try again.")}`);
     }
   }
   if (toAdd.length > 0) {

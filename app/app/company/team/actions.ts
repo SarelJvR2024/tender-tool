@@ -64,13 +64,32 @@ export async function revokeInvite(formData: FormData) {
   const inviteId = str(formData, "invite_id");
   if (!inviteId) redirect(BACK);
 
-  const { error } = await supabase
+  // .select("id").maybeSingle() matters here exactly as it does on every
+  // sibling plain delete already fixed in this bug class (officeActions.ts's
+  // deleteCompanyOffice(), comment-actions.ts's deleteTenderComment(), etc.):
+  // "company_invites: admins manage their company's invites" (0077) is
+  // `using (tt_is_company_admin(company_id))` - USING-only, re-evaluated
+  // against the row at delete time. If this caller's own admin/owner role is
+  // revoked (another admin's concurrent removeMember()/setMemberRole() call)
+  // between requireCompanyAdmin()'s read above and this delete,
+  // tt_is_company_admin() re-evaluates false and the delete matches zero
+  // rows - a 2xx with error: null, indistinguishable from a real revoke by
+  // `error` alone. The same silent no-op is also reachable without any race
+  // on the admin's OWN role: the `.is("accepted_at", null)` guard means a
+  // concurrently-accepted invite (acceptInvite(), app/invite/actions.ts)
+  // also matches zero rows here. Either way, pre-fix this still redirected
+  // `saved=revoked`, telling the admin the invite was gone when it was not -
+  // it would silently reappear in the pending-invites list on refresh.
+  const { data: deleted, error } = await supabase
     .from("company_invites")
     .delete()
     .eq("id", inviteId)
     .eq("company_id", companyId)
-    .is("accepted_at", null);
+    .is("accepted_at", null)
+    .select("id")
+    .maybeSingle();
   if (error) fail(error.message);
+  if (!deleted) fail("That invite is no longer pending - it may have already been accepted or revoked. Refresh and try again.");
 
   revalidatePath(BACK);
   redirect(`${BACK}?saved=revoked`);
