@@ -1,5 +1,6 @@
 import { computeBidReadiness } from "./readiness";
 import { daysUntil } from "./dates";
+import { effectiveSubscriptionStatus, type SubscriptionStatus } from "./billing";
 import type { Customer, CustomerMember } from "@/app/admin/customers/CustomerRow";
 
 export type CompanyOverviewRow = {
@@ -110,6 +111,25 @@ export function buildCustomerRow(
   const primaryContact = membersError ? null : members.find((m) => m.role === "owner")?.email ?? members[0]?.email ?? null;
   const trialDaysRemaining = company.subscription_status === "trialing" ? daysUntil(company.trial_ends_at) : null;
 
+  // Finding 317: `company.subscription_status` is the RAW, never-rewritten
+  // `company_subscriptions.status` column (0098's own `platform_admin_companies()`
+  // selects `cs.status` directly - see that migration) - exactly the same
+  // "stays 'trialing' forever once lapsed" column Finding 316 already
+  // established for admin/billing. `CustomerRow.tsx`'s own status chip used
+  // to colour itself straight off that raw value, so a trial that lapsed
+  // with no payment ever on file (negative `trialDaysRemaining`, shown as
+  // "trial expired" in the SAME chip's own text) still rendered with the
+  // ordinary in-progress-trial "warning" (yellow) tone, not the "past due"
+  // (red) tone an admin scanning this list for who needs chasing would
+  // expect - the chip's own text and colour visibly disagreeing for the
+  // exact row most needing attention. `effectiveSubscriptionStatus()`
+  // (lib/billing.ts) is this app's one canonical reconciliation of that -
+  // computed here, once, rather than re-derived a second time inside
+  // CustomerRow.tsx itself.
+  const effectiveSubscriptionStatusValue: SubscriptionStatus | null = company.subscription_status
+    ? effectiveSubscriptionStatus({ status: company.subscription_status as SubscriptionStatus, trialEndsAt: company.trial_ends_at })
+    : null;
+
   return {
     ...company,
     members,
@@ -118,5 +138,6 @@ export function buildCustomerRow(
     readinessCriteria: readiness?.criteria ?? null,
     primaryContact,
     trialDaysRemaining,
+    effectiveSubscriptionStatus: effectiveSubscriptionStatusValue,
   };
 }

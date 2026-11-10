@@ -105,4 +105,46 @@ describe("buildCustomerRow()", () => {
     const active = buildCustomerRow(COMPANY, { data: REAL_MEMBERS, error: null }, NO_READINESS);
     expect(active.trialDaysRemaining).toBeNull();
   });
+
+  // Finding 317's own regression guard. `subscription_status` is the raw
+  // `company_subscriptions.status` column, which stays "trialing" forever
+  // for a trial that lapsed with no payment on file (nothing rewrites it -
+  // lib/billing.ts's own header comment). Before this fix, CustomerRow.tsx's
+  // status chip coloured itself straight off that raw value, so this exact
+  // row - already shown as "trial expired" by its own trialDaysRemaining -
+  // still got the ordinary in-progress "trialing" (warning/yellow) tone
+  // instead of "past_due" (destructive/red).
+  it("effectiveSubscriptionStatus flips to past_due for a lapsed trial, even though the raw subscription_status still reads 'trialing'", () => {
+    const lapsedTrial = buildCustomerRow(
+      { ...COMPANY, subscription_status: "trialing", trial_ends_at: new Date(Date.now() - 3 * 86400000).toISOString() },
+      { data: REAL_MEMBERS, error: null },
+      NO_READINESS,
+    );
+    expect(lapsedTrial.subscription_status).toBe("trialing");
+    expect(lapsedTrial.trialDaysRemaining).toBeLessThan(0);
+    expect(lapsedTrial.effectiveSubscriptionStatus).toBe("past_due");
+  });
+
+  it("effectiveSubscriptionStatus matches the raw status for a trial still running, a paying active company, and a real past_due/cancelled row", () => {
+    const stillTrialing = buildCustomerRow(
+      { ...COMPANY, subscription_status: "trialing", trial_ends_at: new Date(Date.now() + 5 * 86400000).toISOString() },
+      { data: REAL_MEMBERS, error: null },
+      NO_READINESS,
+    );
+    expect(stillTrialing.effectiveSubscriptionStatus).toBe("trialing");
+
+    const active = buildCustomerRow(COMPANY, { data: REAL_MEMBERS, error: null }, NO_READINESS);
+    expect(active.effectiveSubscriptionStatus).toBe("active");
+
+    const pastDue = buildCustomerRow({ ...COMPANY, subscription_status: "past_due" }, { data: REAL_MEMBERS, error: null }, NO_READINESS);
+    expect(pastDue.effectiveSubscriptionStatus).toBe("past_due");
+
+    const cancelled = buildCustomerRow({ ...COMPANY, subscription_status: "cancelled" }, { data: REAL_MEMBERS, error: null }, NO_READINESS);
+    expect(cancelled.effectiveSubscriptionStatus).toBe("cancelled");
+  });
+
+  it("effectiveSubscriptionStatus is null when there is no subscription row at all", () => {
+    const noSub = buildCustomerRow({ ...COMPANY, subscription_status: null }, { data: REAL_MEMBERS, error: null }, NO_READINESS);
+    expect(noSub.effectiveSubscriptionStatus).toBeNull();
+  });
 });

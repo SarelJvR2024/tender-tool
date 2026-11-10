@@ -33,6 +33,8 @@ export type Customer = {
   primaryContact: string | null;
   /** Only meaningful when subscription_status === "trialing"; null otherwise. Can be negative (trial already expired). */
   trialDaysRemaining: number | null;
+  /** `lib/billing.ts`'s `effectiveSubscriptionStatus()` - unlike `subscription_status` (raw, never rewritten once a trial lapses with no payment), this flips to "past_due" the moment a trial's own `trial_ends_at` passes. Drives the status chip's tone only - see Finding 317. */
+  effectiveSubscriptionStatus: string | null;
 };
 
 const PLAN_LABEL: Record<string, string> = {
@@ -93,7 +95,12 @@ function ViewTenantWorkspaceButton({ companyId, className }: { companyId: string
 export default function CustomerRow({ customer, defaultOpen = false, impersonationAvailable }: { customer: Customer; defaultOpen?: boolean; impersonationAvailable: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const name = customer.csd_trading_name || customer.legal_name;
-  const statusTone = customer.subscription_status ? SUBSCRIPTION_STATUS_TONE[customer.subscription_status] : undefined;
+  // Finding 317: tone is keyed off `effectiveSubscriptionStatus` (flips to
+  // "past_due" the moment a lapsed trial's own `trial_ends_at` passes), not
+  // the raw `subscription_status` (stays "trialing" forever for a trial
+  // that lapsed with no payment on file) - the chip's own "trial expired"
+  // text a few lines below already reflected the lapse; its colour didn't.
+  const statusTone = customer.effectiveSubscriptionStatus ? SUBSCRIPTION_STATUS_TONE[customer.effectiveSubscriptionStatus] : undefined;
   const planLabel = customer.plan_tier ? (PLAN_LABEL[customer.plan_tier] ?? customer.plan_tier) : null;
 
   return (

@@ -113,7 +113,18 @@ export type CompanySubscriptionRow = {
 // doesn't need to be" idiom as lib/notifications.ts/lib/documentExpiry.ts).
 // This is the one function that reconciles the two: the EFFECTIVE status a
 // lapsed trial should be treated as, computed fresh every time.
-export function effectiveSubscriptionStatus(sub: CompanySubscriptionRow, now: Date = new Date()): SubscriptionStatus {
+//
+// Parameter is deliberately just `Pick<CompanySubscriptionRow, "status" |
+// "trialEndsAt">`, not the full row - every real caller only ever has those
+// two fields in scope at the point it needs this (e.g. an admin RPC row
+// that never carries planTier/maxUsers/maxPacksPerMonth at all), and
+// requiring the full shape was pushing callers to either fabricate unused
+// fields or skip calling this function and re-derive the lapsed-trial rule
+// inline instead - see Finding 317's own customerRowData.ts fix.
+export function effectiveSubscriptionStatus(
+  sub: Pick<CompanySubscriptionRow, "status" | "trialEndsAt">,
+  now: Date = new Date(),
+): SubscriptionStatus {
   if (sub.status === "trialing" && sub.trialEndsAt && new Date(sub.trialEndsAt).getTime() < now.getTime()) {
     return "past_due";
   }
@@ -126,7 +137,7 @@ export function effectiveSubscriptionStatus(sub: CompanySubscriptionRow, now: Da
 // (seats, bid packs/month) is separate and real now - company_can_request_pack()
 // and the seat check in app/company/team/actions.ts (migration 0083) - this
 // function is about the SUBSCRIPTION's own state, not a specific limit.
-export function isSubscriptionLapsed(sub: CompanySubscriptionRow, now: Date = new Date()): boolean {
+export function isSubscriptionLapsed(sub: Pick<CompanySubscriptionRow, "status" | "trialEndsAt">, now: Date = new Date()): boolean {
   const status = effectiveSubscriptionStatus(sub, now);
   return status === "past_due" || status === "cancelled";
 }
