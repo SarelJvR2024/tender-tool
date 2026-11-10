@@ -238,6 +238,45 @@ def test_cancelled_tab_fetch_failure_alerts_sarel():
         shutil.rmtree(tmp)
 
 
+def test_readvertisement_duplicate_title_picks_most_recent_cancellation():
+    print("two DIFFERENT cancelled tenders from the same buyer sharing the same generic "
+          "title (a real, recurring-procurement pattern) - a fresh listing must match the "
+          "MOST RECENT cancellation, not whichever one an implementation-detail dict-overwrite "
+          "happened to keep")
+    title = "Appointment of a service provider for cleaning services"
+    buyer = "City of X"
+
+    def cancelled_release(ocid, contract, cancelled_at, reason):
+        r = _release(title=title, ocid=ocid, contract_number=contract)
+        r["buyer"] = buyer
+        r["cancellation"] = {"cancelled_at": cancelled_at, "reason": reason}
+        return r
+
+    older = cancelled_release("ocds-old-1", "OLD-001", "2026-10-01T10:00:00+02:00", "old reason")
+    newer = cancelled_release("ocds-new-1", "NEW-002", "2026-11-05T10:00:00+02:00", "new reason")
+    # cancelled_rels arrives "newest first" in real life (etenders_portal.fetch_releases()'s
+    # own documented order) - pass it in that same order so this test exercises the real
+    # input shape, not a shape that happens to dodge the bug.
+    cancelled_rels = [newer, older]
+
+    fresh = _release(title=title, ocid="ocds-fresh-1", contract_number="FRESH-003")
+    fresh["buyer"] = buyer
+
+    out = tc.readvertisements([fresh], cancelled_rels)
+    check("exactly one readvertised event", len(out) == 1, out)
+    if out:
+        check("matched to the MORE RECENT cancellation (NEW-002), not the older one (OLD-001)",
+              out[0]["old_value"]["contract_number"] == "NEW-002", out[0]["old_value"])
+        check("summary carries the matched cancellation's own reason",
+              "new reason" in out[0]["summary"], out[0]["summary"])
+
+    # The genuinely-same-tender case (one cancellation, one readvertisement) must still work
+    # unaffected by the grouping-into-a-list change.
+    single = tc.readvertisements([fresh], [older])
+    check("single matching cancellation still matches (no regression from list-grouping)",
+          len(single) == 1 and single[0]["old_value"]["contract_number"] == "OLD-001", single)
+
+
 def main():
     test_oscillating_closing_date_every_occurrence_reported()
     test_same_day_retry_still_deduplicates()
@@ -245,6 +284,7 @@ def main():
     test_disagreement_dedupe_also_time_bucketed()
     test_same_day_multiple_real_oscillations_all_reported()
     test_cancelled_tab_fetch_failure_alerts_sarel()
+    test_readvertisement_duplicate_title_picks_most_recent_cancellation()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -244,11 +244,33 @@ def _title_key(r):
 
 
 def readvertisements(new_rels, cancelled_rels):
-    by_title = {_title_key(c): c for c in cancelled_rels if c.get("title")}
+    # Grouped into a list per key, not {_title_key(c): c for c in ...} (the
+    # dict comprehension this replaced): two DIFFERENT cancelled tenders from
+    # the same buyer can share the same normalized title - a generic,
+    # recurring procurement title ("Appointment of a service provider for
+    # cleaning services") is common across SA municipalities/entities that
+    # re-run the same service tender every few years, and each failed run
+    # gets its own cancellation. The old dict silently kept only the LAST one
+    # seen in iteration order; since cancelled_rels arrives "newest first"
+    # (etenders_portal.fetch_releases()'s own order, this module's docstring),
+    # "last seen" was always the OLDEST matching cancellation - an arbitrary
+    # artifact of dict overwrite + input order, not a deliberate choice, and
+    # backwards from what's actually useful (a fresh listing is far more
+    # likely to be re-advertising the MOST RECENT cancellation with that
+    # title, not whichever one happened to be cancelled longest ago).
+    # Reproduced directly: two same-title cancellations 5 weeks apart, newest
+    # first in the input list exactly as the real portal read orders it -
+    # the old code matched the OLDER one every time.
+    by_title = {}
+    for c in cancelled_rels:
+        if c.get("title"):
+            by_title.setdefault(_title_key(c), []).append(c)
     out = []
     for r in new_rels:
-        prior = by_title.get(_title_key(r))
-        if prior and prior.get("ocid") != r.get("ocid"):
+        candidates = [c for c in by_title.get(_title_key(r), ()) if c.get("ocid") != r.get("ocid")]
+        prior = max(candidates, key=lambda c: (c.get("cancellation") or {}).get("cancelled_at") or "") \
+            if candidates else None
+        if prior:
             out.append(_event(r, "readvertised",
                               f"Re-advertised: the same buyer cancelled a tender with this title "
                               f"({prior.get('contract_number')}, {_fmt((prior.get('cancellation') or {}).get('cancelled_at'))}"
