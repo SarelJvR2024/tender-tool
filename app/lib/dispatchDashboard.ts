@@ -9,6 +9,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { nextStepFor } from "./tenderNextStep";
 import { daysUntil } from "./dates";
 import type { PipelineStage } from "./pipeline";
+import { SANRAL_CONVENTIONAL_FAMILY } from "./tenderCompliance";
+import { GENERAL_FAMILY } from "./generalTender";
+import { loadTenderCompliance } from "@/app/tenders/[id]/compliance-data";
+import { loadSubmissionPlan } from "@/app/tenders/[id]/submission-plan-data";
+import { disqualificationGuardRows } from "@/app/tenders/[id]/disqualification-guard";
 import {
   classifyDispatchBucket,
   deriveDecisionNeeded,
@@ -88,11 +93,45 @@ export async function loadDispatchCards(
 
       const blockingStep = worthDeepCheck ? await nextStepFor(b.tenderId, b.family, true) : null;
 
+      // Finding (standing review, originally flagged 2026-10-27, closed out
+      // this pass): `hasRealFixBlocker` is documented ("a real
+      // Disqualification Guard 'Fix' item, not fabricated") as needing the
+      // Guard's own narrow fixCount - but `blockingStep` above comes from
+      // `nextStepFor()`, a much broader "the one concrete, unfinished thing"
+      // signal that's non-null for routine Provide/Verify gaps too (no pack
+      // started yet, a key position still needing a person confirmed, a
+      // general-pack item merely flagged needs_input/warning). Using it here
+      // meant almost any active bid closing within 7 days with ANYTHING left
+      // to do landed in `director_resolution` / the Dashboard's "Decision"
+      // lane - the lane this feature's own brief reserves for a genuine
+      // disqualification risk needing a director's personal call. Fixed by
+      // computing the Guard's own real fixCount instead, via
+      // disqualificationGuardRows() (extracted from DisqualificationGuard()
+      // itself so the two can never disagree) - same `isSanralFamily`/
+      // `isGeneralFamily` split `tenders/[id]/page.tsx` already uses, same
+      // worthDeepCheck cost bound as blockingStep already pays (SANRAL's own
+      // loadTenderCompliance() call is React-cache()'d, so this adds no
+      // second network round trip there; general's own loadSubmissionPlan()
+      // is a different loader from nextStepFor()'s loadGeneralPackReviewSnapshot()
+      // and does add one bounded extra read, same cost tier already accepted
+      // for this 14-day window).
+      const isSanralFamily = b.family === SANRAL_CONVENTIONAL_FAMILY;
+      const isGeneralFamily = b.family === GENERAL_FAMILY;
+      const [compliance, plan] = worthDeepCheck
+        ? await Promise.all([
+            isSanralFamily ? loadTenderCompliance(b.tenderId) : Promise.resolve(null),
+            isGeneralFamily ? loadSubmissionPlan(b.tenderId) : Promise.resolve(null),
+          ])
+        : [null, null];
+      const fixCount = disqualificationGuardRows({ isSanralFamily, isGeneralFamily, compliance, plan }).rows.filter(
+        (r) => r.status === "fix",
+      ).length;
+
       const decisionNeeded = deriveDecisionNeeded(
         {
           briefingDate: b.briefingDate,
           briefingTaskStatus: briefingStatusByTender.get(b.tenderId) ?? null,
-          hasRealFixBlocker: !!blockingStep,
+          hasRealFixBlocker: fixCount > 0,
           closingDate: b.closingDate,
         },
         now,
