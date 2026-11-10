@@ -16937,6 +16937,39 @@ Backlog: unchanged at 18 items - this resolves an informal note from an earlier 
 
 ---
 
+## This pass (2026-11-10, standing QA/robustness review): compliance/reminders rotation - no new behavioral bug found after genuinely adversarial effort; confirmed the SACNASP/SAGC drift bug class (Finding 294's own shape) is now closed everywhere in this area, and `watch_deadlines.py`'s own `supabase_request()` already paginates fully
+
+Oriented from `efaea7d` (sibling track's own most recent commit, confirmed via `git fetch origin
+main` - clean, no new sibling commits either at start or immediately before this write-up).
+
+Read `lib/documentExpiry.ts` in full (recently touched by the sibling track, Finding 293/294) -
+confirmed `COMPANY_EXPIRY_FIELDS` is a straight re-export through `notifications.ts`, no drift from
+`companyExpiryFields.ts`'s own definition; `statusFor()`'s flat 30-day window vs the bell's per-field
+windowDays is already a documented, deliberate, Sarel's-own-call gap, not a fresh issue.
+
+Specifically hunted for a Python-side twin of Finding 294 (documentExpiry.ts/notifications.ts
+missing SACNASP/SAGC alongside ECSA/SACPCMP) in `watch_deadlines.py`'s own
+`find_person_credentials_lapsing_before_closing()` and `complianceDigestCandidates.ts` - both
+already carry all 4 fields (`TRACKED_PERSON_EXPIRY_FIELDS` includes sacnasp/sagc since migration
+0040, predating this session; `complianceDigestCandidates.ts` likewise). This drift class is now
+closed everywhere checked across both languages.
+
+Also traced a plausible-looking lead that turned out to be a non-issue: `find_documents_lapsing_before_closing()`'s
+own `tender_packs?select=company_id,tender_id` read looked like a candidate sixth instance of the
+unpaginated-1000-row-cap bug class this session has found repeatedly elsewhere (Findings 255/266/275)
+- but `watch_deadlines.py`'s own `supabase_request()` (unlike the `send-*.ts` scripts where that
+class was found) already loops through every page itself (`PAGE = 1000`, confirmed by reading its
+own body), fixed here specifically on 2026-10-23 per its own docstring. Read `find_documents_lapsing_before_closing()`/
+`find_person_credentials_lapsing_before_closing()` in full otherwise - both already carry multiple
+dated hardening passes (2026-10-20, 2026-10-24) for the exact SAST-closing-day and double-reminder
+gaps this session's own technique would otherwise look for.
+
+Clean, reportable negative - no code touched this pass, so no suite re-run needed.
+
+Backlog: unchanged.
+
+---
+
 ## This pass (2026-11-10, standing QA/robustness review): intake rotation - no new behavioral bug found after genuinely adversarial effort
 
 Oriented from `7e9b354` (sibling track's own most recent commit, confirmed via `git fetch origin
