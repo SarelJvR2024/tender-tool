@@ -60,10 +60,28 @@ export async function deleteTenderComment(formData: FormData) {
   const back = `/tenders/${tenderId}`;
   if (!commentId) redirect(`${back}#activity`);
 
-  const { error } = await supabase.from("tender_comments").delete().eq("id", commentId).eq("author_id", userId);
+  // .select("id").maybeSingle() matters here exactly as it does on
+  // company/officeActions.ts's deleteCompanyOffice() (Finding 322, same bug
+  // class): "tender_comments: authors delete their own notes" (0033) is
+  // USING-only (is_company_member(company_id) and author_id = auth.uid()),
+  // re-evaluated against the row at delete time - so a membership-revoked-
+  // mid-request race makes a zero-row-match delete indistinguishable from a
+  // real one by `error` alone. Without this check, a delete silently
+  // blocked by RLS still redirected to #activity with no ?error, telling the
+  // user the note was gone when it was not.
+  const { data: deleted, error } = await supabase
+    .from("tender_comments")
+    .delete()
+    .eq("id", commentId)
+    .eq("author_id", userId)
+    .select("id")
+    .maybeSingle();
   if (error) {
     console.error("tender_comments delete failed", error);
     redirect(`${back}?error=${encodeURIComponent("Could not delete the note - try again. If it keeps happening, let us know.")}#activity`);
+  }
+  if (!deleted) {
+    redirect(`${back}?error=${encodeURIComponent("That note is no longer there - it may have already been removed. Refresh and try again.")}#activity`);
   }
 
   revalidatePath(back);
