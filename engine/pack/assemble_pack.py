@@ -72,10 +72,39 @@ import sanral_b7  # noqa: E402
 from sanral_fill import Workbook, n2col  # noqa: E402
 from generate_cv import _convert_to_pdf, SAST  # noqa: E402
 from pdf_merge import merge_with_contents, expiry_warning  # noqa: E402
+from vault_mismatch import vault_document_mismatch_warning  # noqa: E402
 
 TECHNICAL = "Envelope 1 - Technical Submission"
 FINANCIAL = "Envelope 2 - Financial Submission"
 OUTER = "Outer envelope"
+
+# vault_section()'s own key -> the companies.*_path column
+# vault_document_mismatch_warning() is keyed by (same mapping
+# engine/pack/process_pack_jobs.py's VAULT_COLUMNS uses to build vault_docs
+# in the first place - duplicated here, not imported, because that module is
+# the Supabase adapter and this one is Supabase-free by design, same as
+# VAULT_ORDER/ISO_KEY above). A key with no entry (iso_9001) just means
+# vault_document_mismatch_warning() returns None for it - no rule, no crash.
+VAULT_KEY_TO_COLUMN = {
+    "sars_tcs_pin": "sars_tcs_pin_document_path",
+    "bee_proof": "bee_proof_document_path",
+    "coid_letter": "coid_letter_document_path",
+}
+
+
+def vault_warning(key, expiry, closing, path):
+    """The one checklist warning for a vault document bound into the SANRAL
+    pack: an expiring/lapsing-before-closing copy takes priority (same
+    precedence engine/general/build_general_pack.py's own general pack
+    already uses for this exact choice - checked there, not reinvented),
+    else a filename-only content-sanity mismatch (vault_mismatch.py) - the
+    real-incident-driven check the general pack has always had and this
+    SANRAL path never did at all until now (QA pass, 2026-11-10, Finding
+    341): both builders bind the exact same companies.*_path vault
+    documents into a real submission, so a misfiled document (e.g. a
+    B-BBEE Affidavit sitting in the COID slot) is exactly as real a risk
+    here as there."""
+    return expiry_warning(expiry, closing) or vault_document_mismatch_warning(VAULT_KEY_TO_COLUMN.get(key), path)
 
 
 def _generated_heading_date():
@@ -466,7 +495,7 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
             return sec(f"{form} - {label}", envelope, None, "no copy uploaded to the Document Vault")
         pdf, reason = _to_pdf(path, conv_dir)
         return sec(f"{form} - {label}", envelope, pdf, reason and f"vault copy unusable: {reason}",
-                   warning=expiry_warning(expiry, closing))
+                   warning=vault_warning(key, expiry, closing, path))
 
     for key, form, label in VAULT_ORDER:
         sections.append(vault_section(key, form, label, TECHNICAL))

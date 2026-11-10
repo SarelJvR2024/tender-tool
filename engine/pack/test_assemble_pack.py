@@ -181,11 +181,55 @@ def test_generated_heading_date_is_sast_anchored_not_naive_utc():
           heading_date == "2026-10-21", heading_date)
 
 
+def test_vault_warning_flags_the_real_misfiled_coid_case_the_sanral_pack_never_caught():
+    print("vault_warning(): the SANRAL pack's own vault documents now get the same "
+          "filename content-sanity check as the general pack (Finding 341)")
+    # Real incident, 2026-10-28 (Reviewer Civils & Consulting): a B-BBEE
+    # Affidavit uploaded into the COID vault slot. engine/general/
+    # build_general_pack.py was fixed for this the same day; this SANRAL
+    # path (binding the identical companies.*_path vault documents into a
+    # real signed submission) never was, until vault_mismatch.py was pulled
+    # out and wired into both.
+    w = ap.vault_warning("coid_letter", None, "2026-12-01",
+                         "/tmp/x/4b38b265-8ac8-4a8d-b115-bae49821d125-BBBEE_Affidavit.docx")
+    check("real incident filename is flagged on the SANRAL path too", w is not None)
+    check("message names the B-BBEE Affidavit", w and "B-BBEE Affidavit" in w, w)
+
+
+def test_vault_warning_passes_a_correctly_named_document():
+    check("real COID filename passes", ap.vault_warning(
+        "coid_letter", None, "2026-12-01", "/tmp/x/abc-COID_Letter_of_Good_Standing.pdf") is None)
+    check("real BEE filename passes", ap.vault_warning(
+        "bee_proof", None, "2026-12-01", "/tmp/x/abc-BBBEE_Sworn_Affidavit.pdf") is None)
+    check("real SARS filename passes", ap.vault_warning(
+        "sars_tcs_pin", None, "2026-12-01", "/tmp/x/abc-SARS_Tax_Compliance_PIN.pdf") is None)
+
+
+def test_vault_warning_has_no_rule_for_a_key_the_brief_did_not_ask_for():
+    for key in ("pi_insurance", "bank_letter", "iso_9001"):
+        check(f"{key} has no mismatch rule", ap.vault_warning(
+            key, None, "2026-12-01", "/tmp/x/anything_at_all.pdf") is None)
+
+
+def test_vault_warning_expiry_takes_priority_over_a_filename_mismatch():
+    # Same precedence engine/general/build_general_pack.py already uses for
+    # this exact choice: an expired copy is the more urgent, more certain
+    # fact - a misfiled-looking name on an ALSO-expired copy shouldn't hide
+    # the expiry behind the (less certain, filename-only) mismatch text.
+    w = ap.vault_warning("coid_letter", "2026-01-01", "2026-12-01",
+                         "/tmp/x/abc-COID_Letter_of_Good_Standing.pdf")
+    check("expiry warning wins when both would otherwise fire", w is not None and "expir" in w.lower(), w)
+
+
 def main():
     test_check_template_no_baseline_match_mismatch_and_corrupted_baseline()
     test_check_template_refuses_an_unfillable_family()
     test_check_template_surfaces_fingerprint_warnings_not_just_discards_them()
     test_generated_heading_date_is_sast_anchored_not_naive_utc()
+    test_vault_warning_flags_the_real_misfiled_coid_case_the_sanral_pack_never_caught()
+    test_vault_warning_passes_a_correctly_named_document()
+    test_vault_warning_has_no_rule_for_a_key_the_brief_did_not_ask_for()
+    test_vault_warning_expiry_takes_priority_over_a_filename_mismatch()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
