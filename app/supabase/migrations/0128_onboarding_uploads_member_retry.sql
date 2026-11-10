@@ -1,0 +1,44 @@
+-- Finding 326: app/app/company/document-scan/actions.ts's retryOnboardingUpload()
+-- (the "Retry" button on a file that failed classification) has never been
+-- able to actually retry anything, for any company, ever - not a race, a
+-- structural gap. 0063's own header comment records the original design on
+-- purpose ("No member update/delete: status is worker-owned... The worker
+-- writes with the service role (bypasses RLS)"), but retryOnboardingUpload()
+-- runs under the signed-in user's own RLS-scoped client (lib/supabase/server's
+-- createClient(), the same client every sibling action in that file uses),
+-- not the service role - so its
+--   update onboarding_uploads set status = 'classification_requested', ...
+--   where id = :id and company_id = :companyId and status = 'classification_failed'
+-- has never matched a single row under RLS: with no permissive UPDATE policy
+-- on this table at all, PostgREST returns a 2xx with zero rows affected and
+-- error: null, exactly the "plain update twin discards a zero-row match"
+-- bug class's own signature - but 100% of the time here, not a race window.
+-- retryOnboardingUpload() only ever checked `error` (never null here), so the
+-- action always redirected `?saved=retrying` while the row sat unchanged,
+-- forever stuck on classification_failed with its original
+-- classification_error, invisible to the worker (which only ever claims
+-- status = 'classification_requested' rows - engine/onboarding/
+-- process_onboarding_jobs.py's own claim query, confirmed by reading it
+-- directly) and to every other page on this app.
+--
+-- Reproduced on a scratch Postgres: seeded a company, an owner member, and a
+-- classification_failed onboarding_uploads row, then ran retryOnboardingUpload()'s
+-- own exact update (id + company_id + status = 'classification_failed' match)
+-- as that member under RLS (`set role authenticated; select
+-- set_config('test.uid', ...)`) - `UPDATE 0`, the row unchanged, confirming
+-- this is not hypothetical.
+--
+-- Fix: a new, narrowly-scoped permissive UPDATE policy that only ever lets a
+-- company member move THEIR OWN company's upload from classification_failed
+-- back to classification_requested (via its own WITH CHECK) - the exact, and
+-- only, transition retryOnboardingUpload() performs. It cannot be used to set
+-- any other status, touch any other company's row, or do anything the
+-- worker's service-role writes already do - 0063's "status is worker-owned"
+-- design intent is kept everywhere except this one explicit, user-initiated
+-- retry. The existing restrictive "onboarding_uploads: employee has no
+-- access" policy (0077) still applies on top of this, same as it already
+-- does for the member insert/read policies on this table.
+create policy "onboarding_uploads: members retry a failed classification" on onboarding_uploads
+  for update to authenticated
+  using (is_company_member(company_id) and status = 'classification_failed')
+  with check (is_company_member(company_id) and status = 'classification_requested');

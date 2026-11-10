@@ -466,3 +466,58 @@ describe("skipOnboardingDocument - real update still succeeds", () => {
     expect(url).toContain("saved=skipped");
   });
 });
+
+// retryOnboardingUpload() - Finding 326. Pre-fix this checked only `error`
+// (never `data`/row count) on its own
+// `.update({ status: "classification_requested", ... }).eq("id", ...).eq("company_id", ...).eq("status", "classification_failed")`
+// against onboarding_uploads. Confirmed on a scratch Postgres (migration
+// 0128's own write-up) that, pre-0128, this table had NO permissive UPDATE
+// policy for company members at all (0063's own design: "status is
+// worker-owned... the worker writes with the service role") - so this was
+// never a rare race, it was a 100%-guaranteed zero-row match on every single
+// call, yet the action always redirected `?saved=retrying` regardless. The
+// row stayed on classification_failed forever, invisible to
+// engine/onboarding/process_onboarding_jobs.py's own claim query (which only
+// ever looks at status = 'classification_requested'), so the "Retry" button
+// never retried anything for any company.
+describe("retryOnboardingUpload - update matches zero rows (pre-0128 structural gap, or any later race)", () => {
+  it("does not report success", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [{ data: null, error: null }], // retry update - zero-row match -> no permissive policy matched
+      ],
+    });
+    supabaseState.current = client;
+
+    const { retryOnboardingUpload } = await import("./actions");
+
+    const fd = formDataWith({ upload_id: "upload-5" });
+    const url = await expectRedirect(retryOnboardingUpload(fd));
+
+    expect(url).not.toContain("saved=retrying");
+    expect(url).toContain("/company/document-scan?error=");
+  });
+});
+
+describe("retryOnboardingUpload - real update matches the row (post-0128)", () => {
+  it("reports success when the update genuinely matches the row", async () => {
+    const { client, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: { id: "upload-5" }, error: null }], // real match, post-0128's new member retry policy
+      ],
+    });
+    supabaseState.current = client;
+
+    const { retryOnboardingUpload } = await import("./actions");
+
+    const fd = formDataWith({ upload_id: "upload-5" });
+    const url = await expectRedirect(retryOnboardingUpload(fd));
+
+    expect(url).toContain("saved=retrying");
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ status: "classification_requested", classification_error: null }),
+    );
+  });
+});

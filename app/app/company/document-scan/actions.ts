@@ -481,15 +481,25 @@ export async function retryOnboardingUpload(formData: FormData) {
   const uploadId = str(formData, "upload_id");
   if (!uploadId) fail("Missing document.");
 
-  const { error } = await supabase
+  // .select("id").maybeSingle() here matters, same shape as every other
+  // update/delete twin in this bug class: without it, a zero-row match
+  // (another retry/the worker already having moved this upload off
+  // classification_failed, or - before migration 0128 added the one
+  // permissive UPDATE policy this depends on - EVERY call, unconditionally,
+  // since 0063 left onboarding_uploads with no member UPDATE policy at all)
+  // still redirected `?saved=retrying` while the row sat unchanged, forever
+  // invisible to the worker (Finding 326).
+  const { data: updated, error } = await supabase
     .from("onboarding_uploads")
     .update({ status: "classification_requested", classification_error: null, classification_claimed_at: null, classification_completed_at: null })
     .eq("id", uploadId)
     .eq("company_id", companyId)
-    .eq("status", "classification_failed");
-  if (error) {
+    .eq("status", "classification_failed")
+    .select("id")
+    .maybeSingle();
+  if (error || !updated) {
     console.error("onboarding_uploads retry update failed", error);
-    fail("Could not retry this document - try again. If it keeps happening, let us know.");
+    fail("This document is no longer there, or isn't failed any more - refresh and try again.");
   }
 
   const back = backTo(formData);
