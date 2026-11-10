@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { processDiscoveredTenderCompany } from "./send-discovered-tenders.ts";
 import type { DiscoveredOpportunityRow } from "../lib/discoveredTendersDigest.ts";
 
-type Call = { table?: string; name?: string; kind: "rpc" | "from" };
+type Call = { table?: string; name?: string; kind: "rpc" | "from"; params?: Record<string, unknown> };
 
 /** Thenable, chainable query-builder stub good enough for the one .from() shape this function uses (a .maybeSingle() company-name lookup) - same technique scripts/send-operational-alerts.spec.ts already established. */
 function makeBuilder(data: unknown, error: unknown = null) {
@@ -31,8 +31,8 @@ function mockSupabase(opts: {
 }) {
   const calls: Call[] = [];
   const cursors: Record<string, number> = {};
-  const rpc = (name: string) => {
-    calls.push({ name, kind: "rpc" });
+  const rpc = (name: string, params: Record<string, unknown>) => {
+    calls.push({ name, kind: "rpc", params });
     const queued = opts.rpcResponses[name];
     if (!queued) return Promise.resolve({ data: null, error: null });
     if (Array.isArray(queued)) {
@@ -136,5 +136,37 @@ describe("processDiscoveredTenderCompany", () => {
 
     expect(supabase.calls.some((c) => c.name === "claim_notification")).toBe(false);
     expect(result.dryRunRow?.status).toBe("Skipped (no opted-in recipients)");
+  });
+
+  // Finding 347: --test-recipient is documented (lib/senderCliArgs.ts's own
+  // header) as safe specifically because "using the real key here would
+  // permanently burn that one-time claim, and the real recipient would
+  // never get the real notification later" - but the CLAIM call itself
+  // (the one that actually inserts the permanent notification_claims row)
+  // used the real, untouched discoveredTenderIdempotencyKey() regardless of
+  // testRecipient; only the later record_notification_sent call used
+  // testIdempotencyKey(). A --test-recipient run therefore permanently
+  // burns the real company's real one-shot "discovered tender" claim for
+  // this opportunity - the exact outcome the design comment says this flag
+  // exists to prevent.
+  it("--test-recipient must claim under the TEST-prefixed key, never the real one (Finding 347)", async () => {
+    const supabase = mockSupabase({
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+        claim_notification: { data: true, error: null },
+        record_notification_sent: { data: null, error: null },
+      },
+    });
+
+    await processDiscoveredTenderCompany(supabase as never, "company-1", [row({ id: "opp-1" })], "https://app.example", {
+      dryRun: false,
+      testRecipient: "qa@example.com",
+    });
+
+    const claimCall = supabase.calls.find((c) => c.name === "claim_notification");
+    expect(claimCall).toBeDefined();
+    const claimedKey = claimCall!.params!.p_idempotency_key as string;
+    expect(claimedKey.startsWith("test-")).toBe(true);
+    expect(claimedKey).not.toBe("discovered-tender-opp-1");
   });
 });

@@ -123,12 +123,22 @@ export async function processDiscoveredTenderCompany(
 
   const claimedRows: DiscoveredOpportunityRow[] = [];
   for (const row of companyRows) {
+    // Finding 347: claim under the TEST-prefixed key whenever testRecipient
+    // is set, never the real one - claim_notification() is the call that
+    // actually inserts the permanent notification_claims row; using the
+    // real key here (as this used to) would burn the real company's one-
+    // shot-ever claim on a test send, exactly the outcome
+    // lib/senderCliArgs.ts's own testIdempotencyKey() comment says this
+    // flag exists to prevent. The later record_notification_sent call
+    // below already did this correctly - only the claim itself didn't.
+    const realKey = discoveredTenderIdempotencyKey(row.id);
+    const claimKey = testRecipient ? testIdempotencyKey(realKey) : realKey;
     const { data: ok, error: claimError } = await supabase.rpc("claim_notification", {
-      p_idempotency_key: discoveredTenderIdempotencyKey(row.id),
+      p_idempotency_key: claimKey,
       p_notification_type: "discovered_tenders_digest",
     });
     if (claimError) {
-      console.error(`claim_notification failed for ${discoveredTenderIdempotencyKey(row.id)}`, claimError);
+      console.error(`claim_notification failed for ${claimKey}`, claimError);
       continue;
     }
     if (ok) claimedRows.push(row);
