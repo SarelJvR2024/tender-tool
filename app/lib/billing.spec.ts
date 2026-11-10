@@ -99,7 +99,21 @@ describe("trialDaysLeft", () => {
   });
 
   it("counts down, floored, never negative", () => {
-    expect(trialDaysLeft({ ...base, trialEndsAt: daysFromNow(5) })).toBe(5);
-    expect(trialDaysLeft({ ...base, trialEndsAt: daysFromNow(-3) })).toBe(0);
+    // Finding 313: this intermittently failed during a full `vitest run` (not
+    // isolated) - `daysFromNow(5)` captures `Date.now()` once to build
+    // `trialEndsAt`, then `trialDaysLeft()`'s own `now = new Date()` default
+    // captures it again, later, when the real test runner (not an isolated
+    // run of this one file) has spent time on other tests/suites first. Any
+    // elapsed time between those two captures shaves a few ms off the full
+    // 5-day window, and `Math.floor` turns that into 4, not 5 - a real
+    // unfrozen-clock/day-boundary flake (same family as Finding 298), not a
+    // bug in trialDaysLeft() itself. Fixed by freezing `now` once and passing
+    // it explicitly to both `daysFromNow` and `trialDaysLeft` - the same
+    // fixed instant on both sides, so no amount of elapsed real time between
+    // the two calls can change the result.
+    const now = new Date();
+    const daysFromFixedNow = (n: number) => new Date(now.getTime() + n * 24 * 60 * 60 * 1000).toISOString();
+    expect(trialDaysLeft({ ...base, trialEndsAt: daysFromFixedNow(5) }, now)).toBe(5);
+    expect(trialDaysLeft({ ...base, trialEndsAt: daysFromFixedNow(-3) }, now)).toBe(0);
   });
 });
