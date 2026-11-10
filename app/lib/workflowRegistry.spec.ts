@@ -20,9 +20,9 @@ function row(overrides: Partial<WorkflowHeartbeatRow>): WorkflowHeartbeatRow {
 }
 
 describe("WORKFLOW_REGISTRY", () => {
-  it("has exactly 10 entries, one per real cron-relevant workflow file", () => {
-    expect(WORKFLOW_REGISTRY).toHaveLength(10);
-    expect(new Set(WORKFLOW_REGISTRY.map((w) => w.key)).size).toBe(10);
+  it("has exactly 11 entries, one per real cron-relevant workflow file", () => {
+    expect(WORKFLOW_REGISTRY).toHaveLength(11);
+    expect(new Set(WORKFLOW_REGISTRY.map((w) => w.key)).size).toBe(11);
   });
 });
 
