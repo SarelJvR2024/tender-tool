@@ -15979,3 +15979,169 @@ update narrative_documents set status='generating', started_at=now() where id='b
 **Pushed directly to `main`** (not opened as a PR): one new migration adding a single partial unique index (no RLS policy touched, no new table, no new RPC/function), one worker-only Python file's exception handling (`engine/`, not `app/`), no money/pack-quota-credit path (`narrative_documents` is a completely separate table/feature from `pack_generation_jobs`/PayFast), no hard-stop gate on any user-facing action (this only changes how the WORKER retries a claim internally - a company's own "Generate narrative" button and its UI are unchanged), no worker-image/Dockerfile change, not `pack-review.tsx`/`submission-pack.tsx` or anything either imports (narrative cover letters/methodology statements are a separate feature from SANRAL/general pack assembly), no correctness fix to a signed/submitted document (the fix is to the SAFEGUARD that runs before a draft is ever shown to a human to sign anything). Comparable in scope to Findings 300/318/335/336 (each a single-function-or-index SQL change on a narrow, well-understood surface), if anything narrower since no existing RLS policy or RPC body is touched at all.
 
 **Backlog status.** No standing item in `System-Status.md`'s consolidated list named this gap specifically (it lived only in inline code/doc comments and this file's own Finding 66 write-up, not the top-level list) - nothing to close there beyond this entry itself. Noting for the record: this closes the exact, specific risk Finding 66's own write-up and the 2026-10-23 pass entry both flagged by name as "whoever wires `narrative` into `run_bridges.py` ... reads this first" - that wiring landed 2026-10-25 with no follow-up until now, a real example of a correctly-flagged future risk's own trigger condition firing silently with nobody re-checking it, the same "a flagged lead needs a live owner, not just a comment" lesson this track has already drawn elsewhere.
+
+### Finding 338 (CONFIRMED, FIXED, opened as a PR - `/api/billing/checkout`'s own route handler ran
+`start_payfast_checkout()` (a SECURITY DEFINER RPC that writes a company's live `plan_tier`/
+`billing_interval`/`max_users`/`max_packs_per_month` onto `company_subscriptions` immediately,
+before PayFast is ever involved at all) from a plain `GET` request - reachable by a bare top-level
+cross-site navigation (a crafted link, not even a form or script), with no payment, no PayFast
+round-trip and no confirmation step of any kind)
+
+**Area:** `app/app/api/billing/checkout/route.ts` (the one real caller of `start_payfast_checkout()`,
+0078/0117). `app/app/billing/page.tsx`'s `CheckoutLink()` (the one real caller of this route). No
+migration, no RPC body, no RLS policy touched - `start_payfast_checkout()` itself is unchanged.
+
+**This pass's angle.** Took up the task brief's own fresh angle (c): "the PayFast subscription
+lifecycle beyond the ITN webhook itself - e.g. `start_payfast_checkout()`'s own revenue-integrity
+gap (a long-standing item, noted but never deeply investigated) - is there something concrete and
+newly-discoverable there?" Re-read `start_payfast_checkout()` (0078, redefined 0081/0082/0083/0117)
+end to end, confirming directly what the standing item only ever summarised: it writes
+`plan_tier`/`billing_interval`/`max_users`/`max_packs_per_month` onto the company's real
+`company_subscriptions` row synchronously, inside the function itself, before returning the fresh
+`m_payment_id` the caller then redirects to PayFast with - `status` is the only column left alone
+until a real ITN arrives (`apply_payfast_itn()`, same file). That half - WHEN a legitimate click's
+own write takes effect, before the money has actually moved - is exactly the already-standing,
+genuinely-ambiguous product-policy item (same shape as Finding 168's own "what does a period mean
+for a yearly biller" judgment call, which is why neither has been pushed as a fix before). Reading
+one level up, at the route handler that's the only thing standing between "a company member clicked
+Subscribe" and this write, surfaced a second, narrower, NON-ambiguous bug in the same mechanism:
+`app/app/api/billing/checkout/route.ts` exports `GET`, not `POST` - `app/app/billing/page.tsx`'s own
+`CheckoutLink()` renders it as a plain `<Link href="/api/billing/checkout?plan=...&interval=...">`.
+A GET request with a real, synchronous, authenticated-session-scoped write as its side effect is a
+textbook "state-changing action must not be a GET" defect, independent of whatever Sarel eventually
+decides WHEN a checkout's write should land - this part has one unambiguous correct answer (don't
+let a bare top-level navigation trigger it), not a product-policy call.
+
+**Why this is live and externally-reachable, not merely a style nit.** `app/proxy.ts` (this app's own
+middleware-equivalent) never covers `/api/*` at all - the route's own `supabase.auth.getUser()` call
+is the only gate, and it passes for ANY request carrying a valid session cookie regardless of origin,
+method, or `Referer`. `@supabase/ssr`'s own session cookie is set with the library's default
+`SameSite=Lax` (this app sets no explicit `sameSite` option anywhere in `lib/supabase/server.ts` or
+`proxy.ts` - confirmed by reading both files in full) - and `SameSite=Lax`'s own, well-documented
+browser rule is that a cookie IS sent on a cross-site top-level navigation using a "safe" method
+(a plain link click, `window.location =`, a `<meta http-equiv="refresh">`, an auto-redirecting page)
+even though it is withheld from a cross-site subresource request (`<img>`, `<iframe>`, `fetch`).
+`GET` is exactly that "safe" method. A signed-in company member who simply opens one crafted link
+(sent by email/chat/forum post, or embedded as a redirect on any other page they happen to visit
+while signed in) - no JavaScript, no form, no click beyond "open this link" - would silently have
+their OWN company's `plan_tier`/`max_users`/`max_packs_per_month` overwritten to whatever the
+attacker's URL names, with no payment, no PayFast screen ever actually completed, and no on-screen
+confirmation of what just happened. The realistic harmful direction is a forced DOWNGRADE: an
+attacker who knows (or guesses) a target company is on Business (10 users/30 packs) and links them
+to `?plan=starter&interval=monthly` immediately shrinks their live `max_users`/`max_packs_per_month`
+to 5/15 - below what a real, actively-staffed paying customer may already be using - with nothing
+to notice until a teammate can no longer be invited or a pack request is refused. (The opposite
+direction - a forced, unpaid UPGRADE - is the already-standing "grants-before-ITN" item, not new;
+what IS new here is that neither direction any longer requires the company's OWN member to click
+anything inside this app at all - an outside party can trigger it.)
+
+**Reproduced live against the real running route, RED then GREEN, not reasoned about in the
+abstract.** `npx next dev` (a scratch `.env.local`, dummy Supabase URL/anon key - no DB needed for
+this HTTP-method-level claim; `NEXT_PUBLIC_PAYFAST_SANDBOX=false` to bypass the sandbox-only gate the
+same way a real, live-billing deployment would have it set, per `lib/payfast.ts`'s own
+`isBillingSandboxed()`). **RED (pre-fix code):**
+`curl -i -X GET -H "Sec-Fetch-Site: cross-site" -H "Referer: https://attacker.example/evil.html"
+"http://localhost:3101/api/billing/checkout?plan=starter&interval=monthly"` - with no session cookie
+at all, this still returned `307` to `/login` (not a 404/405) - i.e. a bare, forged-looking
+cross-site GET reaches the route's REAL application logic (past the sandbox check, into the
+`auth.getUser()`/no-user branch) exactly as a genuine click would; had a real victim's session cookie
+been attached (as SameSite=Lax permits for this exact request shape), the next line in the same
+function - `supabase.rpc("start_payfast_checkout", ...)` - would have run instead of redirecting.
+**GREEN (post-fix code, fresh dev server, same database-free method):** the identical forged request
+now returns **`405 Method Not Allowed`** - from Next.js's own route-method dispatch, before ANY of
+this app's own code (sandbox check, auth check, the RPC call) ever runs at all, for any GET
+regardless of headers, cookies, or origin. A same-origin `POST` with the same `plan`/`interval` body
+(what `/billing`'s own real `<form method="post">` now sends) returns the identical `307` to
+`/login` the old GET used to - confirming the fix changes WHICH METHOD reaches this logic, not the
+logic itself. (Note on method, since this is an HTTP-method/routing claim, not a SQL/RLS one: per the
+task's own instruction to reproduce "against real code" via Postgres replay for SQL/RLS/migration
+claims specifically - nothing here is a migration, RLS policy, or SQL function body, so the live
+verification instead ran against the real Next.js dev server itself, the equivalent live artifact
+for an HTTP-routing-level bug; the scratch DB discipline doesn't apply to a code path with no SQL in
+it at all - confirmed directly: `start_payfast_checkout()` itself is byte-for-byte unchanged, so no
+Postgres replay was needed to prove this fix's own effect.)
+
+**Fix.** `app/app/api/billing/checkout/route.ts`: renamed `export async function GET` to
+`export async function POST`, reading `plan`/`interval` from `request.formData()` instead of
+`request.nextUrl.searchParams` - every other line (the plan/interval validation, the sandbox gate,
+the auth check, the `start_payfast_checkout()` call, the signed PayFast redirect form) is completely
+unchanged, confirmed by diff. `app/app/billing/page.tsx`'s `CheckoutLink()`: replaced the GET
+`<Link href="/api/billing/checkout?...">` with a same-origin `<form action="/api/billing/checkout"
+method="post">` carrying `plan`/`interval` as hidden fields and a `<Button type="submit">` in place
+of the link (kept `w-full` on both the form and the button so the existing flex-column card layout -
+`align-items: stretch` - still stretches the button to the card's own width exactly as the link used
+to, not just visually by coincidence - checked directly by re-running `npx next build` and confirming
+the route table and `/billing` page are otherwise unaffected). Removed the now-unused `Link` import.
+Does NOT change `start_payfast_checkout()` itself, `apply_payfast_itn()`, or anything about WHEN a
+genuine, same-origin checkout's own write takes effect - the already-standing "grants-before-ITN"
+judgment call (item 8) is completely untouched by this fix, deliberately: this closes only WHO/WHAT
+can reach the handler at all, not the separate, genuinely-ambiguous policy question of what a
+legitimate click should do once it lands there.
+
+**Full verification, all run myself, real exit codes.** `npx tsc --noEmit` - 0 errors. `npx eslint
+app/app/billing/page.tsx app/app/api/billing/checkout/route.ts` - 0 errors/warnings. `npx vitest run` -
+**79/79 test files, 658/658 tests pass**, identical to the pre-fix baseline (no existing test calls
+this route or renders `CheckoutLink` directly - `lib/payfast.spec.ts` only comments on the route, it
+doesn't invoke it; confirmed by grepping every `*.spec.ts`/`*.test.ts` for `billing/checkout` - one
+hit, a comment, not an assertion). `npx next build` - clean, identical route table (`/api/billing/
+checkout` still listed, still dynamic `ƒ`), no new errors. Live RED/GREEN HTTP-level repro against a
+real `npx next dev` server, documented above with exact `curl` commands and exact status codes
+(`307` pre-fix for a forged GET reaching app logic; `405` post-fix for the identical forged GET,
+`307` for the real POST path) - run twice (once before the `w-full` layout touch-up, once after) with
+identical results both times. No Python/`engine/` file touched - confirmed by `git status`/`git diff
+--stat` (2 files, both `app/`, 49 insertions/12 deletions total) - the `engine/` test sweep and
+Postgres replay this track's process otherwise mandates for SQL/RLS changes genuinely do not apply
+here (nothing SQL changed), noted explicitly rather than silently skipped. `git fetch origin main`
+immediately before starting (clean, `b62c976`, matching the task brief exactly) and again immediately
+before pushing this Finding's own branch - still `b62c976`, no sibling collision. `git status` clean
+except this Finding's own 2 files before the fix commit, and the docs files after. The scratch
+`.env.local` used only for the live dev-server repro was removed before every commit (never
+committed - confirmed `git status --short` shows no `.env.local` at any point) and the dev server
+itself was stopped (`pkill -f "next dev"`) after each run - nothing left listening.
+
+**Mandatory open-PR cross-check.** `gh api repos/sareljvr2024/tender-tool/pulls --paginate -q '.[] |
+"\(.number)\t\(.head.ref)\t\(.title)"'`: all 43 open PRs (`#164`/`#165`/`#176`-`#213`/`#215`-`#217`)
+read by number/title/branch. Per the task's own instruction, ran `gh api repos/.../pulls/<n>/files -q
+'.[].filename'` for every one of the 43 and grepped every file list for `billing/checkout|billing/
+page|payfast` - 4 hits: PR #197 (`0125_payfast_itn_exact_redelivery_idempotency.sql` +
+`test_payfast_itn_idempotency.py` - `apply_payfast_itn()`'s own idempotency, a completely different
+function, not this route) and PR #217 (`0128_payfast_itn_stale_redelivery_ledger.sql` + its own test -
+same function, same note, Finding 334's own fix) both confirmed unrelated by reading their real file
+lists, not just titles. PR #215 (`app/app/api/billing/payfast/itn/route.ts` + `lib/payfast.ts` +
+`lib/payfast.spec.ts` - the ITN webhook route and its `x-forwarded-for` check, Finding 331's own fix)
+- a different route entirely (`/api/billing/payfast/itn`, not `/api/billing/checkout`), confirmed by
+reading its real diff (`gh api repos/.../pulls/215/files -q '.[] | select(.filename=="app/lib/
+payfast.ts") | .patch'`) - touches `confirmWithPayfast()`'s IP-sanity check, nothing this Finding's
+own `checkout/route.ts` or `billing/page.tsx` reads or calls. **The one real file-level overlap: PR
+#165** (`pre-demo-defect-fixes`) **does touch `app/app/billing/page.tsx` directly** - read its full
+patch (`gh api repos/.../pulls/165/files -q '.[] | select(.filename=="app/app/billing/page.tsx") |
+.patch'`): a single one-line change, the Enterprise plan's `mailto:` address (around line 159, inside
+the Enterprise `SectionCard`, `hello@tendertool.co.za` -> `support@tenderready.app`) - nowhere near
+this Finding's own edits (the file's top-level `Link` import removal, and `CheckoutLink()` around
+lines 278-337). Genuinely no line-range overlap; the two changes can land in either order with no
+merge conflict. No other PR's title, branch, or real file list mentions `checkout`, `CheckoutLink`,
+or this route in any way. Zero collision beyond the one confirmed-non-overlapping line in PR #165.
+
+**Opened as PR #218 (`finding-338-billing-checkout-get-side-effect`), not pushed to `main`.** Sits
+directly on the PayFast billing/checkout money path - `start_payfast_checkout()`'s own real caller -
+per this track's own binding guardrail ("no money paths" for a direct push), the same category
+Findings 225 (PR #197), 331 (PR #215) and 334 (PR #217) were each opened as PRs for, even though (as
+with Finding 331 specifically) the change itself is pure TypeScript/HTTP-routing with no RLS, no
+schema, no RPC body, and no worker-image surface touched at all.
+
+**Backlog status.** Does not close or supersede the standing item 8 ("`start_payfast_checkout()`'s
+revenue-integrity gap and the yearly pack-quota reset") - that item's own "grants-before-ITN" half
+(WHEN a legitimate click's own write should take effect) remains exactly as open and exactly as
+genuinely product-policy-ambiguous as before; this Finding only closes the separate, unambiguous
+WHO/WHAT-can-reach-it half the task brief's own fresh angle (c) asked to be investigated concretely.
+Noted as a new sub-point under item 8 in `System-Status.md`'s consolidated list, and item 20 (open-PR
+list) updated for PR count 44.
+
+To verify independently: read `app/app/api/billing/checkout/route.ts` and confirm it exports `POST`,
+not `GET`, reading `plan`/`interval` via `request.formData()`. Read `app/app/billing/page.tsx`'s
+`CheckoutLink()` and confirm it renders a `<form method="post">`, not a `<Link>`, to that route. Start
+`npx next dev` from `app/` with a scratch `.env.local` (dummy `NEXT_PUBLIC_SUPABASE_URL`/
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_PAYFAST_SANDBOX=false`) and confirm `curl -X GET
+"http://localhost:<port>/api/billing/checkout?plan=starter&interval=monthly"` returns `405`, while
+`curl -X POST -d "plan=starter&interval=monthly" "http://localhost:<port>/api/billing/checkout"`
+returns `307` to `/login` (no session) - the same behaviour the old GET route had before this fix.
