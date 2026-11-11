@@ -75,11 +75,20 @@ export function nudgeFirstTenderEmail(opts: { companyName: string; appUrl: strin
   return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
+// Standing review, 2026-11-11: this copy used to hardcode "DAY 7"/"halfway
+// through your trial" - true only on the one exact calendar day
+// trialDay7Candidates() used to match. Now that function is a retry-safe
+// RANGE (see its own header comment for why - a missed cron run used to
+// drop this nudge forever), the SAME email can genuinely send anywhere
+// from day 7 down to day 3, so a literal "DAY 7"/"halfway" claim would be
+// wrong on every day but the first. Kept day-count-agnostic instead -
+// still names the two real facts (packs built, trial end date) that were
+// always the point of the email, never a specific elapsed-day claim.
 export function trialDay7MilestoneEmail(opts: { companyName: string; trialEndsAt: string; packsBuiltSoFar: number; appUrl: string; unsubscribeUrl?: string }): NotificationEmail {
-  const subject = lifecycleSubject(`You're halfway through your trial - here's what you've built`);
+  const subject = lifecycleSubject(`Here's what you've built in your trial so far`);
   const html = layout(
     `
-      <p style="margin:0 0 16px;">${pill("TRIAL - DAY 7", "info")}</p>
+      <p style="margin:0 0 16px;">${pill("TRIAL CHECK-IN", "info")}</p>
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.companyName)}'s trial so far</p>
       ${infoCard([
         { label: "Submission packs built", value: String(opts.packsBuiltSoFar) },
@@ -90,7 +99,7 @@ export function trialDay7MilestoneEmail(opts: { companyName: string; trialEndsAt
     `${opts.packsBuiltSoFar} pack(s) built so far - your trial ends ${formatDate(opts.trialEndsAt)}.`,
     { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName }, unsubscribeUrl: opts.unsubscribeUrl }
   );
-  const text = `${opts.companyName}'s trial, day 7: ${opts.packsBuiltSoFar} pack(s) built so far. Trial ends ${formatDate(opts.trialEndsAt)}.\n\n${opts.appUrl}/billing`;
+  const text = `${opts.companyName}'s trial so far: ${opts.packsBuiltSoFar} pack(s) built so far. Trial ends ${formatDate(opts.trialEndsAt)}.\n\n${opts.appUrl}/billing`;
   return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
