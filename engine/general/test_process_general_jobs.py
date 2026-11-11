@@ -16,6 +16,7 @@ Run: python3 engine/general/test_process_general_jobs.py
 import datetime
 import json
 import os
+import shutil
 import sys
 import tempfile
 import urllib.parse
@@ -377,6 +378,88 @@ def test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap():
           [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
+class UploadFailsOnSecondFile(FakeClient):
+    """Records every upload()/remove() call in order; raises on the one
+    upload whose remote path ends with 'guide.docx' (the second file
+    run_pack()'s own upload loop reaches), simulating a transient Storage
+    failure AFTER the first file ('submission_pack.pdf') already landed."""
+
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.uploads = []
+        self.removed = []
+
+    def upload(self, bucket, path, local, content_type):
+        self.uploads.append(path)
+        if path.endswith("guide.docx"):
+            raise RuntimeError("simulated transient Storage failure uploading the completion guide")
+
+    def remove(self, bucket, paths):
+        self.removed.append((bucket, list(paths)))
+
+
+def test_run_pack_cleans_up_storage_when_a_later_upload_fails():
+    print("run_pack(): a .pdf already uploaded to the 'submission-packs' bucket is cleaned up "
+          "when the completion-guide upload that follows it in the same job then fails")
+    # Finding 398 (standing solution-architect review, 2026-11-11): the exact
+    # Storage-orphan shape Findings 396 (engine/cv/process_cv_jobs.py) and
+    # 397 (engine/pack/process_pack_jobs.py) already fixed, found here
+    # independently in this bridge's own run_pack() upload loop - both of
+    # those fixes explicitly left this file noted as the same gap, not yet
+    # fixed. A job whose 'submission_pack.pdf' upload succeeded but whose
+    # next output-file upload (or the field_provenance upsert) then failed
+    # left that PDF sitting in the 'submission-packs' bucket forever: no
+    # pack_generation_jobs row is ever updated with its storage path (the
+    # job is marked 'failed' instead), and no other code in this repo ever
+    # sweeps that bucket for orphans.
+    job = {"id": "job-cleanup", "status": "requested", "engine": "general", "kind": "generate_pack",
+           "company_id": "co-a", "tender_id": "t-a"}
+    client = UploadFailsOnSecondFile([dict(job)])
+    tender = {"id": "t-a", "family": None, "document_requirements": {"forms": ["x"]},
+              "contract_no": "C-1", "buyer": "Test buyer", "description": "Test tender",
+              "closing_date": "2026-12-01T00:00:00Z"}
+    work_root = tempfile.mkdtemp(prefix="test_general_pack_storage_cleanup_work_root_")
+
+    def fake_build_general_pack(manifest, local_docs, company, signatory, answers, tender, files,
+                                work_dir, out_pdf, evidence_items, cvs):
+        os.makedirs(work_dir, exist_ok=True)
+        open(out_pdf, "wb").close()
+        guide_path = os.path.join(work_dir, "guide.docx")
+        open(guide_path, "wb").close()
+        return {"manifest": {"verify_problems": [], "page_count": 11, "sections": [], "omitted": [],
+                             "by_hand": [], "form_results": [], "provenance_summary": [],
+                             "contents_pages": [], "checklist": [], "checklist_summary": []},
+                "outputs": {"guide.docx": guide_path}, "provenance": []}
+
+    real_job_tender, real_own_pack, real_download, real_local_docs_for, real_gather, real_build, real_prov = (
+        pgj.job_tender, pgj.own_pack, pgj.download_tender_documents, pgj.bgp.local_docs_for,
+        pgj.gather_pack_inputs, pgj.bgp.build_general_pack, pgj.provenance_pack_id)
+    pgj.job_tender = lambda client, job: tender
+    pgj.own_pack = lambda client, job: None
+    pgj.download_tender_documents = lambda tender, dest_dir, fetch=None, client=None, sources=None: ([], [])
+    pgj.bgp.local_docs_for = lambda manifest, dirs, work_dir: {}
+    pgj.gather_pack_inputs = lambda client, job, tender, manifest, work, prefer_manifest_rules=False: ({}, {}, {}, None, [], [])
+    pgj.bgp.build_general_pack = fake_build_general_pack
+    pgj.provenance_pack_id = lambda client, job: None
+    try:
+        result = pgj.process_job(client, job, work_root, fetch=None)
+    finally:
+        pgj.job_tender, pgj.own_pack, pgj.download_tender_documents, pgj.bgp.local_docs_for, \
+            pgj.gather_pack_inputs, pgj.bgp.build_general_pack, pgj.provenance_pack_id = (
+            real_job_tender, real_own_pack, real_download, real_local_docs_for,
+            real_gather, real_build, real_prov)
+        shutil.rmtree(work_root, ignore_errors=True)
+
+    check("process_job() handled the failure (returns True)", result is True, result)
+    check("the job was marked failed, not left 'generating'", client.rows[0]["status"] == "failed", client.rows[0])
+    check("both the pdf and the guide uploads were attempted, in that order",
+          len(client.uploads) == 2 and client.uploads[0].endswith("submission_pack.pdf")
+          and client.uploads[1].endswith("guide.docx"), client.uploads)
+    check("the already-uploaded submission_pack.pdf was cleaned up (the bug this test guards)",
+          len(client.removed) == 1 and client.removed[0] == (pgj.PACK_BUCKET, [client.uploads[0]]),
+          (client.uploads, client.removed))
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap()
@@ -386,6 +469,7 @@ def main():
     test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()
     test_gather_pack_inputs_signatory_fallback()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
+    test_run_pack_cleans_up_storage_when_a_later_upload_fails()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
