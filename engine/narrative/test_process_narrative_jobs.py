@@ -376,10 +376,123 @@ def test_load_other_companies_text_excludes_empty_generated_text():
         "narrative_documents": [{"generated_text": "Some text"}, {"generated_text": None}, {"generated_text": ""}],
     })
     try:
-        texts = pnj.load_other_companies_text("url", "key", "tender-1", "methodology", "company-1")
+        texts = pnj.load_other_companies_text("url", "key", ["tender-1"], "methodology", "company-1")
     finally:
         pnj.supabase_request = original
     check("only the non-empty generated_text is returned", texts == ["Some text"], texts)
+
+
+def test_load_other_companies_text_matches_any_of_several_tender_ids():
+    print("load_other_companies_text(): takes a LIST of tender ids (every private copy of the "
+          "same real tender, tender_ids_for_uniqueness_check()'s own job), not just one")
+    db = FakeDB({
+        "narrative_documents": [
+            {"tender_id": "t-mine", "kind": "methodology", "status": "ready", "company_id": "other-co",
+             "generated_text": "Peer A's draft"},
+            {"tender_id": "t-peer", "kind": "methodology", "status": "ready", "company_id": "third-co",
+             "generated_text": "Peer B's draft (a DIFFERENT private copy of the same ocid)"},
+            {"tender_id": "t-unrelated", "kind": "methodology", "status": "ready", "company_id": "fourth-co",
+             "generated_text": "A genuinely different tender - must never be compared against"},
+        ],
+    })
+    original = pnj.supabase_request
+    pnj.supabase_request = db
+    try:
+        texts = pnj.load_other_companies_text("url", "key", ["t-mine", "t-peer"], "methodology", "company-1")
+    finally:
+        pnj.supabase_request = original
+    check("both peer tender ids' ready drafts are returned",
+          set(texts) == {"Peer A's draft", "Peer B's draft (a DIFFERENT private copy of the same ocid)"}, texts)
+    check("the unrelated tender's draft is NOT included", "A genuinely different tender - must never be compared against" not in texts)
+
+
+def test_tender_ids_for_uniqueness_check_returns_just_itself_when_no_ocid():
+    print("tender_ids_for_uniqueness_check(): a fully manual tender with no ocid has no reliable "
+          "real-world identity signal to widen the match on - stays scoped to just itself")
+    stub, original = _patch({"tenders": [{"id": "t1", "ocid": None}]})
+    try:
+        ids = pnj.tender_ids_for_uniqueness_check("url", "key", "t1")
+    finally:
+        pnj.supabase_request = original
+    check("returns exactly [tender_id] when the tender has no ocid", ids == ["t1"], ids)
+
+
+def test_tender_ids_for_uniqueness_check_finds_sibling_private_copies_sharing_an_ocid():
+    print("tender_ids_for_uniqueness_check(): THE REAL BUG (standing review, 2026-11-11). Migration "
+          "0032 lets two different companies each hold their OWN private copy of the SAME real "
+          "tender, sharing one ocid but with two DIFFERENT tenders.id values (tenders_ocid_key is "
+          "only unique among SHARED tenders - load_manual_tender()'s own comment: 'Another "
+          "company's private copy with the same id is invisible here and blocks nothing'). Before "
+          "this fix, load_other_companies_text() filtered narrative_documents by tender_id alone, "
+          "so company A's and company B's private copies of the identical real tender could NEVER "
+          "see each other's draft - the exact collusion risk this whole feature exists to catch, "
+          "reachable with no race and no overlap: just two ordinary 'load my own copy' requests.")
+    db = FakeDB({
+        "tenders": [
+            {"id": "t-company-a", "ocid": "ocds-9999-REALTENDER", "owner_company_id": "company-a"},
+            {"id": "t-company-b", "ocid": "ocds-9999-REALTENDER", "owner_company_id": "company-b"},
+            {"id": "t-unrelated", "ocid": "ocds-1111-DIFFERENT", "owner_company_id": "company-c"},
+        ],
+    })
+    original = pnj.supabase_request
+    pnj.supabase_request = db
+    try:
+        ids = pnj.tender_ids_for_uniqueness_check("url", "key", "t-company-a")
+    finally:
+        pnj.supabase_request = original
+    check("finds BOTH private copies of the same real (ocid-matched) tender, itself included",
+          ids == sorted(["t-company-a", "t-company-b"]), ids)
+    check("does NOT pull in a genuinely different tender with a different ocid", "t-unrelated" not in ids)
+
+
+def test_process_one_uniqueness_check_sees_a_different_companys_private_copy_of_the_same_real_tender():
+    print("process_one(): end to end - the uniqueness check actually receives the OTHER company's "
+          "ready draft when it is a different private copy (different tender_id) of the SAME real "
+          "tender (same ocid), not just a same-tender_id peer.")
+    db = FakeDB({
+        "narrative_documents": [
+            {"id": "job-mine", "status": "requested", "tender_id": "t-company-a", "kind": "methodology",
+             "company_id": "company-a"},
+            {"id": "job-peer-ready", "status": "ready", "tender_id": "t-company-b", "kind": "methodology",
+             "company_id": "company-b", "generated_text": "Company B's own ready methodology statement"},
+        ],
+        "tenders": [
+            {"id": "t-company-a", "ocid": "ocds-9999-REALTENDER", "contract_no": "N.004-010-2026/1F",
+             "title": "N4 Rehab", "buyer": "SANRAL", "owner_company_id": "company-a"},
+            {"id": "t-company-b", "ocid": "ocds-9999-REALTENDER", "owner_company_id": "company-b"},
+        ],
+        "companies": [{"id": "company-a", "legal_name": "Mahlangu Civils"}],
+        "people": [], "experience_items": [],
+    })
+    seen_other_texts = {}
+    original_db, original_build_docx, original_storage_upload, original_generate = (
+        pnj.supabase_request, pnj.build_docx, pnj.storage_upload, pnj.generate_with_uniqueness_check)
+    pnj.supabase_request = db
+    pnj.build_docx = lambda *a, **k: None
+    pnj.storage_upload = lambda *a, **k: None
+
+    def _fake_generate(context, other_texts):
+        seen_other_texts["value"] = other_texts
+        return {"sections": [], "plain_text": "Dear Sir/Madam...", "similarity_score": 0.1,
+                "similarity_flagged": False, "regenerated_for_distinctness": False,
+                "quality_review_passes": 1, "quality_flagged": False}
+
+    pnj.generate_with_uniqueness_check = _fake_generate
+    try:
+        pnj.process_one("url", "key", {"id": "job-mine", "company_id": "company-a", "tender_id": "t-company-a",
+                                        "kind": "methodology", "style_length": "standard",
+                                        "style_detail": "detailed", "style_visual": "structured",
+                                        "style_color": "navy"}, "/tmp")
+    finally:
+        (pnj.supabase_request, pnj.build_docx, pnj.storage_upload,
+         pnj.generate_with_uniqueness_check) = (original_db, original_build_docx,
+                                                 original_storage_upload, original_generate)
+    check("the uniqueness check was actually run with the other company's ready text as a peer "
+          "(not an empty list)",
+          seen_other_texts.get("value") == ["Company B's own ready methodology statement"],
+          seen_other_texts.get("value"))
+    check("job-mine still completed normally (ready)",
+          db.tables["narrative_documents"][0]["status"] == "ready")
 
 
 def test_build_context_raises_generation_failed_when_company_row_is_missing():
@@ -577,6 +690,10 @@ def main():
     test_load_key_people_handles_unparseable_graduation_date()
     test_load_experience_maps_columns_through()
     test_load_other_companies_text_excludes_empty_generated_text()
+    test_load_other_companies_text_matches_any_of_several_tender_ids()
+    test_tender_ids_for_uniqueness_check_returns_just_itself_when_no_ocid()
+    test_tender_ids_for_uniqueness_check_finds_sibling_private_copies_sharing_an_ocid()
+    test_process_one_uniqueness_check_sees_a_different_companys_private_copy_of_the_same_real_tender()
     test_build_context_raises_generation_failed_when_company_row_is_missing()
     test_build_context_assembles_the_shape_generate_narrative_expects()
     test_process_one_never_leaks_a_raw_exception_to_the_customer()

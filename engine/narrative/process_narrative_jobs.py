@@ -274,16 +274,60 @@ def load_experience(url, key, company_id, limit=5):
     } for r in rows]
 
 
-def load_other_companies_text(url, key, tender_id, kind, exclude_company_id):
+def tender_ids_for_uniqueness_check(url, key, tender_id):
+    """Every tenders.id that is really THIS SAME real-world tender, for
+    load_other_companies_text() below to compare against - not just
+    `tender_id` itself.
+
+    Found, standing review 2026-11-11: migration 0032 deliberately lets more
+    than one company hold its OWN private (owner_company_id set) tenders row
+    for the identical real tender, all sharing one ocid -
+    tenders_ocid_key (0018, narrowed by 0032) is only unique among SHARED
+    (owner_company_id is null) rows, and load_manual_tender()'s own comment
+    says it plainly: "Another company's private copy with the same id is
+    invisible here and blocks nothing." That is the intended, documented way
+    for a company to get its own full copy of an eTenders/SANRAL tender's
+    documents - load_manual_tender()'s own refusal message, on a SHARED
+    tender with the same ocid, literally tells the next company to do this
+    ("leave the OCDS id blank to load your own copy of its documents").
+    So two unrelated companies each bidding on the SAME real government
+    tender, through this entirely ordinary path, end up with two DIFFERENT
+    tenders.id rows for one real tender - and before this fix,
+    load_other_companies_text() filtered narrative_documents by tender_id
+    alone, so each company's own private copy's uniqueness check could never
+    see the other's draft at all: the exact collusion-risk scenario
+    Sarel's own requirement for this whole feature exists to catch ("it may
+    NEVER generate the same or similar versions for two companies - then
+    they might both get disqualified"), reachable with no race condition and
+    no overlap needed - just two ordinary, independent "load my own copy"
+    requests for the same tender, any time apart.
+
+    Returns [tender_id] unchanged when this tender has no ocid at all (a
+    fully manual tender with no OCDS identity) - there is no reliable real-
+    world identity signal to widen the match on in that case (a buyer name
+    typed by hand twice is not it), so that narrower gap is left as a known
+    limit, not guessed at."""
+    rows = supabase_request(url, key, "GET", f"tenders?id=eq.{tender_id}&select=ocid")
+    ocid = (rows[0].get("ocid") if rows else None) or None
+    if not ocid:
+        return [tender_id]
+    peers = supabase_request(url, key, "GET", f"tenders?ocid=eq.{urllib.parse.quote(ocid, safe='')}&select=id")
+    return sorted({r["id"] for r in peers if r.get("id")} | {tender_id})
+
+
+def load_other_companies_text(url, key, tender_ids, kind, exclude_company_id):
     """Every OTHER company's ready document of the same kind for the SAME
-    tender - the exact cross-tenant read the uniqueness check needs and the
-    one thing RLS never grants to any client; safe here because this
-    worker uses the service role, and because only a similarity SCORE
-    (never this text) is ever returned to any company. See migration
-    0084's own header comment."""
+    real-world tender - matched against every tenders.id that really is
+    this one tender (tender_ids_for_uniqueness_check() above), not just the
+    requesting job's own tender_id. The exact cross-tenant read the
+    uniqueness check needs and the one thing RLS never grants to any
+    client; safe here because this worker uses the service role, and
+    because only a similarity SCORE (never this text) is ever returned to
+    any company. See migration 0084's own header comment."""
+    ids = ",".join(sorted(set(tender_ids)))
     rows = supabase_request(
         url, key, "GET",
-        f"narrative_documents?tender_id=eq.{tender_id}&kind=eq.{kind}&status=eq.ready"
+        f"narrative_documents?tender_id=in.({ids})&kind=eq.{kind}&status=eq.ready"
         f"&company_id=neq.{exclude_company_id}&select=generated_text",
     )
     return [r["generated_text"] for r in rows if r.get("generated_text")]
@@ -312,7 +356,8 @@ def process_one(url, key, job, out_dir):
 
     try:
         context = build_context(url, key, job)
-        other_texts = load_other_companies_text(url, key, job["tender_id"], job["kind"], job["company_id"])
+        peer_tender_ids = tender_ids_for_uniqueness_check(url, key, job["tender_id"])
+        other_texts = load_other_companies_text(url, key, peer_tender_ids, job["kind"], job["company_id"])
         result = generate_with_uniqueness_check(context, other_texts)
 
         title = "Cover Letter" if job["kind"] == "cover_letter" else "Methodology Statement"
