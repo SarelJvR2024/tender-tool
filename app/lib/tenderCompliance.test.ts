@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { minimumRequirementFor, SANRAL_MIN_REQUIREMENTS, sanralConventionalDocumentChecks, type CompanyVault } from "./tenderCompliance.ts";
+import { minimumRequirementFor, SANRAL_MIN_REQUIREMENTS, sanralConventionalDocumentChecks, qualitySystemFromVault, type CompanyVault } from "./tenderCompliance.ts";
 
 test("a position literally naming 'Geologist' resolves to the SACNASP requirement (unchanged by the fix)", () => {
   const req = minimumRequirementFor("DS1", "Design Specialist 1 - Engineering Geologist");
@@ -113,4 +113,31 @@ test("COID letter already expired is still 'missing', not 'expiring' (no regress
   const coid = coidItemFor(daysFromNow(-5), daysFromNow(10));
   assert.equal(coid.status, "missing");
   assert.equal(coid.expiring, false);
+});
+
+/**
+ * Finding 439 (standing QA/robustness review, 2026-11-11): qualitySystemFromVault()
+ * feeds sanralScoring.ts's Form B4 quality-system ESTIMATE (10 functionality
+ * points: ISO 10, submitted-for-ISO/registered 7, in-house 5, none 0). It used
+ * to return `"iso" | null` only - collapsing two genuinely different facts
+ * into the same `null`:
+ *   1. the company's `iso_9001_certified` field has never been answered at
+ *      all (a true unknown - every one of 10/7/5/0 is still live), and
+ *   2. the company EXPLICITLY answered "No" on the Company Profile page
+ *      (iso_9001_certified === false, a real tri-state field -
+ *      app/app/company/_components/EditForm.tsx's own "yes"/"no"/"" select,
+ *      and this same file's own sanralConventionalDocumentChecks() B4 row
+ *      two lines below already treats `=== false` as a distinct, confident
+ *      "Not ISO 9001 certified" fact, not as "not stated").
+ * An explicit "No" rules out ISO (10) and submitted-for-ISO (7) for certain -
+ * the honest remaining range is in-house-or-none (0-5), not the full 0-10 a
+ * never-answered field deserves. The old code gave both the same wide,
+ * inflated 0-10 range, overstating how close an explicitly-not-certified
+ * company could get on this component.
+ */
+test("ISO 9001 explicitly 'No' on file is distinguished from never answered (qualitySystemFromVault)", () => {
+  const notCertified = qualitySystemFromVault({ ...BASE_COMPANY, iso_9001_certified: false }, daysFromNow(30));
+  const neverAnswered = qualitySystemFromVault({ ...BASE_COMPANY, iso_9001_certified: null }, daysFromNow(30));
+  assert.notEqual(notCertified, neverAnswered, "an explicit 'No' must not read the same as the field never having been touched");
+  assert.equal(neverAnswered, null, "never-answered stays the true-unknown signal");
 });
