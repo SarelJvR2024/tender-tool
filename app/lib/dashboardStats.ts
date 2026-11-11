@@ -27,6 +27,7 @@
 // count needs - requiring a real `tender_packs` row, which only exists
 // once this company has actually started a pack on it.
 import { daysUntil } from "./dates.ts";
+import { DEADLINE_REMINDER_EXCLUDED_STAGES } from "./deadlineReminders.ts";
 import { IN_PROGRESS_STAGES } from "./pipeline.ts";
 
 export type DashboardPack = {
@@ -67,6 +68,12 @@ export function computeDashboardStats<T extends DashboardTenderRow>(rows: T[], a
   const activeBidsCount = myRows.filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t))).length;
   const packsReadyCount = myRows.filter(isPackReady).length;
   const closingThisWeekCount = myRows.filter((t) => {
+    // Same DEADLINE_REMINDER_EXCLUDED_STAGES exclusion every other
+    // deadline-adjacent surface already applies (deadlineReminders.ts,
+    // notifications.ts's bell - Finding 434 - and others): a tender already
+    // submitted/briefing_shortlisted/won/lost is done, even if it's still
+    // "mine" and still closing within the window (Finding 435).
+    if ((DEADLINE_REMINDER_EXCLUDED_STAGES as readonly string[]).includes(stageOf(t))) return false;
     const left = daysUntil(t.closing_date);
     return left !== null && left >= 0 && left <= actionWindowDays;
   }).length;

@@ -85,3 +85,31 @@ test("computeDashboardStats: a null closing_date never counts as 'closing this w
   const stats = computeDashboardStats([myUnknownClose], 7);
   assert.equal(stats.closingThisWeekCount, 0);
 });
+
+// Finding 435: "Closing this week" must apply the same
+// DEADLINE_REMINDER_EXCLUDED_STAGES exclusion every other deadline-adjacent
+// surface already applies (deadlineReminders.ts, notifications.ts's bell -
+// Finding 434 - returnablesDigestCandidates.ts, briefingReminders.ts,
+// printCutoffReminders.ts, opportunityInsights.ts/pastSubmissionReuse.ts,
+// dispatchTriage.ts, two inline literals in tenders/[id]/page.tsx, one in
+// market-context.tsx). A tender this company has already submitted, had
+// shortlisted for briefing, won or lost is still "mine" (myTenderRows keeps
+// it) and can still close within the action window, but it is done - it
+// must never inflate the stat card a Partner reads to decide what still
+// needs action this week.
+test("computeDashboardStats: 'closing this week' excludes submitted/briefing_shortlisted/won/lost stages, even though they're still mine and still closing soon", () => {
+  const myDoneButClosingSoon: Record<string, DashboardTenderRow> = {
+    submitted: { closing_date: daysFromNow(1), tender_packs: [{ status: "confirmed", pipeline_stage: "submitted" }] },
+    briefing_shortlisted: { closing_date: daysFromNow(2), tender_packs: [{ status: "confirmed", pipeline_stage: "briefing_shortlisted" }] },
+    won: { closing_date: daysFromNow(3), tender_packs: [{ status: "confirmed", pipeline_stage: "won" }] },
+    lost: { closing_date: daysFromNow(4), tender_packs: [{ status: "confirmed", pipeline_stage: "lost" }] },
+  };
+  for (const [stage, row] of Object.entries(myDoneButClosingSoon)) {
+    const stats = computeDashboardStats([row], 7);
+    assert.equal(stats.closingThisWeekCount, 0, `stage "${stage}" closing in-window must still be excluded`);
+  }
+  // A still-open stage closing in the same window must still be counted -
+  // this isn't a blanket "never count mine", only the done stages.
+  const stillOpen: DashboardTenderRow = { closing_date: daysFromNow(1), tender_packs: [{ status: "draft", pipeline_stage: "bidding" }] };
+  assert.equal(computeDashboardStats([stillOpen], 7).closingThisWeekCount, 1);
+});
