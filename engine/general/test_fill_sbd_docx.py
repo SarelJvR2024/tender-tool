@@ -336,6 +336,88 @@ def test_sbd6_1_vat_real_value_is_actually_written_and_confirmed():
     check("actually written into the document, not just logged", "4123456789" in d.paragraphs[0].text, d.paragraphs[0].text)
 
 
+# ----------------------------------------------------------------------------
+# Finding 386 (standing solution-architect review, 2026-11-11): Mthashana
+# TVET's real, committed SBD 4 sample splits a question's own distinctive
+# wording across several short tab-separated paragraphs, with the "?" landing
+# on a LATER paragraph than the wording answer_yes_no()'s regex actually
+# looks for - paragraph text reproduced verbatim from
+# templates/general_samples/mthashana_tvet/TENDER-DOCUMENT-PANEL OF HEALTH
+# AND WELLNESS PRACTITIONERS.docx, paragraphs 291-294 and 311-313.
+# ----------------------------------------------------------------------------
+
+def _mthashana_relationship_paragraphs(d):
+    d.add_paragraph("Do you, or any person connected with the bidder, have\t\t\tYES \t\tNO\t")
+    d.add_paragraph("\tany relationship (family, friend, other) with a person \t")
+    d.add_paragraph("\temployed by the state and who may be involved with ")
+    d.add_paragraph("\tthe evaluation and or adjudication of this bid?")
+
+
+def test_mthashana_relationship_question_real_wording_is_now_matched():
+    print("answer_yes_no(): Mthashana TVET's real Q2.9 - the question's own wording "
+          "(relationship ... with a person ... employed by the state ... evaluation) is "
+          "split across 3 paragraphs, with the '?' on a 4th - now matched, not silently missed")
+    d = docx.Document()
+    _mthashana_relationship_paragraphs(d)
+    key, qre = next(kv for kv in sbd.SBD4_QUESTIONS if kv[0] == "sbd4.relationship_with_employee")
+    n = sbd.answer_yes_no(d, qre, "no")
+    check("exactly one place marked", n == 1, n)
+    check("the answer lands on the paragraph that actually has the '?', not an earlier one",
+          d.paragraphs[3].text.endswith("(No)") and not any(p.text.endswith("(No)") for p in d.paragraphs[:3]),
+          [p.text for p in d.paragraphs])
+
+
+def test_mthashana_interest_question_real_wording_is_now_matched():
+    print("answer_yes_no(): Mthashana TVET's real Q2.11 - 'have any interest in any other "
+          "related companies' lands on the paragraph BEFORE the one with the '?' - now matched")
+    d = docx.Document()
+    d.add_paragraph("Do you or any of the directors / trustees / shareholders / members \tYES \t\tNO\t ")
+    d.add_paragraph("of the company have any interest in any other related companies ")
+    d.add_paragraph("whether or not they are bidding for this contract?")
+    key, qre = next(kv for kv in sbd.SBD4_QUESTIONS if kv[0] == "sbd4.interest_in_related_enterprise")
+    n = sbd.answer_yes_no(d, qre, "no")
+    check("exactly one place marked", n == 1, n)
+    check("the answer lands on the paragraph with the '?', not the one before it with the wording",
+          d.paragraphs[2].text.endswith("(No)") and not d.paragraphs[1].text.endswith("(No)"),
+          [p.text for p in d.paragraphs])
+
+
+def test_mthashana_split_question_still_only_marks_the_first_real_match():
+    print("answer_yes_no(): the 3-paragraph join window doesn't resurrect the ALREADY-rejected "
+          "repeated-bullet case (Finding 386 doesn't weaken the existing first-match-only guard)")
+    d = docx.Document()
+    d.add_paragraph("Note: a person employed by the state in an unrelated capacity does not apply.")
+    d.add_paragraph("This sentence on its own means nothing and has no question mark at all.")
+    d.add_paragraph("Bidders must declare whether they are employed by the state? YES/NO")
+    n = sbd.answer_yes_no(d, r"employed\s+by\s+the\s+state", "yes")
+    check("exactly one place marked, on the real question paragraph only",
+          n == 1 and d.paragraphs[2].text.endswith("(Yes)")
+          and not d.paragraphs[0].text.endswith("(Yes)") and not d.paragraphs[1].text.endswith("(Yes)"),
+          [p.text for p in d.paragraphs])
+
+
+def test_mthashana_real_document_end_to_end():
+    print("fill_sbd_document(): the real, committed Mthashana TVET sample .docx - both Q2.9 "
+          "and Q2.11 are now confirmed, not left as 'Declaration not found in this edition'")
+    repo = os.path.dirname(os.path.dirname(HERE))
+    path = os.path.join(repo, "templates", "general_samples", "mthashana_tvet",
+                         "TENDER-DOCUMENT-PANEL OF HEALTH AND WELLNESS PRACTITIONERS.docx")
+    if not os.path.exists(path):
+        print("  (skipped - real sample not present in this checkout)")
+        return
+    d = docx.Document(path)
+    log = ProvenanceLog("test")
+    ctx = {"company": {"legal_name": "Test Co"},
+           "answers": {"sbd4.relationship_with_employee": "no", "sbd4.interest_in_related_enterprise": "no",
+                       "sbd4.employed_by_state": "no"},
+           "signatory": {"name": "Jane Doe"}, "tender": {}}
+    sbd.fill_sbd_document(d, ctx, log, {"4"})
+    for key in ("sbd4.employed_by_state", "sbd4.relationship_with_employee", "sbd4.interest_in_related_enterprise"):
+        entry = _entry(log, key)
+        check(f"{key} is confirmed against the real document",
+              entry is not None and entry["status"] == "confirmed" and entry["value"] == "No", entry)
+
+
 def main():
     test_separate_yes_no_cells()
     test_yes_slash_no_cell()
@@ -353,6 +435,10 @@ def main():
     test_sbd6_1_vat_missing_from_company_is_logged_not_silently_dropped()
     test_sbd6_1_vat_label_not_found_in_this_edition_is_also_logged()
     test_sbd6_1_vat_real_value_is_actually_written_and_confirmed()
+    test_mthashana_relationship_question_real_wording_is_now_matched()
+    test_mthashana_interest_question_real_wording_is_now_matched()
+    test_mthashana_split_question_still_only_marks_the_first_real_match()
+    test_mthashana_real_document_end_to_end()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

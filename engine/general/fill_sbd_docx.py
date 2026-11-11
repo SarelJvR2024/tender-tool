@@ -282,14 +282,32 @@ def answer_yes_no(doc, question_re, answer):
         # Paragraph layout: only a paragraph that IS the question (has a "?" or
         # its own YES/NO), and only the first one - the older SBD 4 edition
         # (Mthashana) repeats "employed by the state" in several prose bullets.
-        for p in doc.paragraphs:
+        # Finding 386 (standing solution-architect review, 2026-11-11): the
+        # question's OWN distinctive wording doesn't always land on that same
+        # "?"/YES-NO paragraph - Mthashana's real Q2.11 ("... have any
+        # interest in any other related companies" / "whether or not they
+        # are bidding for this contract?") splits one sentence across two
+        # short tab-separated paragraphs, the wording on one and the "?" on
+        # the next - so the regex is now checked against a short joined
+        # window (this paragraph plus up to 3 immediately before it), while
+        # the paragraph actually marked, and the requirement that IT carries
+        # the "?"/YES-NO, are both exactly as before (no change to which
+        # paragraph gets written, or to the existing repeated-bullet/"first
+        # match only" behaviour, which still depends on the SAME per-paragraph
+        # "?"/YES-NO check below, not on the window).
+        paras = doc.paragraphs
+        for i, p in enumerate(paras):
             t = p.text
-            if not rx.search(t) or re.search(r"\((?:Yes|No)\)\s*$", t.rstrip()):
+            if re.search(r"\((?:Yes|No)\)\s*$", t.rstrip()):
                 continue
-            if "?" in t or re.search(r"\bYES\s*(?:/|or)?\s*NO\b", t, re.IGNORECASE):
-                p.add_run(f"  ({ans})")
-                n += 1
-                break
+            if not ("?" in t or re.search(r"\bYES\s*(?:/|or)?\s*NO\b", t, re.IGNORECASE)):
+                continue
+            window = " ".join(paras[j].text for j in range(max(0, i - 3), i + 1))
+            if not rx.search(window):
+                continue
+            p.add_run(f"  ({ans})")
+            n += 1
+            break
     return n
 
 
@@ -351,8 +369,28 @@ SBD4_QUESTIONS = [
      r"employed\s+by\s+(?:the\s+state|an\s+organ\s+of\s+state)|presently\s+in\s+the\s+service\s+of\s+the\s+state"),
     ("sbd4.relationship_with_employee",
      r"relationship\s+with\s+any\s+person\s+who\s+is\s+employed\s+by\s+the\s+procuring|"
-     # older edition (Mthashana TVET): "...relationship with persons/a person who are/is involved in the evaluation"
-     r"relationship\s+with\s+persons/a\s+person\s+who\s+are/is\s+involved\s+in\s+the\s+evaluation"),
+     # older edition (Mthashana TVET)'s own DECLARATION OF INTEREST preamble:
+     # "...relationship with persons/a person who are/is involved in the
+     # evaluation" - this alternate was written to recognise that preamble,
+     # but the preamble is never the real Yes/No question (it has no "?"/
+     # YES-NO of its own, so answer_yes_no()'s own paragraph-fallback never
+     # fills it) - Mthashana's REAL Q2.9 answer box, confirmed live against
+     # the real committed sample (standing solution-architect review,
+     # 2026-11-11, Finding 386), reads "Do you ... have any relationship
+     # (family, friend, other) with a person ... employed by the state and
+     # who may be involved with the evaluation and or adjudication of this
+     # bid?" - a different enough shape (a parenthetical between
+     # "relationship" and "with", and "a person" instead of "persons/a
+     # person") that neither existing alternate ever matched it, so this
+     # field silently fell back to "Declaration not found in this edition -
+     # answer by hand" for the one real buyer this module's own comment
+     # claims to have been fixed for. The preamble alternate above is left in
+     # place (harmless, matches nothing that's ever filled) rather than
+     # removed, to avoid guessing whether some other buyer's edition puts
+     # this exact preamble wording ON its own answer-box paragraph.
+     r"relationship\s+with\s+persons/a\s+person\s+who\s+are/is\s+involved\s+in\s+the\s+evaluation|"
+     r"relationship\s*(?:\([^)]{0,40}\))?\s*with\s+a\s+person\b[^.?]{0,150}?employed\s+by\s+the\s+state"
+     r"[^.?]{0,150}?(?:evaluation|adjudication)"),
     ("sbd4.interest_in_related_enterprise", r"interest\s+in\s+any\s+other\s+related\s+(?:enterprise|compan)"),
 ]
 SBD8_QUESTIONS = [
