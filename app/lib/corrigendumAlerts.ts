@@ -12,6 +12,31 @@ const DOC_KIND_LABEL: Record<string, string> = {
   supporting_document: "New supporting document",
 };
 
+// Finding 415 (2026-11-11): a SEPARATE, line-level vocabulary from
+// DOC_KIND_LABEL above. DOC_KIND_LABEL's keys are the DOCUMENT's own overall
+// classification (engine/discovery/tender_updates.py's classify_document()'s
+// `kind` - addendum/clarification/cancellation/revised_document/
+// supporting_document). `other_changes[]` entries come from that same
+// file's find_other_changes()/OTHER_CHANGE_RES instead - a line found INSIDE
+// an addendum's text stating a specific change to the tender itself - and
+// its `kind` can only ever be one of the 7 keys below. The two vocabularies
+// never overlap by construction, so looking `other_changes[].kind` up in
+// DOC_KIND_LABEL (as this file used to) always misses and silently falls
+// back to the generic "Change noted" for every real other_changes entry -
+// discarding the specific signal (scope/pricing/evaluation/CIDB/validity)
+// this exact regex detection work exists to produce, in the real email this
+// sends (scripts/send-corrigendum-alerts.ts, scheduled every 2h, 07:00-19:00
+// SAST weekdays). Confirmed directly against OTHER_CHANGE_RES's own list.
+const OTHER_CHANGE_KIND_LABEL: Record<string, string> = {
+  scope: "Scope of work amended",
+  requirement_removed: "Requirement removed",
+  wording_replaced: "Wording replaced",
+  pricing: "Pricing / BOQ amended",
+  evaluation: "Evaluation criteria changed",
+  cidb: "CIDB grading changed",
+  validity: "Bid validity extended",
+};
+
 export type WatchedDocRow = {
   id: string;
   kind: string | null;
@@ -35,7 +60,7 @@ export function changesForDoc(doc: WatchedDocRow): TenderChange[] {
   }
   const other = (changes.other_changes as { kind?: string; quote?: string }[] | undefined) ?? [];
   for (const c of other) {
-    out.push({ kind: "other", label: DOC_KIND_LABEL[c.kind ?? ""] ?? "Change noted", quote: c.quote ?? "" });
+    out.push({ kind: "other", label: OTHER_CHANGE_KIND_LABEL[c.kind ?? ""] ?? "Change noted", quote: c.quote ?? "" });
   }
   if (out.length === 0) {
     out.push({ kind: "other", label: DOC_KIND_LABEL[doc.kind ?? ""] ?? "New document", quote: doc.summary ?? doc.title ?? "" });

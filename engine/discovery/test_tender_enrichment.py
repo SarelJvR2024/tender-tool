@@ -6,7 +6,10 @@ scope/pricing/BOQ/value-band extraction, including its null-when-unknown
 behaviour (System-Status.md "we stop, we never guess" principle).
 
 No network, no database - pure functions only (see module docstring: enrich()
-takes plain text in, returns a plain dict out).
+takes plain text in, returns a plain dict out). The Finding 409 tests near the
+bottom are the one exception: they exercise _tender_context()/run() against an
+in-memory fake client object (no real network, no real database) to prove the
+read-failure-vs-genuinely-no-documents distinction end to end.
 
     python3 engine/discovery/test_tender_enrichment.py
 """
@@ -316,6 +319,109 @@ def test_enrich_release_is_heuristic_only():
     check(result["boq_summary"]["items"] == [], "enrich_release never downloads/parses documents - items stay empty")
 
 
+# ---------------------------------------------------------------------------
+# Finding 409: _tender_context()/run() must not conflate "genuinely no
+# discovered_opportunities row/documents" with "the read itself failed".
+# ---------------------------------------------------------------------------
+
+class _FakeClientNoDocs:
+    """discovered_opportunities read for this tender succeeds, and finds
+    nothing - the genuine "no documents" case."""
+
+    def select(self, table, filters=None, order=None):
+        check(table == "discovered_opportunities", f"unexpected table {table}")
+        return []
+
+
+class _FakeClientReadFails:
+    """discovered_opportunities read for this tender raises - a transient
+    Supabase/network problem, not a fact about the tender."""
+
+    def select(self, table, filters=None, order=None):
+        raise RuntimeError("GET discovered_opportunities failed: 503 Service Unavailable")
+
+
+def test_tender_context_no_documents_is_not_an_error():
+    ctx = te._tender_context(_FakeClientNoDocs(), {"id": "t1", "slug": "t1"}, log=lambda m: None)
+    check(ctx["documents"] == [] and ctx["buyer"] is None, f"genuinely-empty context should be empty, got {ctx}")
+    check(ctx["error"] is None, f"a successful (if empty) read must not be flagged as an error, got {ctx}")
+
+
+def test_tender_context_read_failure_is_flagged_and_logged():
+    logs = []
+    ctx = te._tender_context(_FakeClientReadFails(), {"id": "t2", "slug": "t2-slug"}, log=logs.append)
+    check(ctx["documents"] == [] and ctx["buyer"] is None,
+          f"a failed read still degrades to an empty context (never crashes the batch), got {ctx}")
+    check(ctx["error"] is not None, "a failed read must be flagged via a non-None 'error', not silently absorbed")
+    check(any("t2-slug" in m and "503" in m for m in logs),
+          f"the read failure must be logged (operator visibility) - got logs={logs}")
+
+
+class _FakeClientRun:
+    """Minimal fake of company_profiles.RestClient for run(): one tender
+    whose discovered_opportunities read succeeds empty (ta), one whose read
+    raises (tb). Tracks every PATCH (tags_updated_at write) and upsert
+    (tender_scope_records write) so the test can assert tb is left alone."""
+
+    def __init__(self):
+        self.patched = []
+        self.upserted = []
+        self.tenders = [
+            {"id": "ta", "slug": "ta-slug",
+             "title": "Appointment of a service provider for guarding services",
+             "description": "24-hour armed guarding and access control at regional offices for 36 months."},
+            {"id": "tb", "slug": "tb-slug",
+             "title": "Supply, implementation and support of an ERP system",
+             "description": "The municipality requires a cloud-hosted ERP system including financial system."},
+        ]
+
+    def select(self, table, filters=None, order=None):
+        if table == "tenders":
+            return self.tenders
+        if table == "discovered_opportunities":
+            if (filters or {}).get("tender_id") == "tb":
+                raise RuntimeError("GET discovered_opportunities failed: 503 Service Unavailable")
+            return []
+        return []
+
+    def _req(self, method, path, body=None, prefer=None):
+        if method == "PATCH":
+            self.patched.append((path, body))
+        return []
+
+    def upsert(self, table, rows, on_conflict):
+        self.upserted.extend(rows)
+        return rows
+
+
+def test_run_skips_a_tender_whose_document_lookup_failed():
+    """The real-world shape of the bug: before the fix, a tender whose
+    discovered_opportunities read raised still got silently enriched from
+    the heuristic-only path AND permanently marked tags_updated_at (so a
+    plain run() would never retry it) - with nothing logged. After the fix,
+    that tender is skipped this run (left untagged, no scope row), while the
+    other, genuinely-document-less tender is enriched normally."""
+    fake = _FakeClientRun()
+    orig_client = te._client
+    te._client = lambda: fake
+    logs = []
+    try:
+        te.run(log=logs.append)
+    finally:
+        te._client = orig_client
+
+    patched_ids = [p[0] for p in fake.patched]
+    upserted_ids = [r["tender_id"] for r in fake.upserted]
+    check(any("id=eq.ta" in p for p in patched_ids), f"ta (no documents, read ok) should still be tagged, got {patched_ids}")
+    check(not any("id=eq.tb" in p for p in patched_ids),
+          f"tb (read failed) must NOT be permanently marked tags_updated_at, got {patched_ids}")
+    check("ta" in upserted_ids, f"ta should still get a tender_scope_records row, got {upserted_ids}")
+    check("tb" not in upserted_ids,
+          f"tb must NOT get a (wrongly heuristic-confidence) tender_scope_records row this run, got {upserted_ids}")
+    check(any("tb-slug" in m and "503" in m for m in logs), f"the read failure for tb must be logged, got logs={logs}")
+    check(any("SKIPPED" in m and "tb-slug" in m for m in logs), f"tb's skip must be logged plainly, got logs={logs}")
+
+
 def main():
     test_cross_industry_tags()
     test_gibberish_text_tags_empty_not_wrong()
@@ -333,6 +439,9 @@ def main():
     test_detect_boq_reference_never_fabricates_without_items()
     test_enrich_uses_llm_scope_result_only_as_a_fallback()
     test_enrich_release_is_heuristic_only()
+    test_tender_context_no_documents_is_not_an_error()
+    test_tender_context_read_failure_is_flagged_and_logged()
+    test_run_skips_a_tender_whose_document_lookup_failed()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

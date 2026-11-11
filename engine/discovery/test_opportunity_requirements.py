@@ -254,6 +254,16 @@ def main():
           r7 and "PDF" not in r7["signal"], r7 and r7.get("signal"))
     check("case 7: the real fetch error is surfaced in unreadable_documents, not silently dropped",
           r7 and len(r7["unreadable_documents"]) == 1, r7 and r7.get("unreadable_documents"))
+    # Finding 408: a classifiable-extension file (.xlsm/.xlsx/.docx - could
+    # genuinely BE a SANRAL workbook) that failed to re-fetch from Storage
+    # must report route=None (genuinely unknown - same honesty as case 2's
+    # "all downloads failed"), never "general". Unlike case 6 (no
+    # classifiable file EXISTS at all, so "no SANRAL workbook" is sound by
+    # elimination), here the one file that could have been the SANRAL
+    # workbook is exactly the one classify_documents() never got to open.
+    check("case 7: route is None (unknown), NOT 'general' - the one classifiable file "
+          "was never actually opened, so there is no basis to call this general",
+          r7 and r7["route"] is None, r7 and r7.get("route"))
 
     # classify_all() writes rows via upsert and is idempotent on release_key
     summary = oreq.classify_all(client)

@@ -121,14 +121,26 @@ def test_tender_context_dedupes_documents_and_reads_the_buyer():
     check(len(ctx["documents"]) == 2, f"should de-duplicate the same URL seen from two companies, got {ctx['documents']}")
     check(ctx["buyer"] == "City of Tshwane",
           "buyer must come from discovered_opportunities - tenders itself has no buyer column")
+    check(ctx["error"] is None, "a successful (if ordinary) read must not be flagged as an error")
 
 
 def test_tender_context_never_raises_when_table_read_fails():
+    """Finding 409: a broken read still degrades to an empty context (never
+    raises - one tender's I/O problem must not take out the whole batch),
+    but it must now be DISTINGUISHABLE from a genuinely empty read via
+    `error` - pre-fix, both cases returned the identical
+    {"documents": [], "buyer": None}, so run() silently treated "couldn't
+    check" as "genuinely has no documents" (permanently marking the tender
+    tags_updated_at from the heuristic-only path, with nothing logged)."""
     class BrokenClient:
         def select(self, table, filters=None, order=None):
             raise RuntimeError("network down")
-    ctx = te._tender_context(BrokenClient(), {"id": "t1"})
-    check(ctx == {"documents": [], "buyer": None}, "a broken read should degrade to an empty context, not raise")
+    logged = []
+    ctx = te._tender_context(BrokenClient(), {"id": "t1"}, log=logged.append)
+    check(ctx["documents"] == [] and ctx["buyer"] is None,
+          "a broken read should still degrade to an empty context, not raise")
+    check(ctx["error"] is not None, "a broken read must be flagged via a non-None 'error', not silently absorbed")
+    check(any("network down" in m for m in logged), f"the read failure must be logged, got logs={logged}")
 
 
 class FakeCountsClient:

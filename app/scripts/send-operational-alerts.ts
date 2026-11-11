@@ -60,7 +60,28 @@ import { printCutoffEmail, briefingReminderEmail } from "../lib/emailTemplates.t
 import { clarificationWindowReminderEmail } from "../lib/emailTemplatesTier1.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { printSignDeadline } from "../lib/dispatchTriage.ts";
-import { operationalRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
+// Finding 411 (standing QA/robustness review, 2026-11-11): all 3 stages here
+// (print cutoff, briefing countdown, clarification window) used
+// operationalRecipients() - gated on company_members.daily_digest_opt_in,
+// which migration 0073 defaults to false ("Sarel's own instruction was an
+// opt-in, not an opt-out, feature") for every member. But migration 0093's
+// own header is explicit that every notification type this engine serves is
+// either covered by that narrower opt-in OR "is an operational/compliance
+// alert the brief itself says 'cannot be disabled for active bidders'" -
+// and these 3 ARE exactly that: a 48-hour physical-submission print/transit
+// cutoff, a compulsory-briefing countdown, and a clarification-window
+// deadline, the same category of "miss this and the bid is dead" alert
+// already fixed to bypass this opt-in for corrigenda/addenda, the
+// returnables digest, closing-deadline reminders (2026-10-30) and the
+// compliance-expiry digest (Finding 163) - all via this exact same
+// criticalBidRecipients() swap. Left on operationalRecipients() by default,
+// this meant every company that had never found and toggled the generic
+// "Email notifications" setting on /company - the out-of-the-box state for
+// every company, by migration 0073's own default - got NONE of these 3
+// alerts at all, for the exact "cannot be disabled" category the brief
+// itself names. One import swap fixes all 3 call sites below (all share
+// this one alias).
+import { criticalBidRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
 import { parseSenderCliArgs, printDryRunTable, type DryRunRow } from "../lib/senderCliArgs.ts";
 import { fetchAllRows } from "../lib/supabasePaging.ts";
 

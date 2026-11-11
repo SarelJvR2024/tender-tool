@@ -396,7 +396,13 @@ def part2(psql):
     check(("sacplan", "Thandeka Ndlovu") not in by, "real rows: director SACPLAN in 200 days -> not reported")
     check(len(due) == 4, f"real rows: exactly 4 items ({len(due)})")
     pdue = [x for x in rr.find_due_property_documents("u", "k", seen, today, wd.DEFAULT_DOC_LEAD_DAYS) if x["company_id"] == co]
-    check(len(pdue) == 1 and pdue[0]["days_left"] == 10 and "Joubertina" in pdue[0]["label"], "real rows: building insurance in 10 days -> reported")
+    # Finding 421 (standing review, 2026-11-11): this used to assert len(pdue) == 1
+    # (building insurance only) - stale since that fix, which made the pest control
+    # certificate (issued_on 400 days ago, no valid_until, past its real 12-month
+    # age limit) visible here too, exactly as it always should have been.
+    check(len(pdue) == 2 and pdue[0]["days_left"] == 10 and "Joubertina" in pdue[0]["label"]
+          and pdue[1]["status"] == "expired" and pdue[1]["days_left"] == -35 and "Pest control" in pdue[1]["label"],
+          f"real rows: building insurance in 10 days -> reported; pest control certificate (400 days old, no valid_until) -> also reported, expired by its 12-month age limit ({pdue})")
     again = [x for x in rr.find_due_registrations("u", "k", seen, today, wd.DEFAULT_DOC_LEAD_DAYS) if x["company_id"] == co]
     check(not again, "real rows: second run reports nothing new")
     # The seen entries go into the database seen store (0041) as-is.
@@ -404,7 +410,9 @@ def part2(psql):
     values = ",".join(f"('{v['company_id']}', 'watch_deadlines', '{k}', '{v['kind']}', '{v['first_seen']}')" for k, v in mine.items())
     code, _, err = run("insert into deadline_reminders_seen (company_id, consumer, seen_key, kind, first_seen) values " + values) \
         if mine else (1, "", "nothing to store")
-    check(code == 0 and len(mine) == 5, f"the 5 seen entries store in deadline_reminders_seen (0041) {err[:160]}")
+    # Finding 421: 6, not the pre-fix 5 - the pest control certificate's own
+    # newly-surfaced "seen" entry (propdoc::<id>::valid_until) joins the other 5.
+    check(code == 0 and len(mine) == 6, f"the 6 seen entries store in deadline_reminders_seen (0041) {err[:160]}")
 
     run(f"delete from companies where id in ('{co}', '{co2}'); delete from auth.users where email like '%@q-md.test'")
     left = one("select count(*) from company_principals where full_name in ('Thandeka Ndlovu', 'Sipho Mokoena')")
