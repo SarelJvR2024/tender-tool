@@ -61,3 +61,37 @@ test("evaluateEvidence's own qualifying count matches itemQualifiesForRule for e
   assert.equal(result.status, "missing");
   assert.ok(result.detail.includes("Only 2 of 3"));
 });
+
+// The real bug: score_outlook.py's _parse_evidence_window() sets `consequence`
+// to "points" whenever a scoring table/ladder is found, even when the SAME
+// window also matches CONSEQUENCE_DISQUALIFY_RE (e.g. Transnet-shaped text: a
+// per-project points ladder PLUS "submitted with no proof at all will be
+// deemed non-responsive/disqualified") - that second signal is kept in the
+// rule's own `disqualification_mentioned` field, but evaluateEvidence()'s
+// "missing" branch only ever read `consequence`, so a shortfall under a
+// scored rule that ALSO disqualifies showed only the points framing, with no
+// hint the bid could be thrown out entirely.
+test("evaluateEvidence's shortfall message also flags disqualification_mentioned when consequence is 'points', not just consequence === 'disqualify'", () => {
+  const rule: EvidenceRule = { ...sinceRule, scored_per_project: true, consequence: "points", disqualification_mentioned: true };
+  const items = [item("2023-01-01")];
+  const result = evaluateEvidence({ rule, source: "tender_document", otherRules: 0 }, items, false);
+  assert.equal(result.status, "missing");
+  assert.ok(result.detail.includes("disqualification"));
+});
+
+test("evaluateEvidence's shortfall message does not double up when consequence is already 'disqualify'", () => {
+  const rule: EvidenceRule = { ...sinceRule, consequence: "disqualify", disqualification_mentioned: true };
+  const items = [item("2023-01-01")];
+  const result = evaluateEvidence({ rule, source: "tender_document", otherRules: 0 }, items, false);
+  assert.equal(result.status, "missing");
+  assert.ok(result.detail.includes("The tender is non-responsive without it."));
+  assert.ok(!result.detail.includes("confirm whether that applies"));
+});
+
+test("evaluateEvidence's shortfall message is unchanged when disqualification_mentioned is not set", () => {
+  const rule: EvidenceRule = { ...sinceRule, consequence: "points" };
+  const items = [item("2023-01-01")];
+  const result = evaluateEvidence({ rule, source: "tender_document", otherRules: 0 }, items, false);
+  assert.equal(result.status, "missing");
+  assert.ok(!/disqualif|non-responsive/i.test(result.detail));
+});

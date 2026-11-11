@@ -194,7 +194,20 @@ export function evaluateEvidence(chosen: ChosenRule, items: ExperienceLite[], ra
       (otherEvidence > 0 ? ` (${otherEvidence} more tagged project(s) have evidence this tender doesn't accept)` : "") +
       "." +
       (rule.scored_per_project ? " Scored per project, so each one added earns points." : "") +
-      (rule.consequence === "disqualify" ? " The tender is non-responsive without it." : "") +
+      (rule.consequence === "disqualify"
+        ? " The tender is non-responsive without it."
+        // consequence is "points"/"zero_points" whenever a scoring table was
+        // also found, even in the SAME window as a separate disqualification
+        // clause (e.g. Transnet-shaped text: a per-project points ladder
+        // PLUS "submitted with no proof at all will be deemed
+        // non-responsive") - score_outlook.py keeps that signal in its own
+        // disqualification_mentioned field for exactly this case, but this
+        // branch, until now, only ever read `consequence`, so a shortfall
+        // under a scored rule that ALSO disqualifies showed only the points
+        // framing with no hint the bid could be thrown out entirely.
+        : rule.disqualification_mentioned
+        ? " This tender's own text also mentions disqualification/non-responsiveness for a shortfall here - confirm whether that applies before relying on points alone."
+        : "") +
       (source === "assumed" || rule.accepted_evidence.includes("affidavit") ? " SANRAL's B6 sworn affidavit covers the gap at 'Adequate'." : "");
   }
   return { status, label, detail: `${prefix} ${body}`, qualifying: n };
