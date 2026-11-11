@@ -278,6 +278,46 @@ describe("applyMyCvExtraction - also queues the 4 standard CV formats on success
   });
 });
 
+// Finding 431: this function's own `fields` list used to be a hand-typed
+// subset of 10 keys instead of lib/cvExtraction.ts's canonical
+// EXTRACTED_PERSON_FIELDS (17) that app/app/people/actions.ts
+// applyCvExtraction() already uses for the identical review card on the full
+// People page - silently dropping 7 real fields extract_cv_fields.py
+// genuinely proposes (id_number, role, phone, email, initial_description,
+// initial_institution, initial_graduated), including initial_graduated,
+// which engine/pack_generator/confirm_pack.py hard-stops pack confirmation
+// on when missing for a key person.
+describe("applyMyCvExtraction - a field outside the old hand-typed 10-key subset is still saved (Finding 431)", () => {
+  it("passes initial_graduated (and other previously-dropped fields) through to the rpc call", async () => {
+    const supabase = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: [], error: null }], // queueStandardCvs' own "already queued?" check - nothing pending
+      ],
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(
+        formDataWith({
+          extraction_id: "extraction-1",
+          use_initial_graduated: "on",
+          f_initial_graduated: "2010-04-23",
+          use_role: "on",
+          f_role: "Project Leader",
+        }),
+      ),
+    );
+
+    expect(url).toBe("/my-cv?saved=extracted");
+    const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ initial_graduated: "2010-04-23", role: "Project Leader" });
+  });
+});
+
 describe("applyMyCvExtraction - queueStandardCvs' own pending-check read fails", () => {
   it("reports failure instead of silently dropping the CV queue request", async () => {
     supabaseState.current = makeSupabase(

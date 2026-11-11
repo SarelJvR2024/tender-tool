@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { ConfirmSubmitButton } from "../_components/ConfirmSubmitButton";
 import { saveMyDetails, uploadMyCv, applyMyCvExtraction, discardMyCvExtraction } from "./actions";
+import { EXTRACTED_PERSON_FIELDS } from "@/lib/cvExtraction";
 
 export const instant = false;
 
@@ -174,7 +175,13 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
         {(extractions ?? []).map((ex) => {
           const proposal = (ex.proposed as { person?: Record<string, { value: string | null; evidence?: string }> }).person ?? {};
-          const fields = ["name", "ecsa_level", "ecsa_number", "ecsa_date", "sacpcmp_number", "sacpcmp_date", "highest_level", "highest_description", "highest_institution", "highest_graduated"];
+          // Finding 431: was a hand-typed subset of 10 keys, out of step with
+          // lib/cvExtraction.ts's own canonical EXTRACTED_PERSON_FIELDS (17) -
+          // see actions.ts applyMyCvExtraction()'s own header for the full
+          // write-up. Using the same list the apply action now uses means
+          // every field a checkbox is offered for here is one the action will
+          // actually save.
+          const fields = EXTRACTED_PERSON_FIELDS.map((f) => f.key);
           return (
             <Card key={ex.id} title="Review your AI-extracted CV">
               <form action={applyMyCvExtraction}>

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { safeFileName } from "@/lib/safeFileName";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
+import { EXTRACTED_PERSON_FIELDS } from "@/lib/cvExtraction";
 
 /**
  * Self-service actions for the My CV page (0065: employee role). Every
@@ -141,6 +142,27 @@ export async function uploadMyCv(formData: FormData) {
  * both require review_status to still be 'pending_review', so once this
  * ran without queuing anything, nobody - not even an owner on the full
  * People page - could ever trigger it for that extraction again.
+ *
+ * Standing solution-architect review, 2026-11-11 (Finding 431): this
+ * function's own `fields` list used to be a hand-typed subset of ten keys
+ * (present since this file's first commit, eb5a846f) instead of the
+ * canonical app/lib/cvExtraction.ts EXTRACTED_PERSON_FIELDS that
+ * app/app/people/actions.ts applyCvExtraction() and people/[id]/cv-review.tsx
+ * both already use for the full People page's identical review card - never
+ * kept in sync with it, so it silently dropped 7 of the 17 real fields
+ * extract_cv_fields.py's own PERSON_FIELDS (engine/cv/extract_cv_fields.py)
+ * genuinely proposes for every real CV: id_number, role, phone, email,
+ * initial_description, initial_institution, initial_graduated. Confirmed
+ * live-reachable, not theoretical: my-cv/page.tsx's own review card reused
+ * this exact same local list to decide which proposed fields to even show a
+ * checkbox for (see that file), so an employee ticking every box this page
+ * offered still never persisted those 7 - including initial_graduated, which
+ * engine/pack_generator/confirm_pack.py HARD-STOPS pack confirmation on when
+ * missing for a key person ("no initial_graduated date on file -
+ * years_experience cannot be computed, refusing to guess one"), telling the
+ * company to "fix it on the People page" - exactly the manual admin
+ * intervention this self-service page exists to avoid. Fixed by importing
+ * the one canonical list instead of re-typing a subset of it.
  */
 export async function applyMyCvExtraction(formData: FormData) {
   const { supabase, userId, companyId, personId } = await requireOwnPerson();
@@ -156,9 +178,8 @@ export async function applyMyCvExtraction(formData: FormData) {
   if (!row || row.person_id !== personId) fail("That extraction result wasn't found for you.");
   if (row.review_status !== "pending_review") fail("These extracted fields were already saved or discarded.");
 
-  const fields = ["name", "ecsa_level", "ecsa_number", "ecsa_date", "sacpcmp_number", "sacpcmp_date", "highest_level", "highest_description", "highest_institution", "highest_graduated"];
   const personUpdate: Record<string, string | null> = {};
-  for (const key of fields) {
+  for (const { key } of EXTRACTED_PERSON_FIELDS) {
     if (formData.get(`use_${key}`) !== "on") continue;
     personUpdate[key] = str(formData, `f_${key}`);
   }
