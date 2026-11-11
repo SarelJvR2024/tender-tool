@@ -211,7 +211,9 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
     # CV cover page - included in the actual submitted pack, per this
     # function's own comment a few lines below - could go out with a blank
     # "Contract / Tender No." line with nobody ever told to fill it in by
-    # hand. QA pass, 2026-11-11, Finding 371.
+    # hand. QA pass, 2026-11-11, Finding 372 (drafted as 371, renumbered on
+    # discovery that a sibling pass's own, different Finding 371 had already
+    # landed on `main` first - see docs/specs/System-Status.md's own note).
     if tender_ctx["contract_no"]:
         log.confirmed("cv_cover.contract_no", tender_ctx["contract_no"])
     else:
@@ -508,8 +510,22 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
     q = person.get("qualifications") or {}  # None (not just missing) degrades the same way
     assoc_lines = []
     if q.get("ecsa_level"):
+        # `q.get("ecsa_number", "MISSING")` only substitutes "MISSING" when the
+        # key is ABSENT from the dict - but both real callers (process_pack_jobs.py's
+        # adapt_person(), process_cv_jobs.py's adapt_person_row()) always build this
+        # dict with every qualification key present, value None when the column is
+        # null. ecsa_level/ecsa_number are two independently-nullable columns
+        # (0001_init_schema.sql, no check constraint tying them together) - a real
+        # person can have an ECSA level on file (e.g. registered as a Candidate
+        # Engineer) with no registration number yet. That real shape sailed through
+        # as the literal string "None" in the actual generated World Bank CV
+        # document ("registration None") with zero crash to catch it - the exact
+        # "dict.get(key, default) only substitutes when the key is ABSENT" bug
+        # class this same file has already been fixed for multiple times
+        # elsewhere (see the project-loop comment below), just missed here.
+        # Standing solution-architect review, 2026-11-11, Finding 382.
         assoc_lines.append(f"Engineering Council of South Africa (ECSA) - {q['ecsa_level']}, "
-                            f"registration {q.get('ecsa_number', 'MISSING')}")
+                            f"registration {q.get('ecsa_number') or 'MISSING'}")
         log.confirmed("cv.wb.professional_associations.ecsa", q["ecsa_level"])
     if q.get("sacpcmp_number"):
         assoc_lines.append(f"SACPCMP - registration {q['sacpcmp_number']}")
