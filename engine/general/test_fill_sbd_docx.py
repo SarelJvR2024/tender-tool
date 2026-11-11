@@ -20,6 +20,8 @@ import os
 import sys
 
 import docx
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls, qn
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.dirname(HERE)
@@ -336,6 +338,90 @@ def test_sbd6_1_vat_real_value_is_actually_written_and_confirmed():
     check("actually written into the document, not just logged", "4123456789" in d.paragraphs[0].text, d.paragraphs[0].text)
 
 
+# ----------------------------------------------------------------------------
+# Finding 438: some buyers' real editions put a form's signature block inside
+# a Word text box/drawing shape rather than the main body flow - confirmed
+# real on RAF's own currently-downloaded SBD 6.1 edition (templates/
+# general_samples/raf_pr10118921/"SBD 6.1 IN TERMS OF PPR2022.docx"): the
+# whole "SIGNATURE(S) OF TENDERER(S)" / "SURNAME AND NAME:" / "ADDRESS:"
+# block lives inside a <w:txbxContent> rectangle shape. python-docx's own
+# doc.paragraphs/table.cell.paragraphs never walk into a <w:txbxContent> at
+# all, so _all_paragraphs() (every label/blank-run matcher's own paragraph
+# source) silently never saw it - sbd6_1.signatory_name/signatory_address
+# were logged "missing - Label not found in this buyer's edition" even
+# though the label genuinely IS there, just inside a drawing shape, not a
+# body paragraph or table cell.
+# ----------------------------------------------------------------------------
+
+def _doc_with_textbox_paragraph(label_line):
+    """A docx.Document whose body holds a <w:txbxContent> (the same shape a
+    real Word text box uses) containing one paragraph with the given text -
+    not reachable via doc.paragraphs or any table cell's own .paragraphs,
+    exactly like RAF's own real SBD 6.1 signature block."""
+    d = docx.Document()
+    xml = (
+        "<w:txbxContent %s>"
+        '<w:p><w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>'
+        "</w:txbxContent>"
+    ) % (nsdecls("w"), label_line)
+    d.element.body.append(parse_xml(xml))
+    return d
+
+
+def test_sbd6_1_signatory_name_inside_a_text_box_is_found_and_filled():
+    print("SBD 6.1: a 'SURNAME AND NAME:' blank inside a Word text box (RAF's own real edition "
+          "shape) is found and filled, not logged as missing from this edition")
+    d = _doc_with_textbox_paragraph("SURNAME AND NAME: ……………………………………………………….")
+    log = ProvenanceLog("test")
+    sbd.fill_sbd_document(d, {"company": {}, "signatory": {"name": "Jane Doe"}, "answers": {}, "tender": {}}, log, {"6.1"})
+    entry = _entry(log, "sbd6_1.signatory_name")
+    check("logged confirmed, not missing", entry is not None and entry["status"] == "confirmed", entry)
+    if entry:
+        check("the real name is the logged value", entry["value"] == "Jane Doe", entry)
+    tb_text = d.element.body.findall(".//" + qn("w:t"))
+    joined = "".join(t.text or "" for t in tb_text)
+    # fill_sbd_document()'s own sbd6_1.signatory_name writer calls
+    # name.upper() before filling (matching this form's own all-caps
+    # "SURNAME AND NAME" convention) - the logged provenance value stays
+    # the real, non-upper-cased name (checked above), but the text actually
+    # placed on the document is upper-cased by that call site, not this fix.
+    check("actually written into the text box's own paragraph, not just logged",
+          "JANE DOE" in joined, joined)
+
+
+def test_sbd6_1_signatory_address_inside_a_text_box_is_found_and_filled():
+    print("SBD 6.1: an 'ADDRESS:' blank inside a Word text box is found and filled, not logged as "
+          "missing from this edition")
+    d = _doc_with_textbox_paragraph("ADDRESS: ……………………………………………………….")
+    log = ProvenanceLog("test")
+    sbd.fill_sbd_document(d, {"company": {"registered_address": "1 Main Street, Pretoria"},
+                              "signatory": {}, "answers": {}, "tender": {}}, log, {"6.1"})
+    entry = _entry(log, "sbd6_1.signatory_address")
+    check("logged confirmed, not missing", entry is not None and entry["status"] == "confirmed", entry)
+    if entry:
+        check("the real address is the logged value", entry["value"] == "1 Main Street, Pretoria", entry)
+    tb_text = d.element.body.findall(".//" + qn("w:t"))
+    joined = "".join(t.text or "" for t in tb_text)
+    check("actually written into the text box's own paragraph, not just logged",
+          "1 Main Street, Pretoria" in joined, joined)
+
+
+def test_sbd6_1_text_box_paragraph_round_trips_through_save_and_reload():
+    print("SBD 6.1: a text-box fill survives a real save()+reopen, not just an in-memory .text read")
+    d = _doc_with_textbox_paragraph("SURNAME AND NAME: ……………………………………………………….")
+    log = ProvenanceLog("test")
+    sbd.fill_sbd_document(d, {"company": {}, "signatory": {"name": "Jane Doe"}, "answers": {}, "tender": {}}, log, {"6.1"})
+    out_path = os.path.join(HERE, "_tmp_test_438_roundtrip.docx")
+    d.save(out_path)
+    try:
+        reloaded = docx.Document(out_path)
+        tb_text = reloaded.element.body.findall(".//" + qn("w:t"))
+        joined = "".join(t.text or "" for t in tb_text)
+        check("the filled value is still there after a real save+reopen", "JANE DOE" in joined, joined)
+    finally:
+        os.remove(out_path)
+
+
 def main():
     test_separate_yes_no_cells()
     test_yes_slash_no_cell()
@@ -353,6 +439,9 @@ def main():
     test_sbd6_1_vat_missing_from_company_is_logged_not_silently_dropped()
     test_sbd6_1_vat_label_not_found_in_this_edition_is_also_logged()
     test_sbd6_1_vat_real_value_is_actually_written_and_confirmed()
+    test_sbd6_1_signatory_name_inside_a_text_box_is_found_and_filled()
+    test_sbd6_1_signatory_address_inside_a_text_box_is_found_and_filled()
+    test_sbd6_1_text_box_paragraph_round_trips_through_save_and_reload()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
