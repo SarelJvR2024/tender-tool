@@ -49,6 +49,28 @@ def blocks_for(wb, code):
         raise ValueError(f"Position '{code}' is not listed on this tender's SETUP sheet")
     return bases
 
+def b7_closing_date_note(close, b7):
+    """Form B7's own pre-filled closing date (TEND 1X!F125, label 'Tender
+    Closing date:' right beside 'B7 Info:') vs the SETUP sheet's own closing
+    date (SETUP!C3) - SANRAL ships both independently on every new template,
+    and they can disagree. fill_tender.py's own tender_check_notes() already
+    found and fixed this exact check for the RRM Consultant Tender family
+    (Finding 114, 2026-11-01) - this template family's own docstring states
+    the Form B3/B7 cells "turned out to be IDENTICAL to the RRM template",
+    confirmed directly against the real committed sample
+    (templates/samples/R.334-030-2025.1F_ran.xlsm: TEND 1X!F125 is the same
+    'Tender Closing date:' serial as SETUP!C3) - but the matching check was
+    never ported to this sibling, so the identical real-world mismatch risk
+    went completely unwarned for every Conventional Consultant Tender pack.
+    Returns a list (0 or 1 note), the same shape tender_check_notes() uses,
+    so main() can extend its own `notes` with it directly."""
+    notes = []
+    if close != b7:
+        notes.append(f"Form B7 closing date ({b7}) differs from the SETUP sheet's own closing date ({close}) - "
+                     "check which is correct before relying on this.")
+    return notes
+
+
 def fill_person(wb, base, person, projects_lib, slot=None, log=None):
     """Fills one Form B1/B2 block. Returns notes (projects left off this block
     because this position's form doesn't offer their project type - see
@@ -170,11 +192,14 @@ def main(tpl, pack_path, out, log=None):
         raise ValueError("Tender pack must not override SANRAL's SETUP details - "
                          "they come pre-filled in each new template")
     serial = lambda v: (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(v))) if isinstance(v, (int, float)) else v
-    print("Tender (from SANRAL template): contract", wb.cached("SETUP", "C2"),
-          "| closes", serial(wb.cached("SETUP", "C3")))
+    close, b7 = serial(wb.cached("SETUP", "C3")), serial(wb.cached(T, "F125"))
+    print("Tender (from SANRAL template): contract", wb.cached("SETUP", "C2"), "| closes", close)
+    extra_notes = b7_closing_date_note(close, b7)
+    if close != b7:
+        print(f"WARNING: Form B7 closing date {b7} differs from SETUP closing date {close}")
 
     # Key persons
-    notes = list(front_notes)
+    notes = list(front_notes) + extra_notes
     for a in pack["key_persons"]:
         person_key = a.get("person")
         person = (pack.get("people") or {}).get(person_key)
