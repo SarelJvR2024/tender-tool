@@ -466,3 +466,64 @@ describe("skipOnboardingDocument - real update still succeeds", () => {
     expect(url).toContain("saved=skipped");
   });
 });
+
+// Standing solution-architect review, Finding 429, 2026-11-11: every file in
+// a registerOnboardingBatch() call was already uploaded straight to
+// ONBOARDING_BUCKET from the browser (uploadBatch.ts) before this Server
+// Action ever runs - the same "upload first, write the DB row after" shape
+// Findings 422/423/424 already fixed everywhere else in this app, but this
+// one site was missed by that sweep (the upload and the insert are split
+// across two different modules, not one function that visibly calls both
+// .upload() and .insert()). A real, reachable way for the insert to fail is
+// this table's own RLS insert policy (0063, `with check
+// (is_company_member(company_id))`) - a company_members row revoked
+// mid-request, the exact race this file's own confirmVaultDocument()/
+// confirmIdDocument() siblings are already tested for above.
+describe("registerOnboardingBatch - onboarding_uploads insert fails (e.g. membership revoked mid-request)", () => {
+  it("cleans up every already-uploaded file in the batch instead of orphaning them in ONBOARDING_BUCKET", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [{ data: null, error: { message: "new row violates row-level security policy for table \"onboarding_uploads\"" } }], // onboarding_uploads insert
+      ],
+    });
+    supabaseState.current = client;
+
+    const { registerOnboardingBatch } = await import("./actions");
+
+    const res = await registerOnboardingBatch({
+      batchId: "11111111-1111-1111-1111-111111111111",
+      files: [
+        { storagePath: "company-1/onboarding/a.pdf", originalFilename: "a.pdf" },
+        { storagePath: "company-1/onboarding/b.pdf", originalFilename: "b.pdf" },
+      ],
+    });
+
+    expect(res?.error).toBeTruthy();
+    const removedPaths = removeCalls.flat();
+    expect(removedPaths).toContain("company-1/onboarding/a.pdf");
+    expect(removedPaths).toContain("company-1/onboarding/b.pdf");
+  });
+});
+
+describe("registerOnboardingBatch - real insert still succeeds", () => {
+  it("does not touch storage at all when the insert genuinely succeeds", async () => {
+    const { client, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: null, error: null }], // onboarding_uploads insert succeeds
+      ],
+    });
+    supabaseState.current = client;
+
+    const { registerOnboardingBatch } = await import("./actions");
+
+    const res = await registerOnboardingBatch({
+      batchId: "22222222-2222-2222-2222-222222222222",
+      files: [{ storagePath: "company-1/onboarding/c.pdf", originalFilename: "c.pdf" }],
+    });
+
+    expect(res).toEqual({ ok: true, batchId: "22222222-2222-2222-2222-222222222222" });
+    expect(removeCalls.length).toBe(0);
+  });
+});
