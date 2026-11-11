@@ -193,6 +193,64 @@ test("estimatePosition: the same PL(T) gap also widens the managerial position-h
   assert.ok(estimate.notes.some((n) => n.includes("PL(T)") && n.includes("management points shown as a range")));
 });
 
+// Finding 437 (standing QA/robustness review, 2026-11-11): the same shape as
+// the PL(T) fix above (2026-11-09), one step earlier - a held position_code
+// that is simply BLANK (never recorded on the People page at all, not a real
+// SANRAL code of any kind) used to also fall through to `return 0`,
+// byte-for-byte identical to a person who genuinely picked "Undefined" on
+// SANRAL's own real form. Those are not the same fact: engine/sanral_fill.py's
+// real pack-build filler (set_dropdown_for()) REFUSES to fill Form B1 at all
+// when position_code is blank ("is not recorded - fill it in on the People
+// page") - it never silently treats a blank field as "Undefined" the way
+// this estimator's old confident 0 effectively did.
+test("estimatePosition: a blank/unset position held scores a range, not a confident 0 indistinguishable from Undefined", () => {
+  const closing = new Date("2027-01-01");
+  const project = (heldCode: string | null) => ({
+    client_type: "National Roads Authority",
+    project_type: null,
+    position_code: heldCode,
+    start_date: "2020-01-01",
+    end_date: "2024-01-01",
+  });
+  const input = (heldCode: string | null): SanralPositionInput => ({
+    positionCode: "CE(T)",
+    description: null,
+    managerial: false,
+    tenderProjectType: null,
+    person: { name: "Test Person", projects: [project(heldCode)] },
+  });
+
+  const blank = estimatePosition(input(""), closing);
+  const nullHeld = estimatePosition(input(null), closing);
+  const undefinedHeld = estimatePosition(input("Undefined"), closing);
+
+  // Before the fix, a blank code and an explicit "Undefined" were
+  // byte-for-byte identical (both a confident technical: {min:5,max:10}).
+  assert.deepEqual(undefinedHeld.technical, { min: 5, max: 10 });
+  assert.deepEqual(blank.technical, { min: 5, max: 15 });
+  assert.deepEqual(nullHeld.technical, { min: 5, max: 15 });
+  assert.notDeepEqual(blank.technical, undefinedHeld.technical);
+  assert.ok(blank.notes.some((n) => n.includes('"position held"') && n.includes("not scored as SANRAL's own")));
+  assert.equal(undefinedHeld.notes.some((n) => n.includes('"position held"')), false);
+});
+
+test("estimatePosition: a blank position held also widens the managerial position-held range, not just technical", () => {
+  const closing = new Date("2027-01-01");
+  const input: SanralPositionInput = {
+    positionCode: "CE(T)",
+    description: null,
+    managerial: true,
+    tenderProjectType: null,
+    person: {
+      name: "Test Person",
+      projects: [{ client_type: "National Roads Authority", project_type: null, position_code: "", start_date: "2020-01-01", end_date: "2024-01-01" }],
+    },
+  };
+  const estimate = estimatePosition(input, closing);
+  assert.ok(estimate.management.min < estimate.management.max, "management should be a real range, not a single confident value");
+  assert.ok(estimate.notes.some((n) => n.includes('"position held"') && n.includes("management points shown as a range")));
+});
+
 test("pastPerformanceFromExperience: picks the best 3 scoreable items and fills remaining slots with the B6 affidavit range", () => {
   const result = pastPerformanceFromExperience([
     { document_type: "reference_letter", performance_rating: "excellent" },
