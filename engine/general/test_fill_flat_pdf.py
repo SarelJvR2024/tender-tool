@@ -33,6 +33,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 import fill_flat_pdf as ffp  # noqa: E402
 
@@ -146,6 +147,38 @@ check("the real en dash (–) is on the printed page, not a '?' placeholder",
       "–" in page_text, repr(page_text))
 check("no '?' placeholder leaked into the printed page in place of the real punctuation",
       "?" not in page_text, repr(page_text))
+
+# --- real-world regression (standing review, 2026-11-11): SBD4's "employed ---
+#     by an organ of state" declaration never matched on SALB's real, live,
+#     flat-PDF SBD4 edition. FORMS["4"]["choices"]'s own label regex for
+#     sbd4.employed_by_state only ever recognised the OLDER "presently in the
+#     service of the state" wording - the real 2026 SBD4 edition asks
+#     "...employed by an organ of state, as defined in section 239 of the
+#     Constitution? YES/NO" instead, wording fill_sbd_docx.py's own sibling
+#     SBD4_QUESTIONS regex for the identical declaration (its .docx-form
+#     counterpart) already recognises. fill_flat_pdf.py's own flat-PDF
+#     version of this exact declaration was never updated to match it, so on
+#     this real document the company's own confirmed "no" answer is never
+#     found or ticked - the field comes back "not_found", which
+#     build_general_pack.py's own _log_overlay() treats exactly like "the
+#     buyer already printed it" (skipped, no provenance entry at all), so
+#     nothing is flagged on ACTIONS_TO_SIGN.md either: a mandatory SBD4
+#     declaration goes out completely blank on a real signed submission with
+#     zero trace anywhere that a human needs to mark it by hand.
+REAL_SBD4 = os.path.join(ROOT_DIR, "templates", "general_samples", "salb_15-10-2026", "SBD4.pdf")
+
+if os.path.exists(REAL_SBD4):
+    _ctx = {"company": {"legal_name": "Test Co"}, "signatory": {"name": "Jane Smith"},
+            "answers": {"sbd4.employed_by_state": "no"}, "tender": {}}
+    _out = os.path.join(TMP, "real_sbd4_out.pdf")
+    _rep = ffp.fill_flat_pdf(REAL_SBD4, _out, _ctx, ["4"])
+    _field = _rep["forms"]["4"]["fields"].get("sbd4.employed_by_state")
+    check("the real SALB SBD4's 'employed by an organ of state' YES/NO declaration is found "
+          "and ticked on the real document, not reported not_found/missing",
+          _field is not None and _field["status"] == "placed", _field)
+else:
+    check("real SALB SBD4 sample present under templates/general_samples (cannot run the real-document regression otherwise)",
+          False, REAL_SBD4)
 
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
