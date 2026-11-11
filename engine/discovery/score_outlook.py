@@ -136,7 +136,15 @@ def _bbbee_points_by_level(text):
     proof-of-status paragraph), and no number is returned."""
     table = {}
     for level in range(1, 9):
-        m = re.search(rf"Level\s*{level}\b([^\n]*)", text)
+        # IGNORECASE: every other regex in this file that matches the literal
+        # word "Level" (BBBEE_TABLE_RE, BBBEE_ROW_RE, two lines/a few lines
+        # away) is case-insensitive - this one wasn't, so a real tender whose
+        # B-BBEE specific-goals table renders its "Level N" rows in a
+        # different case (a scanned/typeset Book 1 table commonly emphasises
+        # a header row in caps, "LEVEL 1  10.00  20.00") silently failed to
+        # parse here even though BBBEE_TABLE_RE/BBBEE_ROW_RE both correctly
+        # recognise the SAME table as present. standing review, 2026-11-11.
+        m = re.search(rf"Level\s*{level}\b([^\n]*)", text, re.IGNORECASE)
         if not m:
             continue
         nums = [float(n) for n in NUM_RE.findall(m.group(1))]
@@ -791,7 +799,18 @@ def match_locality(loc, offices):
             "reason": f"no office in the preferred area(s) - offices on file: {places}{derived}."}
 
 
-FUNCTIONALITY_NA_RE = re.compile(r"functionality\s*\n?\s*N/?A\b", re.IGNORECASE)
+# standing review, 2026-11-11: only allowed a run of whitespace/a single
+# newline between "functionality" and "N/A" - but this regex's own
+# justifying real-world evidence (docs/specs/Tender-Evaluation-Engine-Audit.md,
+# "Round 2": DPWI architectural PSP's "Scoring quality / functionality: N/A")
+# has a colon in between, which that character class never allowed, so the
+# one live document this regex exists to catch never actually matched it and
+# fell through to the "nothing mentioned at all" branch instead of the real
+# "not applicable" one. Widened to allow the handful of short punctuation
+# runs a buyer's own "<label>: N/A" formatting actually uses (colon, dash,
+# slash) - still bounded (at most 3 non-word characters) so it can't drift
+# across an unrelated sentence.
+FUNCTIONALITY_NA_RE = re.compile(r"functionality\W{0,3}N/?A\b", re.IGNORECASE)
 
 # Manifest v2 (Sarel's own brief: "Replace the single functionality:70
 # integer with a structured scorecard... sub_minimum_rule... criteria").
