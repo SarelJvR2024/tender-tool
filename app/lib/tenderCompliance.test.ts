@@ -114,3 +114,54 @@ test("COID letter already expired is still 'missing', not 'expiring' (no regress
   assert.equal(coid.status, "missing");
   assert.equal(coid.expiring, false);
 });
+
+/**
+ * Finding 420 (2026-11-11, standing QA pass): checkRegistration()'s `ecsa`
+ * closure - used for the pr_eng_or_tech/pr_eng/pr_tech_eng/pr_techni_eng/
+ * candidate cases, the DEFAULT SANRAL minimum for most key positions
+ * (SANRAL_MIN_REQUIREMENTS above) - never called registrationValidity() on
+ * person.ecsa_expiry at all, unlike every other case in the SAME switch
+ * (pr_sci_nat/SACNASP, sacpcmp, sagc, the sacqsp/sacap/sacplan/sacpvp/psira
+ * catalog family), which all check their own *_expiry column before
+ * reporting "have". ecsa_expiry is a real, tracked column (migration 0035)
+ * with its own renewal reminder (watch_deadlines.py's
+ * TRACKED_PERSON_EXPIRY_FIELDS treats it exactly like sacpcmp_expiry) - so a
+ * key person whose ECSA registration had already lapsed by a tender's
+ * closing date was reported as meeting the minimum requirement with no
+ * warning at all on compliance-report.tsx's own "Key positions" cross-check.
+ *
+ * Run: node --experimental-strip-types --test app/lib/tenderCompliance.test.ts
+ */
+import { checkMinimumRequirement, type PersonFacts } from "./tenderCompliance.ts";
+
+const personFor = (overrides: Partial<PersonFacts>): PersonFacts => ({
+  name: "Test Person",
+  ecsa_level: "Pr Eng",
+  ecsa_number: "20150155",
+  initial_graduated: null,
+  ...overrides,
+});
+
+test("an ECSA registration already expired by the tender's closing date is reported as NOT meeting the minimum (the same sibling-expiry check SACPCMP/SAGC/SACNASP already get)", () => {
+  const closingDate = daysFromNow(10);
+  const p = personFor({ ecsa_expiry: daysFromNow(-5) });
+  const result = checkMinimumRequirement("PL", p, closingDate);
+  assert.equal(result.status, "missing", "an ECSA registration that lapsed before closing must not be reported as meeting the minimum");
+  assert.match(result.detail, /ECSA registration expired/i);
+});
+
+test("an ECSA registration valid well past the closing date is reported as meeting the minimum, with the expiry carried in the detail text (regression)", () => {
+  const closingDate = daysFromNow(10);
+  const p = personFor({ ecsa_expiry: daysFromNow(900), initial_graduated: daysFromNow(-15 * 365) });
+  const result = checkMinimumRequirement("PL", p, closingDate);
+  assert.equal(result.status, "have");
+  assert.match(result.detail, /valid until/i);
+});
+
+test("an ECSA registration with no expiry recorded falls to 'check' (unknown), not silently 'have' - the same 'check, don't guess' fallback every sibling case already uses when its own expiry field is unset", () => {
+  const closingDate = daysFromNow(10);
+  const p = personFor({ ecsa_expiry: null, initial_graduated: daysFromNow(-15 * 365) });
+  const result = checkMinimumRequirement("PL", p, closingDate);
+  assert.equal(result.status, "check");
+  assert.match(result.detail, /renewal date not on file/i);
+});
