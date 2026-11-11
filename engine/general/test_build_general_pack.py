@@ -161,6 +161,33 @@ def test_buyer_form_note_with_nothing_missing_has_no_extra_clause():
     check("the static by-hand promise is still there", "offered price" in note, note)
 
 
+def test_jv_returnable_not_dismissed_when_bidding_as_jv_is_unanswered():
+    print("Finding, 2026-11-11: build_general_pack()'s own step-4 returnables "
+          "loop used to skip a conditional:'jv' returnable (the JV/consortium "
+          "agreement) whenever bidding_as_jv wasn't an explicit 'yes' - which "
+          "included a never-answered question, not just an explicit 'no'. A "
+          "pack can genuinely be requested before that question is answered "
+          "(general-workspace.tsx says so), so this silently dropped the JV "
+          "agreement from the pack with zero trace - no omitted_reason, no "
+          "by_hand entry - exactly what this module's own header comment "
+          "promises never happens.")
+    # Unanswered: no "bidding_as_jv" key at all - the real shape
+    # process_general_jobs.gather_pack_inputs() produces (only answered
+    # fields get an entry at all).
+    check("unanswered (no key at all) is NOT dismissed", pack.jv_returnable_dismissed({}) is False)
+    # Explicitly "no" - the one real case that SHOULD dismiss it.
+    check("explicit 'no' IS dismissed", pack.jv_returnable_dismissed({"bidding_as_jv": "no"}) is True)
+    check("explicit 'No' (case) IS dismissed", pack.jv_returnable_dismissed({"bidding_as_jv": "No"}) is True)
+    # Explicitly "yes" - must fall through to the normal missing/check
+    # handling (never dismissed outright - that's the whole point of
+    # answering "yes").
+    check("explicit 'yes' is NOT dismissed", pack.jv_returnable_dismissed({"bidding_as_jv": "yes"}) is False)
+    # Some other unexpected stored value - never treated as an affirmative
+    # "no", same "don't guess" discipline as every other tri-state field in
+    # this codebase.
+    check("an unexpected value is NOT dismissed", pack.jv_returnable_dismissed({"bidding_as_jv": ""}) is False)
+
+
 def main():
     test_flags_the_real_misfiled_coid_case()
     test_passes_a_correctly_named_document_for_its_own_slot()
@@ -171,6 +198,7 @@ def main():
     test_still_to_write_includes_a_genuinely_missing_field_with_no_value_on_file()
     test_buyer_form_note_includes_a_genuinely_missing_field_with_no_value_on_file()
     test_buyer_form_note_with_nothing_missing_has_no_extra_clause()
+    test_jv_returnable_not_dismissed_when_bidding_as_jv_is_unanswered()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

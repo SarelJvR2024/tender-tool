@@ -428,6 +428,44 @@ def write_guide(path, manifest, ctx, form_results, by_hand):
 # The pack
 # ---------------------------------------------------------------------------
 
+def jv_returnable_dismissed(answers):
+    """True only when `bidding_as_jv` was EXPLICITLY answered "no" - the one
+    case the step-4 returnables loop below may treat a conditional:"jv"
+    returnable (the JV/consortium agreement) as already satisfied and drop
+    it from the pack outright.
+
+    Finding, 2026-11-11: this used to be
+    `(answers.get("bidding_as_jv") or "").lower() != "yes"`, inline in the
+    loop - true for an explicit "no" AND for a never-answered question
+    alike (`answers` holds no entry at all for an unanswered field -
+    process_general_jobs.py's own gather_pack_inputs() only ever includes a
+    row `if a.get("value") is not None`). A pack requested before the JV
+    question was answered - normal: general-workspace.tsx's own "needAnswer"
+    note explicitly tells the company "you can still generate a draft;
+    those fields are left blank and listed", and the readiness gate
+    (general-pack-review-data.ts's own checkReturnable()) only turns this
+    into a blocking Fix item when the tender's own JV-agreement wording
+    happens to match requirements.py's REQUIRED_CONTEXT_RE "must/shall/
+    submit..." window - most SA tender documents phrase the JV clause
+    conditionally ("if bidding as a joint venture, attach...") without that
+    language right next to it, so usually it doesn't - silently dropped the
+    JV agreement/consortium document from `sections` entirely: no
+    omitted_reason, no by_hand entry, nothing. That is exactly what this
+    module's own header comment (above) promises never happens ("Anything
+    that should be in the pack but isn't is listed on the contents page
+    with the reason ... never silently dropped") - broken only for this one
+    conditional, and only when the company genuinely IS bidding as a JV but
+    just hasn't ticked the Workspace toggle yet, the one case the document
+    is actually needed.
+
+    checkReturnable() in app/lib/generalTender.ts already gets this right -
+    `biddingAsJv === false` only dismisses the returnable; `null` (not yet
+    answered) and `true` both fall through to the normal missing/check
+    handling - mirrored here now."""
+    bidding_jv = answers.get("bidding_as_jv")
+    return bidding_jv is not None and bidding_jv.lower() == "no"
+
+
 def _doc_path(manifest_doc, local_docs):
     """manifest documents carry names; local_docs maps name -> local path
     (the downloaded copy, or the .docx LibreOffice converted from a .doc)."""
@@ -590,9 +628,8 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
 
     # --- 4. company documents -------------------------------------------
     closing = tender.get("closing_date")
-    bidding_jv = (answers.get("bidding_as_jv") or "").lower()
     for r in manifest.get("returnables", []):
-        if r.get("conditional") == "jv" and bidding_jv != "yes":
+        if r.get("conditional") == "jv" and jv_returnable_dismissed(answers):
             continue
         path = files.get("upload:" + r["key"])
         col = VAULT_FILE_FOR.get(r["key"])
