@@ -78,6 +78,47 @@ describe("checkPlan - Targeted Enterprise total percentage", () => {
 // total once saved. Extracted as this shared, single-source-of-truth
 // function so the form's own preview and checkPlan()'s own warnings can
 // never disagree about which band a total falls in again.
+// Finding 377 (2026-11-11): checkPlan() already warns when in_project_province
+// is left unanswered (a real field written into the actual Form B7 workbook),
+// but head_office/consulting_engineering_firm/tax_reference - written into the
+// same real document exactly the same way - never got the identical treatment,
+// so a Targeted Enterprise could reach the real submitted document with any of
+// these three blank and nothing anywhere ever told the company. te()'s own
+// defaults above already leave all three null/blank.
+// engine/sanral_b7.py's check_plan() has the identical fix, same pass.
+describe("checkPlan - head_office / consulting_engineering_firm / tax_reference", () => {
+  it("warns when all three are left blank", () => {
+    const { errors, warnings } = checkPlan(
+      {
+        mode: "subcontract",
+        waiver_quote: null,
+        comments: null,
+        targeted_enterprises: [te({ name: "Blank TE" })],
+      },
+      { status: "required", needsPlan: true, reason: "" },
+    );
+    expect(errors).toEqual([]);
+    expect(warnings.some((w) => w.includes("location of head office"))).toBe(true);
+    expect(warnings.some((w) => w.includes("Consulting Engineering Firm"))).toBe(true);
+    expect(warnings.some((w) => w.includes("Tax Reference Number"))).toBe(true);
+  });
+
+  it("does not warn when all three are given", () => {
+    const { warnings } = checkPlan(
+      {
+        mode: "subcontract",
+        waiver_quote: null,
+        comments: null,
+        targeted_enterprises: [
+          te({ name: "Complete TE", head_office: "1 Main Rd", consulting_engineering_firm: "NO", tax_reference: "123456" }),
+        ],
+      },
+      { status: "required", needsPlan: true, reason: "" },
+    );
+    expect(warnings.some((w) => w.includes("location of head office") || w.includes("Consulting Engineering Firm") || w.includes("Tax Reference Number"))).toBe(false);
+  });
+});
+
 describe("totalPercentInRange", () => {
   it("is false below the policy minimum", () => {
     expect(totalPercentInRange(20)).toBe(false);

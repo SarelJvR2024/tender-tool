@@ -129,6 +129,26 @@ with tempfile.TemporaryDirectory() as tmp:
     ]}, {"needs_plan": True})
     check(not any("more than the whole contract" in x for x in w), f"exactly 50% total -> no over-allocation warning, got {w}")
 
+    # Finding 377 (2026-11-11): fill_b7() writes head_office/consulting_engineering_
+    # firm/tax_reference into the real Form B7 exactly like in_project_province (None
+    # when blank/unanswered) - but, unlike in_project_province, nothing ever warned
+    # when these three were left blank, even though the template asks for all three
+    # just as explicitly. te()'s own defaults (line 69 above) already leave all three
+    # None, so this plan is exactly what every other test in this file already builds.
+    e, w = sanral_b7.check_plan({"mode": "subcontract", "targeted_enterprises": [te(name="Blank TE")]},
+                                {"needs_plan": True})
+    check(not e and any("location of head office" in x for x in w),
+          f"head_office blank -> warning, got {w}")
+    check(any("Consulting Engineering Firm" in x for x in w),
+          f"consulting_engineering_firm blank -> warning, got {w}")
+    check(any("Tax Reference Number" in x for x in w),
+          f"tax_reference blank -> warning, got {w}")
+    e, w = sanral_b7.check_plan({"mode": "subcontract", "targeted_enterprises": [
+        te(name="Complete TE", head_office="1 Main Rd", consulting_engineering_firm="NO", tax_reference="123456")
+    ]}, {"needs_plan": True})
+    check(not any("location of head office" in x or "Consulting Engineering Firm" in x or "Tax Reference Number" in x
+                 for x in w), f"all three given -> no warning for any of them, got {w}")
+
     # Finding 142 (2026-11-07): a NaN/Infinity percentage used to sail straight
     # past check_plan()'s own validation (NaN compares False to every bound
     # check), then got written into the real workbook as a literal <v>nan</v>
