@@ -531,11 +531,11 @@ def _read_document_text(url, timeout=30):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def _tender_context(client, tender):
-    """{"documents": [{"title","url"}, ...], "buyer": str|None} for one
-    tenders row - from discovered_opportunities (tender_id FK), the direct
-    buyer-site document links AND the buyer name captured at discovery time
-    for an eTenders/general tender (seed_supabase_opportunities.to_row()).
+def _tender_context(client, tender, log=print):
+    """{"documents": [{"title","url"}, ...], "buyer": str|None, "error": str|None}
+    for one tenders row - from discovered_opportunities (tender_id FK), the
+    direct buyer-site document links AND the buyer name captured at discovery
+    time for an eTenders/general tender (seed_supabase_opportunities.to_row()).
     `tenders` itself has no `buyer` column (migration 0001) - this is the
     only place that name is recorded for a tender that went through
     Discovery, so it has to be read from here, not guessed from the title.
@@ -550,11 +550,25 @@ def _tender_context(client, tender):
     tender's scope already comes from its own title/description (the
     heuristic path, untouched), and its real financial/technical workbooks
     are a company's own business decision (fill_financial.py), not a buyer
-    document to mine for scope text."""
+    document to mine for scope text.
+
+    `error` is None for a genuine "this tender has no discovered_opportunities
+    row (yet), or none of them list a document" - vs. a non-None message when
+    the read itself failed (a transient Supabase/network problem). Finding 409
+    (standing solution-architect review, 2026-11-11): before this, both cases
+    returned the exact same {"documents": [], "buyer": None} - run() could not
+    tell "genuinely no documents" from "couldn't check", so a transient read
+    failure silently fell through to the heuristic-only scope path (same
+    outcome as a tender nobody ever attached documents to) with nothing
+    logged, and tags_updated_at got written anyway - permanently marking that
+    tender "enriched" so a plain `run()` (no --all) never retries it. Same
+    epistemic-conflation shape Finding 408 fixed in opportunity_requirements.py."""
     try:
         opps = client.select("discovered_opportunities", {"tender_id": tender["id"]})
-    except Exception:
-        return {"documents": [], "buyer": None}
+    except Exception as e:
+        log(f"  [{tender.get('slug') or tender.get('contract_no') or tender.get('id')}] "
+            f"could not read discovered_opportunities for this tender: {type(e).__name__}: {e}")
+        return {"documents": [], "buyer": None, "error": str(e)}
     seen, docs, buyer = set(), [], None
     for o in opps:
         buyer = buyer or o.get("buyer")
@@ -563,7 +577,7 @@ def _tender_context(client, tender):
             if url and url not in seen:
                 seen.add(url)
                 docs.append(d)
-    return {"documents": docs, "buyer": buyer}
+    return {"documents": docs, "buyer": buyer, "error": None}
 
 
 def _boq_candidate_document(documents):
@@ -640,7 +654,16 @@ def run(limit=None, all_tenders=False, fetch_documents=True, max_documents=3, lo
         label = t.get("slug") or t.get("contract_no") or t["id"]
         documents, buyer, document_text, boq_items, llm_result = [], None, None, None, None
         if fetch_documents:
-            ctx = _tender_context(client, t)
+            ctx = _tender_context(client, t, log=log)
+            if ctx["error"]:
+                # Finding 409: could not even check whether this tender has
+                # documents - never fall through to the heuristic-only path
+                # as if it genuinely has none, and never mark it
+                # tags_updated_at (a plain run() would then never retry it).
+                # Skip this tender for this run; next run (or --all) tries
+                # again.
+                log(f"  [{label}] SKIPPED this run (document lookup failed, see above) - will retry next run.")
+                continue
             documents, buyer = ctx["documents"], ctx["buyer"]
             for d in documents[:max_documents]:
                 url = d.get("url")
