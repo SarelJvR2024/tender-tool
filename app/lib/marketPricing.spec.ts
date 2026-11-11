@@ -72,6 +72,36 @@ describe("tenderFrequencyTrend", () => {
     const trend = tenderFrequencyTrend([row({ award_date: null, closing_date: null })], 3, now);
     expect(trend.every((p) => p.count === 0)).toBe(true);
   });
+
+  // Finding 426: `now` straddling the SAST month boundary (real instant
+  // 2026-11-30T23:30:00Z = 2026-12-01 01:30 SAST, already December) used to
+  // anchor the trailing window on November (the Node process's own naive
+  // UTC calendar), not the real SAST December - a control case well inside
+  // December (not near any boundary) proves this isn't a blanket "always
+  // add a month" fix.
+  it("anchors the current month on the real SAST calendar, not the process's naive UTC one", () => {
+    const now = new Date("2026-11-30T23:30:00.000Z"); // real SAST: 2026-12-01 01:30
+    const trend = tenderFrequencyTrend([], 3, now);
+    expect(trend.map((p) => p.month)).toEqual(["2026-10", "2026-11", "2026-12"]);
+  });
+
+  it("counts a genuine December award made during the SAST-midnight UTC lag window, not just a non-boundary one", () => {
+    const now = new Date("2026-11-30T23:30:00.000Z"); // real SAST: 2026-12-01 01:30
+    const rows = [row({ award_date: "2026-12-01" }), row({ award_date: "2026-11-15" })];
+    const trend = tenderFrequencyTrend(rows, 3, now);
+    expect(trend).toEqual([
+      { month: "2026-10", count: 0 },
+      { month: "2026-11", count: 1 },
+      { month: "2026-12", count: 1 },
+    ]);
+  });
+
+  it("still reads December correctly well inside the month, away from any boundary (control, not a blanket month-add)", () => {
+    const now = new Date("2026-12-15T10:00:00.000Z");
+    const trend = tenderFrequencyTrend([row({ award_date: "2026-12-10" })], 3, now);
+    expect(trend.map((p) => p.month)).toEqual(["2026-10", "2026-11", "2026-12"]);
+    expect(trend.find((p) => p.month === "2026-12")?.count).toBe(1);
+  });
 });
 
 describe("byCategory", () => {

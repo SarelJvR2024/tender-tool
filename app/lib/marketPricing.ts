@@ -544,15 +544,51 @@ export async function loadMarketOutcomes(supabase: SupabaseClient, limit = 60_00
 
 export type MonthCount = { month: string; count: number };
 
+// SAST is UTC+2 with no DST (same fact lib/dates.ts's closingDayOf() and
+// analyticsLogic.ts's/savingsCounterData.ts's own identically-named
+// constants already rely on) - shifts `now` into SAST calendar terms before
+// reading its year/month, exactly once.
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+
 /** Tenders per calendar month (award_date, falling back to closing_date for
  * one not yet awarded - same fallback benchmark() uses for its own date
  * range), oldest first, zero-count months kept so a quiet stretch reads as
- * quiet - same discipline as analyticsLogic.ts's buildWinLossTrend(). */
+ * quiet - same discipline as analyticsLogic.ts's buildWinLossTrend().
+ *
+ * Finding 426: the trailing window used to be anchored on
+ * `now.getFullYear()`/`now.getMonth()` directly - the Node process's own
+ * LOCAL time zone, which is UTC on every runtime this app actually deploys
+ * to (no `TZ` env var is set anywhere in this repo; same fact
+ * analyticsLogic.ts's buildWinLossTrend() and savingsCounterData.ts's
+ * fetchSavingsCounterSummary() already independently established and fixed,
+ * Findings 413/414). A 2026-11-06 pass ruled this function "not a bug"
+ * specifically because its row-side dates (`award_date`/`closing_date` are
+ * plain `date` columns, migration 0053 - no time-of-day, no UTC/SAST
+ * ambiguity at all) and its own anchor were both naively UTC, so it read as
+ * "self-consistent" the same way Finding 413's own pre-fix
+ * `buildWinLossTrend()` was - but Finding 413 later proved self-consistency
+ * between two naive-UTC computations does NOT make either of them match the
+ * real SAST calendar a South African user is actually in; that correction
+ * was never carried back to re-check this function, and two later passes
+ * (413, 414) saw it resurface in the same `getMonth()`/`getFullYear()` sweep
+ * and deferred to the stale ruling without re-applying their own new
+ * finding. Confirmed live: at the real instant `2026-11-30T23:30:00Z` (SAST
+ * `2026-12-01 01:30` - already December for a South African user), the
+ * pre-fix window anchored on November, so a genuine `award_date: "2026-12-01"`
+ * row had no bucket to land in at all (silently dropped from the whole
+ * trend, not merely miscounted) for the ~2 hours after every real SAST
+ * month-start. Only the anchor needs the SAST shift - the row dates
+ * themselves are already correct as stored. */
 export function tenderFrequencyTrend(rows: readonly Pick<MarketRow, "award_date" | "closing_date">[], monthsBack: number, now: Date): MonthCount[] {
+  const nowSast = new Date(now.getTime() + SAST_OFFSET_MS);
+  const anchorYear = nowSast.getUTCFullYear();
+  const anchorMonth = nowSast.getUTCMonth(); // 0-indexed
   const points: MonthCount[] = [];
   for (let i = monthsBack - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    points.push({ month: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, count: 0 });
+    const totalMonths = anchorYear * 12 + anchorMonth - i;
+    const y = Math.floor(totalMonths / 12);
+    const m = ((totalMonths % 12) + 12) % 12; // 0-indexed; totalMonths can go negative for a large monthsBack
+    points.push({ month: `${y}-${String(m + 1).padStart(2, "0")}`, count: 0 });
   }
   const byMonth = new Map(points.map((p) => [p.month, p]));
   for (const r of rows) {
