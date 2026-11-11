@@ -264,6 +264,38 @@ def _field_label(key):
     return key.split(".", 1)[-1].replace("_", " ")
 
 
+def _still_to_write(fields):
+    """Field keys left for a human to write by hand on a flat-PDF form the
+    overlay typed SOME values onto (fill_flat_pdf.fill_flat_pdf()'s own
+    per-field report): everything "not_placed" (had a value, couldn't be
+    positioned - too long, clashed with a neighbour, didn't read back) or
+    "missing" (the label is on this edition, but the company has no value
+    on file for it) - never "not_found" (genuinely not on this edition) or
+    "prefilled"/"placed" (nothing left to do).
+
+    Finding 394 (standing QA/robustness review, 2026-11-11): this used to
+    require `v.get("value")` to be truthy as well. "missing" ALWAYS carries
+    a falsy value by construction - place_text_fields()/place_captions()
+    only ever set status="missing" when the company's own value failed the
+    whitespace-stripped truthy check in the first place (fill_flat_pdf.py's
+    own "not value alone lets a whitespace-only value through" comment, same
+    function) - so that one `and` silently dropped EVERY genuinely-missing
+    field from the "still to write" note on every flat-PDF form (SBD1/4/9,
+    the Compulsory Enterprise Questionnaire, Form of Offer and Acceptance),
+    always, not as an edge case: a company with no CSD number on file whose
+    buyer's SBD1 edition happens to be a flat (non-fillable) PDF saw its
+    completion guide say only "check the typed details, then sign" for that
+    form, with the one field that still needed a value never mentioned
+    anywhere - not here, not in guide_rows() (SBD1 IS in FILLABLE_CODES, but
+    this "typed onto the PDF" branch returns before guide_rows() is ever
+    reached for a form that got anything placed at all), not in the
+    ProvenanceLog (status="missing" is logged there, but nothing in-app
+    currently surfaces field_provenance for a general-family tender's own
+    Pack Review screen - general-pack-review-data.ts has none of the
+    field_provenance reads pack-review-data.ts's SANRAL screen has)."""
+    return [(k, v) for k, v in fields.items() if v["status"] in ("not_placed", "missing")]
+
+
 def _log_overlay(log, reports):
     """Provenance for every field fill_flat_pdf looked for: typed (and read
     back) -> confirmed / assumed_default; anything else -> missing with the
@@ -457,7 +489,7 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
         if f["status"] == "overlay" and f["code"] in overlay_reports:
             orep = overlay_reports[f["code"]]
             placed = [k for k, v in orep["fields"].items() if v["status"] == "placed"]
-            left = [(k, v) for k, v in orep["fields"].items() if v["status"] in ("not_placed", "missing") and v.get("value")]
+            left = _still_to_write(orep["fields"])
             doc_name = f["overlay"]["document"]
             if placed and doc_name in overlaid:
                 form_results[f["code"]] = {"status": f"typed onto the PDF ({len(placed)} fields)", "placed": placed,
