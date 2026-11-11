@@ -413,6 +413,16 @@ def fill_a16_addenda(doc, log, updates=None):
                     "title) by hand, from the buyer's portal.")
 
 
+# Form A9's own consent-to-SARS-disclosure sentence, exactly as all six real
+# SANRAL A_Forms.docx editions on file word it (R.334-030/R.343-020/R.352-020/
+# R.352-030/R.394-010/R.396-010-2025.1F all confirmed identical, 2026-11-10) -
+# "...security personal identification number (PIN) is ___". main()'s own A9
+# block matches this paragraph by its start so the real PIN can be written
+# into it, the same para_matching()/set_paragraph_text() convention every
+# other mechanical field in this module already uses.
+A9_PIN_LABEL = "For this purpose our unique security personal identification number (PIN) is"
+
+
 def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenance_out=None):
     profile = json.load(open(profile_path))
     comp = profile["company"]
@@ -490,6 +500,25 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
                 "fill and sign by hand.")
     if comp.get("sars_tcs_pin"):
         issued = f"issued {comp['sars_tcs_pin_issued']}, " if comp.get("sars_tcs_pin_issued") else ""
+        # Until this fix, this branch only ever recorded the PIN as
+        # `confirmed` in field_provenance - it never actually wrote the PIN
+        # into Form A9's own "...security personal identification number
+        # (PIN) is ___" blank (unlike every other mechanical field in this
+        # module, which writes via append_after_label/set_paragraph_text).
+        # The real document shipped with that line exactly as blank as
+        # before, while the provenance record claimed the opposite - and
+        # because it's `confirmed`, not `missing`/`assumed_default`,
+        # generate_action_checklist.py's ACTIONS_TO_SIGN.md never lists it
+        # either (that checklist is built only from `missing`/
+        # `assumed_default` entries), so the signatory has no signal at all
+        # that this real SARS-disclosure-consent line is still empty on the
+        # document they are about to sign. Found by reproducing a real pack
+        # build with a PIN on file and reading the actual output .docx, not
+        # by reasoning about the code alone - confirmed across all six real
+        # SANRAL A_Forms.docx editions on file (identical wording in each).
+        pin_p = para_matching(d, A9_PIN_LABEL)
+        if pin_p is not None:
+            set_paragraph_text(pin_p, pin_p.text.rstrip() + "  " + _safe_text(str(comp["sars_tcs_pin"])))
         log.confirmed("a_forms.A9.tcs_pin",
                        f"{comp['sars_tcs_pin']} ({issued}expires {comp.get('sars_tcs_pin_expiry') or 'expiry not on file'})")
         log.missing("a_forms.A9.tcs_pin_still_valid",
