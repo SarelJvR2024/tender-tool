@@ -160,11 +160,99 @@ def test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the
         check("append_after_label() does not raise on a control character", False, f"{type(e).__name__}: {e}")
 
 
+REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+A17_FORMS_SAMPLE = os.path.join(REPO_ROOT, "templates", "forms", "R.396-010-2025.1F", "A_Forms.docx")
+
+
+def _a17_profile(professional_indemnity_insurance=None):
+    company = {"legal_name": "Acme Roads (Pty) Ltd", "registered_address": "1 Main Road, Pretoria"}
+    if professional_indemnity_insurance is not None:
+        company["professional_indemnity_insurance"] = professional_indemnity_insurance
+    return {
+        "company": company,
+        "key_people": [{"name": "Thandi Nkosi", "signatory_capacity": "Director"}],
+    }
+
+
+def test_a17_professional_indemnity_on_file_is_actually_written_into_the_real_document():
+    """Finding 369: until this fix, a professional indemnity policy on file was
+    only ever recorded as `confirmed` in field_provenance - it never wrote the
+    policy into Form A17's own real "Period of Validity:"/"Company:"/"Value:"
+    blanks (under "Professional Indemnity (for each and every case)"), unlike
+    every other mechanical field in this module. The real submitted document
+    stayed blank while the provenance record claimed otherwise - and because
+    it's `confirmed`, not `missing`, ACTIONS_TO_SIGN.md never flagged it
+    either. The identical shape of gap Finding 368 fixed one function away,
+    for Form A9's SARS TCS PIN."""
+    print("Form A17's own Professional Indemnity blanks are actually filled with the real "
+          "policy on file, not just recorded as confirmed in field_provenance")
+    if not os.path.exists(A17_FORMS_SAMPLE):
+        check("real SANRAL A_Forms.docx sample is on disk", False, A17_FORMS_SAMPLE)
+        return
+    import json
+    import tempfile
+    pi = {"insurer": "Test Underwriters Ltd", "policy_number": "PI-TEST-00123",
+          "limit_of_indemnity_zar": 5000000, "period_from": "2026-01-01", "period_to": "2026-12-31"}
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_path = os.path.join(tmp, "profile.json")
+        json.dump(_a17_profile(professional_indemnity_insurance=pi), open(profile_path, "w"))
+        out_dir = os.path.join(tmp, "out")
+        os.makedirs(out_dir)
+        path, log = fa.main(A17_FORMS_SAMPLE, profile_path, out_dir, "SANRAL R.396-010-2025/1F", "2026/0071")
+        d = docx.Document(path)
+        period_paras = [p.text for p in d.paragraphs if p.text.strip().startswith("Period of Validity:")]
+        company_paras = [p.text for p in d.paragraphs if p.text.strip().startswith("Company:")]
+        value_paras = [p.text for p in d.paragraphs if p.text.strip().startswith("Value:")]
+        check("exactly 1 'Period of Validity:' paragraph in the real sample", len(period_paras) == 1, period_paras)
+        check("exactly 3 'Company:'/'Value:' pairs in the real sample (PI, public liability, third party)",
+              len(company_paras) == 3 and len(value_paras) == 3, (company_paras, value_paras))
+        check("the real validity period is written into 'Period of Validity:'",
+              bool(period_paras) and "2026-01-01 to 2026-12-31" in period_paras[0], period_paras)
+        check("the real insurer is written into the FIRST 'Company:' (Professional Indemnity)",
+              bool(company_paras) and "Test Underwriters Ltd" in company_paras[0], company_paras)
+        check("the real limit/policy number is written into the FIRST 'Value:' (Professional Indemnity)",
+              bool(value_paras) and "5,000,000" in value_paras[0] and "PI-TEST-00123" in value_paras[0], value_paras)
+        check("the OTHER two 'Company:'/'Value:' pairs (public liability, third party) are left untouched",
+              company_paras[1:] == ["Company:\t", "Company:\t"] and value_paras[1:] == ["Value:\t", "Value:\t"],
+              (company_paras[1:], value_paras[1:]))
+        entries = {e["field_key"]: e for e in log.entries}
+        check("field_provenance still records it as confirmed (unchanged behaviour)",
+              entries.get("a_forms.A17.professional_indemnity_value", {}).get("status") == "confirmed")
+
+
+def test_a17_with_no_professional_indemnity_on_file_leaves_the_blanks_untouched():
+    print("with no professional indemnity policy on file, Form A17's own Professional "
+          "Indemnity blanks are left exactly as the template shipped them (control case)")
+    if not os.path.exists(A17_FORMS_SAMPLE):
+        check("real SANRAL A_Forms.docx sample is on disk", False, A17_FORMS_SAMPLE)
+        return
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_path = os.path.join(tmp, "profile.json")
+        json.dump(_a17_profile(), open(profile_path, "w"))
+        out_dir = os.path.join(tmp, "out")
+        os.makedirs(out_dir)
+        path, log = fa.main(A17_FORMS_SAMPLE, profile_path, out_dir, "SANRAL R.396-010-2025/1F", "2026/0071")
+        d = docx.Document(path)
+        period_paras = [p.text for p in d.paragraphs if p.text.strip().startswith("Period of Validity:")]
+        company_paras = [p.text for p in d.paragraphs if p.text.strip().startswith("Company:")]
+        value_paras = [p.text for p in d.paragraphs if p.text.strip().startswith("Value:")]
+        check("'Period of Validity:' is untouched", period_paras == ["Period of Validity:\t"], period_paras)
+        check("all 3 'Company:' blanks are untouched", company_paras == ["Company:\t"] * 3, company_paras)
+        check("all 3 'Value:' blanks are untouched", value_paras == ["Value:\t"] * 3, value_paras)
+        entries = {e["field_key"]: e for e in log.entries}
+        check("field_provenance records it as missing, as before",
+              entries.get("a_forms.A17.professional_indemnity_value", {}).get("status") == "missing")
+
+
 def main():
     test_undersigned_blank_with_an_ordinary_name_is_filled_as_before()
     test_a_name_with_a_literal_backslash_backreference_is_not_silently_corrupted()
     test_a_name_with_an_invalid_backslash_escape_does_not_crash_the_whole_fill()
     test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the_whole_fill()
+    test_a17_professional_indemnity_on_file_is_actually_written_into_the_real_document()
+    test_a17_with_no_professional_indemnity_on_file_leaves_the_blanks_untouched()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
