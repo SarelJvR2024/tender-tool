@@ -296,6 +296,34 @@ def _still_to_write(fields):
     return [(k, v) for k, v in fields.items() if v["status"] in ("not_placed", "missing")]
 
 
+def _buyer_overlay_note(ov, orep):
+    """The 'buyer's own form' by-hand note for an overlay-typed buyer form
+    (Compulsory Enterprise Questionnaire / Form of Offer) - sibling of the
+    "still to write" note the manifest-forms loop already gives its own
+    overlay forms (Finding 394, _still_to_write() above). Without this, this
+    loop only ever reported the STATIC, form-level OVERLAY_BUYER_FORMS
+    promise (requirements.py: "<fills> get typed; <by_hand> stay by hand"),
+    never the per-company, per-field report fill_flat_pdf.py actually
+    produced - so a field that promise counts as "fills" (e.g. CEQ's VAT
+    registration number, tax reference number, CSD number) but that THIS
+    company genuinely has no value for on file (status "missing", same
+    shape Finding 394 fixed) was silently counted as "typed on, check it"
+    rather than flagged as still blank. This note is the ONLY place a
+    genuinely-missing CEQ/Form-of-Offer field is ever shown to a human - it
+    renders in both the app UI (general-workspace.tsx's "Still to do by
+    hand" list) and the Completion Guide docx (write_guide()'s "STILL TO DO
+    BY HAND" section) - so a real company could sign and submit a
+    Compulsory Enterprise Questionnaire with (say) a blank Tax Reference
+    Number, having been told only that the CIDB number/banking
+    details/signature were left for them to do by hand."""
+    left = _still_to_write(orep["fields"]) if orep else []
+    note = (f"your company details are typed on (p.{ov['page']} of {ov['document']}) - "
+            f"check them; {ov['by_hand']} stay by hand")
+    if left:
+        note += "; also still to write (no value on file): " + ", ".join(_field_label(k) for k, _ in left[:8])
+    return note
+
+
 def _log_overlay(log, reports):
     """Provenance for every field fill_flat_pdf looked for: typed (and read
     back) -> confirmed / assumed_default; anything else -> missing with the
@@ -556,8 +584,7 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
         placed = [k for k, v in (orep or {}).get("fields", {}).items() if v["status"] == "placed"]
         if placed and ov["document"] in overlaid:
             form_results[ov["code"]] = {"status": f"typed onto the PDF ({len(placed)} fields)", "placed": placed}
-            by_hand.append({"title": b["label"], "reason": f"your company details are typed on (p.{ov['page']} of {ov['document']}) - "
-                                                           f"check them; {ov['by_hand']} stay by hand"})
+            by_hand.append({"title": b["label"], "reason": _buyer_overlay_note(ov, orep)})
         else:
             by_hand.append({"title": b["label"], "reason": b["reason"]})
 
