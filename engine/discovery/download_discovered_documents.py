@@ -261,10 +261,32 @@ def download_for_releases(releases, client, timeout=DOWNLOAD_TIMEOUT, log=print)
             try:
                 client.insert(TABLE, row)
             except RuntimeError as e:
-                # A duplicate from a concurrent run losing the unique-constraint
-                # race is not a reason to fail this run - the other run's row
-                # already records this document.
-                log(f"  NOTE: could not record a row for {key} - {title or url}: {e}")
+                if "23505" in str(e) or "duplicate key value violates unique constraint" in str(e):
+                    # A duplicate from a concurrent run losing the unique-constraint
+                    # race is not a reason to fail this run - the other run's row
+                    # already records this document. Same check
+                    # process_pack_jobs.py's claim_job()/provenance-upsert
+                    # retries and process_narrative_jobs.py's claim_job() both
+                    # already use for this exact situation.
+                    log(f"  NOTE: could not record a row for {key} - {title or url}: {e}")
+                else:
+                    # Finding, 2026-11-11: every OTHER insert failure (DB
+                    # connectivity, RLS misconfigured for the service role, a
+                    # genuine schema problem) used to hit this same bare
+                    # `except RuntimeError`, with no check of the error at
+                    # all, and was logged to the console ONLY - never counted
+                    # in `failed`/`failures`, never raising this run's own
+                    # summary system_alerts entry the way a download or
+                    # upload failure always does, even though the file was
+                    # already genuinely downloaded and uploaded. In this
+                    # unattended background job (this module's own docstring:
+                    # "no human needing to prompt"), that meant a real,
+                    # persistent failure here was invisible and silently
+                    # retried - and silently swallowed again - forever.
+                    summary["failed"] += 1
+                    summary["failures"].append({"release_key": key, "buyer": r.get("buyer"),
+                                                "document_url": url, "error": f"could not record a row: {e}"})
+                    log(f"  FAILED  {key} - {title or url}: could not record a row: {e}")
             seen.add((key, url))
     if summary["failures"]:
         system_alerts.record(
