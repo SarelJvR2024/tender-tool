@@ -41,6 +41,12 @@ score of 60 points is required to proceed to price evaluation.
 
 SINGLE_LINE_TEXT = "Functionality is scored out of 100. Methodology 20 points is the only line item mentioned."
 
+# The exact real-world phrasing FUNCTIONALITY_NA_RE was created to recognise -
+# docs/specs/Tender-Evaluation-Engine-Audit.md's own "Round 2" evidence,
+# quoted verbatim: "DPWI architectural PSP, 'Scoring quality / functionality:
+# N/A'." standing review, 2026-11-11.
+REAL_DPWI_NA_TEXT = "Scoring quality / functionality: N/A"
+
 
 def test_real_scorecard_with_sub_minimum_extracted():
     r = so._functionality(SCORECARD_TEXT)
@@ -78,11 +84,28 @@ def test_present_false_and_present_none_branches_carry_the_same_new_keys():
     check("the 'not mentioned' branch also carries the same keys", set(none_found.keys()) >= {"has_sub_minimum", "sub_minimum_rule", "criteria"})
 
 
+def test_the_real_dpwi_na_wording_is_actually_recognised():
+    # FUNCTIONALITY_NA_RE only allowed whitespace/a single newline between
+    # "functionality" and "N/A" (`functionality\s*\n?\s*N/?A\b`) - it never
+    # allowed the colon the module's own justifying real-world quote actually
+    # uses ("functionality: N/A"), so the one live document this regex exists
+    # to catch never actually matched it. Confirmed via the regex directly,
+    # not just the function's own output, so a future change to how the
+    # "present" branches are chosen can't accidentally make this pass for the
+    # wrong reason.
+    check("FUNCTIONALITY_NA_RE matches its own real justifying quote verbatim",
+          bool(so.FUNCTIONALITY_NA_RE.search(REAL_DPWI_NA_TEXT)), REAL_DPWI_NA_TEXT)
+    r = so._functionality(REAL_DPWI_NA_TEXT)
+    check("present is False (a real, explicit 'not applicable' statement), not None ('nothing mentioned')",
+          r["present"] is False, r)
+
+
 def main():
     test_real_scorecard_with_sub_minimum_extracted()
     test_no_sub_minimum_clause_means_the_field_stays_honestly_false()
     test_a_single_stray_points_line_is_not_mistaken_for_a_real_scorecard()
     test_present_false_and_present_none_branches_carry_the_same_new_keys()
+    test_the_real_dpwi_na_wording_is_actually_recognised()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
