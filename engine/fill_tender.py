@@ -110,14 +110,64 @@ def fill_person(wb, base, person, projects_lib, slot=None, log=None):
         _log(log, "missing", f"tend1x.{slot}.sacpcmp_date",
              reason=f"{who}: no SACPCMP registration date on file - Form B1/B2's own cell was left blank.")
     set_dropdown_for(wb, T, at(B["highest_qual"], base), q["highest_level"], who, "highest qualification level")
-    wb.set_value(T, at(B["highest_desc"], base), q["highest_description"])
-    wb.set_value(T, at(B["highest_inst"], base), q["highest_institution"])
-    wb.set_date(T, at(B["highest_date"], base), q["highest_graduated"])
+    # highest_description/highest_institution/highest_graduated and their
+    # initial_* siblings are independently-nullable columns (0001_init_schema.sql
+    # - confirmed no check constraint ties any of them to highest_level, and the
+    # People page's own form, app/app/people/[id]/page.tsx, never marks any of
+    # these six inputs `required`) - unlike confirm_pack.py's own hard-stop on
+    # initial_graduated (needed to compute years_experience), NONE of these six
+    # is validated anywhere before reaching this function. Until this fix,
+    # `highest_graduated`/`initial_graduated` were passed straight into
+    # wb.set_date(), which calls `.year` on whatever it's given with no None
+    # guard - a key person with no highest-qualification graduation date on
+    # file crashed the entire pack-generation job with a raw
+    # AttributeError: 'NoneType' object has no attribute 'year', not a clean,
+    # actionable refusal (confirmed reachable: process_pack_jobs.py's own
+    # generic `except Exception` catches it, but Sarel sees an opaque crash,
+    # not "no graduation date on file"). The four text siblings didn't crash
+    # (wb.set_value() already tolerates None), but like the already-fixed
+    # ecsa_number/ecsa_date/sacpcmp_number/sacpcmp_date gap two lines above
+    # (Finding 376), they were written with NO log call in either branch - a
+    # genuinely missing value left zero trace in field_provenance.json, so
+    # ACTIONS_TO_SIGN.md never flagged it. QA pass, 2026-11-11 (Finding 388).
+    if q.get("highest_description"):
+        wb.set_value(T, at(B["highest_desc"], base), q["highest_description"])
+        _log(log, "confirmed", f"tend1x.{slot}.highest_description", q["highest_description"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.highest_description",
+             reason=f"{who}: no highest qualification description on file - Form B1/B2's own cell was left blank.")
+    if q.get("highest_institution"):
+        wb.set_value(T, at(B["highest_inst"], base), q["highest_institution"])
+        _log(log, "confirmed", f"tend1x.{slot}.highest_institution", q["highest_institution"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.highest_institution",
+             reason=f"{who}: no highest qualification institution on file - Form B1/B2's own cell was left blank.")
+    if q.get("highest_graduated"):
+        wb.set_date(T, at(B["highest_date"], base), q["highest_graduated"])
+        _log(log, "confirmed", f"tend1x.{slot}.highest_graduated", q["highest_graduated"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.highest_graduated",
+             reason=f"{who}: no highest qualification graduation date on file - Form B1/B2's own cell was left blank.")
     set_dropdown_for(wb, T, at(B["years_exp"], base),
                      None if q.get("years_experience") is None else str(q["years_experience"]), who, "years of experience")
-    wb.set_value(T, at(B["initial_desc"], base), q["initial_description"])
-    wb.set_value(T, at(B["initial_inst"], base), q["initial_institution"])
-    wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])
+    if q.get("initial_description"):
+        wb.set_value(T, at(B["initial_desc"], base), q["initial_description"])
+        _log(log, "confirmed", f"tend1x.{slot}.initial_description", q["initial_description"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.initial_description",
+             reason=f"{who}: no initial qualification description on file - Form B1/B2's own cell was left blank.")
+    if q.get("initial_institution"):
+        wb.set_value(T, at(B["initial_inst"], base), q["initial_institution"])
+        _log(log, "confirmed", f"tend1x.{slot}.initial_institution", q["initial_institution"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.initial_institution",
+             reason=f"{who}: no initial qualification institution on file - Form B1/B2's own cell was left blank.")
+    if q.get("initial_graduated"):
+        wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])
+        _log(log, "confirmed", f"tend1x.{slot}.initial_graduated", q["initial_graduated"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.initial_graduated",
+             reason=f"{who}: no initial qualification graduation date on file - Form B1/B2's own cell was left blank.")
     return notes
 
 def tender_check_notes(close, b7, bundles):
