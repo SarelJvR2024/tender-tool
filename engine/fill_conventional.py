@@ -11,7 +11,7 @@ Form B7 targeted-enterprise cells are unlocked but not yellow).
 """
 import sys, yaml, datetime
 import sanral_b7
-from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block, fill_company_front
+from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block, fill_company_front, _log
 
 T = "TEND 1X"
 
@@ -49,7 +49,7 @@ def blocks_for(wb, code):
         raise ValueError(f"Position '{code}' is not listed on this tender's SETUP sheet")
     return bases
 
-def fill_person(wb, base, person, projects_lib, slot=None):
+def fill_person(wb, base, person, projects_lib, slot=None, log=None):
     """Fills one Form B1/B2 block. Returns notes (projects left off this block
     because this position's form doesn't offer their project type - see
     sanral_fill.projects_for_block)."""
@@ -84,10 +84,41 @@ def fill_person(wb, base, person, projects_lib, slot=None):
                      "People page (employment status); confirm before signing, SANRAL's minimums require permanent "
                      "employment for several key positions.")
     set_dropdown_for(wb, T, at(B["ecsa_level"], base), q["ecsa_level"], who, "ECSA registration level")
-    if q.get("ecsa_number"): wb.set_value(T, at(B["ecsa_number"], base), q["ecsa_number"])
-    if q.get("ecsa_date"): wb.set_date(T, at(B["ecsa_date"], base), q["ecsa_date"])
-    if q.get("sacpcmp_number"): wb.set_value(T, at(B["sacpcmp_number"], base), q["sacpcmp_number"])
-    if q.get("sacpcmp_date"): wb.set_date(T, at(B["sacpcmp_date"], base), q["sacpcmp_date"])
+    # ecsa_number/ecsa_date/sacpcmp_number/sacpcmp_date are the one group of
+    # fields in this function that were conditionally written (`if q.get(...)`)
+    # with NO log call in either branch - unlike every other optional field
+    # this pipeline fills (sanral_fill.fill_company_front's own bee_level/
+    # black_ownership_pct two-way `_log()` above, or the already-fixed SARS
+    # TCS PIN/VAT-number siblings in fill_a_forms.py/fill_sbd_docx.py). A key
+    # person with no ECSA/SACPCMP number or date on file silently got a blank
+    # Form B1/B2 cell with zero trace in field_provenance.json, so
+    # ACTIONS_TO_SIGN.md never told anyone to go fill it in before signing.
+    # Identical gap and fix to fill_tender.py's own sibling. QA pass,
+    # 2026-11-11 (Finding 376).
+    if q.get("ecsa_number"):
+        wb.set_value(T, at(B["ecsa_number"], base), q["ecsa_number"])
+        _log(log, "confirmed", f"tend1x.{slot}.ecsa_number", q["ecsa_number"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.ecsa_number",
+             reason=f"{who}: no ECSA registration number on file - Form B1/B2's own cell was left blank.")
+    if q.get("ecsa_date"):
+        wb.set_date(T, at(B["ecsa_date"], base), q["ecsa_date"])
+        _log(log, "confirmed", f"tend1x.{slot}.ecsa_date", q["ecsa_date"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.ecsa_date",
+             reason=f"{who}: no ECSA registration date on file - Form B1/B2's own cell was left blank.")
+    if q.get("sacpcmp_number"):
+        wb.set_value(T, at(B["sacpcmp_number"], base), q["sacpcmp_number"])
+        _log(log, "confirmed", f"tend1x.{slot}.sacpcmp_number", q["sacpcmp_number"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.sacpcmp_number",
+             reason=f"{who}: no SACPCMP registration number on file - Form B1/B2's own cell was left blank.")
+    if q.get("sacpcmp_date"):
+        wb.set_date(T, at(B["sacpcmp_date"], base), q["sacpcmp_date"])
+        _log(log, "confirmed", f"tend1x.{slot}.sacpcmp_date", q["sacpcmp_date"])
+    else:
+        _log(log, "missing", f"tend1x.{slot}.sacpcmp_date",
+             reason=f"{who}: no SACPCMP registration date on file - Form B1/B2's own cell was left blank.")
     set_dropdown_for(wb, T, at(B["highest_qual"], base), q["highest_level"], who, "highest qualification level")
     wb.set_value(T, at(B["highest_desc"], base), q["highest_description"])
     wb.set_value(T, at(B["highest_inst"], base), q["highest_institution"])
@@ -161,7 +192,7 @@ def main(tpl, pack_path, out, log=None):
             )
         bases = [a["block_row"]] if a.get("block_row") else blocks_for(wb, a["position"])
         for base in bases:
-            notes += fill_person(wb, base, person, pack.get("projects", {}), a.get("position"))
+            notes += fill_person(wb, base, person, pack.get("projects", {}), a.get("position"), log)
     notes = list(dict.fromkeys(notes))  # an ALT slot repeats its primary's block notes
 
     wb.save(out)
