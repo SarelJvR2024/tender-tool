@@ -463,6 +463,18 @@ def extract_experience_evidence(text):
                                               key=EVIDENCE_ORDER.index)
             dup["practical_completion_excluded"] |= r["practical_completion_excluded"]
             dup["disqualification_mentioned"] |= r["disqualification_mentioned"]
+            # Finding 381: a restatement of the same rule (the exact SANRAL/
+            # Transnet shape this function's own docstring names) can state the
+            # points ladder only in its SECOND occurrence - e.g. a narrative
+            # "at least 3 projects" sentence followed, well past the merge
+            # gap, by the real 1/2/3 -> points scoring table. Losing that
+            # (keeping only the first occurrence's reading, like every OTHER
+            # field here except this one used to) silently told
+            # describe_evidence_rule()/experienceEvidence.ts's describeRule()
+            # the rule was a flat project count, dropping the "scored per
+            # project" wording and the matching "each one added earns points"
+            # encouragement in evaluateEvidence()'s own "missing" message.
+            dup["scored_per_project"] |= r["scored_per_project"]
             continue
         rules.append(r)
     if not rules:
