@@ -68,6 +68,22 @@
 
 ---
 
+## This pass (2026-11-11, standing QA/robustness review): CV rotation - genuine negative on `process_cv_jobs.py`, plus one small non-Finding fix (a stray stale Finding-number reference)
+
+Rotation: CV. Mention-count heuristic pointed at `process_cv_jobs.py` (the Supabase<->`generate_cv.py` bridge), the least-covered production file in `engine/cv/` - `generate_cv.py`/`extract_cv_fields.py` had both just been heavily worked by the sibling track this same window (Findings 372-382).
+
+Read `process_cv_jobs.py` end to end against the standing bug classes this whole session has found repeatedly (unpaginated reads, a stale-job sweep that aborts on one bad row, a bridge adapter missing a field a sibling adapter carries, a `person_id`/identity mismatch). All already hardened or confirmed harmless on direct trace:
+- `supabase_request_all()` already paginates past PostgREST's 1000-row cap (confirmed correctly implemented, same shape as every other fixed instance of this class this session).
+- `fail_stale_jobs()` already has the documented per-row `try/except` around a malformed `claimed_at` (2026-10-29 fix, still intact).
+- `adapt_person_row()`'s `qualifications` dict is missing `highest_level` (present in `process_pack_jobs.py`'s sibling `adapt_person()`) - traced all the way through: `generate_cv.py` never reads `q.get("highest_level")` anywhere (confirmed by grep), so this isn't a silently-dropped-bridge-field bug, just a field the standalone CV document never shows at all (only `fill_tender.py`/`fill_conventional.py`'s real SANRAL Form B2.1 dropdown uses it) - not actionable, no downstream consumer.
+- `process_job()`'s `person_id = "person_0"` doesn't match the `f"person_{job['person_id']}"` string `fetch_job_context()` embeds in `tender_ctx["candidate"]` - traced every use of the `person_id` parameter in `generate_cv.py`: only read for a cosmetic log message in the `cand is None` branch of `add_cover_page()`, which this bridge's own `build_tender_ctx_from_assignment()` never produces (it always returns a real `candidate` dict, never `None`, unlike the CLI's `load_tender_context()`) - confirmed dead/unreachable for this bridge, not a live bug.
+
+**One small, non-behavioral fix, not a Finding** (same precedent as the `corrigendumAlerts.ts`/`run_bridges.py` fixes earlier this session): while reading the sibling track's own just-landed work in `generate_cv.py`, found a stale inline comment - `add_cover_page()`'s own Finding-371 citation (added this same window by the sibling pass, before they discovered this track's own, different Finding 371 had already landed on `main` first and correctly renumbered their doc entries to 372) never got the matching update in the CODE COMMENT itself, so it still read "Finding 371" even though `QA-Edge-Case-Findings.md`/`System-Status.md` both correctly say 372. Fixed the stray reference so the comment matches the real record. `python3 -m py_compile` clean; `engine/cv/test_generate_cv.py` re-run, `0 failure(s)`, unaffected (comment-only change).
+
+Backlog: unchanged - nothing here rose to a numbered Finding or a backlog item.
+
+---
+
 ## This pass (2026-11-11, standing solution-architect review): Finding 382, CONFIRMED and FIXED, pushed directly to `main` - `generate_cv.py`'s `build_world_bank()` printed the literal word "None" into a real CV's ECSA line whenever a person had an ECSA level on file but no registration number yet
 
 **Oriented.** `git fetch origin main` first and again immediately before this push: HEAD unchanged at `c2866e5` (Finding 381's own pass) both times - no sibling-track commit landed in between. Read the consolidated standing items (1-43) in full and grepped the chronological log for "exhausted"/"collision" - confirmed the "confirmed vs written/logged" class (11 named files), the `.runs[0]` class, `experienceEvidence.ts`'s sibling-field bugs (375/378), `sanral_b7.py`'s TE-field gap (377) and the `quick-fix-config.ts` drawer sweep (379/380) remain exhausted and none of this pass's own work repeats any of them. Read `QA-Edge-Case-Findings.md`'s tail (Findings 371-381) for documentation style/numbering. `app/AGENTS.md` was not read - no file under `app/` was touched this pass. Listed all open PRs via the GitHub MCP tools: **61** (`#164`/`#165`/`#176`-`#213`/`#215`-`#235`), matching standing item 23, unchanged across both checks. `main`'s own last real `QA-Edge-Case-Findings.md` entry is **381**; **382** confirmed next-free both times (no open PR title/branch claims it).

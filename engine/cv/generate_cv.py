@@ -211,7 +211,9 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
     # CV cover page - included in the actual submitted pack, per this
     # function's own comment a few lines below - could go out with a blank
     # "Contract / Tender No." line with nobody ever told to fill it in by
-    # hand. QA pass, 2026-11-11, Finding 371.
+    # hand. QA pass, 2026-11-11, Finding 372 (drafted as 371, renumbered on
+    # discovery that a sibling pass's own, different Finding 371 had already
+    # landed on `main` first - see docs/specs/System-Status.md's own note).
     if tender_ctx["contract_no"]:
         log.confirmed("cv_cover.contract_no", tender_ctx["contract_no"])
     else:
