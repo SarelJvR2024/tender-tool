@@ -292,6 +292,50 @@ def test_a_value_with_a_literal_backslash_is_placed_verbatim_not_corrupted_or_cr
               bad_value in d.paragraphs[0].text, repr(d.paragraphs[0].text))
 
 
+# ----------------------------------------------------------------------------
+# Finding 371: SBD 6.1's own VAT field used to only ever call log.confirmed(),
+# and only when a value was on file AND the label matched - every other
+# outcome logged nothing at all, so the action silently never reached
+# ACTIONS_TO_SIGN.md (generate_action_checklist.py builds it purely from
+# logged assumed_default/missing entries).
+# ----------------------------------------------------------------------------
+
+def test_sbd6_1_vat_missing_from_company_is_logged_not_silently_dropped():
+    print("SBD 6.1: no VAT number on file is logged missing (with a reason), not silently un-logged")
+    d = docx.Document()
+    d.add_paragraph("VAT Registration number: ................")
+    log = ProvenanceLog("test")
+    sbd.fill_sbd_document(d, {"company": {}, "answers": {}, "tender": {}}, log, {"6.1"})
+    entry = _entry(log, "sbd6_1.vat_registration_number")
+    check("a provenance entry exists at all", entry is not None, entry)
+    if entry:
+        check("it is 'missing', with a real reason", entry["status"] == "missing" and entry["reason"], entry)
+
+
+def test_sbd6_1_vat_label_not_found_in_this_edition_is_also_logged():
+    print("SBD 6.1: a VAT number on file but no matching label in this buyer's edition is logged "
+          "missing too, not silently un-logged (the actual gap this Finding was reproduced with)")
+    d = docx.Document()
+    d.add_paragraph("No VAT label anywhere in this buyer's own edition.")
+    log = ProvenanceLog("test")
+    sbd.fill_sbd_document(d, {"company": {"vat_number": "4123456789"}, "answers": {}, "tender": {}}, log, {"6.1"})
+    entry = _entry(log, "sbd6_1.vat_registration_number")
+    check("a provenance entry exists at all", entry is not None, entry)
+    if entry:
+        check("it is 'missing', with a real reason", entry["status"] == "missing" and entry["reason"], entry)
+
+
+def test_sbd6_1_vat_real_value_is_actually_written_and_confirmed():
+    print("SBD 6.1: a real VAT number on file is actually written into the document and confirmed")
+    d = docx.Document()
+    d.add_paragraph("VAT Registration number: ................")
+    log = ProvenanceLog("test")
+    sbd.fill_sbd_document(d, {"company": {"vat_number": "4123456789"}, "answers": {}, "tender": {}}, log, {"6.1"})
+    entry = _entry(log, "sbd6_1.vat_registration_number")
+    check("confirmed, with the real value", entry["status"] == "confirmed" and entry["value"] == "4123456789", entry)
+    check("actually written into the document, not just logged", "4123456789" in d.paragraphs[0].text, d.paragraphs[0].text)
+
+
 def main():
     test_separate_yes_no_cells()
     test_yes_slash_no_cell()
@@ -306,6 +350,9 @@ def main():
     test_fill_cells_prefill_ok_lets_a_known_prefix_through()
     test_whitespace_only_value_is_never_placed_or_confirmed()
     test_a_value_with_a_literal_backslash_is_placed_verbatim_not_corrupted_or_crashed()
+    test_sbd6_1_vat_missing_from_company_is_logged_not_silently_dropped()
+    test_sbd6_1_vat_label_not_found_in_this_edition_is_also_logged()
+    test_sbd6_1_vat_real_value_is_actually_written_and_confirmed()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
