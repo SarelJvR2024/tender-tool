@@ -61,3 +61,35 @@ test("evaluateEvidence's own qualifying count matches itemQualifiesForRule for e
   assert.equal(result.status, "missing");
   assert.ok(result.detail.includes("Only 2 of 3"));
 });
+
+// The real bug: experience_items.document_type (experience.ts's
+// DOCUMENT_TYPES) has no "practical" vs "final" completion distinction at
+// all, so when a tender's own rule states practical completion certificates
+// are NOT accepted, a tagged "completion_certificate" item can never
+// actually be confirmed to qualify - evaluateEvidence() must downgrade to
+// "check" here, the same treatment it already gives
+// requires_appointment_and_completion, never a blind "have".
+test("evaluateEvidence downgrades to 'check' when the rule excludes practical completion certificates and a qualifying item is a completion_certificate", () => {
+  const rule: EvidenceRule = { ...sinceRule, since_year: null, practical_completion_excluded: true };
+  const items = [item("2024-01-01"), item("2024-02-01"), item("2024-03-01")];
+  const result = evaluateEvidence({ rule, source: "tender_document", otherRules: 0 }, items, false);
+  assert.equal(result.qualifying, 3);
+  assert.equal(result.status, "check");
+  assert.ok(result.detail.toLowerCase().includes("practical"));
+});
+
+test("evaluateEvidence still reports 'have' when the rule excludes practical completion certificates but no qualifying item is a completion_certificate", () => {
+  const rule: EvidenceRule = { ...sinceRule, since_year: null, accepted_evidence: ["reference_letter"], practical_completion_excluded: true };
+  const items = [item("2024-01-01", "reference_letter"), item("2024-02-01", "reference_letter"), item("2024-03-01", "reference_letter")];
+  const result = evaluateEvidence({ rule, source: "tender_document", otherRules: 0 }, items, false);
+  assert.equal(result.qualifying, 3);
+  assert.equal(result.status, "have");
+});
+
+test("evaluateEvidence still reports 'have' for completion_certificate items when the rule does not exclude practical completion", () => {
+  const rule: EvidenceRule = { ...sinceRule, since_year: null, practical_completion_excluded: false };
+  const items = [item("2024-01-01"), item("2024-02-01"), item("2024-03-01")];
+  const result = evaluateEvidence({ rule, source: "tender_document", otherRules: 0 }, items, false);
+  assert.equal(result.qualifying, 3);
+  assert.equal(result.status, "have");
+});

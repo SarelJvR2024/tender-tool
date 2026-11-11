@@ -61,6 +61,88 @@
 
 ---
 
+## This pass (2026-11-11, standing solution-architect review): Finding 375, CONFIRMED and FIXED, opened as a PR, not pushed to `main` - `evaluateEvidence()` (`app/lib/experienceEvidence.ts`) silently reports a tender's own "no PRACTICAL completion certificates accepted" rule as satisfied by a company's plain `completion_certificate`-tagged items, even though `experience_items.document_type` has no practical-vs-final distinction at all - the identical gap this same file already closes correctly for the sibling `requires_appointment_and_completion` rule
+
+`git fetch origin main` at the start found local already matching `origin/main` exactly - `fd50abb`
+(Finding 374's own commit). Re-fetched again immediately before opening this pass's own PR - still
+`fd50abb`, no sibling-track commit landed in between. Re-confirmed `gh api
+repos/sareljvr2024/tender-tool/pulls --paginate -q '.[].number' | wc -l` - exactly **58** open PRs
+(`#164`/`#165`/`#176`-`#213`/`#215`-`#232`) both before starting and again immediately before
+opening this pass's own PR, matching the task brief exactly both times. Grepped `Finding [0-9]+`
+across both docs and every open PR's own diff before picking a number - last real entry on `main`
+is **374**; no open PR's own diff claims 375 or higher - **375** taken this pass, re-confirmed
+collision-free immediately before opening the PR.
+
+**What was found.** `app/lib/experienceEvidence.ts`'s `evaluateEvidence()` - the one shared
+function both the SANRAL compliance report (`compliance-data.ts`, read by `submission-pack.tsx`)
+and the general-family Pack Review screen (`general-pack-review-data.ts`) use to turn a tender's
+own experience-evidence rule into a `have`/`missing`/`check` verdict - already has a correct
+precedent for "a document-type count alone can't prove this rule is satisfied": when
+`rule.requires_appointment_and_completion` is true, it downgrades an otherwise-passing count to
+`"check"` rather than a blind `"have"`, since `experience_items.document_type` alone can't confirm
+the matching appointment/award letter is also on file. It never applies the identical treatment to
+the sibling field `rule.practical_completion_excluded` - extracted by
+`engine/discovery/score_outlook.py` from real tender text ("practical completion certificates ...
+will not be accepted") and already rendered into the item's own descriptive text by
+`describeRule()`, but never actually consulted by the pass/fail logic. Since
+`experience_items.document_type` (`app/lib/experience.ts`'s `DOCUMENT_TYPES`) has no "practical" vs
+"final" completion-certificate distinction anywhere in its schema or its UI, a tender stating this
+exact rule with a company holding 3 generically-tagged `completion_certificate` items shows a
+confident green "have - enough", with no way for the system (or the company) to know whether any of
+those items are actually the practical-completion kind the tender's own rule rejects.
+
+**Fix.** One more branch in `evaluateEvidence()`'s own `n >= need` chain, immediately after the
+existing `requires_appointment_and_completion` branch: when `practical_completion_excluded` is true
+and at least one qualifying item is tagged `completion_certificate`, downgrade to `"check"` with a
+note to confirm each one on file is the FINAL certificate, not practical completion. A rule with the
+flag set but no `completion_certificate`-tagged item among its qualifying items (e.g. all
+`reference_letter`) is unaffected - no ambiguity to flag. A rule without the flag is unaffected
+either way. `itemQualifiesForRule()`/`acceptedDocTypes()` themselves are untouched.
+
+**Verified red-then-green myself, real exit codes, never through a pipe.** 3 new tests in
+`app/lib/experienceEvidence.test.ts`. **RED** (`git stash push -- app/lib/experienceEvidence.ts`
+first, to isolate the fix from the new tests): `node --experimental-strip-types --test
+lib/experienceEvidence.test.ts` from `app/` - exit **1**, `7 pass`, `1 fail` (the new "downgrades to
+check" test, failing with the real pre-fix `"have"`). `git stash pop`. **GREEN:** same command -
+exit **0**, `8 pass`, `0 fail`. Full regression: `npx tsc --noEmit` (exit 0), `npx eslint
+lib/experienceEvidence.ts lib/experienceEvidence.test.ts` (exit 0, 0 warnings), `npx vitest run`
+(**84 files, 685 tests, exit 0** - this file's own tests run via plain `node --test`, not vitest, so
+unaffected by this fix; confirmed no `.spec.ts` file imports `evaluateEvidence`/`itemQualifiesForRule`
+directly), `npx next build` (exit 0, clean).
+
+**Why a PR, not a direct push.** No RLS, no money path, no hard-stop/disqualification gate
+(`tenderCompliance.ts`'s own call site feeds this as `mandatory: false` - scored functionality, not
+Stage-2 Mandatory Administration Criteria), no worker-image/deployment or schema change, and not
+itself a correctness fix to a document a company signs or submits (a compliance-report/Pack-Review
+*display* verdict only - neither pack-build engine's own Python experience-evidence selection logic
+imports anything from this TypeScript file). It IS, however, transitively imported by
+`submission-pack.tsx`: that file imports `loadTenderCompliance` directly from `./compliance-data`,
+and `compliance-data.ts` imports `evaluateEvidence`/`chooseEvidenceRule` directly from
+`@/lib/experienceEvidence` - triggering this track's own standing guardrail ("anything
+pack-review.tsx/submission-pack.tsx imports from, even cosmetically") on that transitive link alone.
+Opened as a PR (`fix/finding-375-experience-evidence-practical-completion-excluded`), not merged.
+
+**Mandatory open-PR cross-check, by the exact filenames touched.** Read all 58 open PRs' own real
+changed-file lists (`gh api .../pulls/<n>/files`, one call per PR) - zero hits on
+`experienceEvidence.ts`/`experienceEvidence.test.ts` in any of them. The one topically-adjacent PR,
+**#222** (Finding 344, the `asOf` naive-UTC-slice fix in the same file family), touches
+`compliance-data.ts`/`general-pack-review-data.ts`/`general-workspace.tsx` but never
+`experienceEvidence.ts` itself - confirmed by reading its actual diff. PR #209 (Finding 301) and PR
+#211 (Finding 305) touch `general-pack-review-data.ts`/`pack-review-data.ts` too, but at their own
+unrelated sections (closing-date warning; CV-readiness check), 50+ lines from this fix's own block,
+and neither touches `experienceEvidence.ts`. No collision found anywhere.
+
+**Backlog status.** No new standing item opened - a self-contained, now-fixed display-verdict bug,
+not a judgment call for Sarel. Standing item 23's own open-PR count is bumped in a short, separate
+direct-to-main docs commit per the task's own split-write instruction for a PR-tracked finding; the
+full write-up above stays only on this PR's own branch. Does not touch any RLS/money-path/
+pack-quota-credit surface.
+
+See `QA-Edge-Case-Findings.md`'s Finding 375 entry (on this PR's own branch, not `main`) for the full
+investigation, RED/GREEN transcript and cross-check detail.
+
+---
+
 ## This pass (2026-11-11, standing solution-architect review): Finding 374, CONFIRMED and FIXED, pushed directly to `main` - `generate_cv.py`'s own `_footer()` crashes with `IndexError` on a company `legal_name` that sanitizes down to nothing, the identical "empty-after-sanitize `.runs[0]` crash" shape the standing docs already recorded (unfixed) for `build_docx.py`'s subtitle, here instead in the one footer paragraph both real CV formats share
 
 **Oriented.** `git fetch origin main` first and again immediately before this push: HEAD unchanged at `98d9299` (the prior pass's own commit) both times - no sibling-track commit landed in between. Read the consolidated standing items (1-37), `docs/specs/QA-Edge-Case-Findings.md`'s most recent ~10 entries (365-373), and `app/AGENTS.md`. `gh api repos/sareljvr2024/tender-tool/pulls --paginate -q '.[].number' | wc -l`: **58** open PRs, matching standing item 23, unchanged. `grep -oE "^### Finding [0-9]+" ... | sort -t' ' -k3 -n -u | tail`: **373** is `main`'s own last real entry - **374** is next-free, re-confirmed live again immediately before this push with the identical result.
