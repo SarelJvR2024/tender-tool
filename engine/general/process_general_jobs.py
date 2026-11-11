@@ -207,6 +207,23 @@ class Supabase:
             self._req("POST", f"/storage/v1/object/{bucket}/{urllib.parse.quote(path)}", raw=f.read(),
                       headers={"Content-Type": content_type, "x-upsert": "true"})
 
+    def remove(self, bucket, paths):
+        """Deletes one or more objects already uploaded to Storage, via
+        Supabase's own bulk-delete endpoint (DELETE <url>/storage/v1/object/
+        <bucket>, body {"prefixes": [...]}) - same endpoint/shape as
+        engine/cv/process_cv_jobs.py's storage_remove() (Finding 396) and
+        engine/pack/process_pack_jobs.py's SupabaseRest.remove() (Finding
+        397). Standing review, 2026-11-11 (Finding 398): used by run_pack()
+        below to clean up whatever of this job's pdf/output files already
+        reached the 'submission-packs' bucket before a LATER step in the
+        SAME job (a later upload in the same loop, or the field_provenance
+        upsert) then failed. This bucket is shared with process_pack_jobs.py
+        (confirmed by grep - both set PACK_BUCKET = "submission-packs"), and
+        nothing anywhere in this repo sweeps it for orphans, so a file left
+        behind here stays forever."""
+        self._req("DELETE", f"/storage/v1/object/{bucket}", {"prefixes": paths},
+                  headers={"Content-Type": "application/json"})
+
 
 # ---------------------------------------------------------------------------
 # Tender documents
@@ -793,20 +810,50 @@ def run_pack(client, job, work_root, fetch=None):
 
     prefix = f"{job['company_id']}/tenders/{tender['id']}/{job['id']}"
     pdf_path = f"{prefix}/submission_pack.pdf"
-    client.upload(PACK_BUCKET, pdf_path, out_pdf, "application/pdf")
-    output_files = {}
-    for name, local_path in res["outputs"].items():
-        ct = "application/json" if name.endswith(".json") else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        client.upload(PACK_BUCKET, f"{prefix}/{name}", local_path, ct)
-        output_files[name] = f"{prefix}/{name}"
+    # Finding 398 (standing solution-architect review, 2026-11-11): the exact
+    # Storage-orphan shape Findings 396/397 already fixed in the CV and
+    # SANRAL pack bridges, picked up here by name for its general-pack
+    # sibling (the gap both of those fixes explicitly left noted, not
+    # fixed). Before this, a later upload in this same loop, or the
+    # field_provenance upsert below, failing after an EARLIER upload to
+    # this same 'submission-packs' bucket already succeeded left that file
+    # orphaned forever: process_job()'s own except block only marks the job
+    # 'failed' (no storage_path_pdf/output_files ever get written to any
+    # row), and nothing else in this repo sweeps this bucket for orphans -
+    # confirmed shared with process_pack_jobs.py's own PACK_BUCKET by grep.
+    # uploaded_paths is tracked and cleaned up best-effort on any failure in
+    # this block, then the original exception is re-raised unchanged so
+    # process_job()'s existing failure-marking logic (and the real error
+    # message) is untouched.
+    uploaded_paths = []
+    try:
+        client.upload(PACK_BUCKET, pdf_path, out_pdf, "application/pdf")
+        uploaded_paths.append(pdf_path)
+        output_files = {}
+        for name, local_path in res["outputs"].items():
+            ct = "application/json" if name.endswith(".json") else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            remote = f"{prefix}/{name}"
+            client.upload(PACK_BUCKET, remote, local_path, ct)
+            uploaded_paths.append(remote)
+            output_files[name] = remote
 
-    prov_pack = provenance_pack_id(client, job)
-    if prov_pack and res["provenance"]:
-        seen = {}
-        for e in res["provenance"]:
-            seen[e["field_key"]] = e  # last write wins (a field filled in two documents)
-        client.upsert("field_provenance", [{"tender_pack_id": prov_pack, **{k: e[k] for k in ("field_key", "status", "value", "reason", "source")}}
-                                          for e in seen.values()], "tender_pack_id,field_key")
+        prov_pack = provenance_pack_id(client, job)
+        if prov_pack and res["provenance"]:
+            seen = {}
+            for e in res["provenance"]:
+                seen[e["field_key"]] = e  # last write wins (a field filled in two documents)
+            client.upsert("field_provenance", [{"tender_pack_id": prov_pack, **{k: e[k] for k in ("field_key", "status", "value", "reason", "source")}}
+                                              for e in seen.values()], "tender_pack_id,field_key")
+    except Exception as e:
+        if uploaded_paths:
+            try:
+                client.remove(PACK_BUCKET, uploaded_paths)
+            except Exception as e2:
+                system_alerts.record("general", f"Could not clean up {len(uploaded_paths)} orphaned Storage file(s) "
+                                     f"after a failed general pack job: {type(e2).__name__}: {e2}", "warning", exc=e2,
+                                     context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                              "tender_id": job.get("tender_id"), "paths": uploaded_paths})
+        raise
     return {"storage_path_pdf": pdf_path, "output_files": output_files, "page_count": pm["page_count"],
             "manifest": {k: pm[k] for k in ("sections", "omitted", "by_hand", "form_results", "provenance_summary", "contents_pages",
                                             "checklist", "checklist_summary")}}

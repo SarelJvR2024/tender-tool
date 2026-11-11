@@ -41,6 +41,26 @@ function cleanDocuments(docs: UploadedTenderDocument[], prefix: string): Uploade
   return out;
 }
 
+// Finding 391 (standing QA/robustness review, 2026-11-11): cleanDocuments()
+// rejects the WHOLE batch (returns null) the moment any ONE entry's path is
+// invalid - but the browser has already put every file in Storage before
+// calling this action (this file's own header comment), so a batch with one
+// bad entry alongside otherwise-genuinely-uploaded files left those real
+// files orphaned in Storage forever: never recorded in the DB, never
+// cleaned up. registerManualTender() already closed this exact gap for
+// itself (2026-11-09, its own inline comment: "Every refusal here now
+// cleans up the already-uploaded documents") by filtering the RAW input for
+// real, prefix-matching paths rather than trusting cleanDocuments()'s own
+// all-or-nothing output - but that fix was never swept to this file's other
+// two upload actions, addManualTenderDocuments()/addPrivateTenderDocuments(),
+// which had no cleanup at all on a rejected batch. Shared here so the same
+// discipline applies uniformly, including on an RPC/insert failure (not
+// just a no-docs refusal).
+async function cleanupUploadedPaths(supabase: Awaited<ReturnType<typeof createClient>>, documents: UploadedTenderDocument[] | null | undefined, prefix: string): Promise<void> {
+  const paths = (documents ?? []).map((d) => d?.storage_path).filter((p): p is string => typeof p === "string" && p.startsWith(prefix));
+  if (paths.length > 0) await supabase.storage.from(TENDER_DOCS_BUCKET).remove(paths);
+}
+
 export async function registerManualTender(input: {
   tenderId: string;
   title: string;
@@ -55,10 +75,7 @@ export async function registerManualTender(input: {
   if (!UUID_RE.test(input.tenderId)) return { error: "Invalid upload - start again." };
   const prefix = manualPrefix(companyId, input.tenderId);
   const docs = cleanDocuments(input.documents, prefix);
-  const cleanup = async () => {
-    const paths = (input.documents ?? []).map((d) => d.storage_path).filter((p) => typeof p === "string" && p.startsWith(prefix));
-    if (paths.length > 0) await supabase.storage.from(TENDER_DOCS_BUCKET).remove(paths);
-  };
+  const cleanup = () => cleanupUploadedPaths(supabase, input.documents, prefix);
   if (!docs) {
     await cleanup();
     return { error: "Upload at least one of the tender's own documents." };
@@ -106,11 +123,14 @@ export async function addManualTenderDocuments(input: { tenderId: string; docume
   if (!UUID_RE.test(input.tenderId)) return { error: "Unknown tender." };
   const prefix = manualPrefix(companyId, input.tenderId);
   const docs = cleanDocuments(input.documents, prefix);
-  if (!docs) return { error: "Choose at least one document." };
+  if (!docs) {
+    await cleanupUploadedPaths(supabase, input.documents, prefix);
+    return { error: "Choose at least one document." };
+  }
   const { error } = await supabase.rpc("add_manual_tender_documents", { p_tender_id: input.tenderId, p_documents: docs });
   if (error) {
     console.error("add_manual_tender_documents rpc failed", error);
-    await supabase.storage.from(TENDER_DOCS_BUCKET).remove(docs.map((d) => d.storage_path));
+    await cleanupUploadedPaths(supabase, input.documents, prefix);
     return { error: "Could not add these documents - try again. If it keeps happening, let us know." };
   }
   revalidatePath(`/tenders/${input.tenderId}`);
@@ -131,8 +151,11 @@ export async function addPrivateTenderDocuments(input: { tenderId: string; docum
   if (!UUID_RE.test(input.tenderId)) return { error: "Unknown tender." };
   const prefix = privatePrefix(companyId, input.tenderId);
   const docs = cleanDocuments(input.documents, prefix);
-  if (!docs) return { error: "Choose at least one document." };
-  const cleanup = () => supabase.storage.from(TENDER_DOCS_BUCKET).remove(docs.map((d) => d.storage_path));
+  const cleanup = () => cleanupUploadedPaths(supabase, input.documents, prefix);
+  if (!docs) {
+    await cleanup();
+    return { error: "Choose at least one document." };
+  }
 
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", input.tenderId).eq("company_id", companyId).maybeSingle();
   if (!pack) {

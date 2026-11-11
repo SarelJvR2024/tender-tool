@@ -286,6 +286,77 @@ def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
           [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
+class FakeDoc:
+    """Stands in for the real python-docx Document build_sanral_keyperson()
+    returns - just needs a working .save()."""
+    def save(self, path):
+        with open(path, "wb") as f:
+            f.write(b"fake docx")
+
+
+def test_process_job_cleans_up_storage_when_a_later_upload_fails():
+    print("process_job(): a .docx already uploaded to Storage is cleaned up when the PDF "
+          "upload that follows it in the same job then fails")
+    # Finding 396 (standing solution-architect review, 2026-11-11): before this
+    # fix, nothing in process_job() ever deleted a file it had already
+    # uploaded when a LATER step in the SAME job then failed. A job whose
+    # .docx upload succeeded but whose .pdf upload (or the final 'ready'
+    # PATCH) then failed left that .docx sitting in the 'cv-documents' bucket
+    # forever: the PATCH that would have recorded its path on the
+    # generated_cvs row never ran (the job is marked 'failed' with no
+    # storage_path_docx at all), and no other code anywhere in this repo ever
+    # sweeps that bucket for orphans - the identical Storage-leak shape
+    # Finding 391 already fixed for app/app/tenders/new/actions.ts's manual-
+    # tender uploads, found here independently in a bridge that had no
+    # storage-delete capability of its own at all before this.
+    job = {"id": "job-cleanup", "format": "sanral_keyperson", "detail": "full",
+           "company_id": "c1", "person_id": "p1"}
+
+    def claim_stub(url, key, method, path, body=None):
+        if method == "PATCH" and path.startswith("generated_cvs") and "status=eq.requested" in path:
+            return [{"id": "job-cleanup"}]
+        return []
+
+    uploads, removed = [], []
+
+    def upload_stub(url, key, bucket, object_path, local_path, content_type):
+        uploads.append(object_path)
+        if object_path.endswith(".pdf"):
+            raise RuntimeError("simulated transient Storage failure uploading the PDF")
+
+    def remove_stub(url, key, bucket, object_paths):
+        removed.append(list(object_paths))
+
+    original_request = pcj.supabase_request
+    original_fetch = pcj.fetch_job_context
+    original_builder = pcj.generate_cv.build_sanral_keyperson
+    original_convert = pcj.generate_cv._convert_to_pdf
+    original_upload = pcj.storage_upload
+    original_remove = pcj.storage_remove
+    pcj.supabase_request = claim_stub
+    pcj.fetch_job_context = lambda url, key, job: (
+        {"company": {"legal_name": "Klipcorp"}, "key_people": [{"name": "Jane Doe"}]}, None)
+    pcj.generate_cv.build_sanral_keyperson = lambda *a, **kw: FakeDoc()
+    pcj.generate_cv._convert_to_pdf = lambda docx_local, out_dir: docx_local.replace(".docx", ".pdf")
+    pcj.storage_upload = upload_stub
+    pcj.storage_remove = remove_stub
+    try:
+        result = pcj.process_job("https://x", "key", job, "/tmp")
+    finally:
+        pcj.supabase_request = original_request
+        pcj.fetch_job_context = original_fetch
+        pcj.generate_cv.build_sanral_keyperson = original_builder
+        pcj.generate_cv._convert_to_pdf = original_convert
+        pcj.storage_upload = original_upload
+        pcj.storage_remove = original_remove
+
+    check("process_job() handled the failure (returns True)", result is True)
+    check("both the .docx and the .pdf uploads were attempted, in that order", len(uploads) == 2 and
+          uploads[0].endswith(".docx") and uploads[1].endswith(".pdf"), uploads)
+    check("the already-uploaded .docx was cleaned up (the bug this test guards)",
+          len(removed) == 1 and removed[0] == [uploads[0]], (uploads, removed))
+
+
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
 test_could_not_mark_a_failed_cv_job_as_failed_alert_carries_company_id()
@@ -293,6 +364,7 @@ test_adapt_person_row_carries_sacpcmp_date_through()
 test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()
 test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
+test_process_job_cleans_up_storage_when_a_later_upload_fails()
 
 print(f"\n{len(FAILS)} failure(s)")
 if FAILS:

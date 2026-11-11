@@ -430,6 +430,83 @@ def test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent()
     check("no field_provenance upsert was attempted", client.upserted == [], client.upserted)
 
 
+class UploadFailsOnSecondFile(FakeClient):
+    """Records every upload() call in order; raises on the one whose remote
+    path ends with 'financial.pdf' (the second file process_job()'s own
+    upload loop reaches), simulating a transient Storage failure AFTER the
+    first file ('submission_pack.pdf') already landed. Also records every
+    remove() call, matching the real SupabaseRest.remove() this pass adds."""
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.uploads = []
+        self.removed = []
+
+    def upload(self, bucket, path, local, content_type):
+        self.uploads.append(path)
+        if path.endswith("financial.pdf"):
+            raise RuntimeError("simulated transient Storage failure uploading the financial PDF")
+
+    def remove(self, bucket, paths):
+        self.removed.append((bucket, list(paths)))
+
+
+def test_process_job_cleans_up_storage_when_a_later_upload_fails():
+    print("process_job(): a .pdf already uploaded to the 'submission-packs' bucket is cleaned "
+          "up when the financial PDF upload that follows it in the same job then fails")
+    # Finding 397 (standing solution-architect review, 2026-11-11): before this
+    # fix, nothing in process_job() ever deleted a file it had already
+    # uploaded when a LATER step in the SAME job then failed - the exact gap
+    # Finding 396 already fixed in engine/cv/process_cv_jobs.py, found here
+    # independently in this bridge's own multi-file upload loop. A job whose
+    # 'submission_pack.pdf' upload succeeded but whose financial PDF upload
+    # (or the field_provenance upsert, or the final 'ready' update) then
+    # failed left that PDF sitting in the 'submission-packs' bucket forever:
+    # the 'ready' update that would have recorded its path on the
+    # pack_generation_jobs row never ran, and no other code anywhere in this
+    # repo ever sweeps that bucket for orphans.
+    work_root = tempfile.mkdtemp(prefix="test_pack_storage_cleanup_work_root_")
+    job = {"id": "job-cleanup", "status": "requested", "engine": "sanral",
+           "company_id": "co-a", "tender_id": "t-a", "tender_pack_id": "pack-xyz"}
+    client = UploadFailsOnSecondFile([dict(job)])
+
+    def fake_gather(client, job, work):
+        return {}
+
+    def fake_build_submission_pack(work_dir, **kwargs):
+        os.makedirs(work_dir, exist_ok=True)
+        pdf_path = os.path.join(work_dir, "submission_pack.pdf")
+        fin_path = os.path.join(work_dir, "financial.pdf")
+        open(pdf_path, "wb").close()
+        open(fin_path, "wb").close()
+        return pdf_path, {
+            "page_count": 42, "sections": ["s1"], "omitted": [],
+            "financial": {"page_count": 5},
+            "outputs": {"pdf": pdf_path, "financial_pdf": fin_path},
+        }
+
+    real_gather, real_build, real_verify, real_send = (
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email)
+    ppj.gather = fake_gather
+    ppj.build_submission_pack = fake_build_submission_pack
+    ppj.verify_pack = lambda pdf, manifest: []
+    ppj.send_pack_ready_email = lambda client, job, page_count, app_url: None
+    try:
+        result = ppj.process_job(client, job, work_root, keep=True)
+    finally:
+        ppj.gather, ppj.build_submission_pack, ppj.verify_pack, ppj.send_pack_ready_email = (
+            real_gather, real_build, real_verify, real_send)
+        shutil.rmtree(work_root, ignore_errors=True)
+
+    check("process_job() handled the failure (returns None)", result is None, result)
+    check("the job was marked failed, not left 'generating'", client.rows[0]["status"] == "failed", client.rows[0])
+    check("both the pdf and the financial pdf uploads were attempted, in that order",
+          len(client.uploads) == 2 and client.uploads[0].endswith("submission_pack.pdf")
+          and client.uploads[1].endswith("financial.pdf"), client.uploads)
+    check("the already-uploaded submission_pack.pdf was cleaned up (the bug this test guards)",
+          len(client.removed) == 1 and client.removed[0] == ("submission-packs", [client.uploads[0]]),
+          (client.uploads, client.removed))
+
+
 def test_suggested_person_label_flags_a_real_override_even_when_unresolved():
     print("Finding 167: _suggested_person_label() must still flag a real AI-suggestion "
           "override even when the suggested person's own row was never fetched into this "
@@ -697,6 +774,7 @@ def main():
     test_process_job_sends_the_pack_ready_email_on_success()
     test_process_job_writes_field_provenance_to_the_db_on_success()
     test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent()
+    test_process_job_cleans_up_storage_when_a_later_upload_fails()
     test_suggested_person_label_flags_a_real_override_even_when_unresolved()
     test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id()
     test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id()

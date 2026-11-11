@@ -162,6 +162,40 @@ def storage_upload(url, service_key, bucket, object_path, local_path, content_ty
         raise RuntimeError(f"storage upload of {object_path} failed: {e.code} {e.read().decode()}")
 
 
+def storage_remove(url, service_key, bucket, object_paths):
+    """Deletes one or more objects already uploaded to Storage, via Supabase's
+    own bulk-delete endpoint (DELETE <url>/storage/v1/object/<bucket>, body
+    {"prefixes": [...]}) - the same endpoint the Supabase JS client's own
+    storage.remove() calls. Standing review, 2026-11-11 (Finding 396): used by
+    process_job()'s own except block below to clean up a CV's .docx (and, if
+    it got that far, .pdf) the moment EITHER of them was already uploaded
+    before some LATER step in the same job failed - the PDF upload itself, or
+    the final 'ready' PATCH. Before this, a job that failed after the .docx
+    (or both files) had already reached Storage left them there forever: no
+    generated_cvs row ever points at them (the PATCH that would have never
+    ran), and no other code in this repo ever sweeps the cv-documents bucket
+    for orphans - the exact Storage-leak shape Finding 391 already fixed for
+    actions.ts's manual-tender uploads, found here independently, in the one
+    bridge that had never had any storage-delete capability of its own at
+    all (confirmed by grep: no engine/*.py file calls a Storage DELETE
+    anywhere before this)."""
+    req = urllib.request.Request(
+        f"{url}/storage/v1/object/{bucket}",
+        data=json.dumps({"prefixes": object_paths}).encode(),
+        method="DELETE",
+        headers={
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"storage cleanup of {object_paths} failed: {e.code} {e.read().decode()}")
+
+
 # ============================================================================
 # Adapters: Supabase row shape -> generate_cv.py's profile-dict shape
 # (verified by the self-test below, no live project needed to check this part)
@@ -378,6 +412,11 @@ def process_job(url, key, job, out_dir):
     if not claim_job(url, key, job):
         print(f"[skipped] {job['id']}: already claimed by another worker")
         return False
+    uploaded_paths = []  # Finding 396: cleaned up in the except block below if
+                         # this job fails after uploading some but not all of
+                         # its files (or after uploading everything but
+                         # failing the final PATCH that would have pointed a
+                         # real row at them).
     try:
         profile, tender_ctx = fetch_job_context(url, key, job)
         person = profile["key_people"][0]
@@ -401,6 +440,7 @@ def process_job(url, key, job, out_dir):
         storage_path_docx = f"{job['company_id']}/people/{job['person_id']}/generated/{base_name}.docx"
         storage_upload(url, key, "cv-documents", storage_path_docx, docx_local,
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        uploaded_paths.append(storage_path_docx)
 
         storage_path_pdf = None
         if not pdf_local:
@@ -413,6 +453,7 @@ def process_job(url, key, job, out_dir):
         if pdf_local:
             storage_path_pdf = f"{job['company_id']}/people/{job['person_id']}/generated/{base_name}.pdf"
             storage_upload(url, key, "cv-documents", storage_path_pdf, pdf_local, "application/pdf")
+            uploaded_paths.append(storage_path_pdf)
 
         supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}", {
             "status": "ready",
@@ -422,6 +463,23 @@ def process_job(url, key, job, out_dir):
         })
         print(f"[ready] {job['id']} ({job['format']}/{job['detail']}) -> {storage_path_docx}")
     except Exception as e:
+        # Finding 396 (standing solution-architect review, 2026-11-11): clean
+        # up whatever got as far as Storage before this failure - the PDF
+        # upload or the final PATCH can still fail after the .docx (or both
+        # files) already landed in the 'cv-documents' bucket. Without this,
+        # that file sat there forever: the PATCH that would have recorded its
+        # path on the generated_cvs row never ran, and nothing else in this
+        # repo ever sweeps that bucket for orphans. Best-effort and silent on
+        # its own failure (an alert, not a raise) - a cleanup problem must
+        # never hide or replace the real failure being handled here.
+        if uploaded_paths:
+            try:
+                storage_remove(url, key, "cv-documents", uploaded_paths)
+            except Exception as e3:
+                system_alerts.record("cv", f"Could not clean up {len(uploaded_paths)} orphaned Storage file(s) "
+                                     f"after a failed CV job: {type(e3).__name__}: {e3}", "warning", exc=e3,
+                                     context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                              "person_id": job.get("person_id"), "paths": uploaded_paths})
         system_alerts.record("cv", f"CV generation job failed: {type(e).__name__}: {e}", "error", exc=e,
                              context={"job_id": job["id"], "company_id": job.get("company_id"),
                                       "person_id": job.get("person_id"), "format": job.get("format")})

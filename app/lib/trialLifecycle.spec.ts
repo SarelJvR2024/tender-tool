@@ -14,7 +14,7 @@ const hoursFromNow = (h: number) => new Date(NOW.getTime() + h * 60 * 60 * 1000)
 describe("trialDay7Candidates", () => {
   const sub: TrialSubscriptionRow = { company_id: "c1", status: "trialing", trial_ends_at: "2026-11-01" };
 
-  it("fires only for a trialing subscription exactly at the day-7 threshold", () => {
+  it("fires at the day-7 threshold itself", () => {
     const daysUntilFn = (d: string | null) => (d === sub.trial_ends_at ? TRIAL_DAY_7_AT_DAYS_LEFT : 999);
     expect(trialDay7Candidates([sub], daysUntilFn)).toEqual([sub]);
   });
@@ -24,9 +24,33 @@ describe("trialDay7Candidates", () => {
     expect(trialDay7Candidates([active], () => TRIAL_DAY_7_AT_DAYS_LEFT)).toEqual([]);
   });
 
-  it("off-threshold day counts yield nothing", () => {
-    expect(trialDay7Candidates([sub], () => 6)).toEqual([]);
+  it("does not fire before day 7 (too early)", () => {
     expect(trialDay7Candidates([sub], () => 8)).toEqual([]);
+  });
+
+  // Standing review, 2026-11-11: this is the real fix - trialDay7Candidates()
+  // used to be an EXACT match (only daysLeft === 7), the one candidate
+  // function in this file with no retry safety at all. A company whose one
+  // qualifying run was missed (a cron misfire, a transient read error - see
+  // send-onboarding-nudges.ts's own Finding 162) never got the nudge again,
+  // since daysLeft only ever passes through 7 once, going down. Now a RANGE,
+  // same retry-safe shape as trialExpiringCandidates/trialExpiredCandidates
+  // below - the one-time idempotency claim (not this function) is still
+  // what prevents a double-send, so widening this changes no dedupe logic.
+  it("still fires on any day between the 7-day mark and the 48h 'expiring' handoff - the actual fix, catching up a missed day-7 run", () => {
+    expect(trialDay7Candidates([sub], () => 6)).toEqual([sub]);
+    expect(trialDay7Candidates([sub], () => 5)).toEqual([sub]);
+    expect(trialDay7Candidates([sub], () => 3)).toEqual([sub]);
+  });
+
+  it("stops at the floor so it never overlaps trialExpiringCandidates()'s own 48-hour window", () => {
+    expect(trialDay7Candidates([sub], () => 2)).toEqual([]);
+    expect(trialDay7Candidates([sub], () => 0)).toEqual([]);
+    expect(trialDay7Candidates([sub], () => -1)).toEqual([]);
+  });
+
+  it("never fires once daysUntilFn returns null (no trial_ends_at on file)", () => {
+    expect(trialDay7Candidates([sub], () => null)).toEqual([]);
   });
 });
 

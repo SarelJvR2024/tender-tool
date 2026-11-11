@@ -12,15 +12,29 @@ function daysUntilFn(map: Record<string, number | null>) {
 const NOT_SUBMITTED = () => "found";
 
 describe("clarificationThresholdFor", () => {
-  it("matches exactly 10 and 2 days", () => {
+  it("matches exactly 10 and 2 days (the nominal thresholds)", () => {
     expect(clarificationThresholdFor(10)).toBe(10);
     expect(clarificationThresholdFor(2)).toBe(2);
   });
 
-  it("does not match any other day count", () => {
-    expect(clarificationThresholdFor(9)).toBeNull();
-    expect(clarificationThresholdFor(1)).toBeNull();
+  // Finding 401: widened from an exact match to a range, same self-healing
+  // shape as trialDay7Candidates() (Finding 387) - a missed/late daily cron
+  // run can still catch up on a later day instead of permanently losing the
+  // reminder for that threshold.
+  it("still matches the 10-day threshold on a catch-up day between the two windows", () => {
+    expect(clarificationThresholdFor(9)).toBe(10);
+    expect(clarificationThresholdFor(5)).toBe(10);
+    expect(clarificationThresholdFor(3)).toBe(10);
+  });
+
+  it("still matches the 2-day threshold on a catch-up day below it", () => {
+    expect(clarificationThresholdFor(1)).toBe(2);
+  });
+
+  it("does not match above the 10-day window, at the 2-day floor, or below it", () => {
+    expect(clarificationThresholdFor(11)).toBeNull();
     expect(clarificationThresholdFor(0)).toBeNull();
+    expect(clarificationThresholdFor(-1)).toBeNull();
   });
 });
 
@@ -64,10 +78,16 @@ describe("clarificationWindowCandidates", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("does not fire when daysLeft is not exactly on a threshold", () => {
+  it("does not fire outside either threshold's window", () => {
+    const task = { ...BASE, due_date: "2026-12-01" };
+    const result = clarificationWindowCandidates([task], daysUntilFn({ "2026-12-01": 11 }), NOT_SUBMITTED);
+    expect(result).toHaveLength(0);
+  });
+
+  it("fires for the 10-day threshold on a catch-up day, same as a missed cron run self-healing on the next one", () => {
     const task = { ...BASE, due_date: "2026-12-01" };
     const result = clarificationWindowCandidates([task], daysUntilFn({ "2026-12-01": 5 }), NOT_SUBMITTED);
-    expect(result).toHaveLength(0);
+    expect(result).toEqual([{ task, daysLeft: 5, threshold: 10 }]);
   });
 
   it("does not fire for a null due_date", () => {

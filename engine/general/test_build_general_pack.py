@@ -98,6 +98,69 @@ def test_cidb_vault_document_is_now_reachable_from_a_general_pack():
     check("the real pack-build lookup now actually finds the vault file", path == "/work/files/vault/cidb-cert.pdf", path)
 
 
+def test_still_to_write_includes_a_genuinely_missing_field_with_no_value_on_file():
+    print("Finding 394: a 'missing' field (label on this edition, no value on "
+          "file at all) must still show up in the 'still to write' note, not "
+          "just a 'not_placed' field that happens to have a value")
+    fields = {
+        "sbd1.name_of_bidder": {"status": "placed", "value": "Acme (Pty) Ltd"},
+        # Genuinely missing: no CSD number on file at all - this is the shape
+        # place_text_fields()/place_captions() ALWAYS produce for status
+        # "missing" (vals.get(...) is the same falsy value that made it
+        # "missing" in the first place).
+        "sbd1.csd_number": {"status": "missing", "value": None, "reason": "not on file"},
+        # not_placed WITH a value (too long for the cell) - already worked
+        # before this fix; must keep working.
+        "sbd1.total_bid_price": {"status": "not_placed", "value": "R 12 345 678.90", "reason": "too long for the cell on the form"},
+        # Genuinely not on this edition - never belongs in "still to write".
+        "sbd1.facsimile_number": {"status": "not_found", "value": None, "reason": "label not on this edition"},
+        # Already handled by the buyer - never belongs either.
+        "sbd9.name_of_institution": {"status": "prefilled", "value": None, "reason": "already printed on the form by the buyer"},
+    }
+    left_keys = {k for k, _ in pack._still_to_write(fields)}
+    check("the missing, no-value CSD field IS included", "sbd1.csd_number" in left_keys, left_keys)
+    check("the not_placed, has-a-value field is still included", "sbd1.total_bid_price" in left_keys, left_keys)
+    check("a placed field is not included", "sbd1.name_of_bidder" not in left_keys, left_keys)
+    check("a genuinely not_found field is not included", "sbd1.facsimile_number" not in left_keys, left_keys)
+    check("a buyer-prefilled field is not included", "sbd9.name_of_institution" not in left_keys, left_keys)
+    check("exactly the two real gaps are reported, nothing more", left_keys == {"sbd1.csd_number", "sbd1.total_bid_price"}, left_keys)
+
+
+def test_buyer_form_note_includes_a_genuinely_missing_field_with_no_value_on_file():
+    print("Finding 395: the buyer_forms loop's own overlay note (CEQ / Form "
+          "of Offer) must also surface a genuinely missing field - the same "
+          "sibling gap Finding 394 fixed for the manifest-forms loop, but "
+          "this loop never picked up at all: it only ever reported the "
+          "STATIC fills/by_hand promise from requirements.OVERLAY_BUYER_FORMS, "
+          "never fill_flat_pdf.py's own per-company, per-field report")
+    ov = {"page": 3, "document": "CEQ.pdf",
+          "by_hand": "the CIDB number, partner/principal particulars, banking account number and the signature"}
+    orep = {"fields": {
+        "ceq.name_of_enterprise": {"status": "placed", "value": "Acme (Pty) Ltd"},
+        # Genuinely missing: no tax reference number on file at all - this
+        # field is part of the STATIC "fills" promise (requirements.py:
+        # "name, VAT, CSD, company registration and tax numbers..."), so the
+        # old code told the company it was typed on when it was not.
+        "ceq.tax_reference_number": {"status": "missing", "value": None, "reason": "not on file"},
+        # Genuinely not on this edition - never belongs in the note.
+        "ceq.bank_name_and_branch": {"status": "not_found", "value": None, "reason": "label not on this edition"},
+    }}
+    note = pack._buyer_overlay_note(ov, orep)
+    check("mentions the genuinely missing tax reference number", "tax reference number" in note, note)
+    check("still names the static by-hand list too", "CIDB number" in note, note)
+    check("does not claim a not_found field is still to write", "bank name and branch" not in note, note)
+
+
+def test_buyer_form_note_with_nothing_missing_has_no_extra_clause():
+    print("Finding 395: when every field the overlay attempted was actually "
+          "placed, the note must stay exactly as before - no false positive")
+    ov = {"page": 1, "document": "FORM_OF_OFFER.pdf", "by_hand": "the offered price, the signature and the witnesses"}
+    orep = {"fields": {"form_of_offer.tenderer": {"status": "placed", "value": "Acme (Pty) Ltd"}}}
+    note = pack._buyer_overlay_note(ov, orep)
+    check("no 'still to write' clause when nothing is missing", "still to write" not in note, note)
+    check("the static by-hand promise is still there", "offered price" in note, note)
+
+
 def main():
     test_flags_the_real_misfiled_coid_case()
     test_passes_a_correctly_named_document_for_its_own_slot()
@@ -105,6 +168,9 @@ def main():
     test_no_rule_for_a_column_the_brief_did_not_ask_for()
     test_no_local_path_is_a_no_op_not_a_crash()
     test_cidb_vault_document_is_now_reachable_from_a_general_pack()
+    test_still_to_write_includes_a_genuinely_missing_field_with_no_value_on_file()
+    test_buyer_form_note_includes_a_genuinely_missing_field_with_no_value_on_file()
+    test_buyer_form_note_with_nothing_missing_has_no_extra_clause()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

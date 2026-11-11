@@ -241,6 +241,31 @@ class SupabaseRest:
             self._req("POST", f"/storage/v1/object/{bucket}/{urllib.parse.quote(path)}", raw=f.read(),
                       headers={"Content-Type": content_type, "x-upsert": "true"})
 
+    def remove(self, bucket, paths):
+        """Deletes one or more objects already uploaded to Storage, via
+        Supabase's own bulk-delete endpoint (DELETE <url>/storage/v1/object/
+        <bucket>, body {"prefixes": [...]}) - same endpoint and shape as
+        engine/cv/process_cv_jobs.py's own module-level storage_remove()
+        (Finding 396). Standing review, 2026-11-11 (Finding 397): used by
+        process_job()'s own except block below to clean up whatever of this
+        job's pdf/financial_pdf/manifest/field_provenance files already
+        reached the 'submission-packs' bucket before a LATER step in the
+        SAME job (a later upload in the same loop, the field_provenance
+        upsert, or the final 'ready' PATCH) then failed. Before this, every
+        one of those already-uploaded files was orphaned forever: the
+        'ready' PATCH that would have recorded their paths on the
+        pack_generation_jobs row never ran, and no other code in this repo
+        ever sweeps the submission-packs bucket for orphans (confirmed by
+        grep: process_general_jobs.py's own PACK_BUCKET ('submission-packs',
+        shared with this bridge) has the identical gap - its own upload
+        loop/provenance-upsert/'ready' update can fail after uploads too,
+        with no cleanup of its own either - tracked separately, not fixed
+        here, since this file's own SupabaseRest class and this file's own
+        general-family sibling's Supabase class are two independent client
+        implementations)."""
+        self._req("DELETE", f"/storage/v1/object/{bucket}", {"prefixes": paths},
+                  headers={"Content-Type": "application/json"})
+
 
 # ============================================================================
 # Adapters: Supabase rows -> the profile/pack shapes the CLI engines read.
@@ -793,6 +818,10 @@ def process_job(client, job, work_root, keep=False):
         print(f"[skip] {job['id']}: already claimed by another worker")
         return None
     work = tempfile.mkdtemp(prefix=f"pack_{job['id'][:8]}_", dir=work_root)
+    uploaded_paths = []  # Finding 397: cleaned up in the except block below if this
+                         # job fails after uploading some but not all of its files
+                         # (or after uploading everything but failing the
+                         # field_provenance upsert or the final 'ready' update).
     try:
         kwargs = gather(client, job, work)
         pdf, manifest = build_submission_pack(work_dir=os.path.join(work, "pack"), **kwargs)
@@ -816,6 +845,7 @@ def process_job(client, job, work_root, keep=False):
             client.upload("submission-packs", remote, local,
                           CONTENT_TYPES.get(os.path.splitext(local)[1], "application/octet-stream"))
             uploaded[key] = remote
+            uploaded_paths.append(remote)
         pdf_remote = uploaded.pop("pdf")
 
         # Finding, standing review 2026-11-07: this SANRAL bridge has never
@@ -866,6 +896,26 @@ def process_job(client, job, work_root, keep=False):
         # A ValueError is the confirm gate / a filler refusing on purpose (the
         # user can act on the message) - recorded as a warning, since a refusal
         # can hide a real bug (the MO/MA refusal did). Anything else is a crash.
+        # Finding 397 (standing solution-architect review, 2026-11-11): clean
+        # up whatever of this job's pdf/financial_pdf/manifest/
+        # field_provenance files already reached the 'submission-packs'
+        # bucket before this failure - the field_provenance upsert or the
+        # final 'ready' update can still fail after every file already
+        # landed in Storage. Without this, those files sat there forever:
+        # the 'ready' update that would have recorded their paths on the
+        # pack_generation_jobs row never ran, and nothing else in this repo
+        # ever sweeps that bucket for orphans. Best-effort and silent on its
+        # own failure (an alert, not a raise) - a cleanup problem must never
+        # hide or replace the real failure being handled here (same shape as
+        # Finding 396's identical fix in engine/cv/process_cv_jobs.py).
+        if uploaded_paths:
+            try:
+                client.remove("submission-packs", uploaded_paths)
+            except Exception as e3:
+                system_alerts.record("pack", f"Could not clean up {len(uploaded_paths)} orphaned Storage file(s) "
+                                     f"after a failed SANRAL pack job: {type(e3).__name__}: {e3}", "warning", exc=e3,
+                                     context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                              "tender_id": job.get("tender_id"), "paths": uploaded_paths})
         system_alerts.record("pack", f"SANRAL pack job failed: {msg}", "warning" if isinstance(e, ValueError) else "error",
                              exc=e, context={"job_id": job["id"], "company_id": job.get("company_id"),
                                              "tender_id": job.get("tender_id")})
