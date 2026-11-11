@@ -595,6 +595,47 @@ def test_world_bank_standalone_cv_with_role_still_confirmed():
           entry)
 
 
+def test_world_bank_ecsa_level_with_no_number_does_not_print_the_word_none():
+    print("build_world_bank: an ECSA level on file with no registration number yet must not "
+          "render the literal word 'None' into a real, client-facing CV")
+    # Finding 382 (standing solution-architect review, 2026-11-11): ecsa_level/ecsa_number are
+    # two independently-nullable columns (0001_init_schema.sql) - a real person can be registered
+    # at a level (e.g. Candidate Engineer) with no number issued yet. The old code wrote
+    # `q.get("ecsa_number", "MISSING")` - a default that only applies when the KEY is absent, not
+    # when it is present with value None - but both real callers (process_pack_jobs.py's
+    # adapt_person(), process_cv_jobs.py's adapt_person_row()) always build this dict with every
+    # qualification key present. So a real null ecsa_number sailed through as the literal string
+    # "None" in the real World Bank CV document ("registration None"), same bug class as
+    # Finding 49/73, just missed at this one site.
+    person = {
+        "name": "Jane Doe", "role": "Engineer", "projects": [],
+        "qualifications": {"ecsa_level": "Professional Engineer", "ecsa_number": None},
+    }
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    text = next(p.text for p in doc.paragraphs if "ECSA" in p.text)
+    check("the document text does not contain the literal word 'None'", "None" not in text, text)
+    check("the document text reads 'registration MISSING' instead", "registration MISSING" in text, text)
+    entry = next(e for e in log.entries if e["field_key"] == "cv.wb.professional_associations.ecsa")
+    check("the provenance entry is still 'confirmed' with the real ecsa_level value (unchanged)",
+          entry["status"] == "confirmed" and entry["value"] == "Professional Engineer", entry)
+
+
+def test_world_bank_ecsa_level_with_number_still_prints_it():
+    print("build_world_bank: regression guard - a real ecsa_number on file must still print "
+          "verbatim, same as before this fix")
+    person = {
+        "name": "Jane Doe", "role": "Engineer", "projects": [],
+        "qualifications": {"ecsa_level": "Professional Engineer", "ecsa_number": "20150155"},
+    }
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    text = next(p.text for p in doc.paragraphs if "ECSA" in p.text)
+    check("the real registration number still prints correctly", "registration 20150155" in text, text)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -623,6 +664,8 @@ def main():
     test_world_bank_position_blank_tender_description_logged_missing_not_falsely_confirmed()
     test_world_bank_standalone_cv_no_role_logged_missing()
     test_world_bank_standalone_cv_with_role_still_confirmed()
+    test_world_bank_ecsa_level_with_no_number_does_not_print_the_word_none()
+    test_world_bank_ecsa_level_with_number_still_prints_it()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
