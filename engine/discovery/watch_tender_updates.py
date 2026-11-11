@@ -141,22 +141,48 @@ def _now():
 # ---------------------------------------------------------------------------
 
 class OcdsDays:
-    """One-day OCDS windows, each fetched at most once per run."""
+    """One-day OCDS windows, each fetched at most once per run - but only once
+    it has genuinely been fetched. `today` (the first candidate day for every
+    single pursued eTenders tender, via find()'s own RECENT_DAYS window
+    below) is shared across this whole run's one OcdsDays instance: found
+    2026-11-11, standing review - a transient read failure on that one day
+    (checked while processing whichever tender happens to be first in the
+    run) used to be cached here as `[]`, exactly as a day that was genuinely
+    read and genuinely had no releases on it. Every OTHER pursued tender in
+    the SAME run that also needed that day then reused that cached `[]`
+    directly, with no retry, even though a fresh fetch moments later would
+    very likely have succeeded. The practical effect: one transient OCDS
+    read blip, hit once, produced a spurious "release could not be found in
+    the windows this run checked" error alert (see find()'s own caller) and a
+    silently skipped update-check for every other actively-pursued eTenders
+    tender sharing that day - not just the one tender being checked when the
+    read actually failed. Self-heals on the NEXT run (a fresh OcdsDays
+    instance, fresh cache), but within the run that hit it, healthy tenders
+    were wrongly treated as having a missing release. Fixed by only caching a
+    day once it was actually read; a failed read is reported (unchanged) but
+    left out of the cache, so the next tender that needs the same day gets
+    its own fresh attempt rather than inheriting someone else's failure."""
 
     def __init__(self, fetch_day=None):
         self.fetch_day = fetch_day or (lambda d: etenders_national.fetch_releases(d.isoformat(), d.isoformat()))
         self.cache = {}
 
     def releases(self, day):
-        if day not in self.cache:
-            try:
-                self.cache[day] = self.fetch_day(day)
-            except Exception as e:  # one bad day must not end the run
-                print(f"  OCDS {day}: fetch failed ({e})")
-                system_alerts.record("tender_updates", f"The OCDS feed could not be read for one day: {type(e).__name__}: {e}",
-                                     "error", exc=e, context={"day": str(day)})
-                self.cache[day] = []
-        return self.cache[day]
+        if day in self.cache:
+            return self.cache[day]
+        try:
+            fetched = self.fetch_day(day)
+        except Exception as e:  # one bad day must not end the run
+            print(f"  OCDS {day}: fetch failed ({e})")
+            system_alerts.record("tender_updates", f"The OCDS feed could not be read for one day: {type(e).__name__}: {e}",
+                                 "error", exc=e, context={"day": str(day)})
+            # Deliberately NOT cached (see class docstring) - a transient
+            # failure here must not be mistaken for a genuine "nothing
+            # published that day" by every other pursued tender that also
+            # needs this same day later in this same run.
+            return []
+        self.cache[day] = fetched
+        return fetched
 
     def find(self, ocid, known_day, discovered_day, today):
         tried = []

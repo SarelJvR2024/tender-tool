@@ -203,10 +203,81 @@ def test_sanral_failure_still_alerted_unchanged():
     check(len(sanral_alerts) == 1, f"the SANRAL failure path still alerts, unchanged ({len(alerts)} total)")
 
 
+def test_transient_day_fetch_failure_does_not_poison_other_pursued_tenders():
+    """Finding 410, 2026-11-11: `OcdsDays.releases()` used to cache a day's
+    FAILED fetch as `[]` - the identical value a day that was genuinely read
+    and genuinely had nothing on it produces. `today` is always every
+    pursued eTenders tender's own first candidate day (`find()`'s own
+    RECENT_DAYS window) - so that cache entry is shared, for the whole run,
+    across every tender this watch checks. Two pursued eTenders tenders, t1
+    and t2, both with their one true release sitting on `today` (the only
+    day either can be found on). `fetch_ocds_day` raises on its first call
+    (today's fetch, made while checking t1 - always first, by `tender_packs`
+    insertion order) and succeeds on every call after that - a real,
+    one-off, transient read blip, not a persistently broken feed.
+
+    Before the fix: t1 fails to find its release this run regardless (it was
+    genuinely unlucky enough to hit the live failure) - unavoidable and not
+    what this test checks. t2, checked right after, reuses `today`'s cached
+    `[]` from t1's failure without ever calling `fetch_ocds_day` again, so it
+    ALSO wrongly reports "release not found", even though a fresh fetch
+    (which a real retry moments later would make) finds it immediately -
+    red. After the fix: the failed fetch is not cached, so t2's own lookup
+    retries `today` fresh, finds its real release, and is never wrongly
+    reported as missing - green.
+
+    Run: python3 test_watch_tender_updates.py
+    """
+    client = make_client()
+    client.tables["tender_packs"].append({"company_id": "c1", "tender_id": "t2", "pipeline_stage": "bidding"})
+    client.tables["tenders"].append({"id": "t2", "ocid": "ocds-test-2", "status": None,
+                                     "closing_date": "2099-01-01T11:00:00+02:00", "contract_no": "T2",
+                                     "description": "Test tender 2", "document_urls": []})
+
+    today = datetime.date(2026, 11, 7)
+    calls = {"n": 0}
+
+    def fetch_ocds_day(day):
+        if day != today:
+            return []
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient network blip")
+        return [{"ocid": "ocds-test-1", "tender": {"documents": []}},
+                {"ocid": "ocds-test-2", "tender": {"documents": []}}]
+
+    alerts = []
+    system_alerts.set_sink(lambda payload: alerts.append(payload))
+    work_dir = tempfile.mkdtemp(prefix="watch-test-")
+    try:
+        watch.run(client, today=today, fetch_ocds_day=fetch_ocds_day, fetch_sanral=None, fetch_doc=None,
+                 work_dir=work_dir, log=lambda *a, **k: None)
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        system_alerts.set_sink(None)
+
+    not_found_alerts = [a for a in alerts if a["p_source"] == "tender_updates" and "not found" in a["p_message"].lower()]
+    reported_missing = {a["p_context"].get("tender_id") for a in not_found_alerts}
+    check("t1" in reported_missing, "t1 (the tender actually hit by the transient failure) still gets its own "
+                                    f"'not found' alert, unchanged ({reported_missing})")
+    check("t2" not in reported_missing,
+          f"t2's own release - genuinely findable with a fresh fetch - must not be wrongly reported as 'not found' "
+          f"just because t1's transient failure poisoned today's cache first (tenders reported missing: "
+          f"{reported_missing}) - THIS IS THE FIX THIS TEST EXISTS FOR")
+
+    t2_state = client.select("tender_watch_state", {"tender_id": "t2"})
+    check(len(t2_state) == 1 and not t2_state[0].get("last_error") and t2_state[0].get("last_found_at"),
+          f"t2's own watch state shows its release genuinely found this run, not a false 'not found' ({t2_state})")
+    check(calls["n"] == 2, f"today's feed was fetched exactly twice - once that failed (checking t1), once that "
+                          f"succeeded (checking t2) - a failed fetch must never be cached as a genuine empty day "
+                          f"(calls={calls['n']})")
+
+
 def main():
     print("watch_tender_updates.py - OCDS-vs-SANRAL failure-alerting symmetry")
     test_ocds_release_not_found_is_alerted()
     test_sanral_failure_still_alerted_unchanged()
+    test_transient_day_fetch_failure_does_not_poison_other_pursued_tenders()
     print()
     if FAILS:
         print(f"{len(FAILS)} FAILED:")
