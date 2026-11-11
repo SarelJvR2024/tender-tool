@@ -91,4 +91,41 @@ describe("fetchSavingsCounterSummary", () => {
     expect(summary?.allTime.tendersCounted).toBe(1);
     expect(summary?.usingDefaultBaseline).toBe(false);
   });
+
+  // Found 2026-11-11, standing review: "thisMonth" used to anchor on
+  // `now.getFullYear()`/`now.getMonth()` directly - the Node process's own
+  // local time zone, which is UTC on every runtime this app actually
+  // deploys to (no TZ env var is set anywhere in this repo - see
+  // lib/dates.ts's daysUntil() header comment). SAST is UTC+2 with no DST,
+  // so for the ~2 hours after real SAST midnight on the 1st of a month
+  // (while UTC's own calendar is still on the LAST day of the PREVIOUS
+  // month), this anchored "this month" on the just-ENDED month's own start
+  // instead of the just-started real one - the same naive-UTC-calendar-
+  // boundary bug class as Finding 289/290 (day-level) and 413
+  // (analyticsLogic.ts's monthKey(), month-level), independently present
+  // here because this function never called that shared SAST conversion.
+  // `now` = 2026-11-30T23:30:00Z is real 2026-12-01 01:30 SAST - already
+  // December for a South African user - while the Node process's own UTC
+  // clock still reads November 30.
+  it("anchors 'this month' on the real SAST calendar month, not the UTC one, during the SAST midnight rollover window", async () => {
+    const now = new Date("2026-11-30T23:30:00.000Z");
+    const supabase = makeSupabase(OK_COMPANY, {
+      data: [
+        // Genuinely mid-November by any reckoning - must NOT count as
+        // "this month" once the real (SAST) month has rolled over to
+        // December, even though the Node process's own UTC clock is
+        // still showing November 30.
+        { tender_id: "nov", hours: 5, counted_at: "2026-11-15T10:00:00.000Z" },
+        // 2026-11-30T23:00:00Z is real 2026-12-01 01:00 SAST - genuinely
+        // IN December already, and must count as "this month".
+        { tender_id: "dec", hours: 8, counted_at: "2026-11-30T23:00:00.000Z" },
+      ],
+      error: null,
+    });
+    const { summary } = await fetchSavingsCounterSummary(supabase, now);
+    // Pre-fix: both rows land in "this month" (monthStart wrongly pinned to
+    // UTC-calendar November 1st), so tendersCounted is 2, not 1.
+    expect(summary?.thisMonth.tendersCounted).toBe(1);
+    expect(summary?.allTime.tendersCounted).toBe(2);
+  });
 });

@@ -10,6 +10,34 @@ import {
 } from "./savingsCounter";
 import type { SavingsCounterSummary } from "@/components/tt/savings-counter-card";
 
+// SAST is UTC+2 with no DST (same fact lib/dates.ts's closingDayOf() and
+// analyticsLogic.ts's monthKey()/buildWinLossTrend() already rely on) -
+// shared here so "this month" is computed in the same calendar terms
+// everywhere this file needs it.
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * The real UTC instant of SAST midnight on the 1st of `now`'s own SAST
+ * calendar month - NOT `new Date(now.getFullYear(), now.getMonth(), 1)`,
+ * which reads the Node process's own local time zone. That's UTC on every
+ * runtime this app actually deploys to (no TZ env var is set anywhere in
+ * this repo - see lib/dates.ts's daysUntil() header comment), so for the
+ * ~2 hours after real SAST midnight on the 1st of a month (while UTC's own
+ * calendar is still on the LAST day of the PREVIOUS month), that naive
+ * construction anchored "this month" on the just-ENDED month's own start
+ * instead of the just-started real one - e.g. at 2026-11-30T23:30:00Z
+ * (real 2026-12-01 01:30 SAST, already December for a South African user)
+ * it returned 2026-11-01, so the whole of November still counted as "this
+ * month". Found 2026-11-11, standing review: same naive-UTC-calendar-
+ * boundary bug class as Finding 289/290 (day-level) and 413
+ * (analyticsLogic.ts's monthKey(), month-level), independently present here
+ * because this function never called that shared conversion.
+ */
+function sastMonthStart(now: Date): Date {
+  const nowSast = new Date(now.getTime() + SAST_OFFSET_MS);
+  return new Date(Date.UTC(nowSast.getUTCFullYear(), nowSast.getUTCMonth(), 1) - SAST_OFFSET_MS);
+}
+
 /**
  * Fetches the real `savings_counted_steps` rows and the company's own
  * baseline, then hands them to the pure functions in lib/savingsCounter.ts -
@@ -30,9 +58,14 @@ import type { SavingsCounterSummary } from "@/components/tt/savings-counter-card
  * briefing-attendance section (System-Status.md, this entry's own
  * predecessor). Both errors are now captured, logged, and surfaced to the
  * caller as `error: true` instead of being swallowed.
+ *
+ * `now` is injectable only for tests (same convention as lib/dates.ts's
+ * daysUntil()/lib/publicHolidays.ts's sastToday()); every real caller
+ * leaves it as `new Date()`.
  */
 export async function fetchSavingsCounterSummary(
   supabase: SupabaseClient,
+  now: Date = new Date(),
 ): Promise<{ summary: SavingsCounterSummary | null; error: boolean }> {
   const [
     { data: company, error: companyError },
@@ -62,8 +95,7 @@ export async function fetchSavingsCounterSummary(
   const hourlyCost = baseline.hourlyCostZar;
   const allRows = (rows ?? []) as { tender_id: string; hours: number; counted_at: string }[];
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = sastMonthStart(now);
   const thisMonthRows = allRows.filter((r) => new Date(r.counted_at) >= monthStart);
 
   const summaryFor = (periodRows: typeof allRows): SavingsTotals => {
