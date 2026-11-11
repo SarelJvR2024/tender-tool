@@ -19,7 +19,69 @@ number or any other personal field of a principal (POPIA; 0050 header).
 """
 
 
+import calendar
 import datetime
+
+
+# Mirrors app/lib/properties.ts's own PROPERTY_DOCUMENT_TYPES maxAgeMonths
+# rule for the two property-document types whose real "still valid" test is
+# an age limit counted from the issue date, not a fixed expiry date the
+# certificate itself carries - pest_control_certificate and sapoa_grading.
+# The upload form (app/app/company/properties/page.tsx) labels its
+# valid_until field "Valid until (if it has one)" for exactly this reason:
+# these two types realistically get saved with issued_on set and valid_until
+# left null. Before this (standing review, 2026-11-11), find_due_property_
+# documents()/find_property_documents_lapsing_before_closing() keyed purely
+# off valid_until, so a null valid_until made a row invisible to BOTH
+# reminder functions forever, no matter how stale issued_on got - confirmed
+# live: test_principals_registrations.py's own Part 2 fixture already
+# inserts a pest_control_certificate issued 400 days ago (well past the
+# 12-month limit) with valid_until null, and its own assertion (len(pdue)
+# == 1) says only the OTHER row, the one with a real valid_until, gets
+# reported. The only place this was ever surfaced was lib/properties.ts's
+# own tooOld(), a client-render-time-only check on the Properties page
+# itself - no email, no daily digest, no "lapses before closing on an open
+# tender" warning: a genuinely non-compliant building document for an
+# active lease tender produced zero proactive signal unless someone
+# happened to load that exact page.
+PROPERTY_DOCUMENT_MAX_AGE_MONTHS = {
+    "pest_control_certificate": 12,
+    "sapoa_grading": 12,
+}
+
+
+def _add_months_clamped(d, months):
+    """Same calendar-anniversary clamping as date-fns's addMonths(), which
+    lib/properties.ts's own tooOld() already uses for this exact calculation
+    (standing review, 2026-11-06) - a bare month-rollover would otherwise
+    overflow a certificate issued on Feb 29 into March 1 of the following
+    year instead of landing on Feb 28."""
+    total = d.month - 1 + months
+    year = d.year + total // 12
+    month = total % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return datetime.date(year, month, day)
+
+
+def _effective_property_expiry(document_type, issued_on, valid_until):
+    """The date find_due_property_documents()/find_property_documents_
+    lapsing_before_closing() should treat as this document's expiry: the
+    real valid_until when the certificate has one, else issued_on plus the
+    type's own age limit (PROPERTY_DOCUMENT_MAX_AGE_MONTHS) when it doesn't.
+    None if neither applies - exactly like a row with no valid_until did
+    before this fix, for every OTHER document type (title deed, building
+    insurance, ...), which genuinely have no expiry concept at all and are
+    correctly still never reminded."""
+    if valid_until:
+        return valid_until
+    max_months = PROPERTY_DOCUMENT_MAX_AGE_MONTHS.get(document_type)
+    if not max_months or not issued_on:
+        return None
+    try:
+        issued = datetime.date.fromisoformat(str(issued_on)[:10])
+    except ValueError:
+        return None
+    return _add_months_clamped(issued, max_months).isoformat()
 
 
 def _wd():
@@ -203,18 +265,20 @@ def find_due_property_documents(url, key, seen, today, lead_days):
     wd = _wd()
     rows = wd.supabase_request(
         url, key,
-        "property_documents?select=id,company_id,property_id,document_type,reference_number,valid_until"
-        "&valid_until=not.is.null")
+        "property_documents?select=id,company_id,property_id,document_type,reference_number,issued_on,valid_until")
     props = _names(url, key, "company_properties", "label", {r["property_id"] for r in rows})
     companies = _names(url, key, "companies", "legal_name", {r["company_id"] for r in rows})
     due = []
     for r in rows:
+        expiry = _effective_property_expiry(r["document_type"], r.get("issued_on"), r.get("valid_until"))
+        if not expiry:
+            continue
         prefix = f"propdoc::{r['id']}::valid_until"
-        hit = wd._expiry_window(seen, prefix, "property_document", r["valid_until"], today, lead_days)
+        hit = wd._expiry_window(seen, prefix, "property_document", expiry, today, lead_days)
         if not hit:
             continue
         left, status = hit
-        _mark_company(seen, prefix, r["valid_until"], status, r["company_id"])
+        _mark_company(seen, prefix, expiry, status, r["company_id"])
         label = PROPERTY_DOCUMENT_LABELS.get(r["document_type"], r["document_type"].replace("_", " "))
         due.append({
             "type": "document",
@@ -225,7 +289,7 @@ def find_due_property_documents(url, key, seen, today, lead_days):
             "field": f"property_documents:{r['document_type']}",
             "label": f"{label} - {props.get(r['property_id']) or 'property'}",
             "registration_number": r.get("reference_number"),
-            "expiry_date": r["valid_until"],
+            "expiry_date": expiry,
             "days_left": left,
             "status": status,
         })
@@ -277,8 +341,7 @@ def find_property_documents_lapsing_before_closing(url, key, seen, today, lead_d
     wd = _wd()
     rows = wd.supabase_request(
         url, key,
-        "property_documents?select=id,company_id,property_id,document_type,reference_number,valid_until"
-        "&valid_until=not.is.null")
+        "property_documents?select=id,company_id,property_id,document_type,reference_number,issued_on,valid_until")
     if not rows:
         return []
     companies = _names(url, key, "companies", "legal_name", {r["company_id"] for r in rows})
@@ -319,7 +382,9 @@ def find_property_documents_lapsing_before_closing(url, key, seen, today, lead_d
         if to_closing < 0:
             continue
         for r in company_rows:
-            expiry = r["valid_until"]
+            expiry = _effective_property_expiry(r["document_type"], r.get("issued_on"), r.get("valid_until"))
+            if not expiry:
+                continue
             left = wd.days_until(expiry, today)  # None (alert recorded) for a malformed date
             if left is None:
                 continue
