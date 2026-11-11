@@ -160,11 +160,87 @@ def test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the
         check("append_after_label() does not raise on a control character", False, f"{type(e).__name__}: {e}")
 
 
+REPO_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+A_FORMS_SAMPLE = os.path.join(REPO_ROOT, "templates", "forms", "R.396-010-2025.1F", "A_Forms.docx")
+
+
+def _minimal_profile(sars_tcs_pin=None, sars_tcs_pin_expiry=None, sars_tcs_pin_issued=None):
+    company = {"legal_name": "Acme Roads (Pty) Ltd", "registered_address": "1 Main Road, Pretoria"}
+    if sars_tcs_pin is not None:
+        company["sars_tcs_pin"] = sars_tcs_pin
+    if sars_tcs_pin_expiry is not None:
+        company["sars_tcs_pin_expiry"] = sars_tcs_pin_expiry
+    if sars_tcs_pin_issued is not None:
+        company["sars_tcs_pin_issued"] = sars_tcs_pin_issued
+    return {
+        "company": company,
+        "key_people": [{"name": "Thandi Nkosi", "signatory_capacity": "Director"}],
+    }
+
+
+def test_a9_sars_tcs_pin_is_actually_written_into_the_real_document():
+    """Finding 368: this branch only ever recorded the PIN as `confirmed` in
+    field_provenance - it never wrote the real PIN into Form A9's own
+    "...security personal identification number (PIN) is ___" blank, unlike
+    every other mechanical field in this module (which all go through
+    append_after_label/set_paragraph_text). The real submitted document
+    stayed blank while the provenance record claimed otherwise - and because
+    it's `confirmed`, not `missing`, ACTIONS_TO_SIGN.md never flagged it
+    either."""
+    print("Form A9's own PIN blank is actually filled with the real PIN on file, "
+          "not just recorded as confirmed in field_provenance")
+    if not os.path.exists(A_FORMS_SAMPLE):
+        check("real SANRAL A_Forms.docx sample is on disk", False, A_FORMS_SAMPLE)
+        return
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_path = os.path.join(tmp, "profile.json")
+        json.dump(_minimal_profile(sars_tcs_pin="9876543210", sars_tcs_pin_expiry="2027-06-30"),
+                  open(profile_path, "w"))
+        out_dir = os.path.join(tmp, "out")
+        os.makedirs(out_dir)
+        path, log = fa.main(A_FORMS_SAMPLE, profile_path, out_dir, "SANRAL R.396-010-2025/1F", "2026/0071")
+        d = docx.Document(path)
+        pin_paras = [p.text for p in d.paragraphs if "identification number (PIN) is" in p.text]
+        check("the Form A9 PIN paragraph exists in the real sample", len(pin_paras) == 1, pin_paras)
+        check("the real PIN is now written into that paragraph",
+              bool(pin_paras) and "9876543210" in pin_paras[0], pin_paras)
+        entries = {e["field_key"]: e for e in log.entries}
+        check("field_provenance still records it as confirmed (unchanged behaviour)",
+              entries.get("a_forms.A9.tcs_pin", {}).get("status") == "confirmed")
+
+
+def test_a9_with_no_pin_on_file_leaves_the_blank_untouched():
+    print("with no SARS TCS PIN on file, Form A9's own blank is left exactly as the template "
+          "shipped it (control case - no false write, matches the missing provenance entry)")
+    if not os.path.exists(A_FORMS_SAMPLE):
+        check("real SANRAL A_Forms.docx sample is on disk", False, A_FORMS_SAMPLE)
+        return
+    import json
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        profile_path = os.path.join(tmp, "profile.json")
+        json.dump(_minimal_profile(), open(profile_path, "w"))
+        out_dir = os.path.join(tmp, "out")
+        os.makedirs(out_dir)
+        path, log = fa.main(A_FORMS_SAMPLE, profile_path, out_dir, "SANRAL R.396-010-2025/1F", "2026/0071")
+        d = docx.Document(path)
+        pin_paras = [p.text for p in d.paragraphs if "identification number (PIN) is" in p.text]
+        check("the blank is untouched (still ends in dots/tab, no stray digits)",
+              bool(pin_paras) and not any(ch.isdigit() for ch in pin_paras[0]), pin_paras)
+        entries = {e["field_key"]: e for e in log.entries}
+        check("field_provenance records it as missing, as before",
+              entries.get("a_forms.A9.tcs_pin", {}).get("status") == "missing")
+
+
 def main():
     test_undersigned_blank_with_an_ordinary_name_is_filled_as_before()
     test_a_name_with_a_literal_backslash_backreference_is_not_silently_corrupted()
     test_a_name_with_an_invalid_backslash_escape_does_not_crash_the_whole_fill()
     test_a_control_character_in_the_company_or_signatory_name_does_not_crash_the_whole_fill()
+    test_a9_sars_tcs_pin_is_actually_written_into_the_real_document()
+    test_a9_with_no_pin_on_file_leaves_the_blank_untouched()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
