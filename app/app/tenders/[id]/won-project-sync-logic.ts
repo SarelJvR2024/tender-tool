@@ -31,3 +31,37 @@ export function staleSyncedProjectRows(
   const currentPersonByPosition = new Map(confirmed.map((a) => [a.position_code, a.confirmed_person_id]));
   return existingSynced.filter((row) => currentPersonByPosition.get(row.position_code) !== row.person_id);
 }
+
+/**
+ * Whether a pipeline-stage move (pipeline/actions.ts's moveTenderStage and
+ * recordOutcomeAndMoveStage - the only two writers of tender_packs.
+ * pipeline_stage, lib/pipeline.ts) must clear this tender pack's own
+ * already-synced `projects` rows (syncWonProjectToTeam, 0065) before it
+ * takes effect.
+ *
+ * Why this exists: syncWonProjectToTeam() is gated one-directionally - it
+ * only ever checks "is this pack CURRENTLY won" before writing a person's
+ * project history (actions.ts line ~545) - but nothing anywhere checks the
+ * reverse: once a pack stops being 'won' (corrected back to 'submitted' via
+ * the board's own "← Back" mis-click fixer, lib/pipeline.ts's
+ * PREVIOUS_STAGE, or changed to 'lost' via OutcomeForm's own "Mark Lost"
+ * button - recordOutcomeAndMoveStage lets either outcome overwrite the
+ * other at any time, by design, "to correct it later" per its own header
+ * comment), any rows that sync already wrote stay in `projects` forever,
+ * with no later sync ever re-checking them (WonProjectCard itself only
+ * renders `pipeline_stage === "won"`, so there is no UI path left to even
+ * see, let alone fix, a stale row once the stage has moved on). Those rows
+ * feed directly into `engine/cv/generate_cv.py`'s own project-history
+ * section - so a reverted/overturned award keeps falsely claiming a
+ * completed project on every confirmed team member's next generated CV,
+ * indefinitely, including a CV actually submitted in a later tender's pack.
+ *
+ * The rule is the simple symmetric counterpart to `pipeline_stage !== "won"`
+ * fail`-ing the sync one event earlier (actions.ts line ~545): once the
+ * PREVIOUS stage was 'won' and the NEW stage is anything else, whatever was
+ * synced for that stay-at-won is now stale and must be cleared - regardless
+ * of which of the two real "leaving won" paths it took.
+ */
+export function shouldClearWonProjectSync(previousStage: string | null | undefined, nextStage: string): boolean {
+  return previousStage === "won" && nextStage !== "won";
+}

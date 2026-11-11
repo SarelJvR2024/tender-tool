@@ -5,6 +5,32 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { isPipelineStage, OUTCOME_FIELD_KEYS } from "@/lib/pipeline";
 import { isPriceSector, parsePercent, parseRand } from "@/lib/dealEconomics";
+import { shouldClearWonProjectSync } from "../tenders/[id]/won-project-sync-logic";
+
+/**
+ * Finding 360: syncWonProjectToTeam() (tenders/[id]/actions.ts) only ever
+ * checks the FORWARD direction - pipeline_stage === "won" - before writing a
+ * confirmed team member's own project history. Nothing checks the reverse:
+ * once a pack stops being "won" (moveTenderStage's own "← Back" mis-click
+ * fixer, or recordOutcomeAndMoveStage's own won <-> lost correction), the
+ * already-synced `projects` rows stay forever, with no later sync or UI path
+ * left to even see them (WonProjectCard only renders on pipeline_stage ===
+ * "won") - feeding a reverted/overturned award straight into every confirmed
+ * person's next generated CV as if it were still a real completed project.
+ * Shared by both writers below so the rule can't drift between them the way
+ * OUTCOME_FORM_STAGES' own header already warns two hand-kept lists will.
+ */
+async function clearStaleWonProjectSync(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  packId: string,
+) {
+  const { error } = await supabase.from("projects").delete().eq("source_tender_pack_id", packId);
+  // Best-effort, logged not gated - same "safe direction only" precedent
+  // syncWonProjectToTeam()'s own existingSynced read already uses: a failed
+  // delete here leaves a stale row for a later pass to catch, never removes
+  // a row that's still genuinely current.
+  if (error) console.error("projects delete failed clearing stale won-project sync", error);
+}
 
 /**
  * Moves one tender to a pipeline stage for the signed-in user's company
@@ -32,6 +58,19 @@ export async function moveTenderStage(formData: FormData) {
     redirect(`/pipeline?error=${encodeURIComponent("Unknown tender or stage.")}`);
   }
 
+  // Finding 360: read the pack's CURRENT stage before moving it, purely to
+  // know whether this move is a "leaving won" one - see
+  // clearStaleWonProjectSync()'s own header above for why that matters. A
+  // read failure here just means "nothing to clear" (same safe-direction-
+  // only precedent as syncWonProjectToTeam()'s own existingSynced read) -
+  // never blocks the move itself, which is this function's one real job.
+  const { data: existingPack } = await supabase
+    .from("tender_packs")
+    .select("id, pipeline_stage")
+    .eq("company_id", membership.company_id as string)
+    .eq("tender_id", tenderId as string)
+    .maybeSingle();
+
   const { error } = await supabase
     .from("tender_packs")
     .upsert(
@@ -41,6 +80,10 @@ export async function moveTenderStage(formData: FormData) {
   if (error) {
     console.error("tender_packs upsert failed for pipeline stage", error);
     redirect(`/pipeline?error=${encodeURIComponent("Could not move this tender - try again. If it keeps happening, let us know.")}`);
+  }
+
+  if (existingPack && shouldClearWonProjectSync(existingPack.pipeline_stage as string, stage)) {
+    await clearStaleWonProjectSync(supabase, existingPack.id as string);
   }
 
   revalidatePath("/pipeline");
@@ -157,6 +200,18 @@ export async function recordOutcomeAndMoveStage(formData: FormData) {
     redirect(`/pipeline?error=${encodeURIComponent("Unknown tender or outcome.")}`);
   }
 
+  // Finding 360: same reasoning as moveTenderStage's own read above - OutcomeForm
+  // renders on both 'won' and 'lost' precisely so an outcome can be corrected
+  // later, which means this same form can carry a tender straight from 'won'
+  // to 'lost' (or vice versa). Read first so clearStaleWonProjectSync() below
+  // only fires on a genuine "was won, now isn't" correction.
+  const { data: existingPack } = await supabase
+    .from("tender_packs")
+    .select("id, pipeline_stage")
+    .eq("company_id", companyId)
+    .eq("tender_id", tenderId as string)
+    .maybeSingle();
+
   const text = (k: string) => {
     const v = formData.get(k);
     return typeof v === "string" && v.trim() ? v.trim() : null;
@@ -192,6 +247,10 @@ export async function recordOutcomeAndMoveStage(formData: FormData) {
   if (error) {
     console.error("tender_packs upsert failed for pipeline outcome move", error);
     redirect(`/pipeline?error=${encodeURIComponent("Could not move this tender - try again. If it keeps happening, let us know.")}`);
+  }
+
+  if (existingPack && shouldClearWonProjectSync(existingPack.pipeline_stage as string, stage)) {
+    await clearStaleWonProjectSync(supabase, existingPack.id as string);
   }
 
   revalidatePath("/pipeline");
