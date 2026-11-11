@@ -107,6 +107,66 @@ except ValueError as e:
     check("a null hours value is refused as 'missing', not silently passed through",
           "still null" in str(e), str(e))
 
+# --- Finding 417: a THIRD (or further) confirmed key person beyond PL/DS1 --
+#     used to be silently dropped from suggest()'s own capture skeleton, and
+#     outright refused by fill() even when added to the capture file by
+#     hand - losing the WHOLE Hours capture for every discipline/category,
+#     not just that one position's row, since fill() used to raise before
+#     wb.save() ran. The real file's own rows base+1..base+20 are each a
+#     live key-person slot (B8/B9 already confirmed above as live formulas
+#     reading the tender's own key-person list); rows 10+ are the SAME kind
+#     of cell, just empty on this 2-key-person sample - simulated here by
+#     writing a real position code into one of those real-but-empty cells,
+#     the same shape a tender with a 3rd key person produces on its own
+#     shipped file. -----------------------------------------------------
+
+CE_TPL = os.path.join(tmp, "ce_template.xlsm")
+wb_ce_src = Workbook(TPL)
+wb_ce_src.set_value("Hours Roadworks", "B10", "CE", allow_formula=True)  # category A's 3rd key-person row
+wb_ce_src.save(CE_TPL)
+
+check("row_for_position() still finds PL's own row (8) dynamically",
+      ffh.row_for_position(Workbook(CE_TPL), "Hours Roadworks", 7, "PL") == 8)
+check("row_for_position() still finds DS1's own row (9) dynamically",
+      ffh.row_for_position(Workbook(CE_TPL), "Hours Roadworks", 7, "DS1") == 9)
+check("row_for_position() finds a THIRD confirmed key person's (CE) own row (10) dynamically",
+      ffh.row_for_position(Workbook(CE_TPL), "Hours Roadworks", 7, "CE") == 10)
+check("row_for_position() returns None for a position genuinely not on this tender's own sheet",
+      ffh.row_for_position(Workbook(CE_TPL), "Hours Roadworks", 7, "ZZ") is None)
+
+pack_ce_path = os.path.join(tmp, "pack_ce.yaml")
+yaml.safe_dump(
+    {"_provenance": {"contract": "R.334-030-2025.1F"},
+     "key_persons": [{"position": "PL", "person": "p1"}, {"position": "DS1", "person": "p2"},
+                      {"position": "CE", "person": "p3"}]},
+    open(pack_ce_path, "w"),
+)
+skeleton_ce_path = os.path.join(tmp, "skeleton_ce.yaml")
+ffh.suggest(pack_ce_path, skeleton_ce_path)
+skeleton = yaml.safe_load(open(skeleton_ce_path))
+check("suggest()'s own capture skeleton lists a THIRD confirmed key person (CE), not only PL/DS1",
+      "CE" in skeleton["hours"]["Roadworks"]["A"], sorted(skeleton["hours"]["Roadworks"]["A"]))
+
+capture_ce_path = os.path.join(tmp, "capture_ce.yaml")
+yaml.safe_dump({"contract": "R.334-030-2025.1F",
+               "hours": {"Roadworks": {"A": {"PL": 10, "DS1": 20, "CE": 15}}}},
+              open(capture_ce_path, "w"))
+out_ce_path = os.path.join(tmp, "out_ce.xlsm")
+try:
+    log_ce = ffh.fill(CE_TPL, capture_ce_path, out_ce_path)
+    check("fill() accepts a capture naming a THIRD confirmed key person (CE) instead of refusing the whole file",
+          log_ce is not None and len(log_ce.entries) == 3, len(log_ce.entries) if log_ce else None)
+    wb_ce_out = Workbook(out_ce_path)
+    check("...and writes CE's hours into its own real row (10), not PL's/DS1's",
+          wb_ce_out.cached("Hours Roadworks", "E10") == 15, wb_ce_out.cached("Hours Roadworks", "E10"))
+    check("...PL's own row (8) is written correctly too, unaffected by the new CE row",
+          wb_ce_out.cached("Hours Roadworks", "E8") == 10, wb_ce_out.cached("Hours Roadworks", "E8"))
+    check("...DS1's own row (9) is written correctly too, unaffected by the new CE row",
+          wb_ce_out.cached("Hours Roadworks", "E9") == 20, wb_ce_out.cached("Hours Roadworks", "E9"))
+except ValueError as e:
+    check("fill() accepts a capture naming a THIRD confirmed key person (CE) instead of refusing the whole file",
+          False, str(e))
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)
