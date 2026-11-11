@@ -163,7 +163,21 @@ FORMS = {
             {"key": "sbd4.company_registration_number", "label": r"Company\s*Registration\s*Number:?", "v": "cipc_registration_number"},
             {"key": "sbd4.tax_reference_number", "label": r"Tax\s*Reference\s*Number:?", "v": "income_tax_number"},
             {"key": "sbd4.vat_registration_number", "label": r"VAT\s*Registration\s*Number:?", "v": "vat_number"},
-            {"key": "sbd4.declarant_name", "label": r"I,?\s+(?:THE\s+)?UNDERSIGNED,?\s*\(NAME\)", "v": "signatory_name"},
+            # Finding 391: the real, live SALB SBD4 edition (templates/general_samples/
+            # salb_15-10-2026/SBD4.pdf) phrases the general declaration "I,
+            # ................., the undersigned, in submitting the accompanying
+            # bid..." - the signatory's name comes BEFORE "the undersigned", not
+            # after it as "I, (THE) UNDERSIGNED, (NAME) ....." assumes. The second
+            # alternate matches "I," immediately followed by the dotted/underscored
+            # blank (confirmed unique in this document - grepped the real extracted
+            # text for every "I," occurrence), ending right there so the existing
+            # leader-run placement logic finds the real blank. fill_sbd_docx.py's own
+            # sibling field (same key, the .docx-form counterpart of this identical
+            # declaration) already recognises both phrasings - this is the one its
+            # own copy of the regex never inherited.
+            {"key": "sbd4.declarant_name",
+             "label": r"I,?\s+(?:THE\s+)?UNDERSIGNED,?\s*\(NAME\)|\bI,\s*(?=[.…_])",
+             "v": "signatory_name"},
             {"key": "sbd4.csd_number", "label": r"\(CSD\)\s+Registration|CSD\s+Registration\s+number", "v": "csd_supplier_number", "prefix": "MAAA"},
         ],
         "choices": [
