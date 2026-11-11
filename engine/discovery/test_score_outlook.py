@@ -268,6 +268,31 @@ def test_experience_evidence_merge_keeps_scored_per_project_from_either_restatem
           r["scored_per_project"] is True, r)
 
 
+def test_bbbee_points_by_level_is_case_insensitive_like_its_sibling_regexes():
+    print("_bbbee_points_by_level(): every other regex in this file that matches the literal word "
+          "'Level' (BBBEE_TABLE_RE, BBBEE_ROW_RE) is case-insensitive - a real tender's B-BBEE "
+          "specific-goals table whose 'Level N' rows render in a different case (a scanned/typeset "
+          "Book 1 table commonly emphasises its header/rows in caps) must still parse, not silently "
+          "return {} with the table's own points thrown away.")
+    text = (
+        "3.2 SPECIFIC GOALS\n"
+        "B-BBEE STATUS LEVEL OF CONTRIBUTOR    POINTS (90/10)    POINTS (80/20)\n"
+        "LEVEL 1    10.00    20.00\n"
+        "LEVEL 2    9.00    18.00\n"
+        "LEVEL 3    6.00    14.00\n"
+    )
+    check("BBBEE_TABLE_RE already recognises this same table as present",
+          so.BBBEE_TABLE_RE.search(text) is not None)
+    table = so._bbbee_points_by_level(text)
+    check("the all-caps table is parsed, not silently dropped", table.get(1) == (10.0, 20.0), table)
+    check("level 2's points are read correctly too", table.get(2) == (9.0, 18.0), table)
+
+    result = so._specific_goals(text, {"bee_level": 1}, "90/10")
+    check("estimate_score_outlook's own _specific_goals() reports the real points for a level-1 company "
+          "under 90/10 (10 of 10), not the generic 'basis not identified' fallback",
+          result["basis"] == "bbbee_level" and result["points_estimate"] == "10 of 10", result)
+
+
 def main():
     test_unrelated_municipalities_do_not_falsely_match()
     test_legitimate_city_of_prefix_still_matches()
@@ -283,6 +308,7 @@ def main():
     test_estimate_score_outlook_locality_match_does_not_leak_the_functionality_criterions_points()
     test_estimate_score_outlook_locality_match_is_still_none_with_no_offices()
     test_experience_evidence_merge_keeps_scored_per_project_from_either_restatement()
+    test_bbbee_points_by_level_is_case_insensitive_like_its_sibling_regexes()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
