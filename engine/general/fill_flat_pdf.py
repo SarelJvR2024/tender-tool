@@ -167,7 +167,22 @@ FORMS = {
             {"key": "sbd4.csd_number", "label": r"\(CSD\)\s+Registration|CSD\s+Registration\s+number", "v": "csd_supplier_number", "prefix": "MAAA"},
         ],
         "choices": [
-            {"key": "sbd4.employed_by_state", "label": r"presently\s+in\s+the\s+service|presently\s+in\s+the\s*$", "v": "employed_by_state"},
+            # Standing review, 2026-11-11: the real, live SALB SBD4 edition
+            # (templates/general_samples/salb_15-10-2026/SBD4.pdf) asks
+            # "...employed by an organ of state, as defined in section 239 of
+            # the Constitution? YES/NO" - this label only ever recognised the
+            # OLDER "presently in the service of the state" wording, the
+            # same real-vs-regex mismatch Finding 386 already fixed for this
+            # identical declaration in fill_sbd_docx.py's own sibling
+            # SBD4_QUESTIONS (the .docx-form counterpart of this exact
+            # field), never carried over to this, the flat-PDF filler's own
+            # copy of the same regex. Broadened to match both real
+            # phrasings - confirmed against the real SALB document's own
+            # text, not assumed.
+            {"key": "sbd4.employed_by_state",
+             "label": r"employed\s+by\s+(?:the\s+state|an\s+organ\s+of\s+state)|"
+                      r"presently\s+in\s+the\s+service(?:\s+of\s+the\s+state)?|presently\s+in\s+the\s*$",
+             "v": "employed_by_state"},
         ],
         "captions": [
             {"key": "sbd4.name_of_bidder_footer", "caption": r"Name\s+of\s+(?:Bidder|bidder)", "v": "legal_name"},
