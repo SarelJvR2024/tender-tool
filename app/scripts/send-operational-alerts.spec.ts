@@ -100,6 +100,26 @@ describe("runPrintCutoff", () => {
     expect(recipientsIdx).toBeGreaterThanOrEqual(0);
     expect(recipientsIdx).toBeLessThan(claimIdx);
   });
+
+  // Finding 411: this is the realistic DEFAULT state for every company
+  // (migration 0073: daily_digest_opt_in defaults to false for every
+  // member) - a 48-hour physical print/transit cutoff is exactly the
+  // "cannot be disabled for active bidders" category migration 0093's own
+  // header names, so it must still send even when nobody has opted in.
+  it("still attempts to claim/send for a real member who has never opted into the daily digest (Finding 411)", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tender_packs: [pack] },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: false }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    await runPrintCutoff(supabase as never, "https://app.example", baseOpts, []);
+    // Pre-fix (operationalRecipients()), an opted-out member resolves to
+    // zero recipients, so the candidate is skipped before ever claiming -
+    // the claim call below would never happen.
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(true);
+  });
 });
 
 describe("runBriefingReminders", () => {
@@ -137,6 +157,18 @@ describe("runBriefingReminders", () => {
     const claimIdx = supabase.calls.findIndex((c) => c.name === "record_operational_alert_sent");
     expect(recipientsIdx).toBeGreaterThanOrEqual(0);
     expect(recipientsIdx).toBeLessThan(claimIdx);
+  });
+
+  it("still attempts to claim/send for a real member who has never opted into the daily digest (Finding 411)", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tenders: [tender] },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: false }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    await runBriefingReminders(supabase as never, "https://app.example", baseOpts, []);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(true);
   });
 });
 
@@ -178,6 +210,18 @@ describe("runClarificationWindow", () => {
     const claimIdx = supabase.calls.findIndex((c) => c.name === "record_operational_alert_sent");
     expect(recipientsIdx).toBeGreaterThanOrEqual(0);
     expect(recipientsIdx).toBeLessThan(claimIdx);
+  });
+
+  it("still attempts to claim/send for a real member who has never opted into the daily digest (Finding 411)", async () => {
+    const supabase = mockSupabase({
+      fromResponses: { tender_tasks: [task], tender_packs: null },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: false }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    await runClarificationWindow(supabase as never, "https://app.example", baseOpts, []);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(true);
   });
 
   it("pages through every tender_tasks row via fetchAllRows(), not just the first PostgREST page (Finding, compliance/reminders rotation 2026-11-09)", async () => {

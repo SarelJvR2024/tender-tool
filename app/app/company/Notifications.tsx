@@ -28,7 +28,17 @@ import { Button } from "@/components/ui/button";
  * rotation): a user reading "addenda/corrigenda, returnable checklists, and
  * closing deadline reminders... are always delivered" would reasonably but
  * wrongly conclude a lapsing SARS PIN/COID letter still depends on this
- * toggle, when it has not for weeks. Fixed below to name all 4.
+ * toggle, when it has not for weeks. Fixed then to name all 4.
+ *
+ * scripts/send-operational-alerts.ts's own print/transit cutoff, compulsory-
+ * briefing countdown and clarification-window-expiry stages joined the same
+ * bypass list later still (Finding 411, 2026-11-11, standing QA pass, notify
+ * rotation) - migration 0093's own header is explicit that every alert this
+ * engine serves is either the narrower daily_digest_opt_in or "an
+ * operational/compliance alert the brief itself says 'cannot be disabled
+ * for active bidders'," and these 3 are squarely the latter, yet they had
+ * been left gated on this toggle (defaulting to OFF for every company,
+ * 0073) since the day they shipped. Fixed in the same pass to name all 7.
  *
  * Self-contained server component, same reason as OfficeLocations.tsx: does
  * its own read under RLS, so company/page.tsx only mounts it.
@@ -69,9 +79,10 @@ export async function Notifications() {
           </div>
           <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
             Active bid alerts (addenda/corrigenda, returnable checklists, closing deadline reminders,
-            and compliance-expiry warnings for your SARS PIN, COID letter, B-BBEE proof, CIDB
-            registration and other on-file documents) are always delivered to keep your submissions
-            compliant.
+            compliance-expiry warnings for your SARS PIN, COID letter, B-BBEE proof, CIDB
+            registration and other on-file documents, print &amp; transit cutoffs, compulsory briefing
+            countdowns, and clarification-window deadlines) are always delivered to keep your
+            submissions compliant.
           </div>
         </div>
         <form action={setDailyDigestOptIn}>
