@@ -205,6 +205,29 @@ def test_company_legal_name_control_character_in_footer_is_stripped_not_crashed_
         check("a control character in company legal_name does not crash docx generation", False, f"{type(e).__name__}: {e}")
 
 
+def test_company_legal_name_entirely_control_characters_does_not_crash_footer():
+    print("a company legal_name that is NOTHING BUT control character(s) (the realistic "
+          "'OCR/paste corruption' shape Finding 367 found for a tender's own contract_no, "
+          "here in _footer()'s own write of comp['legal_name']) sanitizes down to an empty "
+          "string, and must not crash docx generation reaching for a run that was never created")
+    person = {"name": "Jane Doe", "qualifications": {},
+              "projects": [{"client_and_number": "Proj A", "value_rm": 5, "position_held": "Engineer",
+                             "start": "2020", "end": "2021", "contact": "Bob", "contact_phone": "012"}]}
+    profile = {"company": {"legal_name": "\x00"}}  # nothing left after _safe_text() strips it
+    log = ProvenanceLog(source="test")
+    try:
+        gc.build_world_bank(profile, person, "person_1", "summary", None, None, log)
+        check("a legal_name that sanitizes to empty does not crash build_world_bank", True)
+    except IndexError as e:
+        check("a legal_name that sanitizes to empty does not crash build_world_bank", False, f"{type(e).__name__}: {e}")
+    log2 = ProvenanceLog(source="test")
+    try:
+        gc.build_sanral_keyperson(profile, person, "person_1", "summary", None, None, log2)
+        check("a legal_name that sanitizes to empty does not crash build_sanral_keyperson", True)
+    except IndexError as e:
+        check("a legal_name that sanitizes to empty does not crash build_sanral_keyperson", False, f"{type(e).__name__}: {e}")
+
+
 def test_years_experience_uses_sast_not_naive_utc_today():
     print("Form B2.1: years-of-experience fallback 'as of today' uses SAST, not a naive UTC date")
     # Finding (2026-10-21): the standard (non-tender) CV path's fallback
@@ -583,6 +606,7 @@ def main():
     test_null_projects_and_qualifications_degrade_instead_of_crashing()
     test_control_characters_are_stripped_not_crashed_on()
     test_company_legal_name_control_character_in_footer_is_stripped_not_crashed_on()
+    test_company_legal_name_entirely_control_characters_does_not_crash_footer()
     test_years_experience_uses_sast_not_naive_utc_today()
     test_world_bank_project_with_null_fields_does_not_print_the_word_none()
     test_world_bank_project_with_null_position_held_does_not_print_the_word_none()

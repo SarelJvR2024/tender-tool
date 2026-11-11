@@ -16974,3 +16974,63 @@ next(e for e in log2.entries if e["field_key"] == "cv.wb.position")
 **Numbering note.** Re-verified live, twice: once before drafting (last real entry 372, no open PR claims 373+) and again immediately before this push (`main` at `42e4f15`, still no claim on 373+) - no collision this time.
 
 To verify independently: `python3 engine/cv/test_generate_cv.py` (expect 49/49 checks pass across 25 test functions, exit 0). Read `build_sanral_keyperson()` and `build_world_bank()` in `engine/cv/generate_cv.py` and confirm both now call `log.confirmed`/`log.missing` conditionally on `position_desc` for `cv.b11.position`/`cv.wb.position`, matching the pattern already used for `cv.b11.id_number` a few lines above. Read `engine/pack_generator/suggest_pack.py`'s `read_required_positions()` (lines 66-87) to independently confirm `description` is read from `SETUP!<col>7` with no fallback, so a blank description with a real position code is a genuine, reachable shape.
+
+---
+
+### Finding 374 (CONFIRMED, FIXED, pushed directly to `main`): `engine/cv/generate_cv.py`'s own `_footer()` sanitizes a company's `legal_name` for control characters but never checks whether sanitizing left anything behind - the exact "empty-after-sanitize" crash shape Finding 367 found in `build_docx.py`'s subtitle, here instead in the one footer paragraph both real CV document formats share
+
+**Area:** `engine/cv/generate_cv.py`'s `_footer(d, comp)` (shared by `build_sanral_keyperson()` and `build_world_bank()` - every CV this engine produces, in either format, ends by calling it), plus a new regression test in `engine/cv/test_generate_cv.py`.
+
+**How this was found.** Per this pass's own third suggested angle ("trace a cross-cutting convention... across every site that should follow it, in a part of the codebase not yet checked this way"), I took the exact bug class the most recent negative-result pass's own hint named - `build_docx.py`'s subtitle, which Finding 367 (documented, but still unfixed on `main`, living only on PR #230's own unmerged branch - see standing item 35) found crashes with `IndexError` when a value that's non-empty BEFORE sanitizing becomes completely empty AFTER it, because `python-docx`'s own `add_paragraph("")` creates a paragraph with **zero runs**, and the very next line that reaches for `.runs[0]` to style it has nothing to reach for. I grepped every `.runs[0]` access across the whole engine (`grep -rn "\.runs\[0\]" --include=*.py .`, 40 hits across 9 files) and read each one's own paragraph-text argument, asking the same question Finding 367's own write-up asks: is this text a STATIC Python literal (can never sanitize to empty), or a DYNAMIC value with no guaranteed-non-empty literal padding around it (can)?
+
+37 of the 40 are safe - either a hardcoded heading/label string (`_heading()`'s title arguments, table column headers, "STILL TO DO BY HAND", etc. - these can never be touched by `_safe_text()`'s control-character strip because they're never built from real/user data), or a dynamic value wrapped in enough literal surrounding text (a label, a colon-and-space, a joining " - ") that the final string can never fully vanish even if the dynamic part does (e.g. `engine/general/build_general_pack.py`'s own `f"{b['title']}: {b['reason']}"` - the literal `": "` alone survives). `engine/fill_a_forms.py`'s own helper, `set_paragraph_text()`, already guards this exact case explicitly (`if p.runs: ... else: p.add_run(text)`), so every one of its own call sites is already safe regardless of what the text sanitizes down to.
+
+One site had neither protection: `generate_cv.py`'s own `_footer()`:
+```python
+d.add_paragraph()
+p = d.add_paragraph(_safe_text(comp.get("legal_name", "")))
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+p.runs[0].italic = True
+```
+`comp["legal_name"]` is wrapped in `_safe_text()` (added by an earlier fix, commit `13bdfc2`, for the *different*, already-closed bug of a raw `ValueError` on any control character) with **no literal text around it at all** - if sanitizing strips every character the value had, `add_paragraph("")` produces a paragraph with zero runs, and `p.runs[0].italic = True` on the very next line raises `IndexError`, failing the whole CV build. `legal_name` is `NOT NULL` in the schema (migration `0001_init_schema.sql`), but nothing enforces it being anything more than a single stray control byte - the identical realistic "OCR/paste corruption" source `_safe_text()`'s own docstring in this very file already names, and the identical scenario Finding 367 already accepted as sufficiently real for `contract_no` ("a tender `contract_no` that is nothing but a stray NUL byte").
+
+**Reproduced live, before any fix** (`engine/cv/`, run with `python3 -I`):
+```python
+import docx
+from generate_cv import _footer
+d = docx.Document()
+_footer(d, {"legal_name": "\x00"})
+```
+**RED:** `IndexError: list index out of range`.
+
+**Confirmed reachable from both real document builders, not just the helper in isolation** - both `build_sanral_keyperson()` (line 458) and `build_world_bank()` (line 624) call `_footer(d, comp)` as their own last step, unconditionally, for every CV either format produces - a company whose `legal_name` happens to be corrupted down to nothing but control bytes can never get ANY CV generated for ANY key person, in either format, until this is fixed.
+
+**Fix.** Same shape already recorded as the recommended fix for Finding 367's own `build_docx.py` case: only style the paragraph once sanitizing has actually left a real run behind.
+```python
+p = d.add_paragraph(_safe_text(comp.get("legal_name", "")))
+p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+if p.runs:
+    p.runs[0].italic = True
+```
+A `legal_name` that sanitizes to genuinely nothing now produces a blank, un-italicised footer line instead of crashing the build - the same "blank rather than guessed, and never a raw exception" discipline this file already applies everywhere else `_safe_text()` is used.
+
+**Verified red-then-green, myself, real exit codes.** Added one new test, `test_company_legal_name_entirely_control_characters_does_not_crash_footer()`, to `engine/cv/test_generate_cv.py`, exercising BOTH `build_world_bank()` and `build_sanral_keyperson()` with `profile["company"]["legal_name"] = "\x00"` (nothing left after `_safe_text()`). **RED** (`git stash push -- engine/cv/generate_cv.py` to isolate the test from the fix, run from `engine/cv/`): `python3 test_generate_cv.py` - exit **1**, `2 failure(s)`:
+```
+  FAIL a legal_name that sanitizes to empty does not crash build_world_bank  (IndexError: list index out of range)
+  FAIL a legal_name that sanitizes to empty does not crash build_sanral_keyperson  (IndexError: list index out of range)
+```
+`git stash pop` to restore the fix. **GREEN:** `python3 test_generate_cv.py` - exit **0**, `0 failure(s)`, **51/51** `check()` assertions pass across all **27** test functions in the file (the pre-existing 26 + this new one).
+
+**Full regression, counted, not estimated.** Ran every one of this repo's 90 `engine/test_*.py` files individually (`find engine -name "test_*.py" | wc -l` = 90, run from `engine/`): **89/90 exit 0** on the first pass; the 90th, `engine/pack/test_b7_hard_stop.py`, hit this pass's own 60s-per-file timeout cap (exit `124`) and was re-run alone with a 180s cap - it passed in ~85s real time, a pre-existing slow-but-passing test (already flagged by this series' own standing notes), not a regression from this change. The one genuine non-zero exit, `engine/discovery/test_download_documents.py` (`ModuleNotFoundError: No module named 'playwright'`), is the same pre-existing, already-documented sandbox-only gap this series' own standing notes say not to re-report. `python3 -m py_compile`/`ast.parse` clean on both touched files. `ruff check engine/cv/generate_cv.py engine/cv/test_generate_cv.py` - **16** findings before AND after this fix (confirmed via `git stash`/`git stash pop`), the exact same 16 rule violations at the exact same lines except one (`BLE001` on the pre-existing blind-`except Exception`), which shifted from line 722 to line 736 - precisely the 14 comment/code lines this fix inserted above it, not a new finding.
+
+**Why pushed directly to `main`, not a PR.** No RLS, no money path, no hard-stop/disqualification gate, no worker-image/deployment-config change, no migration/schema surface - two Python files, zero SQL. `generate_cv.py` is explicitly NOT one of the six files this track's own guardrail names as requiring a PR for a correctness fix (`fill_a_forms.py`/`fill_sbd_docx.py`/`fill_flat_pdf.py`/`make_envelope_covers.py`/`process_narrative_jobs.py`/`build_docx.py`) - direct precedent already established three times in this exact file for this exact class of fix (the original `13bdfc2` sanitisation fix, the 2026-10-25 `cv.wb.education` fix, and Findings 372/373 immediately above, all pushed directly). Not auth-adjacent. Nothing in `pack-review.tsx`/`submission-pack.tsx`'s import graph touches Python at all. This IS a correctness fix to a document a company submits (the CV), but the guardrail's own explicit six-file list - not the general "touches a submitted document" language - is what this track has consistently treated as decisive for this file, per the Finding 372/373 precedent two entries above.
+
+**Mandatory open-PR cross-check, by the exact filenames touched (`engine/cv/generate_cv.py`, `engine/cv/test_generate_cv.py`)**: `gh api repos/sareljvr2024/tender-tool/pulls --paginate -q '.[].number' | wc -l` - **58** open PRs, unchanged from Finding 373's own count. Looped `gh api repos/sareljvr2024/tender-tool/pulls/<n>/files -q '.[].filename'` over all 58 and grepped for `cv/generate_cv\.py|cv/test_generate_cv\.py` - **zero hits**, no open PR touches either file. `git fetch origin main` immediately before starting this pass, and again immediately before this push, both showed `main` unchanged at `98d9299` (Finding 373's own pass's commit) - no sibling-track commit landed in either gap.
+
+**Relationship to Finding 367 (documented, not fixed, PR #230 only).** Same bug CLASS, different file and different value - Finding 367 is `build_docx.py`'s subtitle (a tender's `contract_no`), still unfixed on `main` (standing item 35, PR #230 unmerged, out of this track's reach per the guardrail against touching other PRs' branches). This finding is `generate_cv.py`'s footer (a company's `legal_name`), fixed here directly since `generate_cv.py` is not one of the guardrail's named PR-required files. Fixing this one does not fix or touch the other - they are independent instances of the same convention gap in two unrelated modules. Having now read every `.runs[0]` site across the entire engine for this specific shape (see "How this was found" above), this class is exhausted for every file EXCEPT `build_docx.py` itself (Finding 367, left as-is per the guardrail against editing another open PR's own file) and `fill_sbd_docx.py` (explicitly off-limits this pass per the task brief's own standing exhaustion note for that file) - neither re-checked here.
+
+**Backlog status.** No new standing item needed for this fix itself (self-contained, now-closed bug, not a judgment call) - see `System-Status.md`'s standing item 35 for the still-open Finding 367 note this entry cross-references, unchanged by this fix. Standing item 23's open-PR count unchanged at 58 (no PR opened).
+
+**Numbering note.** Re-verified live, twice: once before drafting (last real entry 373, no open PR claims 374+) and again immediately before this push (`main` still at `98d9299`, still no claim on 374+) - no collision.
+
+To verify independently: `python3 engine/cv/test_generate_cv.py` (expect 51/51 checks pass across 27 test functions, exit 0). Read `_footer()` in `engine/cv/generate_cv.py` and confirm the `p.runs[0].italic = True` write is now guarded by `if p.runs:`. Reproduce the original crash directly against `git show 98d9299:engine/cv/generate_cv.py`'s own copy of `_footer()` with `comp = {"legal_name": "\x00"}`.
