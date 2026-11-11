@@ -180,6 +180,16 @@ export function evaluateEvidence(chosen: ChosenRule, items: ExperienceLite[], ra
     if (rule.requires_appointment_and_completion) {
       status = "check";
       body = `${n} item(s) with completion proof. This tender also wants the matching appointment/award letter for each project - confirm both are on file for every one.`;
+    } else if (rule.practical_completion_excluded && qualifyingItems.some((i) => i.document_type === "completion_certificate")) {
+      // experience_items.document_type has no "practical" vs "final"
+      // distinction at all (experience.ts's DOCUMENT_TYPES) - so when this
+      // tender's own rule states practical completion certificates aren't
+      // accepted, a "completion_certificate" item on file can't actually be
+      // confirmed to qualify, the identical "can't tell from the document
+      // type alone" shape requires_appointment_and_completion already
+      // handles above by downgrading to "check" rather than claiming "have".
+      status = "check";
+      body = `${n} qualifying item(s) tagged, but this tender's own rule does not accept PRACTICAL completion certificates - confirm each completion certificate on file is the FINAL completion certificate, not practical completion, before relying on it.`;
     } else if (ratingsMatter && rated < need) {
       status = "check";
       body = `${n} qualifying item(s), ${rated} with a rating tagged - tag the ratings so the score estimate can use them.`;
