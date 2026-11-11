@@ -17,8 +17,34 @@
 export const CLARIFICATION_WINDOW_THRESHOLD_DAYS = [10, 2] as const;
 export type ClarificationWindowThresholdDays = (typeof CLARIFICATION_WINDOW_THRESHOLD_DAYS)[number];
 
+// Finding 401 (standing QA/robustness review, 2026-11-11): this used to be
+// an EXACT match (`[10, 2].includes(daysLeft)`) - the same no-retry-safety
+// shape Finding 387 (lib/trialLifecycle.ts's trialDay7Candidates()) just
+// fixed for the trial lifecycle's own day-7 check-in, found here independently
+// in this file. send-operational-alerts.ts runs once a day (cron
+// "20 4 * * *"); a task whose daysLeft hit exactly 10 (or exactly 2) on a
+// day that run was missed, late, or failed (a GitHub Actions outage needs no
+// code bug at all - scheduled workflows are documented to occasionally skip
+// or run late under load) would NEVER get that threshold's clarification-
+// window reminder again, since every later day's daysLeft no longer matches
+// either exact value. Widened to a range per threshold, same precedent as
+// trialDay7Candidates(): floored just above the other threshold's own window
+// so the two never compete for the same day, and never below 0 (a task
+// already due today or overdue was never in scope - 2 was its own only
+// matching value before this fix either). Safe to widen with no change to
+// how often the email actually sends: runClarificationWindow()'s own claim()
+// key (`claim(supabase, "clarification_window", tender.id, task.company_id,
+// String(threshold), opts)`) has no day component, only the threshold
+// itself, so claim_notification()'s one-time-ever claim is what prevents a
+// double-send, not this function matching only one day - widening the
+// window only adds the ability to catch up on a later run.
+const CLARIFICATION_10_DAY_FLOOR = 2;
+const CLARIFICATION_2_DAY_FLOOR = 0;
+
 export function clarificationThresholdFor(daysLeft: number): ClarificationWindowThresholdDays | null {
-  return (CLARIFICATION_WINDOW_THRESHOLD_DAYS as readonly number[]).includes(daysLeft) ? (daysLeft as ClarificationWindowThresholdDays) : null;
+  if (daysLeft <= 10 && daysLeft > CLARIFICATION_10_DAY_FLOOR) return 10;
+  if (daysLeft <= 2 && daysLeft > CLARIFICATION_2_DAY_FLOOR) return 2;
+  return null;
 }
 
 export type ClarificationTaskRow = {
