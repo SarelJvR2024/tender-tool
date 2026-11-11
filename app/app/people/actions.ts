@@ -376,6 +376,14 @@ export async function uploadCv(formData: FormData) {
   });
   if (insertError) {
     console.error("cv_uploads insert failed", insertError);
+    // Finding 422: the file above already made it into the cv-documents
+    // bucket - if the row that was supposed to record it never gets
+    // written, that file is orphaned forever (nothing else in this repo
+    // sweeps that bucket). Same clean-up-on-failure discipline every other
+    // upload action already follows (company/actions.ts, properties/
+    // actions.ts, principals/actions.ts, registrations/actions.ts) - this
+    // file's own CV-upload sites never picked it up until now.
+    await supabase.storage.from("cv-documents").remove([storagePath]);
     redirect(`/people/${personId}?error=${encodeURIComponent("Could not save this CV - try again. If it keeps happening, let us know.")}`);
   }
 
@@ -544,6 +552,10 @@ export async function createPersonWithCv(formData: FormData) {
     });
     if (cvInsertError) {
       console.error("cv_uploads insert failed (createPersonWithCv)", cvInsertError);
+      // Finding 422 (same gap as uploadCv() above): the file already
+      // uploaded to cv-documents is orphaned forever if this row never
+      // gets written - clean it up.
+      await supabase.storage.from("cv-documents").remove([storagePath]);
       redirect(`/people/${personId}?error=${encodeURIComponent(`${name} was added, but the CV couldn't be saved - try adding it again from this page.`)}`);
     }
   }
@@ -586,6 +598,9 @@ async function attachCvToPerson(
   });
   if (insertError) {
     console.error("cv_uploads insert failed (bulkUploadCvs)", insertError);
+    // Finding 422 (same gap as uploadCv()/createPersonWithCv() above):
+    // clean up the already-uploaded file rather than orphaning it.
+    await supabase.storage.from("cv-documents").remove([storagePath]);
     return `Could not save ${file.name}.`;
   }
   return null;

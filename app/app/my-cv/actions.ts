@@ -114,7 +114,15 @@ export async function uploadMyCv(formData: FormData) {
     status: mode === "as_is" ? "uploaded" : "extraction_requested",
     uploaded_by: userId,
   });
-  if (insertError) fail(insertError.message);
+  if (insertError) {
+    // Finding 422 (same gap as app/app/people/actions.ts's uploadCv() -
+    // this function's own header comment says it follows "the same upload
+    // flow"): the file above already made it into cv-documents - clean it
+    // up rather than orphaning it when the row that was supposed to record
+    // it never gets written.
+    await supabase.storage.from("cv-documents").remove([storagePath]);
+    fail(insertError.message);
+  }
   redirect(`${BACK}?saved=cv`);
 }
 

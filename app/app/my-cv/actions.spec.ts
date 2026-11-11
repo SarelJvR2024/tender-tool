@@ -51,11 +51,13 @@ function makeChain(queue: Resp[], insertCalls?: unknown[]) {
   return chain;
 }
 
-function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
+function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = [], storageOpts?: { uploadError?: { message: string } | null }) {
   let fromCallIndex = 0;
   let rpcCallIndex = 0;
   const rpcCalls: { name: string; params: unknown }[] = [];
   const insertCalls: unknown[] = [];
+  const uploadCalls: { bucket: string; path: string }[] = [];
+  const removeCalls: { bucket: string; paths: string[] }[] = [];
   return {
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from: () => {
@@ -73,8 +75,22 @@ function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
       rpcCallIndex += 1;
       return next;
     },
+    storage: {
+      from: (bucket: string) => ({
+        upload: async (path: string) => {
+          uploadCalls.push({ bucket, path });
+          return { data: { path }, error: storageOpts?.uploadError ?? null };
+        },
+        remove: async (paths: string[]) => {
+          removeCalls.push({ bucket, paths });
+          return { data: null, error: null };
+        },
+      }),
+    },
     rpcCalls,
     insertCalls,
+    uploadCalls,
+    removeCalls,
   };
 }
 
@@ -307,5 +323,36 @@ describe("discardMyCvExtraction - real update still succeeds", () => {
     const url = await expectRedirect(discardMyCvExtraction(formDataWith({ extraction_id: "extraction-1" })));
 
     expect(url).toBe("/my-cv");
+  });
+});
+
+// Finding 422: uploadMyCv()'s own header comment says it follows "the same
+// upload flow as app/app/people/actions.ts uploadCv" - including, until
+// now, that function's own gap. The file is uploaded to cv-documents
+// FIRST, then the cv_uploads row that records it is inserted; before this
+// fix, an insert failure there left the already-uploaded file orphaned in
+// Storage forever, instead of being cleaned up the way every other upload
+// action in this app already does.
+describe("uploadMyCv - cv_uploads insert fails after the file already uploaded (Finding 422)", () => {
+  it("removes the orphaned file from storage instead of leaving it there forever", async () => {
+    const supabase = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: null, error: { message: "insert failed" } }], // cv_uploads insert
+    ]);
+    supabaseState.current = supabase;
+
+    const { uploadMyCv } = await import("./actions");
+
+    const fd = new FormData();
+    fd.set("mode", "as_is");
+    fd.set("file", new File(["cv-bytes"], "cv.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(uploadMyCv(fd));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(supabase.uploadCalls).toHaveLength(1);
+    expect(supabase.uploadCalls[0].bucket).toBe("cv-documents");
+    expect(supabase.removeCalls).toHaveLength(1);
+    expect(supabase.removeCalls[0]).toEqual({ bucket: "cv-documents", paths: [supabase.uploadCalls[0].path] });
   });
 });

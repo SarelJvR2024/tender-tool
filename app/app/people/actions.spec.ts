@@ -37,13 +37,14 @@ function makeChain(queue: Resp[], insertCalls?: unknown[]) {
 
 function makeSupabase(
   fromQueues: Resp[][],
-  storageOpts?: { listFiles?: Record<string, { name: string }[]> },
+  storageOpts?: { listFiles?: Record<string, { name: string }[]>; uploadError?: { message: string } | null },
   rpcQueue: Resp[] = [],
 ) {
   let fromCallIndex = 0;
   let rpcCallIndex = 0;
   const insertCalls: unknown[] = [];
   const removeCalls: { bucket: string; paths: string[] }[] = [];
+  const uploadCalls: { bucket: string; path: string }[] = [];
   const rpcCalls: { name: string; params: unknown }[] = [];
   return {
     client: {
@@ -66,6 +67,10 @@ function makeSupabase(
       storage: {
         from: (bucket: string) => ({
           list: async (path: string) => ({ data: storageOpts?.listFiles?.[path] ?? [], error: null }),
+          upload: async (path: string) => {
+            uploadCalls.push({ bucket, path });
+            return { data: { path }, error: storageOpts?.uploadError ?? null };
+          },
           remove: async (paths: string[]) => {
             removeCalls.push({ bucket, paths });
             return { data: null, error: null };
@@ -75,6 +80,7 @@ function makeSupabase(
     },
     insertCalls,
     removeCalls,
+    uploadCalls,
     rpcCalls,
   };
 }
@@ -593,5 +599,95 @@ describe("saveRoleEligibility - real delete still succeeds", () => {
     const url = await expectRedirect(saveRoleEligibility(fd));
 
     expect(url).toBe("/people/person-1?roles_saved=1");
+  });
+});
+
+// Finding 422: uploadCv()/createPersonWithCv()/attachCvToPerson() (the
+// latter shared by bulkUploadCvs()) each upload the CV file to the
+// cv-documents bucket FIRST, then insert the cv_uploads row that is
+// supposed to record it. Before this fix, none of the three cleaned up the
+// already-uploaded file when that insert failed (a transient Supabase
+// error, or an RLS/FK failure - e.g. the person being deleted by someone
+// else between page load and this submit) - the file was orphaned in
+// Storage forever, exactly the same bug class already fixed at
+// app/app/tenders/new/actions.ts (Finding 391) and in the three
+// process_*_jobs.py pack/CV bridges (Findings 396-398), just never swept
+// into this file's own three CV-upload sites.
+describe("uploadCv - cv_uploads insert fails after the file already uploaded (Finding 422)", () => {
+  it("removes the orphaned file from storage instead of leaving it there forever", async () => {
+    const { client, uploadCalls, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: null, error: { message: "insert failed" } }], // cv_uploads insert
+    ]);
+    supabaseState.current = client;
+
+    const { uploadCv } = await import("./actions");
+
+    const fd = new FormData();
+    fd.set("person_id", "person-1");
+    fd.set("mode", "as_is");
+    fd.set("file", new File(["cv-bytes"], "cv.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(uploadCv(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0].bucket).toBe("cv-documents");
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toEqual({ bucket: "cv-documents", paths: [uploadCalls[0].path] });
+  });
+});
+
+describe("createPersonWithCv - cv_uploads insert fails after the file already uploaded (Finding 422)", () => {
+  it("removes the orphaned file from storage instead of leaving it there forever", async () => {
+    const { client, uploadCalls, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "person-new-1" }, error: null }], // people insert - succeeds
+      [{ data: null, error: { message: "insert failed" } }], // cv_uploads insert - fails
+    ]);
+    supabaseState.current = client;
+
+    const { createPersonWithCv } = await import("./actions");
+
+    const fd = new FormData();
+    fd.set("name", "Jane Doe");
+    fd.set("mode", "as_is");
+    fd.set("file", new File(["cv-bytes"], "cv.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(createPersonWithCv(fd));
+
+    expect(url).toContain("/people/person-new-1?error=");
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0].bucket).toBe("cv-documents");
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toEqual({ bucket: "cv-documents", paths: [uploadCalls[0].path] });
+  });
+});
+
+describe("bulkUploadCvs - cv_uploads insert fails after the file already uploaded (Finding 422)", () => {
+  it("removes the orphaned file from storage for the failed row, same as uploadCv()", async () => {
+    const { client, uploadCalls, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: null, error: { message: "insert failed" } }], // cv_uploads insert, inside attachCvToPerson
+    ]);
+    supabaseState.current = client;
+
+    const { bulkUploadCvs } = await import("./actions");
+
+    const fd = new FormData();
+    fd.set("count", "1");
+    fd.set("mode", "as_is");
+    fd.set("kind_0", "existing");
+    fd.set("person_id_0", "person-1");
+    fd.set("file_0", new File(["cv-bytes"], "cv.pdf", { type: "application/pdf" }));
+
+    const result = await bulkUploadCvs(fd);
+
+    expect(result.attached).toBe(0);
+    expect(result.errors).toEqual(["cv.pdf: Could not save cv.pdf."]);
+    expect(uploadCalls).toHaveLength(1);
+    expect(uploadCalls[0].bucket).toBe("cv-documents");
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toEqual({ bucket: "cv-documents", paths: [uploadCalls[0].path] });
   });
 });
