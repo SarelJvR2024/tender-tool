@@ -160,6 +160,40 @@ export const OUTCOME_FORM_STAGES: readonly PipelineStage[] = PIPELINE_STAGES.fil
   (s) => OUTCOME_STAGES.includes(s) || NEXT_STAGES[s].some((next) => OUTCOME_STAGES.includes(next))
 );
 
+/**
+ * Groups /pipeline's cards into one array per column (PIPELINE_STAGES
+ * order), then sorts each column: "open work" (found/assessing/building)
+ * keeps the order it's given (the caller's own closing-date-ascending
+ * query - "sorts by what closes next"); every stage `OUTCOME_FORM_STAGES`
+ * covers (submitted/briefing_shortlisted/won/lost - sitting at or reached
+ * only through an outcome) sorts most-recent stage-change first ("outcomes
+ * by most recent first"), per this function's own prior inline comment.
+ *
+ * Pulled out of pipeline/page.tsx (standing review, 2026-11-11) after a
+ * real bug: that inline version hand-listed the recency-sorted stages as
+ * `["submitted", "won", "lost"]` - written in the SAME commit
+ * (`ff98f25`) that added the `briefing_shortlisted` column, which was
+ * simply never added to this list. `briefing_shortlisted` cards (shown with
+ * their own `stageChangedAt` date on the card face, exactly like
+ * `submitted`'s) silently kept whatever order the original closing-date
+ * query left them in - the only column on the whole board whose own
+ * displayed date and visual order disagreed. Reusing `OUTCOME_FORM_STAGES`
+ * here (rather than hand-listing a 4th copy of the same stage set) is the
+ * exact fix pattern that constant's own header comment already explains:
+ * "two hand-kept stage lists had to stay in sync and didn't" - this was a
+ * third such list, found independently of the first two.
+ */
+export function groupCardsByStage<T extends { stage: PipelineStage; stageChangedAt: string | null }>(
+  cards: readonly T[],
+): Record<PipelineStage, T[]> {
+  const byStage = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, [] as T[]])) as Record<PipelineStage, T[]>;
+  for (const c of cards) byStage[c.stage].push(c);
+  for (const s of OUTCOME_FORM_STAGES) {
+    byStage[s] = [...byStage[s]].sort((a, b) => (b.stageChangedAt ?? "").localeCompare(a.stageChangedAt ?? ""));
+  }
+  return byStage;
+}
+
 /** The 4 outcome fields (prompt 10, item 4), namespaced in tender_answers - see recordOutcomeAndMoveStage (pipeline/actions.ts) for why this table and not a new one. Lives here, not actions.ts, because a "use server" file can only export async functions. */
 export const OUTCOME_FIELD_KEYS = {
   winningCompany: "outcome:winning_company",

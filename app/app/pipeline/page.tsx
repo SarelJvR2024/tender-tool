@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { closingCountdown, daysUntil, formatClosingDateTime } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_PACK_FAMILIES } from "@/lib/pastSubmissionReuse";
-import { IN_PROGRESS_STAGES, LEGACY_BIDDING_STAGE, NEXT_STAGES, normalizeStage, OUTCOME_FIELD_KEYS, OUTCOME_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { groupCardsByStage, IN_PROGRESS_STAGES, LEGACY_BIDDING_STAGE, NEXT_STAGES, normalizeStage, OUTCOME_FIELD_KEYS, OUTCOME_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -392,12 +392,12 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     if (c.stage === "found") c.packHealth = NOT_STARTED;
   }
 
-  const byStage = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, [] as Card[]])) as Record<PipelineStage, Card[]>;
-  for (const c of cards) byStage[c.stage].push(c);
-  // Open work sorts by what closes next; outcomes by most recent first.
-  for (const s of ["submitted", "won", "lost"] as const) {
-    byStage[s].sort((a, b) => (b.stageChangedAt ?? "").localeCompare(a.stageChangedAt ?? ""));
-  }
+  // groupCardsByStage() (lib/pipeline.ts) - open work sorts by what closes
+  // next; outcomes by most recent first. See that function's own header
+  // comment for the real bug this replaced (briefing_shortlisted was never
+  // sorted, the one column whose own order silently disagreed with its own
+  // displayed date).
+  const byStage = groupCardsByStage(cards);
 
   const submittedToDate = cards.filter((c) => c.submittedAt).length;
 
