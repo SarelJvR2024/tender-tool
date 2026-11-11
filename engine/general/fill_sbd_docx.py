@@ -54,6 +54,8 @@ import sys
 import re
 import datetime
 import docx
+from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
 
 # provenance.py lives in engine/, one level up from engine/general/ - this
 # stays its own importer (Sarel's scope-guard principle: a template family's
@@ -245,6 +247,25 @@ def _all_paragraphs(doc):
         for row in t.rows:
             for c in _distinct_cells(row):
                 yield from c.paragraphs
+    # Finding 438: some buyers' real editions put a form's signature block
+    # inside a Word text box/drawing shape instead of the main body flow -
+    # confirmed real on RAF's own currently-downloaded SBD 6.1
+    # ("SIGNATURE(S) OF TENDERER(S)" / "SURNAME AND NAME:" / "ADDRESS:" all
+    # live inside a <w:txbxContent> rectangle shape, not a body paragraph or
+    # table cell). python-docx's own doc.paragraphs/table.cell.paragraphs
+    # never walks into a <w:txbxContent> at all, so every writer above that
+    # only reads _all_paragraphs() silently treated a label genuinely
+    # present in that buyer's own edition as "not found in this edition -
+    # fill by hand" (a false negative, not an honest "this buyer really has
+    # no such field" - the field is right there, just inside a drawing
+    # shape). Wrapping each txbxContent's own <w:p> elements in a real
+    # Paragraph (parent=doc; confirmed round-trips correctly through
+    # .text/.runs/add_run()/save()+reload) lets every existing label/blank-
+    # run matcher above see and fill it with zero change to any matcher's
+    # own logic - this only widens what paragraphs they're offered.
+    for txbx in doc.element.body.findall(".//" + qn("w:txbxContent")):
+        for p in txbx.findall(qn("w:p")):
+            yield Paragraph(p, doc)
 
 
 def answer_yes_no(doc, question_re, answer):
