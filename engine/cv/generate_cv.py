@@ -632,10 +632,24 @@ def _footer(d, comp):
     # and the one just above calling into this function were the two left
     # unguarded in generate_cv.py itself, the file every other control-
     # character fix this session imports _safe_text() FROM.
+    #
+    # Standing review, 2026-11-11 (Finding 374): that fix stripped control
+    # characters but never asked what happens when they were ALL the value
+    # had - a legal_name that is nothing but a stray control byte (the exact
+    # "OCR/paste corruption" shape engine/narrative/build_docx.py's own
+    # subtitle crash (Finding 367) already found, just here instead)
+    # sanitizes down to "", and python-docx's own add_paragraph("") creates
+    # a paragraph with ZERO runs - so the very next line, reaching for
+    # p.runs[0] to italicise it, raised IndexError and failed the whole CV
+    # build. legal_name is NOT NULL in the schema, but nothing stops it
+    # being a single control character end to end. Only style the paragraph
+    # once sanitizing has left a real run to style - same fix shape recorded
+    # for build_docx.py's own subtitle.
     d.add_paragraph()
     p = d.add_paragraph(_safe_text(comp.get("legal_name", "")))
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.runs[0].italic = True
+    if p.runs:
+        p.runs[0].italic = True
 
 
 # ============================================================================
