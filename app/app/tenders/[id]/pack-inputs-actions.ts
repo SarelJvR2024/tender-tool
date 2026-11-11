@@ -244,6 +244,18 @@ export async function uploadTenderTemplate(formData: FormData) {
   });
   if (error) {
     console.error("record_tender_document rpc failed", error);
+    // Finding 423: the file above already made it into the tender-documents
+    // bucket at `storagePath` - if record_tender_document() then fails (a
+    // transient error, or its own "start a pack before uploading templates"/
+    // tender-not-found checks, each reachable independently of this upload
+    // itself having succeeded), nothing else in this repo ever points at or
+    // sweeps that object again: orphaned in storage forever. Same
+    // clean-up-on-failure discipline every other upload-then-insert action in
+    // this codebase already follows (e.g. people/actions.ts's uploadCv(),
+    // Finding 422) - this file's own template upload never picked it up,
+    // because it isn't named `actions.ts` and so sat outside that sweep's own
+    // file glob.
+    await supabase.storage.from(TENDER_TEMPLATE_BUCKET).remove([storagePath]);
     fail("Could not save this template - try again. If it keeps happening, let us know.");
   }
 
