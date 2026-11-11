@@ -177,6 +177,21 @@ export function checkPlan(plan: SubcontractingPlan | null, applies?: B7Applicabi
     if (!te.in_project_province) {
       warnings.push(`${who}: "Is the TE based in the province of the project?" not answered - the form's local sub-target then counts it as 0%`);
     }
+    // QA pass, 2026-11-11: parsePlan()/fill_b7()'s Python twin write head_office/
+    // consulting_engineering_firm/tax_reference into the real Form B7 exactly
+    // like in_project_province above (null when blank/unanswered), but unlike
+    // in_project_province nothing ever warned when these three were left blank -
+    // see engine/sanral_b7.py's own identical fix, same pass, for the full
+    // finding (the template asks for all three just as explicitly).
+    if (!(te.head_office ?? "").trim()) {
+      warnings.push(`${who}: location of head office (and other offices, if any) not given - SANRAL's Form B7 asks for it`);
+    }
+    if (!te.consulting_engineering_firm) {
+      warnings.push(`${who}: "Is the Targeted Enterprise a Consulting Engineering Firm as stated in the Conditions of Contract...?" not answered`);
+    }
+    if (!(te.tax_reference ?? "").trim()) {
+      warnings.push(`${who}: SARS Tax Reference Number not given - SANRAL's Form B7 asks for it, with a current Tax Clearance Certificate as proof`);
+    }
   });
   const fmt = (n: number) => `${Math.round(n * 1000) / 1000}`;
   if (tes.length > 0 && applies?.needsPlan && total < B7_POLICY_MIN_PCT) {

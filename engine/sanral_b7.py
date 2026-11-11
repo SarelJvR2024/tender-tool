@@ -207,6 +207,29 @@ def check_plan(plan, applies=None):
         if not str(te.get("in_project_province") or "").strip():
             warnings.append(f"{who}: \"Is the TE based in the province of the project?\" not answered - the form's "
                             "local sub-target then counts it as 0%")
+        # QA pass, 2026-11-11: fill_b7() writes head_office/consulting_engineering_
+        # firm/tax_reference into the real Form B7 exactly like in_project_province
+        # (None when blank/unanswered) - but, unlike in_project_province two lines
+        # above, nothing ever warned when THESE three were left blank, even though
+        # the template asks for all three just as explicitly (SETUP/TEND 1X's own
+        # labels: "Location of Head Office and other offices...", "Is the
+        # Targeted Enterprise a Consulting Engineering Firm...", "Provide SARS Tax
+        # Reference Number... Attach scanned copy of current valid Tax Clearance
+        # Certificate as proof"). A real submission could reach SANRAL with any of
+        # these three blank and nothing anywhere - not this check, not
+        # field_provenance (fill_b7() never logs at all) - ever told the company.
+        # Warnings only (not errors): SANRAL's own form never states a hard
+        # pass/fail consequence for leaving them blank, unlike the mandatory name/
+        # size/percentage/BEE-level fields check_plan() already errors on above.
+        if not (te.get("head_office") or "").strip():
+            warnings.append(f"{who}: location of head office (and other offices, if any) not given - "
+                            "SANRAL's Form B7 asks for it")
+        if not str(te.get("consulting_engineering_firm") or "").strip():
+            warnings.append(f"{who}: \"Is the Targeted Enterprise a Consulting Engineering Firm as stated in the "
+                            "Conditions of Contract...?\" not answered")
+        if not (te.get("tax_reference") or "").strip():
+            warnings.append(f"{who}: SARS Tax Reference Number not given - SANRAL's Form B7 asks for it, with a "
+                            "current Tax Clearance Certificate as proof")
     if tes and (applies or {}).get("needs_plan") and total < POLICY_MIN_PCT:
         warnings.append(f"Targeted Enterprises total {total:g}% of the contract price (excl. provisional sums) - below "
                         f"SANRAL's {POLICY_MIN_PCT}% minimum; the form will show NOT ACCEPTABLE")
