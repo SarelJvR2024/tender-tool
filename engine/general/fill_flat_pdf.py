@@ -163,7 +163,7 @@ FORMS = {
             {"key": "sbd4.company_registration_number", "label": r"Company\s*Registration\s*Number:?", "v": "cipc_registration_number"},
             {"key": "sbd4.tax_reference_number", "label": r"Tax\s*Reference\s*Number:?", "v": "income_tax_number"},
             {"key": "sbd4.vat_registration_number", "label": r"VAT\s*Registration\s*Number:?", "v": "vat_number"},
-            # Finding 391: the real, live SALB SBD4 edition (templates/general_samples/
+            # Finding 392: the real, live SALB SBD4 edition (templates/general_samples/
             # salb_15-10-2026/SBD4.pdf) phrases the general declaration "I,
             # ................., the undersigned, in submitting the accompanying
             # bid..." - the signatory's name comes BEFORE "the undersigned", not
