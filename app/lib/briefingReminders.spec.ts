@@ -2,13 +2,37 @@ import { describe, expect, it } from "vitest";
 import { briefingReminderCandidates, briefingThresholdFor, BRIEFING_REMINDER_EXCLUDED_STAGES, type BriefingReminderTenderRow } from "./briefingReminders";
 
 describe("briefingThresholdFor", () => {
-  it("matches exactly 5 days and 1 day (24 hours), nothing else", () => {
+  it("matches the full 5-day window down to just above 1 day", () => {
     expect(briefingThresholdFor(5)).toBe(5);
+    expect(briefingThresholdFor(4)).toBe(5);
+    expect(briefingThresholdFor(3)).toBe(5);
+    expect(briefingThresholdFor(2)).toBe(5);
+  });
+
+  it("matches the 1-day (24 hour) window", () => {
     expect(briefingThresholdFor(1)).toBe(1);
-    expect(briefingThresholdFor(4)).toBeNull();
-    expect(briefingThresholdFor(0)).toBeNull();
+  });
+
+  it("stays out of scope above the 5-day window, at/below the briefing itself, and for a stale negative value", () => {
     expect(briefingThresholdFor(14)).toBeNull();
+    expect(briefingThresholdFor(6)).toBeNull();
+    expect(briefingThresholdFor(0)).toBeNull();
     expect(briefingThresholdFor(-1)).toBeNull();
+  });
+
+  // QA Finding 404 (2026-11-11): pre-fix, this was a bare
+  // `[5, 1].includes(daysLeft)` exact match - a GitHub Actions cron run
+  // that skipped or ran late on the one calendar day daysLeft was exactly
+  // 5 (e.g. caught up a day late, at daysLeft=4) lost that tender/
+  // company's briefing-session warning for good, since no later day's
+  // daysLeft could ever match either threshold again. The dedupe key
+  // (`record_operational_alert_sent()`, migration 0092) is
+  // `alert_type, tender_id, company_id, threshold_key` where threshold_key
+  // is the THRESHOLD ("5"/"1"), not daysLeft, so widening this window to a
+  // catch-up range changes nothing about send frequency - still exactly
+  // one email per (tender, company, threshold) ever.
+  it("catches up a missed cron run - a day-late send at daysLeft=4 still resolves to the 5-day threshold, not nothing", () => {
+    expect(briefingThresholdFor(4)).toBe(5);
   });
 });
 
@@ -34,7 +58,12 @@ describe("briefingReminderCandidates", () => {
   });
 
   it("off-threshold day counts yield nothing", () => {
-    expect(briefingReminderCandidates([tender], () => 3)).toEqual([]);
+    expect(briefingReminderCandidates([tender], () => 14)).toEqual([]);
+  });
+
+  it("a day inside the 5-day catch-up window still yields a candidate at threshold 5 (QA Finding 404)", () => {
+    const candidates = briefingReminderCandidates([tender], () => 3);
+    expect(candidates.every((c) => c.daysLeft === 3 && c.threshold === 5)).toBe(true);
   });
 
   it("a tender with no tracking company yields no candidates", () => {

@@ -1,6 +1,6 @@
 // Pure threshold logic for the briefing-session countdown alert
 // (Operational Notification Engine) - "5 days and 24 hours prior", same
-// exact-day-match + per-company-fanout shape as lib/deadlineReminders.ts's
+// bounded-range + per-company-fanout shape as lib/deadlineReminders.ts's
 // own closing-date reminder (including the same QA fix: a tender is the
 // shared/public table, tender_packs is unique(company_id, tender_id) not
 // unique(tender_id), so more than one company routinely tracks the same
@@ -18,8 +18,38 @@
 export const BRIEFING_REMINDER_THRESHOLD_DAYS = [5, 1] as const; // 1 day = "24 hours"
 export type BriefingReminderThresholdDays = (typeof BRIEFING_REMINDER_THRESHOLD_DAYS)[number];
 
+/**
+ * Which briefing-reminder threshold, if any, daysLeft is due for right now
+ * - a bounded RANGE per threshold, not an exact calendar-day match (QA
+ * Finding 404, 2026-11-11). This function's own header previously claimed
+ * an exact `[5, 1].includes(daysLeft)` match "fires once per tender" - the
+ * identical misconception Findings 387/401/403 already debunked for their
+ * own sibling threshold functions: firing-once is guaranteed by
+ * `record_operational_alert_sent()`'s own dedupe key (migration 0092:
+ * `alert_type, tender_id, company_id, threshold_key`, where
+ * `threshold_key` is the THRESHOLD itself - `String(threshold)`, i.e. "5"
+ * or "1" - not `daysLeft`; confirmed by reading `scripts/send-operational-
+ * alerts.ts`'s own `claim()` call site), not by the match being exact.
+ * `scripts/send-operational-alerts.ts` runs once a day via a GitHub
+ * Actions cron (`.github/workflows/operational-alerts.yml`), and scheduled
+ * workflows are documented to occasionally skip or run late - if that
+ * happens on the one calendar day a tender's `daysLeft` was exactly 5 or
+ * exactly 1, that tender/company's briefing-session warning was lost for
+ * good: the compulsory pre-bid briefing this reminder exists for cannot be
+ * attended after the fact, unlike a closing-date or clarification-window
+ * reminder where the underlying deadline is still ahead on a later day.
+ * Same fix pattern as `lib/trialLifecycle.ts`'s `trialDay7Candidates()`
+ * (387), `lib/clarificationWindowReminders.ts`'s `clarificationThresholdFor()`
+ * (401) and `lib/deadlineReminders.ts`'s `reminderThresholdFor()` (403) -
+ * the 5-day window is floored just above the 1-day window so the two never
+ * compete for the same day; the 1-day window is floored at 0 so a briefing
+ * already today or past stays out of scope, matching the original exact
+ * match's own scope (it never matched 0 or a negative number either).
+ */
 export function briefingThresholdFor(daysLeft: number): BriefingReminderThresholdDays | null {
-  return (BRIEFING_REMINDER_THRESHOLD_DAYS as readonly number[]).includes(daysLeft) ? (daysLeft as BriefingReminderThresholdDays) : null;
+  if (daysLeft <= 5 && daysLeft > 1) return 5;
+  if (daysLeft <= 1 && daysLeft > 0) return 1;
+  return null;
 }
 
 export type BriefingReminderTenderRow = {
