@@ -147,6 +147,54 @@ check("the real en dash (–) is on the printed page, not a '?' placeholder",
 check("no '?' placeholder leaked into the printed page in place of the real punctuation",
       "?" not in page_text, repr(page_text))
 
+# ----------------------------------------------------------------------------
+# Standing solution-architect review, 2026-11-11: FORMS["4"]'s default
+# pages_after (2, a 3-page scan window) was one page too few for the real,
+# committed Overberg District Municipality Q12-2026 edition of MBD4, which
+# genuinely runs 4 pages - its own signature-block footer caption ("Capacity
+# ... Name of Bidder") sits on the 4th page, never reached, so both
+# sbd4.name_of_bidder_footer and sbd4.designation_footer came back
+# "not_found" ("label not on this edition") rather than "missing". Because
+# build_general_pack.py's own _log_overlay() treats "not_found" exactly like
+# "prefilled" (the buyer already printed it - nothing for the company to do)
+# and silently skips logging it, this real declaration's own
+# Capacity/Name-of-Bidder footer shipped completely blank on the real,
+# committed document with ZERO signal anywhere - no field_provenance entry
+# at all - that a human needed to fill it in by hand before signing.
+# Against the real, committed sample itself, not a synthetic fixture.
+# ----------------------------------------------------------------------------
+REAL_SAMPLES_DIR = os.path.join(HERE, "..", "..", "templates", "general_samples")
+OVERBERG_PDF = os.path.join(REAL_SAMPLES_DIR, "overberg_q12", "Q12-2026 Bid Doc.pdf")
+
+if os.path.exists(OVERBERG_PDF):
+    real_ctx = {
+        "company": {"legal_name": "Test Co (Pty) Ltd"},
+        "signatory": {"name": "Jane Signatory", "capacity": "Director"},
+        "answers": {}, "tender": {},
+    }
+    real_out = os.path.join(TMP, "overberg_sbd4.pdf")
+    real_report = ffp.fill_flat_pdf(OVERBERG_PDF, real_out, real_ctx, ["4"])
+    real_fields = real_report["forms"]["4"]["fields"]
+    name_footer = real_fields.get("sbd4.name_of_bidder_footer")
+    designation_footer = real_fields.get("sbd4.designation_footer")
+    check("the real MBD4 edition's 4th page is now scanned, so the footer caption is found "
+          "(was 'not_found' before this fix - confirmed by reverting pages_after to the old default)",
+          name_footer is not None and name_footer["status"] == "placed", name_footer)
+    check("the real signatory's legal name is the value actually placed into the footer",
+          name_footer is not None and name_footer.get("value") == "Test Co (Pty) Ltd", name_footer)
+    check("the Designation/Capacity footer caption is found and placed too",
+          designation_footer is not None and designation_footer["status"] == "placed", designation_footer)
+    check("the real signatory's capacity is the value actually placed",
+          designation_footer is not None and designation_footer.get("value") == "Director", designation_footer)
+    # Control: every OTHER field this same form places on this real document
+    # must be completely unaffected by widening the scan window - this fix
+    # must not cause a different field to be found on, or placed onto, a
+    # newly-reachable later page it was never meant to touch.
+    check("the earlier, already-working fields on this document are unaffected (still placed on page 27)",
+          real_fields.get("sbd4.registered_name", {}).get("page") == 27, real_fields.get("sbd4.registered_name"))
+else:
+    check("real Overberg Q12-2026 sample is on disk to test against", False, OVERBERG_PDF)
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)
