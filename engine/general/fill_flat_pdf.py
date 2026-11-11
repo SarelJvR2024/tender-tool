@@ -151,6 +151,30 @@ FORMS = {
         "page": [r"DECLARATION\s+OF\s+INTEREST|BIDDER.?S\s+DISCLOSURE"],
         "needs": [r"Identity\s+Number|Full\s+Name|Registered\s+name|Position\s+occupied|Name\s+of\s+bidder"],
         "scope": (None, None),
+        # Standing solution-architect review, 2026-11-11: the default
+        # pages_after (2, giving a 3-page scan window: start, start+1,
+        # start+2) is one page too few for this real, committed buyer
+        # edition - Overberg District Municipality's Q12-2026 MBD4 genuinely
+        # runs 4 pages (its own table of contents states "27 - 30"), and the
+        # signature-block footer caption ("Capacity ... Name of Bidder") sits
+        # on the 4th page, confirmed directly via pdftotext and PageModel
+        # (page 30 of the real PDF). Without this override, that page was
+        # never scanned at all, so sbd4.name_of_bidder_footer/
+        # designation_footer both came back "not_found" ("label not on this
+        # edition") rather than "missing" - and build_general_pack.py's own
+        # _log_overlay() treats "not_found" exactly like "prefilled" (nothing
+        # for the company to do), so this real general-tender MBD4
+        # declaration's own Capacity/Name-of-Bidder footer shipped completely
+        # blank with ZERO signal anywhere (no field_provenance entry at all,
+        # confirmed vs missing or otherwise) that a human needed to fill it
+        # in by hand before signing. Confirmed this does not change ANY
+        # field's outcome on the other 3 real samples that use this form as
+        # a flat PDF (SALB, Dawid Kruiper TN051, ECDPWI SCMU5-26/27-0007SB) -
+        # each already finds its own footer within the default window, and
+        # `end` is still correctly capped by the next form's own start page
+        # when one exists, so widening this only ever extends the scan on an
+        # edition that genuinely needs it.
+        "pages_after": 3,
         "fields": [
             {"key": "sbd4.registered_name", "label": r"Registered\s+name\s+of\s+supplier", "v": "legal_name"},
             {"key": "sbd4.representative_full_name",
