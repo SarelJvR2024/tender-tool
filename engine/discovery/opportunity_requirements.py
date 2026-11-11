@@ -152,15 +152,32 @@ def classify_release(client, release_key, log=print):
                 # transient error). Distinct from "every downloaded file is a
                 # PDF" below: say so honestly, and keep the real error instead
                 # of letting it vanish past this early return.
+                #
+                # Finding 408: route must be None here, NOT "general". The
+                # sibling "else" branch below can honestly conclude "general"
+                # because NO classifiable-extension file exists at all among
+                # what downloaded - there is no possible SANRAL workbook to
+                # have missed. Here the opposite is true: a classifiable file
+                # (.xlsm/.xlsx/.docx - could genuinely BE the SANRAL workbook)
+                # DOES exist, we just couldn't open it this run. classify_
+                # documents() was never actually called, so there is no basis
+                # to call this "general" - that previously fed a false "+15:
+                # requirements extraction ran and classified this as a general
+                # (non-SANRAL) tender" into compileReadiness.assessCompile
+                # Confidence() for a release nothing was ever classified for.
+                # Same honest-null precedent as the "every download failed"
+                # branch above.
                 signal = (f"{len(fetch_errors)} of {len(downloaded)} downloaded document(s) looked like a "
-                          "workbook or .docx form, but couldn't be re-fetched from storage just now - see "
-                          "unreadable_documents.")
+                          "workbook or .docx form, but couldn't be re-fetched from storage just now - route "
+                          "is unknown, not general - see unreadable_documents.")
+                route = None
             else:
                 signal = (f"{len(downloaded)} document(s) downloaded, none of them a workbook or .docx form "
                           "classify_documents() can look inside (PDFs, mostly) - nothing to route on yet.")
+                route = "general"
             return {
                 "release_key": release_key, "source": source, "buyer": buyer,
-                "route": "general", "family": None,
+                "route": route, "family": None,
                 "signal": signal,
                 "required_documents": [], "missing": [], "fingerprint_status": None,
                 "unreadable_documents": [f"(storage fetch failed) {e}" for e in fetch_errors],
