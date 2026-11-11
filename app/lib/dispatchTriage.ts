@@ -35,7 +35,14 @@ export type DispatchStatus = "not_ready" | "compiling" | "print_ready" | "printe
 export type DispatchBucket = "critical" | "decision" | "in_progress" | "radar";
 export type DecisionNeeded = "attend_briefing" | "director_resolution" | "none";
 
-const DISPATCHED_STATUSES: DispatchStatus[] = ["printed_and_bound", "out_for_delivery", "submitted_and_receipted"];
+// Exported (Finding 405) so lib/printCutoffReminders.ts's own candidate
+// selection - the real cron-driven email send, a third consumer of this
+// same dispatch_status fact alongside classifyDispatchBucket()'s
+// notYetDispatched guard and operationalStatusMessage()'s own (Finding 352)
+// - can check it too, instead of re-deriving a second copy of this list
+// that could silently drift from this one, the same "never a second number
+// that could disagree" rule this module's own header already states.
+export const DISPATCHED_STATUSES: DispatchStatus[] = ["printed_and_bound", "out_for_delivery", "submitted_and_receipted"];
 // Standing review, 2026-11-09: was missing 'briefing_shortlisted' (0105,
 // PR #173 - a real stage reached only FROM 'submitted', per lib/pipeline.ts's
 // own PREVIOUS_STAGE), unlike every one of its 7+ sibling "already closed

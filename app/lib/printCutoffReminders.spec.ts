@@ -46,6 +46,15 @@ describe("printCutoffCandidates", () => {
     expect(printCutoffCandidates([pack({ pipeline_stage: "lost" })], tendersById, now)).toEqual([]);
   });
 
+  it("never fires once the pack has already been dispatched (Finding 405) - a pipeline_stage still open is not enough on its own", () => {
+    const now = new Date("2026-11-10T05:00:00+02:00"); // well inside the 48h window on the raw date math
+    expect(printCutoffCandidates([pack({ dispatch_status: "printed_and_bound" })], tendersById, now)).toEqual([]);
+    expect(printCutoffCandidates([pack({ dispatch_status: "out_for_delivery" })], tendersById, now)).toEqual([]);
+    expect(printCutoffCandidates([pack({ dispatch_status: "submitted_and_receipted" })], tendersById, now)).toEqual([]);
+    // Sanity: the same pack, same hoursLeft, still fires while genuinely not yet dispatched.
+    expect(printCutoffCandidates([pack({ dispatch_status: "print_ready" })], tendersById, now)).toHaveLength(1);
+  });
+
   it("a pack whose tender isn't in the map (deleted/unjoined) is skipped, not a crash", () => {
     const now = new Date("2026-11-10T11:00:00+02:00");
     expect(printCutoffCandidates([pack({ tender_id: "missing" })], tendersById, now)).toEqual([]);
