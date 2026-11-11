@@ -17,9 +17,36 @@ export const DEADLINE_WINDOW_DAYS = 14;
 export const REMINDER_THRESHOLD_DAYS = [3, 1] as const; // 1 day = "24 hours"
 export type ReminderThresholdDays = (typeof REMINDER_THRESHOLD_DAYS)[number];
 
-/** Whether daysLeft exactly matches one of the two reminder thresholds - never "within", always an exact calendar-day match, so each threshold fires once per tender (see sent_deadline_reminders' own unique constraint for the actual dedupe). */
+/**
+ * Which reminder threshold, if any, daysLeft is due for right now - a
+ * bounded RANGE per threshold, not an exact calendar-day match (QA Finding
+ * 403, 2026-11-11): this file's own header comment, and the pre-fix version
+ * of this function, previously justified an exact match with "so each
+ * threshold fires once per tender" - but that's actually guaranteed by
+ * `record_deadline_reminder_sent()`'s own dedupe key (`tender_id,
+ * company_id, threshold_days` - migration 0080), which has no day/date
+ * component at all. The one-time claim, not this match, is what prevents a
+ * double-send - so an exact match bought no correctness and was only an
+ * unnecessary single point of failure: scripts/send-deadline-reminders.ts
+ * runs once a day via a GitHub Actions cron
+ * (.github/workflows/deadline-reminders.yml), and scheduled workflows are
+ * documented to occasionally skip or run late - if that happens on the one
+ * calendar day a tender's daysLeft was exactly 3 or exactly 1, that
+ * tender/company's "closing in 3 days"/"24 hours" warning was lost for
+ * good, with no way to ever catch up, since every later day's daysLeft is a
+ * different integer matching neither threshold. Same shape, same fix
+ * pattern, as `lib/trialLifecycle.ts`'s `trialDay7Candidates()` (Finding
+ * 387) and `lib/clarificationWindowReminders.ts`'s
+ * `clarificationThresholdFor()` (Finding 401) - the 3-day window is floored
+ * just above the 1-day window so the two never compete for the same day;
+ * the 1-day window is floored at 0 so a tender already closing today or
+ * overdue stays out of scope, matching the original exact match's own
+ * scope (it never matched 0 or a negative number either).
+ */
 export function reminderThresholdFor(daysLeft: number): ReminderThresholdDays | null {
-  return (REMINDER_THRESHOLD_DAYS as readonly number[]).includes(daysLeft) ? (daysLeft as ReminderThresholdDays) : null;
+  if (daysLeft <= 3 && daysLeft > 1) return 3;
+  if (daysLeft <= 1 && daysLeft > 0) return 1;
+  return null;
 }
 
 export type DeadlineReminderTenderRow = {

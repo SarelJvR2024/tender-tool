@@ -2,12 +2,30 @@ import { describe, expect, it } from "vitest";
 import { deadlineReminderCandidates, reminderThresholdFor, DEADLINE_REMINDER_EXCLUDED_STAGES, type DeadlineReminderTenderRow } from "./deadlineReminders";
 
 describe("reminderThresholdFor", () => {
-  it("matches exactly 3 days and 1 day (24 hours), nothing else", () => {
+  it("matches 3 days and 1 day (24 hours) exactly", () => {
     expect(reminderThresholdFor(3)).toBe(3);
     expect(reminderThresholdFor(1)).toBe(1);
-    expect(reminderThresholdFor(2)).toBeNull();
-    expect(reminderThresholdFor(0)).toBeNull();
+  });
+
+  // QA Finding 403, 2026-11-11: pre-fix, this matched ONLY 3 or ONLY 1 -
+  // daysLeft===2 (between the two thresholds) got nothing, so a cron run
+  // (scripts/send-deadline-reminders.ts) missed or delayed on exactly the
+  // day a tender's countdown hit 3 permanently lost that tender/company's
+  // "closing in 3 days" warning: the very next day's daysLeft (2) matched no
+  // threshold at all, and every day after that only moves further away.
+  // Same shape/fix as lib/trialLifecycle.ts's trialDay7Candidates()
+  // (Finding 387) and lib/clarificationWindowReminders.ts's
+  // clarificationThresholdFor() (Finding 401) - safe to widen with no
+  // change to send frequency, since record_deadline_reminder_sent()'s own
+  // dedupe key (migration 0080) has no day/date component.
+  it("catches up a missed/late run: daysLeft=2 (between the thresholds) now resolves to the 3-day threshold, not nothing", () => {
+    expect(reminderThresholdFor(2)).toBe(3);
+  });
+
+  it("still does not fire outside the two windows", () => {
+    expect(reminderThresholdFor(0)).toBeNull(); // closing today/overdue - out of scope, same as pre-fix
     expect(reminderThresholdFor(14)).toBeNull();
+    expect(reminderThresholdFor(4)).toBeNull(); // just above the 3-day window's own floor-less upper bound
     expect(reminderThresholdFor(-1)).toBeNull();
   });
 });
@@ -66,5 +84,15 @@ describe("deadlineReminderCandidates", () => {
       const active: DeadlineReminderTenderRow = { ...tender, id: `tender-${stage}`, tender_packs: [{ company_id: "company-a", pipeline_stage: stage }] };
       expect(deadlineReminderCandidates([active], daysUntilFn)).toHaveLength(1);
     }
+  });
+
+  // QA Finding 403: a missed/late cron run on the exact day daysLeft hit 3
+  // used to permanently lose that candidate - daysLeft=2 the next day
+  // matched neither threshold. Now it still produces a (threshold 3)
+  // candidate, catching the run up instead of silently dropping it forever.
+  it("catches up a missed run at the candidate level: daysLeft=2 still yields a threshold-3 candidate", () => {
+    const candidates = deadlineReminderCandidates([tender], () => 2);
+    expect(candidates.map((c) => c.companyId).sort()).toEqual(["company-a", "company-b"]);
+    expect(candidates.every((c) => c.daysLeft === 2 && c.threshold === 3)).toBe(true);
   });
 });

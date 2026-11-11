@@ -44,7 +44,20 @@ export function deadlineReminderEmail(opts: {
 }): { subject: string; html: string; text: string } {
   const urgent = opts.daysLeft <= 1;
   const whenText = opts.daysLeft <= 0 ? "closes today" : opts.daysLeft === 1 ? "closes tomorrow (within 24 hours)" : `closes in ${opts.daysLeft} days`;
-  const subject = urgent ? `Closing in 24 hours: ${opts.contractLabel}` : `Closing in 3 days: ${opts.contractLabel}`;
+  // Driven by the real daysLeft, not by which threshold fired - QA Finding
+  // 403: lib/deadlineReminders.ts's reminderThresholdFor() now matches a
+  // bounded RANGE per threshold (a missed-cron-run catch-up), not only
+  // exactly 3 or exactly 1, so a send for the "3-day" threshold can genuinely
+  // happen with daysLeft=2 (catching up a skipped run). A subject hardcoded
+  // to "Closing in 3 days" would then overstate how much time is actually
+  // left - the same "stale hardcoded day claim" class Finding 387 fixed for
+  // trialDay7MilestoneEmail() once that function could likewise fire on more
+  // than one day.
+  const subject = opts.daysLeft <= 0
+    ? `Closing today: ${opts.contractLabel}`
+    : opts.daysLeft === 1
+    ? `Closing in 24 hours: ${opts.contractLabel}`
+    : `Closing in ${opts.daysLeft} days: ${opts.contractLabel}`;
   const html = layout(
     `
       <p style="margin:0 0 16px;">${pill(urgent ? "24H TO CLOSING" : "CLOSING SOON", urgent ? "urgent" : "warning")}</p>
