@@ -94,6 +94,19 @@
 
 ---
 
+## This pass (2026-11-11, standing QA/robustness review): worker/job-queue rotation - genuine negative, all 3 production files re-read end to end, nothing new found
+
+Rotation: worker/job-queue. All 3 `engine/worker/*.py` production files (`fake_supabase.py`, `poll_loop.py`, `run_bridges.py`) read fresh, end to end, looking specifically for the bug classes this session has repeatedly found elsewhere (a test mock more generous than real PostgREST/Supabase, an unguarded per-row loop that aborts a whole sweep on one bad row, a silently-dropped filter operator, a signal-handling/threading edge case). Nothing new confirmed:
+
+- `fake_supabase.py`'s `_parse_filters()` silently drops any filter operator other than `eq.`/`is.null` (no `else` branch) - checked every real call site in its own documented scope (`process_cv_jobs.py`, the only script this fake is ever used to test, confirmed by grep across `test_poll_loop.py`) and confirmed that file never uses any other operator, so this is unreached, not a live gap.
+- `run_bridges.py` - re-read in full against its own extensive dated comment history (2026-10-23 process-group timeout kill, 2026-11-03 Popen OSError isolation, 2026-11-08 UnicodeDecodeError isolation) - each already-fixed failure mode re-verified still fixed; no new unguarded failure mode found in `BridgeRunner.run_once()`'s per-bridge loop.
+- `poll_loop.py` - re-read in full; the `max_runtime`/fake-`sleep` interaction (Finding, 2026-11-06) and the main-thread-only signal-handler guard both re-verified correct; confirmed no caller ever runs `poll_forever()` off the main thread (every one of the 6 real bridges is its own standalone process, never a thread within a larger app).
+- `engine/worker/Dockerfile` - cross-checked its `COPY` list against what the 6 real bridges (`cv`/`cv_extract`/`pack`/`general`/`onboarding`/`narrative`) actually read, in both directions. No missing file found (the exact "silently absent in production" shape the 2026-10-17 fingerprints-baseline incident was). One loose end, not a bug: `config/discipline_taxonomy.json` is copied in but traced (by import graph) to be used only by `engine/discovery/taxonomy.py`'s own callers (`assess_tender.py`, `tender_enrichment.py`) - neither is one of the 6 bridges `run_bridges.py` drives, nor transitively imported by any of them. Harmless extra bytes in the image, not a missing-file risk; not worth a Finding.
+
+Backlog: unchanged - nothing here rose to a numbered Finding or a backlog item.
+
+---
+
 ## This pass (2026-11-11, standing solution-architect review): Finding 419, CONFIRMED and FIXED, pushed directly to `main` - full write-up in `QA-Edge-Case-Findings.md`'s Finding 419 entry, summarized here
 
 Oriented from `d35a710ff048889f1455e7d949e59984ad05bef9` (Finding 418's own commit, matching the task brief's own stated HEAD exactly). `git fetch origin main` re-confirmed clean both before drafting and again immediately before pushing - `main` unchanged at that same commit both times, no sibling-track collision. Re-read the standing items list (66 numbered items) and the exhausted-angles list before starting.
