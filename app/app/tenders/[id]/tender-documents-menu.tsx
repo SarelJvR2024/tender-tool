@@ -4,9 +4,10 @@ import Link from "next/link";
 import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { hasRealHref, type PrivateDocEntry } from "./tender-documents-menu-logic";
 
 export type DocUrlEntry = { url: string; title: string | null };
-export type PrivateDocEntry = { id: string; title: string; href: string | null };
+export type { PrivateDocEntry };
 
 /**
  * Tender Workspace header's own document quick-access (Sarel's "Master
@@ -61,19 +62,38 @@ export function TenderDocumentsMenu({
                   </div>
                 </a>
               ))}
-              {privateDocs.map((d) => (
-                <a
-                  key={d.id}
-                  href={d.href ?? "#"}
-                  className="flex items-start gap-3 border-b border-border px-4 py-3 text-inherit no-underline last:border-b-0 hover:bg-muted/50"
-                >
-                  <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground">{d.title}</div>
-                    <div className="text-xs text-muted-foreground">Your private copy - only your company sees this</div>
+              {privateDocs.map((d) => {
+                const rowContent = (
+                  <>
+                    <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium text-foreground">{d.title}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {hasRealHref(d)
+                          ? "Your private copy - only your company sees this"
+                          : "Your private copy - link unavailable right now, try refreshing"}
+                      </div>
+                    </div>
+                  </>
+                );
+                // Finding 433: a missing signed URL must render as plain,
+                // unlinked text (same fallback private-documents.tsx's own
+                // identical data already uses), never a clickable `href="#"`
+                // row that looks actionable but silently does nothing.
+                return hasRealHref(d) ? (
+                  <a
+                    key={d.id}
+                    href={d.href!}
+                    className="flex items-start gap-3 border-b border-border px-4 py-3 text-inherit no-underline last:border-b-0 hover:bg-muted/50"
+                  >
+                    {rowContent}
+                  </a>
+                ) : (
+                  <div key={d.id} className="flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0">
+                    {rowContent}
                   </div>
-                </a>
-              ))}
+                );
+              })}
             </>
           )}
         </div>

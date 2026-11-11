@@ -51,11 +51,13 @@ function makeChain(queue: Resp[], insertCalls?: unknown[]) {
   return chain;
 }
 
-function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
+function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = [], storageOpts?: { uploadError?: { message: string } | null }) {
   let fromCallIndex = 0;
   let rpcCallIndex = 0;
   const rpcCalls: { name: string; params: unknown }[] = [];
   const insertCalls: unknown[] = [];
+  const uploadCalls: { bucket: string; path: string }[] = [];
+  const removeCalls: { bucket: string; paths: string[] }[] = [];
   return {
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from: () => {
@@ -73,8 +75,22 @@ function makeSupabase(fromQueues: Resp[][], rpcQueue: Resp[] = []) {
       rpcCallIndex += 1;
       return next;
     },
+    storage: {
+      from: (bucket: string) => ({
+        upload: async (path: string) => {
+          uploadCalls.push({ bucket, path });
+          return { data: { path }, error: storageOpts?.uploadError ?? null };
+        },
+        remove: async (paths: string[]) => {
+          removeCalls.push({ bucket, paths });
+          return { data: null, error: null };
+        },
+      }),
+    },
     rpcCalls,
     insertCalls,
+    uploadCalls,
+    removeCalls,
   };
 }
 
@@ -160,10 +176,15 @@ describe("saveMyDetails - real update still succeeds", () => {
   });
 });
 
+// Finding 432: must be one of lib/cvExtraction.ts's own ECSA_LEVELS strings
+// now that applyMyCvExtraction() validates "select"-kind fields the same
+// way its sibling applyCvExtraction() already does - "Pr Eng" (this
+// fixture's value before that fix) is not a real SANRAL dropdown label and
+// would now be refused.
 const EXTRACTION_FORM = {
   extraction_id: "extraction-1",
   use_ecsa_level: "on",
-  f_ecsa_level: "Pr Eng",
+  f_ecsa_level: "Professional Engineer",
 };
 
 // applyMyCvExtraction()'s own person-update-then-mark-applied sequence used
@@ -212,7 +233,7 @@ describe("applyMyCvExtraction - apply_my_cv_extraction_checked rpc succeeds", ()
     expect(supabase.rpcCalls).toHaveLength(1);
     expect(supabase.rpcCalls[0].name).toBe("apply_my_cv_extraction_checked");
     const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
-    expect(params.p_person_fields).toEqual({ ecsa_level: "Pr Eng" });
+    expect(params.p_person_fields).toEqual({ ecsa_level: "Professional Engineer" });
   });
 });
 
@@ -262,6 +283,121 @@ describe("applyMyCvExtraction - also queues the 4 standard CV formats on success
   });
 });
 
+// Finding 431: this function's own `fields` list used to be a hand-typed
+// subset of 10 keys instead of lib/cvExtraction.ts's canonical
+// EXTRACTED_PERSON_FIELDS (17) that app/app/people/actions.ts
+// applyCvExtraction() already uses for the identical review card on the full
+// People page - silently dropping 7 real fields extract_cv_fields.py
+// genuinely proposes (id_number, role, phone, email, initial_description,
+// initial_institution, initial_graduated), including initial_graduated,
+// which engine/pack_generator/confirm_pack.py hard-stops pack confirmation
+// on when missing for a key person.
+describe("applyMyCvExtraction - a field outside the old hand-typed 10-key subset is still saved (Finding 431)", () => {
+  it("passes initial_graduated (and other previously-dropped fields) through to the rpc call", async () => {
+    const supabase = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: [], error: null }], // queueStandardCvs' own "already queued?" check - nothing pending
+      ],
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(
+        formDataWith({
+          extraction_id: "extraction-1",
+          use_initial_graduated: "on",
+          f_initial_graduated: "2010-04-23",
+          use_role: "on",
+          f_role: "Project Leader",
+        }),
+      ),
+    );
+
+    expect(url).toBe("/my-cv?saved=extracted");
+    const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ initial_graduated: "2010-04-23", role: "Project Leader" });
+  });
+});
+
+// Finding 432 (standing solution-architect review, 2026-11-11): this
+// function had NO validation of any kind - not even the required-name/
+// ISO-date/select-options checks its sibling applyCvExtraction() already
+// has - so an employee retyping the id_number box this page's own review
+// card shows (a plain text input, not masked or constrained in any way
+// before this fix) could save a garbage value straight into people.id_number,
+// the same real-world column savePerson() (Finding 219) and now
+// applyCvExtraction() (Finding 432, above) are both gated on.
+describe("applyMyCvExtraction - id_number is validated via isValidSaId() (Finding 432)", () => {
+  it("refuses a ticked id_number that isn't a real South African ID number", async () => {
+    const supabase = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+    ]);
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(formDataWith({ extraction_id: "extraction-1", use_id_number: "on", f_id_number: "abc123def0123" })),
+    );
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("valid 13-digit South African ID number"));
+    expect(supabase.rpcCalls).toHaveLength(0);
+  });
+
+  it("still saves normally when the ticked id_number is genuinely valid", async () => {
+    const supabase = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: [], error: null }], // queueStandardCvs' own "already queued?" check - nothing pending
+      ],
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(formDataWith({ extraction_id: "extraction-1", use_id_number: "on", f_id_number: "8601205135087" })),
+    );
+
+    expect(url).toBe("/my-cv?saved=extracted");
+    const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ id_number: "8601205135087" });
+  });
+});
+
+// Finding 432: "select"-kind fields (ecsa_level/highest_level) must be one
+// of lib/cvExtraction.ts's own fixed option lists - SANRAL's real Form
+// B2.1 dropdown labels - the same check applyCvExtraction() already runs;
+// this function had none at all, and this page's own review card rendered
+// every field (select ones included) as a plain free-text input, so
+// nothing anywhere stopped an arbitrary string from reaching
+// people.ecsa_level, which engine/fill_conventional.py refuses outright
+// when it isn't one of those exact labels.
+describe("applyMyCvExtraction - a 'select'-kind field must be one of SANRAL's own options (Finding 432)", () => {
+  it("refuses an ecsa_level that isn't one of ECSA_LEVELS", async () => {
+    const supabase = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+    ]);
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(formDataWith({ extraction_id: "extraction-1", use_ecsa_level: "on", f_ecsa_level: "Pr Eng" })),
+    );
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("choose one of SANRAL's options"));
+    expect(supabase.rpcCalls).toHaveLength(0);
+  });
+});
+
 describe("applyMyCvExtraction - queueStandardCvs' own pending-check read fails", () => {
   it("reports failure instead of silently dropping the CV queue request", async () => {
     supabaseState.current = makeSupabase(
@@ -307,5 +443,36 @@ describe("discardMyCvExtraction - real update still succeeds", () => {
     const url = await expectRedirect(discardMyCvExtraction(formDataWith({ extraction_id: "extraction-1" })));
 
     expect(url).toBe("/my-cv");
+  });
+});
+
+// Finding 422: uploadMyCv()'s own header comment says it follows "the same
+// upload flow as app/app/people/actions.ts uploadCv" - including, until
+// now, that function's own gap. The file is uploaded to cv-documents
+// FIRST, then the cv_uploads row that records it is inserted; before this
+// fix, an insert failure there left the already-uploaded file orphaned in
+// Storage forever, instead of being cleaned up the way every other upload
+// action in this app already does.
+describe("uploadMyCv - cv_uploads insert fails after the file already uploaded (Finding 422)", () => {
+  it("removes the orphaned file from storage instead of leaving it there forever", async () => {
+    const supabase = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: null, error: { message: "insert failed" } }], // cv_uploads insert
+    ]);
+    supabaseState.current = supabase;
+
+    const { uploadMyCv } = await import("./actions");
+
+    const fd = new FormData();
+    fd.set("mode", "as_is");
+    fd.set("file", new File(["cv-bytes"], "cv.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(uploadMyCv(fd));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(supabase.uploadCalls).toHaveLength(1);
+    expect(supabase.uploadCalls[0].bucket).toBe("cv-documents");
+    expect(supabase.removeCalls).toHaveLength(1);
+    expect(supabase.removeCalls[0]).toEqual({ bucket: "cv-documents", paths: [supabase.uploadCalls[0].path] });
   });
 });

@@ -46,3 +46,36 @@ export function primaryActionLabel(stage: PipelineStage, packHealth: PackHealth 
   if (packHealth?.status === "not_started") return "Start workspace →";
   return "Continue workspace →";
 }
+
+// SAST is UTC+2 with no DST - the same fact lib/dates.ts's closingDayOf()
+// and lib/analyticsLogic.ts's monthKey() already rely on, duplicated here
+// as its own local constant rather than imported, matching this codebase's
+// own established convention for this exact shift (lib/analyticsLogic.ts,
+// lib/marketPricing.ts and lib/savingsCounterData.ts each keep their own
+// identical copy rather than sharing one).
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Finding 428 (2026-11-11): is `dateStr` (a `timestamptz` read back over
+ * PostgREST as a UTC ISO string, e.g. `tender_packs.submitted_at`) in the
+ * same calendar month as `now`, in real South African (SAST) time - never
+ * a naive `getUTCFullYear()`/`getUTCMonth()` comparison of the two raw,
+ * un-shifted UTC instants. The exact Finding 413/414/426 bug class
+ * (naive-UTC month anchoring), independently present at a 4th site: Bids
+ * board's own header-strip "Submitted this month" stat (app/pipeline/
+ * page.tsx) compared `d.getUTCFullYear()/getUTCMonth()` against
+ * `now.getUTCFullYear()/getUTCMonth()` directly, with no SAST shift at
+ * all. For the first ~2 hours of every real SAST calendar month (SAST
+ * 00:00-01:59, i.e. UTC 22:00-23:59 the prior day), `now`'s raw UTC month
+ * is still the PREVIOUS month, so the stat silently counted the previous
+ * month's submissions as "this month" instead of the real new month's
+ * (which should read 0 if nothing has been submitted yet). Confirmed live
+ * before this fix: at the real SAST instant 2026-12-01T00:30 (UTC
+ * 2026-11-30T22:30Z), a card submitted 2026-11-15 - plainly a November,
+ * not December, submission - was counted into "submitted this month".
+ */
+export function isSameSastMonth(dateStr: string, now: Date): boolean {
+  const d = new Date(new Date(dateStr).getTime() + SAST_OFFSET_MS);
+  const nowSast = new Date(now.getTime() + SAST_OFFSET_MS);
+  return d.getUTCFullYear() === nowSast.getUTCFullYear() && d.getUTCMonth() === nowSast.getUTCMonth();
+}

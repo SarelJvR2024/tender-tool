@@ -29,7 +29,7 @@ type Resp = { data: unknown; error: { message: string } | null };
 
 function makeChain(queue: Resp[]) {
   const chain: Record<string, unknown> = {};
-  const methods = ["select", "update", "eq", "upload"];
+  const methods = ["select", "update", "eq", "is", "upload"];
   for (const m of methods) chain[m] = () => chain;
   chain.maybeSingle = () => chain;
   (chain as { then: unknown }).then = (resolve: (r: Resp) => void) => {
@@ -193,6 +193,65 @@ describe("uploadCoidQuickFix - real membership, real save", () => {
     expect(res).toEqual({ ok: true });
     expect(removeCalls).toHaveLength(1);
     expect(removeCalls[0].paths).toEqual(["company-1/vault/coid/old.pdf"]);
+  });
+});
+
+// Finding 430 (standing review, 2026-11-11): this second, independent
+// direct-write entry point for coid_letter_document_path (the Tender
+// Workspace's own Quick Blocker Resolver drawer) never got the
+// vaultDocumentMismatchWarning() check company/actions.ts's own
+// uploadVaultDocument() already re-checks server-side for the exact same
+// column - the real 2026-10-28 misfiled-COID incident this check exists to
+// catch.
+describe("uploadCoidQuickFix - filename mismatch (Finding 430)", () => {
+  it("refuses a BBBEE-affidavit-shaped filename with no acknowledgement, and never touches storage or the companies row", async () => {
+    const { client, removeCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId - real membership
+      [{ data: { coid_letter_document_path: null }, error: null }], // existing read - none on file (must never be reached: the mismatch check comes first)
+      [{ data: { id: "company-1" }, error: null }], // companies update - would succeed if ever reached (must never be reached either)
+    ]);
+    supabaseState.current = client;
+
+    const { uploadCoidQuickFix } = await import("./vault-quick-fix-actions");
+
+    const file = new File(["x"], "BBBEE_Affidavit.docx", { type: "application/octet-stream" });
+    const res = await uploadCoidQuickFix("tender-1", "company-1", file);
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("B-BBEE Affidavit");
+    expect(removeCalls).toHaveLength(0);
+  });
+
+  it("uploads normally once the mismatch is acknowledged", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { coid_letter_document_path: null }, error: null }], // existing read - none on file
+      [{ data: { id: "company-1" }, error: null }], // companies update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { uploadCoidQuickFix } = await import("./vault-quick-fix-actions");
+
+    const file = new File(["x"], "BBBEE_Affidavit.docx", { type: "application/octet-stream" });
+    const res = await uploadCoidQuickFix("tender-1", "company-1", file, true);
+
+    expect(res).toEqual({ ok: true });
+  });
+
+  it("uploads normally, no acknowledgement needed, for a correctly-named COID letter", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { coid_letter_document_path: null }, error: null }], // existing read - none on file
+      [{ data: { id: "company-1" }, error: null }], // companies update - real match
+    ]);
+    supabaseState.current = client;
+
+    const { uploadCoidQuickFix } = await import("./vault-quick-fix-actions");
+
+    const file = new File(["x"], "COID_Letter_of_Good_Standing.pdf", { type: "application/pdf" });
+    const res = await uploadCoidQuickFix("tender-1", "company-1", file);
+
+    expect(res).toEqual({ ok: true });
   });
 });
 

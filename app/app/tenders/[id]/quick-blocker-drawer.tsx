@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { ACCEPTED_EXTENSIONS, MAX_ONBOARDING_FILE_BYTES, ONBOARDING_BUCKET, uploadPrefix } from "@/lib/onboardingScan";
+import { vaultDocumentMismatchWarning } from "@/lib/vaultDocuments";
 import { registerOnboardingBatch } from "../../company/document-scan/actions";
 import { FileDropzone, validateFiles } from "../../_components/document-intake/FileDropzone";
 import { uploadBatch, partitionBatch } from "../../_components/document-intake/uploadBatch";
@@ -75,7 +76,17 @@ export function QuickBlockerDrawer({
       if (!config.aiClassified) {
         // COID only - no AI classifier entry exists for it, so there is no
         // review step to send it through; this is a real, direct write.
-        const res = await uploadCoidQuickFix(tenderId, companyId, files[0]);
+        //
+        // Filename-only mismatch heuristic (lib/vaultDocuments.ts's own
+        // comment explains why) - the real 2026-10-28 incident this check
+        // exists for (a B-BBEE affidavit filed as the COID letter) is just
+        // as reachable through this drawer as through /company's own
+        // DirectVaultDocumentUploader, which already has this same
+        // window.confirm step. Never a hard block - a correctly-chosen file
+        // with an unusual name is never trapped.
+        const warning = vaultDocumentMismatchWarning("coid", files[0].name);
+        if (warning && !window.confirm(`${warning}\n\nUpload it anyway?`)) return;
+        const res = await uploadCoidQuickFix(tenderId, companyId, files[0], !!warning);
         if (!res.ok) {
           setError(res.error);
           return;

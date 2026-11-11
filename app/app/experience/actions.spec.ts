@@ -349,3 +349,35 @@ describe("saveExperienceTags - two concurrent replace requests (both succeed, no
     expect(removeCalls.flat()).not.toContain(finalValue);
   });
 });
+
+// Finding 422: this file's own header comment says captureExperience()'s
+// upload "follows people/actions.ts uploadCv exactly" - including, until
+// now, that function's own gap. The file is uploaded to
+// experience-documents FIRST, then the experience_items row that records
+// it is inserted; before this fix, an insert failure there (a transient
+// Supabase error, or an RLS failure) left the already-uploaded file
+// orphaned in Storage forever, instead of being cleaned up the way every
+// other upload action in this app already does.
+describe("captureExperience - experience_items insert fails after the file already uploaded (Finding 422)", () => {
+  it("removes the orphaned file from storage instead of leaving it there forever", async () => {
+    const { client, uploadCalls, removeCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [{ data: null, error: { message: "insert failed" } }], // experience_items insert
+      ],
+    });
+    supabaseState.current = client;
+
+    const { captureExperience } = await import("./actions");
+
+    const fd = formDataWith({ project_name: "N1 upgrade", document_type: "reference_letter" });
+    fd.set("file", new File(["pdf-bytes"], "reference.pdf", { type: "application/pdf" }));
+
+    const url = await expectRedirect(captureExperience(fd));
+
+    expect(url).toContain("/experience?error=");
+    expect(uploadCalls).toHaveLength(1);
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]).toEqual([uploadCalls[0]]);
+  });
+});

@@ -184,6 +184,18 @@ export async function uploadNarrativeFinal(formData: FormData) {
     .select("id")
     .maybeSingle();
   if (updateError || !updated) {
+    // Finding 424: the same upload-then-insert/update-orphans-on-failure
+    // shape Findings 422/423 already fixed elsewhere in this codebase - the
+    // file above already made it into `narrative-documents` at `storagePath`;
+    // if this update then fails, nothing ever points at it or sweeps that
+    // bucket for orphans. Only remove it when it's genuinely a NEW, now
+    // entirely unreferenced object (a different filename than before) - when
+    // `storagePath === previousFinalPath`, the row's own final_storage_path
+    // still points there (upsert already overwrote the old content in place,
+    // a separate, pre-existing tradeoff this fix doesn't change).
+    if (storagePath !== previousFinalPath) {
+      await supabase.storage.from(NARRATIVE_BUCKET).remove([storagePath]);
+    }
     fail(updateError
       ? `Uploaded, but couldn't save it against the document: ${updateError.message}`
       : "That document is no longer there - it may have been removed. Refresh and try again.");

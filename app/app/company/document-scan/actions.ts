@@ -94,6 +94,26 @@ export async function registerOnboardingBatch(input: {
   const { error } = await supabase.from("onboarding_uploads").insert(rows);
   if (error) {
     console.error("onboarding_uploads insert failed", error);
+    // Standing solution-architect review, Finding 429, 2026-11-11: every
+    // file in `rows` was already uploaded straight to ONBOARDING_BUCKET from
+    // the browser (uploadBatch.ts) BEFORE this Server Action ever runs - the
+    // same "upload first, write the DB row after" shape Findings 422/423/424
+    // already fixed for every single-file upload-then-insert site in this
+    // app, but this one was missed by that sweep because the upload and the
+    // insert are split across two different modules (a shared client-side
+    // helper plus this one shared registration action), not one function
+    // that visibly calls both .upload() and .insert(). A real, reachable
+    // failure here is this table's own RLS insert policy itself
+    // (`onboarding_uploads: members insert`, 0063, `with check
+    // (is_company_member(company_id))`) - a company_members row revoked
+    // mid-request (another admin's removeMember(), the exact race this
+    // file's own confirmVaultDocument()/confirmIdDocument() siblings are
+    // already tested for) makes this insert fail for every real file in the
+    // batch at once. Without this cleanup, every just-uploaded file in the
+    // batch was orphaned in ONBOARDING_BUCKET forever - not referenced by
+    // any row, invisible to the UI, outside the vault/CV upload caps, and
+    // re-uploaded again under a fresh random path on every retry.
+    await supabase.storage.from(ONBOARDING_BUCKET).remove(rows.map((r) => r.storage_path));
     return { error: "Could not register these uploads - try again. If it keeps happening, let us know." };
   }
   revalidatePath(BACK);

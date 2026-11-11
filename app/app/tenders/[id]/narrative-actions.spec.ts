@@ -122,6 +122,49 @@ describe("uploadNarrativeFinal - narrative_documents update matches zero rows (R
   });
 });
 
+// Finding 424: the same upload-then-update-orphans-on-failure shape
+// Findings 422/423 already fixed elsewhere - when the update above fails
+// (or matches zero rows), the file this action just uploaded was, pre-fix,
+// never cleaned up: orphaned in `narrative-documents` forever, exactly like
+// uploadCv()/uploadTenderTemplate() before their own fixes. Only the
+// genuinely-new-path case should be cleaned up - when the re-upload reuses
+// the SAME deterministic path as the existing final (upsert already
+// overwrote it in place), removing it would delete the file the row still
+// legitimately points to.
+describe("uploadNarrativeFinal - cleans up the just-uploaded file when the update itself fails", () => {
+  it("removes the just-uploaded object when the update matches zero rows and the path is genuinely new", async () => {
+    const { client, removedPaths } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "doc-1", final_storage_path: "company-1/tenders/tender-1/doc-1/final-old-name.docx" }, error: null }], // row ownership check - OLD final path, different from the new upload
+      [{ data: null, error: null }], // narrative_documents update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { uploadNarrativeFinal } = await import("./narrative-actions");
+
+    await expectRedirect(uploadNarrativeFinal(uploadFormData("tender-1", "doc-1")));
+
+    // uploadFormData's file is "final.docx" -> storagePath ends in
+    // final-final.docx, the just-uploaded (now unreferenced) object.
+    expect(removedPaths).toEqual([["company-1/tenders/tender-1/doc-1/final-final.docx"]]);
+  });
+
+  it("does NOT remove the just-uploaded object when its path is the same as the row's existing final path (upsert already overwrote it in place)", async () => {
+    const { client, removedPaths } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "doc-1", final_storage_path: "company-1/tenders/tender-1/doc-1/final-final.docx" }, error: null }], // same path the new upload will also produce
+      [{ data: null, error: null }], // narrative_documents update - zero rows matched, no error
+    ]);
+    supabaseState.current = client;
+
+    const { uploadNarrativeFinal } = await import("./narrative-actions");
+
+    await expectRedirect(uploadNarrativeFinal(uploadFormData("tender-1", "doc-1")));
+
+    expect(removedPaths).toEqual([]);
+  });
+});
+
 describe("uploadNarrativeFinal - narrative_documents update genuinely succeeds", () => {
   it("redirects to the real success anchor when the update actually matches", async () => {
     const { client } = makeSupabase([

@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { safeFileName } from "@/lib/safeFileName";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
+import { EXTRACTED_PERSON_FIELDS, ISO_DATE } from "@/lib/cvExtraction";
+import { isValidSaId } from "@/lib/principals";
 
 /**
  * Self-service actions for the My CV page (0065: employee role). Every
@@ -114,7 +116,15 @@ export async function uploadMyCv(formData: FormData) {
     status: mode === "as_is" ? "uploaded" : "extraction_requested",
     uploaded_by: userId,
   });
-  if (insertError) fail(insertError.message);
+  if (insertError) {
+    // Finding 422 (same gap as app/app/people/actions.ts's uploadCv() -
+    // this function's own header comment says it follows "the same upload
+    // flow"): the file above already made it into cv-documents - clean it
+    // up rather than orphaning it when the row that was supposed to record
+    // it never gets written.
+    await supabase.storage.from("cv-documents").remove([storagePath]);
+    fail(insertError.message);
+  }
   redirect(`${BACK}?saved=cv`);
 }
 
@@ -133,6 +143,27 @@ export async function uploadMyCv(formData: FormData) {
  * both require review_status to still be 'pending_review', so once this
  * ran without queuing anything, nobody - not even an owner on the full
  * People page - could ever trigger it for that extraction again.
+ *
+ * Standing solution-architect review, 2026-11-11 (Finding 431): this
+ * function's own `fields` list used to be a hand-typed subset of ten keys
+ * (present since this file's first commit, eb5a846f) instead of the
+ * canonical app/lib/cvExtraction.ts EXTRACTED_PERSON_FIELDS that
+ * app/app/people/actions.ts applyCvExtraction() and people/[id]/cv-review.tsx
+ * both already use for the full People page's identical review card - never
+ * kept in sync with it, so it silently dropped 7 of the 17 real fields
+ * extract_cv_fields.py's own PERSON_FIELDS (engine/cv/extract_cv_fields.py)
+ * genuinely proposes for every real CV: id_number, role, phone, email,
+ * initial_description, initial_institution, initial_graduated. Confirmed
+ * live-reachable, not theoretical: my-cv/page.tsx's own review card reused
+ * this exact same local list to decide which proposed fields to even show a
+ * checkbox for (see that file), so an employee ticking every box this page
+ * offered still never persisted those 7 - including initial_graduated, which
+ * engine/pack_generator/confirm_pack.py HARD-STOPS pack confirmation on when
+ * missing for a key person ("no initial_graduated date on file -
+ * years_experience cannot be computed, refusing to guess one"), telling the
+ * company to "fix it on the People page" - exactly the manual admin
+ * intervention this self-service page exists to avoid. Fixed by importing
+ * the one canonical list instead of re-typing a subset of it.
  */
 export async function applyMyCvExtraction(formData: FormData) {
   const { supabase, userId, companyId, personId } = await requireOwnPerson();
@@ -148,11 +179,35 @@ export async function applyMyCvExtraction(formData: FormData) {
   if (!row || row.person_id !== personId) fail("That extraction result wasn't found for you.");
   if (row.review_status !== "pending_review") fail("These extracted fields were already saved or discarded.");
 
-  const fields = ["name", "ecsa_level", "ecsa_number", "ecsa_date", "sacpcmp_number", "sacpcmp_date", "highest_level", "highest_description", "highest_institution", "highest_graduated"];
+  // Finding 432: this loop used to write whatever was ticked straight
+  // through with NO validation at all - not even the three checks its own
+  // sibling applyCvExtraction() (app/app/people/actions.ts) already runs on
+  // the exact same canonical EXTRACTED_PERSON_FIELDS list (required name,
+  // ISO date format, and - crucially - that a "select" field's value is one
+  // of SANRAL's own fixed options; this page's own review card renders every
+  // field, select ones included, as a plain free-text <input>, so nothing
+  // ever constrained what could be typed into ecsa_level/highest_level
+  // before this fix). engine/fill_conventional.py "refuses any other label"
+  // than the exact ECSA_LEVELS/QUALIFICATION_LEVELS strings when it fills a
+  // real pack (lib/cvExtraction.ts's own header comment) - an employee
+  // retyping either field here, then confirming, could save a value that
+  // later hard-fails that person's own real SANRAL submission. id_number
+  // gets the same isValidSaId() gate savePerson() already has (Finding 219)
+  // and applyCvExtraction() now also has (Finding 432) - the AI only ever
+  // PROPOSES a plausible ID number, but this box is freely editable before
+  // ticking "use".
   const personUpdate: Record<string, string | null> = {};
-  for (const key of fields) {
-    if (formData.get(`use_${key}`) !== "on") continue;
-    personUpdate[key] = str(formData, `f_${key}`);
+  for (const f of EXTRACTED_PERSON_FIELDS) {
+    if (formData.get(`use_${f.key}`) !== "on") continue;
+    let v = str(formData, `f_${f.key}`);
+    if (f.key === "name" && !v) fail("A ticked name can't be empty.");
+    if (v && f.kind === "date" && !ISO_DATE.test(v)) fail(`${f.label}: "${v}" isn't a date (yyyy-mm-dd).`);
+    if (v && f.kind === "select" && !(f.options ?? []).includes(v)) fail(`${f.label}: choose one of SANRAL's options.`);
+    if (f.key === "id_number") {
+      v = v?.replace(/\s+/g, "") ?? null;
+      if (v && !isValidSaId(v)) fail("That ID number isn't a valid 13-digit South African ID number.");
+    }
+    personUpdate[f.key] = v;
   }
   if (Object.keys(personUpdate).length === 0) fail("Nothing was ticked. Tick the fields to save, or discard the extraction.");
 

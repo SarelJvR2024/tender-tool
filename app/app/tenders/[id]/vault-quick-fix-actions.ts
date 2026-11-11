@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { buildCompanyUpdate } from "@/lib/companyProfileUpdate";
-import { MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS } from "@/lib/vaultDocuments";
+import { MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS, vaultDocumentMismatchWarning } from "@/lib/vaultDocuments";
 import { safeFileName } from "@/lib/safeFileName";
 
 // Unlike every other requireCompanyId() in this codebase (swept for this
@@ -103,11 +103,25 @@ export async function saveVaultQuickFields(
  * the other 6 vault kinds). Same bucket/path/replace-previous-copy logic as
  * app/company/actions.ts's own uploadVaultDocument, just returning instead
  * of redirecting so the drawer can show a real success state in place.
+ *
+ * `acknowledgeMismatch` closes a real gap found by the standing review
+ * (2026-11-11): this is a SECOND, independent direct-write entry point for
+ * the exact same `coid_letter_document_path` column `uploadVaultDocument()`
+ * writes - the one the real 2026-10-28 incident (a "...BBBEE_Affidavit.docx"
+ * filed as the COID Letter of Good Standing, then merged into a real
+ * submission pack) led to `vaultDocumentMismatchWarning()` being added for.
+ * `uploadVaultDocument()` re-checks it server-side (not just client-side -
+ * see its own comment) before this header comment's claim of "same ...
+ * logic" was ever actually true here; this copy, reached from the Tender
+ * Workspace's own Quick Blocker Resolver drawer instead of /company, never
+ * got it, so the identical misfiled-COID failure mode this check exists to
+ * catch was still fully open through this second door.
  */
 export async function uploadCoidQuickFix(
   tenderId: string,
   companyId: string,
   file: File,
+  acknowledgeMismatch = false,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const verified = await requireCompanyId(companyId);
   if (!verified.ok) return { ok: false, error: verified.error };
@@ -115,6 +129,11 @@ export async function uploadCoidQuickFix(
   if (file.size > MAX_UPLOAD_BYTES) {
     return { ok: false, error: "File is larger than 4.4 MB - scan it at a lower resolution or compress the PDF." };
   }
+  // Re-checked here, not just client-side (QuickBlockerDrawer's own
+  // window.confirm) - a request with no acknowledgement must not silently
+  // skip the warning just because it didn't come through that confirm step.
+  const mismatch = vaultDocumentMismatchWarning("coid", file.name);
+  if (mismatch && !acknowledgeMismatch) return { ok: false, error: mismatch };
   const verifiedCompanyId = verified.companyId;
 
   const supabase = await createClient();

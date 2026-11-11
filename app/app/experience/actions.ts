@@ -98,6 +98,15 @@ export async function captureExperience(formData: FormData) {
     .single();
   if (error) {
     console.error("experience_items insert failed", error);
+    // Finding 422: this file's own header comment says its upload "follows
+    // people/actions.ts uploadCv exactly" - including, until now, that
+    // function's own gap: the file above already made it into
+    // experience-documents, and with no row ever written to point at it,
+    // it was orphaned forever (nothing else in this repo sweeps that
+    // bucket). Same clean-up-on-failure discipline every other upload
+    // action already follows (company/actions.ts, properties/actions.ts,
+    // principals/actions.ts, registrations/actions.ts).
+    if (storagePath) await supabase.storage.from("experience-documents").remove([storagePath]);
     redirect(err("/experience", "Could not save this project - try again. If it keeps happening, let us know."));
   }
 

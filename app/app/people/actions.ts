@@ -376,6 +376,14 @@ export async function uploadCv(formData: FormData) {
   });
   if (insertError) {
     console.error("cv_uploads insert failed", insertError);
+    // Finding 422: the file above already made it into the cv-documents
+    // bucket - if the row that was supposed to record it never gets
+    // written, that file is orphaned forever (nothing else in this repo
+    // sweeps that bucket). Same clean-up-on-failure discipline every other
+    // upload action already follows (company/actions.ts, properties/
+    // actions.ts, principals/actions.ts, registrations/actions.ts) - this
+    // file's own CV-upload sites never picked it up until now.
+    await supabase.storage.from("cv-documents").remove([storagePath]);
     redirect(`/people/${personId}?error=${encodeURIComponent("Could not save this CV - try again. If it keeps happening, let us know.")}`);
   }
 
@@ -544,6 +552,10 @@ export async function createPersonWithCv(formData: FormData) {
     });
     if (cvInsertError) {
       console.error("cv_uploads insert failed (createPersonWithCv)", cvInsertError);
+      // Finding 422 (same gap as uploadCv() above): the file already
+      // uploaded to cv-documents is orphaned forever if this row never
+      // gets written - clean it up.
+      await supabase.storage.from("cv-documents").remove([storagePath]);
       redirect(`/people/${personId}?error=${encodeURIComponent(`${name} was added, but the CV couldn't be saved - try adding it again from this page.`)}`);
     }
   }
@@ -586,6 +598,9 @@ async function attachCvToPerson(
   });
   if (insertError) {
     console.error("cv_uploads insert failed (bulkUploadCvs)", insertError);
+    // Finding 422 (same gap as uploadCv()/createPersonWithCv() above):
+    // clean up the already-uploaded file rather than orphaning it.
+    await supabase.storage.from("cv-documents").remove([storagePath]);
     return `Could not save ${file.name}.`;
   }
   return null;
@@ -745,10 +760,24 @@ export async function applyCvExtraction(formData: FormData) {
   const edited: string[] = [];
   for (const f of EXTRACTED_PERSON_FIELDS) {
     if (formData.get(`use_${f.key}`) !== "on") continue;
-    const v = str(formData, `f_${f.key}`);
+    let v = str(formData, `f_${f.key}`);
     if (f.key === "name" && !v) back("A ticked name can't be empty.");
     if (v && f.kind === "date" && !ISO_DATE.test(v)) back(`${f.label}: "${v}" isn't a date (yyyy-mm-dd).`);
     if (v && f.kind === "select" && !(f.options ?? []).includes(v)) back(`${f.label}: choose one of SANRAL's options.`);
+    // Finding 432: this card's own id_number row (kind "secret") is a plain
+    // editable text input (cv-review.tsx's ValueInput, type="password") -
+    // the AI only ever PROPOSES a value extract_cv_fields.py's own
+    // _plausible_sa_id() already approved (Finding 219's own "the
+    // CV-extraction automated write path is NOT affected" claim is true only
+    // for that proposed value), but a reviewer can freely retype this box
+    // before ticking "use" and saving, and nothing here checked what they
+    // typed - the exact same unchecked write into people.id_number that
+    // savePerson() (Finding 219) was fixed for, reachable through a second,
+    // untouched door into the same column.
+    if (f.key === "id_number") {
+      v = v?.replace(/\s+/g, "") ?? null;
+      if (v && !isValidSaId(v)) back("That ID number isn't a valid 13-digit South African ID number.");
+    }
     personUpdate[f.key] = v;
     if ((proposal.person?.[f.key]?.value ?? null) !== v) edited.push(f.key);
   }
