@@ -297,6 +297,25 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         log.confirmed("cv.b11.id_number", person["id_number"])
     else:
         log.missing("cv.b11.id_number", reason="No id_number on file for this person.")
+    # QA pass (standing solution-architect review, 2026-11-11, Finding 373): "Position in
+    # team:" is written into this same _kv_table call above (line 293) but, unlike Name and
+    # ID Number right beside it, had NO field_provenance entry at all before this fix - not
+    # confirmed, not missing, nothing. generate_action_checklist.py's ACTIONS_TO_SIGN.md only
+    # ever reads field_provenance, so a genuinely blank position (this tender's own
+    # suggest_pack.read_required_positions() reads SETUP!<col>7 with no fallback, so a sparse
+    # SETUP sheet can leave it blank even though a real position code exists; or, for a
+    # standalone CV with tender_ctx=None, person.get("role") simply not on file) was
+    # completely invisible to a human, worse than Findings 368/369/371/372 (which at least
+    # produced a wrongly-"confirmed" entry).
+    if position_desc:
+        log.confirmed("cv.b11.position", position_desc)
+    else:
+        log.missing(
+            "cv.b11.position",
+            reason=(f"This tender's own stored position description (SETUP sheet) is blank "
+                    f"for position {tender_ctx['position']['code']}." if tender_ctx else
+                    "No 'role' on file for this person, and this is a standalone CV with no "
+                    "tender context to pull a position description from."))
 
     d.add_paragraph()
     # `person.get(key, default)` only substitutes default when the key is
@@ -465,7 +484,22 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
         if value == "MISSING":
             log.missing("cv.wb." + label.split(".")[0], reason=f"'{label.strip(': ')}' is not a field "
                         "captured in the people/projects schema yet - see findings doc section 5")
-    log.confirmed("cv.wb.position", position_desc or "(standard CV - no tender position)")
+    # QA pass (standing solution-architect review, 2026-11-11, Finding 373): this used to call
+    # log.confirmed(..., position_desc or "(standard CV - no tender position)") unconditionally -
+    # a real tender_ctx whose own stored position description is genuinely blank (a sparse SETUP
+    # sheet - see the identical fix a few lines above in build_sanral_keyperson) got "confirmed"
+    # with a FABRICATED placeholder sentence that falsely claims "no tender position" even though
+    # a real tender position code DOES exist, hiding both the real gap from ACTIONS_TO_SIGN.md and
+    # the real cause from anyone reading the provenance log. Mirrors build_sanral_keyperson's fix.
+    if position_desc:
+        log.confirmed("cv.wb.position", position_desc)
+    else:
+        log.missing(
+            "cv.wb.position",
+            reason=(f"This tender's own stored position description (SETUP sheet) is blank "
+                    f"for position {tender_ctx['position']['code']}." if tender_ctx else
+                    "No 'role' on file for this person, and this is a standalone CV with no "
+                    "tender context to pull a position description from."))
     log.confirmed("cv.wb.name", person["name"])
     _kv_table(d, rows)
 

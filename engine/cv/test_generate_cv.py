@@ -471,6 +471,107 @@ def test_ecsa_and_sacpcmp_expiry_missing_degrades_honestly():
     check("no SACPCMP expiry on file is logged as missing, with a reason", sacpcmp_entry["status"] == "missing" and sacpcmp_entry["reason"], sacpcmp_entry)
 
 
+def test_sanral_keyperson_position_in_team_is_logged_when_present():
+    print("build_sanral_keyperson: Form B1.1's 'Position in team:' row - a real tender position "
+          "description on file must be logged as confirmed, like every sibling field in the same "
+          "table (Name, ID Number) already is")
+    # Finding (standing solution-architect review, 2026-11-11): 'Position in team:' is written
+    # into the real document (line 293) but, unlike Name (log.confirmed) and ID Number
+    # (log.confirmed/log.missing) two lines below it in the exact same _kv_table call, NO
+    # field_provenance entry was ever written for it at all - not confirmed, not missing,
+    # nothing. generate_action_checklist.py only ever reads field_provenance entries, so a
+    # genuinely blank 'Position in team:' cell (below) was completely invisible to
+    # ACTIONS_TO_SIGN.md, worse than Findings 368/369/371/372 (which at least produced a
+    # provenance entry, just the wrong status).
+    person = {"name": "Jane Doe", "id_number": "8001015009087", "role": "Engineer", "projects": []}
+    profile = {"company": {"legal_name": "Test Co"}}
+    tender_ctx = {
+        "contract_no": "X.001-001-2026/1F", "closing_date": "2026-12-01",
+        "position": {"code": "DS1", "description": "Structures specialist"},
+        "candidate": {"specialism_warning": False, "rationale": "r", "score": 0.5},
+    }
+    log = ProvenanceLog(source="test")
+    gc.build_sanral_keyperson(profile, person, "person_1", "full", tender_ctx, None, log)
+    entries = [e for e in log.entries if e["field_key"] == "cv.b11.position"]
+    check("a field_provenance entry for the position now exists at all (the real bug: it didn't)",
+          len(entries) == 1, entries)
+    if entries:
+        check("a real tender position description on file is logged 'confirmed' with that value",
+              entries[0]["status"] == "confirmed" and entries[0]["value"] == "Structures specialist",
+              entries[0])
+
+
+def test_sanral_keyperson_position_in_team_blank_tender_description_logged_missing():
+    print("build_sanral_keyperson: this tender's own stored SETUP-sheet position description is "
+          "blank (a real shape - suggest_pack.read_required_positions() reads SETUP!<col>7 with no "
+          "fallback at all) - must be logged 'missing', not silently absent from provenance")
+    person = {"name": "Jane Doe", "id_number": "8001015009087", "role": "Engineer", "projects": []}
+    profile = {"company": {"legal_name": "Test Co"}}
+    tender_ctx = {
+        "contract_no": "X.001-001-2026/1F", "closing_date": "2026-12-01",
+        "position": {"code": "DS1", "description": ""},
+        "candidate": {"specialism_warning": False, "rationale": "r", "score": 0.5},
+    }
+    log = ProvenanceLog(source="test")
+    gc.build_sanral_keyperson(profile, person, "person_1", "full", tender_ctx, None, log)
+    entry = next((e for e in log.entries if e["field_key"] == "cv.b11.position"), None)
+    check("a blank tender position description is logged 'missing' (with a reason), not absent "
+          "from provenance and not falsely 'confirmed' with an empty value",
+          entry is not None and entry["status"] == "missing" and bool(entry["reason"]), entry)
+
+
+def test_world_bank_position_blank_tender_description_logged_missing_not_falsely_confirmed():
+    print("build_world_bank: a blank tender position description must be logged 'missing', not "
+          "'confirmed' with the misleading placeholder sentence '(standard CV - no tender "
+          "position)' - which falsely implies there IS no tender context when there actually is one")
+    # Before the fix: log.confirmed("cv.wb.position", position_desc or "(standard CV - no tender "
+    # "position)") ran unconditionally - a real tender_ctx with a genuinely blank SETUP-sheet
+    # description got the exact same 'confirmed'-with-a-fabricated-sentence treatment as a
+    # standalone CV with no tender context at all, hiding the real gap from ACTIONS_TO_SIGN.md
+    # and mislabeling its own cause.
+    person = {"name": "Jane Doe", "role": "Engineer", "qualifications": {}, "projects": []}
+    profile = {"company": {"legal_name": "Test Co"}}
+    tender_ctx = {
+        "contract_no": "X.001-001-2026/1F", "closing_date": "2026-12-01",
+        "position": {"code": "DS1", "description": ""},
+        "candidate": {"specialism_warning": False, "rationale": "r", "score": 0.5},
+    }
+    log = ProvenanceLog(source="test")
+    gc.build_world_bank(profile, person, "person_1", "full", tender_ctx, None, log)
+    entry = next((e for e in log.entries if e["field_key"] == "cv.wb.position"), None)
+    check("a blank tender position description is logged 'missing', not 'confirmed' with a "
+          "fabricated placeholder sentence",
+          entry is not None and entry["status"] == "missing" and bool(entry["reason"]), entry)
+    check("the placeholder sentence is no longer written into field_provenance as a fake value",
+          entry is not None and entry["value"] != "(standard CV - no tender position)", entry)
+
+
+def test_world_bank_standalone_cv_no_role_logged_missing():
+    print("build_world_bank: a standalone (non-tender) CV for a person with no 'role' on file - "
+          "the position row must still be logged (missing, with a clear reason), not silently "
+          "dropped from provenance the way it was before this fix")
+    person = {"name": "Jane Doe", "qualifications": {}, "projects": []}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    entry = next((e for e in log.entries if e["field_key"] == "cv.wb.position"), None)
+    check("no role on file for a standalone CV is logged 'missing', with a reason",
+          entry is not None and entry["status"] == "missing" and bool(entry["reason"]), entry)
+
+
+def test_world_bank_standalone_cv_with_role_still_confirmed():
+    print("build_world_bank: regression guard - a standalone CV for a person who DOES have a "
+          "role on file must still log it as confirmed, same as before this fix")
+    person = {"name": "Jane Doe", "role": "Senior Engineer", "qualifications": {}, "projects": []}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    entry = next((e for e in log.entries if e["field_key"] == "cv.wb.position"), None)
+    check("a real role on file is still logged 'confirmed' with that value",
+          entry is not None and entry["status"] == "confirmed" and entry["value"] == "Senior Engineer",
+          entry)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -493,6 +594,11 @@ def main():
     test_sacnasp_expiry_missing_degrades_honestly()
     test_ecsa_and_sacpcmp_expiry_now_appear_on_form_b21()
     test_ecsa_and_sacpcmp_expiry_missing_degrades_honestly()
+    test_sanral_keyperson_position_in_team_is_logged_when_present()
+    test_sanral_keyperson_position_in_team_blank_tender_description_logged_missing()
+    test_world_bank_position_blank_tender_description_logged_missing_not_falsely_confirmed()
+    test_world_bank_standalone_cv_no_role_logged_missing()
+    test_world_bank_standalone_cv_with_role_still_confirmed()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
