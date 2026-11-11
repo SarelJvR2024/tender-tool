@@ -161,10 +161,16 @@ export type GeneralCompany = CompanyVault & {
   cellphone: string | null;
   email: string | null;
   cidb_grading: string | null;
+  // Migration 0063 (onboarding document scan): the CIDB registration/grading
+  // certificate's own expiry and uploaded copy - added alongside cidb_grading's
+  // vault slot, "same pattern as every other Document Vault column". Never
+  // read here until this fix (see checkReturnable()'s "cidb" case below).
+  cidb_expiry: string | null;
+  cidb_document_path: string | null;
 };
 
 export const GENERAL_COMPANY_COLUMNS =
-  "cipc_registration_number, vat_number, postal_address, registered_address, telephone, cellphone, email, cidb_grading";
+  "cipc_registration_number, vat_number, postal_address, registered_address, telephone, cellphone, email, cidb_grading, cidb_expiry, cidb_document_path";
 
 export type TenderAnswer = {
   field_key: string;
@@ -259,10 +265,34 @@ export function checkReturnable(
       const v = validityAtClosing(c.pi_insurance_expiry, closingDate);
       return { ...base, status: v.status === "have" && !c.pi_insurance_document_path ? "check" : v.status, expiring: v.expiring, detail: `Policy ${c.pi_insurance_policy_number ?? ""} ${v.text}.`, uploadable: false, vaultLink: !c.pi_insurance_document_path };
     }
-    case "cidb":
-      return c?.cidb_grading
-        ? { ...base, status: upload ? "have" : "check", detail: `CIDB grading ${c.cidb_grading} on file.${uploaded || " Attach the CIDB registration certificate for this tender."}`, uploadable: true, vaultLink: false }
-        : { ...base, status: "missing", detail: "No CIDB grading recorded - answer the CIDB question below (leave blank if you have none).", uploadable: true, vaultLink: false };
+    case "cidb": {
+      // Found 2026-11-11 (QA pass): every other dated vault item in this
+      // switch (tax/bbbee/coid/bank/insurance) calls validityAtClosing() on
+      // its own companies.*_expiry column - this branch never did, even
+      // though migration 0063 added cidb_expiry/cidb_document_path "same
+      // pattern as every other Document Vault column" specifically so this
+      // could happen, and engine/general/build_general_pack.py's own
+      // VAULT_EXPIRY_FOR already keys "cidb" -> "cidb_expiry" when it
+      // assembles the real pack (QA pass, 2026-11-03). So the actual
+      // submitted pack already treats an expired CIDB certificate as
+      // expired, while this review screen kept saying "CIDB grading X on
+      // file" with no hint the certificate itself had lapsed by closing -
+      // the one vault item left showing a stale, over-confident "have"/
+      // "check" status that the pack-build engine no longer agrees with.
+      if (!c?.cidb_grading) {
+        return { ...base, status: "missing", detail: "No CIDB grading recorded - answer the CIDB question below (leave blank if you have none).", uploadable: true, vaultLink: false };
+      }
+      if (!c.cidb_expiry) {
+        // No expiry on file yet (every company before this fix, and any
+        // company that typed a grading without ever recording its
+        // certificate's expiry) - same "check, don't guess" fallback
+        // every sibling case uses when its own expiry field is unset.
+        return { ...base, status: upload ? "have" : "check", detail: `CIDB grading ${c.cidb_grading} on file, but no expiry date recorded - add it on the Company page.${uploaded}`, uploadable: true, vaultLink: true };
+      }
+      const v = validityAtClosing(c.cidb_expiry, closingDate);
+      const hasCopy = !!c.cidb_document_path || !!upload;
+      return { ...base, status: v.status === "have" && !hasCopy ? "check" : v.status, expiring: v.expiring, detail: `CIDB grading ${c.cidb_grading} ${v.text}.${hasCopy ? (upload ? uploaded : " Vault copy on file.") : " Attach the CIDB registration certificate for this tender."}`, uploadable: true, vaultLink: !c.cidb_document_path };
+    }
     default:
       return upload
         ? { ...base, status: "have", detail: `Uploaded for this tender: ${upload.original_filename}.`, uploadable: true, vaultLink: false }
