@@ -15,6 +15,21 @@ export type ListingChange = {
   detected_at: string;
 };
 
+// Keep in step with engine/discovery/gov_sources.py's OWN SOURCE_LABELS -
+// the two are separate, hand-kept copies of the identical source-code ->
+// human-label mapping (same shape already found and fixed three times in
+// this codebase for hand-kept pipeline_stage lists; Finding 418, QA pass
+// 2026-11-11). Until this fix, 6 of gov_sources.ALL_SOURCES's 11 real,
+// production-scheduled discovery sources (sars_procurement, cidb_tenders,
+// dbsa_procurement, vaal_central_water, lephalale, kouga) had no entry here
+// at all, so a discovered_opportunity sourced from any of them fell through
+// sourceLabel()'s own raw-code fallback and showed an unformatted,
+// lowercase, underscore-stripped source code (e.g. "sars procurement") as
+// its chip on app/app/discovery/page.tsx - the one screen every user sees
+// every discovered tender on. randwater is included too even though
+// gov_sources.ALL_SOURCES itself doesn't carry it (confirmed not
+// production-reachable today) - same defense-in-depth reasoning
+// gov_sources.py's own SOURCE_LABELS already applies by keeping it there.
 export const SOURCE_LABELS: Record<string, string> = {
   etenders_portal: "eTenders portal",
   etenders_ocds: "eTenders (OCDS feed)",
@@ -22,6 +37,13 @@ export const SOURCE_LABELS: Record<string, string> = {
   eskom_bulletin: "Eskom Tender Bulletin",
   transnet_etenders: "Transnet eTenders",
   capetown_procurement: "City of Cape Town portal",
+  sars_procurement: "SARS Published Tenders",
+  cidb_tenders: "cidb's own procurement",
+  dbsa_procurement: "DBSA open RFPs/RFRs",
+  randwater: "Rand Water's own bids portal",
+  vaal_central_water: "Vaal Central Water Board",
+  lephalale: "Lephalale Municipality",
+  kouga: "Kouga Municipality",
   manual: "Loaded manually",
 };
 
