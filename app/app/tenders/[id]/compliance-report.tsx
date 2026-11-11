@@ -309,7 +309,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }): Prom
       estimate={estimate}
       beeLevel={(company?.bee_level as number | null) ?? null}
       beeProofValid={beeProofValid}
-      qualityFromVault={qualitySystem !== null}
+      qualitySystemFromVault={qualitySystem}
     />
   ) : null;
 
@@ -320,17 +320,30 @@ function ScoreEstimate({
   estimate,
   beeLevel,
   beeProofValid,
-  qualityFromVault,
+  qualitySystemFromVault,
 }: {
   estimate: ReturnType<typeof estimateSanralConventional>;
   beeLevel: number | null;
   beeProofValid: boolean;
-  qualityFromVault: boolean;
+  qualitySystemFromVault: "iso" | "not_iso" | null;
 }) {
+  // Finding 439 (standing QA/robustness review, 2026-11-11): this used to be
+  // a plain `qualityFromVault: boolean` (`qualitySystem !== null`), which
+  // read an explicit "No, not ISO 9001 certified" on file (the "not_iso"
+  // vault signal this same function's own estimate now scores as 0-5, not
+  // 0-10) as if it meant "ISO 9001 certificate in your vault" - the exact
+  // opposite of what the company actually told the system. Branching on the
+  // real three states instead of a collapsed boolean.
+  const qsNote =
+    qualitySystemFromVault === "iso"
+      ? "ISO 9001 certificate in your vault"
+      : qualitySystemFromVault === "not_iso"
+        ? "Not ISO 9001 certified (per your vault) - in-house QMS still scores 5"
+        : "Set ISO 9001 in the vault";
   const rows: { label: string; range: Range; max: number; note: string }[] = [
     { label: "Technical experience (B1)", range: estimate.technical, max: 30, note: "From key people's project history" },
     { label: "Management ability (B2)", range: estimate.management, max: 15, note: "From key people's clients" },
-    { label: "Quality system (B4)", range: estimate.qualitySystem, max: 10, note: qualityFromVault ? "ISO 9001 certificate in your vault" : "Set ISO 9001 in the vault" },
+    { label: "Quality system (B4)", range: estimate.qualitySystem, max: 10, note: qsNote },
     { label: "Past performance (B6)", range: estimate.pastPerformance, max: 15, note: "From your Experience Library" },
     { label: "Workplan hours (C2.4)", range: estimate.workplan, max: 30, note: "Depends on other bidders" },
   ];

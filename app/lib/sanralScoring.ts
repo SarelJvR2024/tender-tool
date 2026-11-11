@@ -244,7 +244,13 @@ export function estimateSanralConventional(opts: {
   positions: SanralPositionInput[];
   closingDate: string;
   threshold?: number;
-  qualitySystem?: "iso" | "registered" | "in_house" | "none" | null;
+  // "not_iso" (Finding 439, 2026-11-11): the vault's own `iso_9001_certified`
+  // explicitly answered "No" - ISO (10) and submitted-for-ISO (7) are ruled
+  // out for certain, but in-house-vs-none isn't tracked by that field, so
+  // this narrows to a 0-5 range rather than collapsing to a confident 0 (that
+  // would need a caller-asserted "none", which still means something
+  // different: no QMS evidence of ANY kind, in-house included).
+  qualitySystem?: "iso" | "registered" | "in_house" | "none" | "not_iso" | null;
   // From pastPerformanceFromExperience() once Experience Library rows exist;
   // omitted = no evidence read, full 6-15 range.
   pastPerformance?: { range: Range; note: string } | null;
@@ -323,8 +329,19 @@ export function estimateSanralConventional(opts: {
   const management = roundR(r(extremeManagement("min"), extremeManagement("max")));
 
   const QS: Record<string, number> = { iso: 10, registered: 7, in_house: 5, none: 0 };
-  const qualitySystem = opts.qualitySystem ? r(QS[opts.qualitySystem], QS[opts.qualitySystem]) : r(0, 10);
-  if (!opts.qualitySystem) notes.push("Quality system (Form B4): no ISO/QMS evidence on file - 0 to 10 (ISO 10, submitted for ISO 7, in-house 5).");
+  let qualitySystem: Range;
+  if (opts.qualitySystem === "not_iso") {
+    // Explicit "No" on file (Finding 439): ISO (10) and submitted-for-ISO (7)
+    // are ruled out for certain - the honest remaining range is in-house (5)
+    // or none (0), narrower than a never-answered field's full 0-10.
+    qualitySystem = r(0, 5);
+    notes.push("Quality system (Form B4): not ISO 9001 certified (on file) - 0 to 5 (in-house QMS 5, none 0). ISO (10) and submitted for ISO (7) are ruled out.");
+  } else if (opts.qualitySystem) {
+    qualitySystem = r(QS[opts.qualitySystem], QS[opts.qualitySystem]);
+  } else {
+    qualitySystem = r(0, 10);
+    notes.push("Quality system (Form B4): no ISO/QMS evidence on file - 0 to 10 (ISO 10, submitted for ISO 7, in-house 5).");
+  }
 
   const pastPerformance = opts.pastPerformance ? roundR(opts.pastPerformance.range) : r(6, 15);
   if (opts.pastPerformance) {

@@ -2,6 +2,34 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { estimateSanralConventional, estimatePosition, pastPerformanceFromExperience, type SanralPositionInput } from "./sanralScoring.ts";
 
+/**
+ * Finding 439 (standing QA/robustness review, 2026-11-11): the Form B4
+ * quality-system component (10 functionality points: ISO 10, submitted-for-
+ * ISO/registered 7, in-house 5, none 0) only ever got `opts.qualitySystem`
+ * as `null` for TWO genuinely different real-world facts - the field was
+ * never answered on the Company Profile page at all, or the company
+ * EXPLICITLY answered "No, not ISO 9001 certified" there
+ * (tenderCompliance.ts's `qualitySystemFromVault()`, a real tri-state
+ * boolean field per app/app/company/_components/EditForm.tsx's own
+ * "yes"/"no"/"" select). Both got the exact same full 0-10 range and the
+ * exact same "no ISO/QMS evidence on file" note, as if ISO (10) and
+ * submitted-for-ISO (7) were still live possibilities for a company that
+ * had already told the system they are not ISO certified. The honest range
+ * once ISO is explicitly ruled out is 0-5 (in-house or none), narrower than
+ * the true-unknown 0-10 a field nobody has touched yet deserves - this
+ * module's own header promises "Every unknown is a range, never a guessed
+ * point value" (line 24), which cuts both ways: it should never be a
+ * WIDER range than the facts on file support, either.
+ */
+test("estimateSanralConventional: qualitySystem 'not_iso' (explicit 'No' on file) narrows the range to 0-5, not the full 0-10 a never-answered field gets", () => {
+  const closingDate = "2027-01-01";
+  const neverAnswered = estimateSanralConventional({ positions: [], closingDate, qualitySystem: null });
+  const explicitlyNotCertified = estimateSanralConventional({ positions: [], closingDate, qualitySystem: "not_iso" });
+  assert.deepEqual(neverAnswered.qualitySystem, { min: 0, max: 10 }, "never-answered keeps the full range (no regression)");
+  assert.deepEqual(explicitlyNotCertified.qualitySystem, { min: 0, max: 5 }, "ISO (10) and submitted-for-ISO (7) are ruled out by the explicit 'No'");
+  assert.notDeepEqual(explicitlyNotCertified.qualitySystem, neverAnswered.qualitySystem);
+});
+
 // Finding (2026-11-06, standing solution-architect review): estimateSanralConventional()'s
 // management range used an exhaustive 2^n brute force over every position whose
 // `managerial` flag isn't on file, but ONLY up to n<=6 ambiguous positions - above that

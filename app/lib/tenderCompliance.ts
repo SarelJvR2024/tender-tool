@@ -174,8 +174,25 @@ export function beeProofValidAtClosing(c: CompanyVault | null, closingDate: stri
   return validityAtClosing(c.bee_proof_expiry, closingDate).status === "have";
 }
 
-/** SANRAL Form B4 quality-system input for sanralScoring.ts, from the vault. */
-export function qualitySystemFromVault(c: CompanyVault | null, closingDate: string | null): "iso" | null {
+/**
+ * SANRAL Form B4 quality-system input for sanralScoring.ts, from the vault.
+ *
+ * Finding 439 (standing QA/robustness review, 2026-11-11): this used to
+ * return `"iso" | null` only, so a company that EXPLICITLY answered "No" to
+ * ISO 9001 certification (iso_9001_certified === false - a real tri-state
+ * field; see EditForm.tsx's own "yes"/"no"/"" select and this file's own
+ * sanralConventionalDocumentChecks() B4 row two lines below, which already
+ * treats `=== false` as a distinct, confident fact, not as "not stated")
+ * got the exact same `null` as a company that has never answered the
+ * question at all. sanralScoring.ts reads a bare `null` as "fully unknown -
+ * show the whole 0-10 range", which is right for "never answered" but wrong
+ * for an explicit "No": ISO (10) and submitted-for-ISO (7) are both ruled
+ * out for certain once the company has said so, so the honest remaining
+ * range is in-house-or-none (0-5), not the full 0-10. `"not_iso"` carries
+ * that distinction through to the estimator.
+ */
+export function qualitySystemFromVault(c: CompanyVault | null, closingDate: string | null): "iso" | "not_iso" | null {
+  if (c?.iso_9001_certified === false) return "not_iso"; // explicit "No" on file - ISO/registered ruled out, in-house QMS not tracked by this field
   if (!c?.iso_9001_certified || !c.iso_9001_expiry) return null; // not stated / no expiry -> leave as a range
   return validityAtClosing(c.iso_9001_expiry, closingDate).status === "have" ? "iso" : null;
 }
