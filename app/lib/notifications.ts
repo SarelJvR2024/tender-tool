@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "./dates";
-import { DEADLINE_WINDOW_DAYS } from "./deadlineReminders";
+import { DEADLINE_REMINDER_EXCLUDED_STAGES, DEADLINE_WINDOW_DAYS } from "./deadlineReminders";
 import { COMPANY_EXPIRY_FIELDS } from "./companyExpiryFields";
 
 export type AppNotification = {
@@ -64,7 +64,13 @@ type PersonExpiryRow = {
   sagc_expiry: string | null;
 };
 
-type DeadlineRow = { id: string; contract_no: string | null; description: string | null; closing_date: string | null };
+type DeadlineRow = {
+  id: string;
+  contract_no: string | null;
+  description: string | null;
+  closing_date: string | null;
+  tender_packs: { pipeline_stage: string }[];
+};
 
 /**
  * A read-only glance at two things already tracked elsewhere in the app -
@@ -109,7 +115,7 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
     supabase.from("people").select("id, name, ecsa_expiry, sacpcmp_expiry, sacnasp_expiry, sagc_expiry"),
     supabase
       .from("tenders")
-      .select("id, contract_no, description, closing_date, tender_packs!inner(id)")
+      .select("id, contract_no, description, closing_date, tender_packs!inner(id, pipeline_stage)")
       .not("closing_date", "is", null)
       .order("closing_date", { ascending: true }),
   ]);
@@ -189,6 +195,14 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
   }
 
   for (const t of (tenderRows ?? []) as unknown as DeadlineRow[]) {
+    // Finding 434: a tender whose own tender_packs row is already
+    // submitted/briefing_shortlisted/won/lost no longer has an actionable
+    // deadline - same DEADLINE_REMINDER_EXCLUDED_STAGES the email reminder
+    // (deadlineReminderCandidates(), this same closing-date fact) already
+    // applies; this loop never read pipeline_stage at all until now, so the
+    // bell kept nagging "Closes in N days" for a tender already dealt with.
+    const stage = t.tender_packs[0]?.pipeline_stage;
+    if (stage && (DEADLINE_REMINDER_EXCLUDED_STAGES as readonly string[]).includes(stage)) continue;
     const left = daysUntil(t.closing_date);
     if (!withinWindow(left, DEADLINE_WINDOW_DAYS) || left < 0) continue;
     notifications.push({

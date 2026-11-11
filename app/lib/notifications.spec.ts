@@ -152,3 +152,73 @@ describe("getNotifications - person credential coverage (Finding 294)", () => {
     expect(ids).toContain("person:p1:sagc_expiry");
   });
 });
+
+// Finding 434: the bell's own "closing soon" deadline loop read `tenders`
+// joined to `tender_packs!inner(id)` with no `pipeline_stage` at all, so it
+// never applied `deadlineReminders.ts`'s own DEADLINE_REMINDER_EXCLUDED_STAGES
+// (submitted/briefing_shortlisted/won/lost) - the exact "a company already
+// past this milestone shouldn't still get nagged about it" rule every OTHER
+// closing-date-ish reminder in this codebase applies (the email reminder
+// script itself, lib/returnablesDigestCandidates.ts, lib/briefingReminders.ts,
+// lib/printCutoffReminders.ts's CLOSED_STAGES, lib/opportunityInsights.ts's
+// and lib/pastSubmissionReuse.ts's DONE_STAGES). AGENTS.md's own header
+// comment for this file claims the email reminder "triggers off the exact
+// facts lib/notifications.ts's bell already computes" - true for the
+// DEADLINE_WINDOW_DAYS constant, false for this stage exclusion, which only
+// ever lived in deadlineReminders.ts's own deadlineReminderCandidates(),
+// never imported here. Real effect: the topbar bell (shown on every signed-in
+// page) kept showing a "Closes in N days" / "Closes today" warning for a
+// tender a company had already submitted, or that was already won/lost -
+// noise for a deadline that no longer needs any action.
+describe("getNotifications - tender deadlines exclude stages already past the deadline (Finding 434)", () => {
+  it("does NOT surface a closing-soon notification for a tender already submitted", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      tenders: [
+        {
+          id: "t1",
+          contract_no: "C1",
+          description: "Tender 1",
+          closing_date: daysFromNow(2),
+          tender_packs: [{ id: "p1", pipeline_stage: "submitted" }],
+        },
+      ],
+    });
+    const notifications = await getNotifications(supabase);
+    expect(notifications.map((n) => n.id)).not.toContain("deadline:t1");
+  });
+
+  it("does NOT surface a closing-soon notification for a tender already won", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      tenders: [
+        {
+          id: "t2",
+          contract_no: "C2",
+          description: "Tender 2",
+          closing_date: daysFromNow(1),
+          tender_packs: [{ id: "p2", pipeline_stage: "won" }],
+        },
+      ],
+    });
+    const notifications = await getNotifications(supabase);
+    expect(notifications.map((n) => n.id)).not.toContain("deadline:t2");
+  });
+
+  it("still surfaces a closing-soon notification for a tender still genuinely in progress", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      tenders: [
+        {
+          id: "t3",
+          contract_no: "C3",
+          description: "Tender 3",
+          closing_date: daysFromNow(2),
+          tender_packs: [{ id: "p3", pipeline_stage: "bidding" }],
+        },
+      ],
+    });
+    const notifications = await getNotifications(supabase);
+    expect(notifications.map((n) => n.id)).toContain("deadline:t3");
+  });
+});
