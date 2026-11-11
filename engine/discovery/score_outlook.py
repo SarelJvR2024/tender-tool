@@ -799,7 +799,18 @@ def match_locality(loc, offices):
             "reason": f"no office in the preferred area(s) - offices on file: {places}{derived}."}
 
 
-FUNCTIONALITY_NA_RE = re.compile(r"functionality\s*\n?\s*N/?A\b", re.IGNORECASE)
+# standing review, 2026-11-11: only allowed a run of whitespace/a single
+# newline between "functionality" and "N/A" - but this regex's own
+# justifying real-world evidence (docs/specs/Tender-Evaluation-Engine-Audit.md,
+# "Round 2": DPWI architectural PSP's "Scoring quality / functionality: N/A")
+# has a colon in between, which that character class never allowed, so the
+# one live document this regex exists to catch never actually matched it and
+# fell through to the "nothing mentioned at all" branch instead of the real
+# "not applicable" one. Widened to allow the handful of short punctuation
+# runs a buyer's own "<label>: N/A" formatting actually uses (colon, dash,
+# slash) - still bounded (at most 3 non-word characters) so it can't drift
+# across an unrelated sentence.
+FUNCTIONALITY_NA_RE = re.compile(r"functionality\W{0,3}N/?A\b", re.IGNORECASE)
 
 # Manifest v2 (Sarel's own brief: "Replace the single functionality:70
 # integer with a structured scorecard... sub_minimum_rule... criteria").
