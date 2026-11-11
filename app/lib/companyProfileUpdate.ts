@@ -86,15 +86,31 @@ const INTEGER_FIELDS = new Set(["other_offices", "ecsa_registered_staff_count", 
 // Found 2026-10-30: every field above only ever rejected a NEGATIVE number -
 // there was no upper bound at all, for a percentage field or for bee_level,
 // client-side (NumberInput has no max) or here. black_ownership_pct/
-// bee_procurement_recognition_pct/typical_jv_share_pct are written verbatim
-// onto real tender submission documents (engine/sanral_fill.py L33,
-// engine/fill_a_forms.py's A12 confirmation line, engine/pack_generator/
-// confirm_pack.py's jv_share_pct) - "500%" or "250%" would print on an actual
-// government bid with nothing anywhere in the stack ever refusing it.
+// typical_jv_share_pct are written verbatim onto real tender submission
+// documents (engine/sanral_fill.py L33, engine/fill_a_forms.py's A12
+// confirmation line, engine/pack_generator/confirm_pack.py's jv_share_pct) -
+// "500%" or "250%" would print on an actual government bid with nothing
+// anywhere in the stack ever refusing it.
 // bee_level is written straight into SANRAL's own K33 cell (whole 1-9;
 // SANRAL's template itself ships 9 = "non-compliant contributor" when no
 // level is on file - docs/specs/Form-Field-Audit.md row K33), so 1-9 is the
 // real, documented range, not 1-8.
+// Correction (standing solution-architect review, Finding 379, 2026-11-11):
+// bee_procurement_recognition_pct is NOT in fact written onto any real
+// document anywhere - this comment previously claimed it was, grouped in
+// with its two true siblings above by category (a percentage field) rather
+// than by a confirmed write site. A full sweep of every engine/*.py filler
+// (confirm_pack.py's own company dict, sanral_fill.py, fill_a_forms.py,
+// fill_docx_forms.py, build_general_pack.py) and docs/specs/Form-Field-
+// Audit.md's own exhaustive TEND1X-row-30-34 cell audit confirm there is no
+// cell for it on either pack engine - confirm_pack.py silently drops it
+// when translating a company profile into pack.yaml. Still capped at 100
+// here (a nonsense "500%" is still bad to show on the Company page itself,
+// and bounding it costs nothing), but see QA-Edge-Case-Findings.md's
+// Finding 379 for the real gap this correction doesn't fix: the field is
+// still presented in quick-fix-config.ts's "bbbee" drawer as if it mattered
+// for B-BBEE compliance, exactly like bee_level/black_ownership_pct, when it
+// in fact affects no document and no compliance check anywhere.
 const PERCENTAGE_FIELDS = new Set(["black_ownership_pct", "bee_procurement_recognition_pct", "typical_jv_share_pct"]);
 const FIELD_MAX: Partial<Record<(typeof COMPANY_NUMERIC_FIELDS)[number], number>> = { bee_level: 9 };
 
