@@ -35,6 +35,7 @@ import { TenderTemplates } from "./tender-templates";
 import { NarrativeDocuments } from "./narrative-documents";
 import { SubcontractingPlan } from "./subcontracting-plan";
 import { PositionPersonSelect } from "./position-person-select";
+import { cvJobsForPosition } from "./position-cv-jobs-logic";
 import { startTenderPack } from "./pack-inputs-actions";
 import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
@@ -1125,7 +1126,16 @@ export default async function TenderWorkspacePage({
                       tags: roleTags,
                       peopleIds: new Set(assignablePeople.map((p) => p.id)),
                     });
-                    const positionJobs = generatedCvs.filter((g) => g.position_code === code);
+                    // Only this position's CURRENTLY confirmed person's own
+                    // jobs - not every job that ever carried this position's
+                    // code. Finding 402: a position reassigned away from
+                    // whoever a CV was generated for used to keep showing
+                    // that old, now-stale "ready" job (with live download
+                    // links) under the new person's name - the same
+                    // stale-reassignment shape won-project-sync-logic.ts's
+                    // staleSyncedProjectRows() already guards against for
+                    // `projects` rows. See position-cv-jobs-logic.ts.
+                    const positionJobs = cvJobsForPosition(generatedCvs, code, confirmedId);
                     return (
                       <div key={code} style={{ borderTop: "1px solid var(--border)", padding: "12px 0" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
