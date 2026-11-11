@@ -13,6 +13,7 @@ import {
   PACK_BUCKET,
   checkReturnable,
   companyFieldStates,
+  needsSignatoryFallbackOption,
   questionStates,
   type EngineJob,
   type GeneralCompany,
@@ -581,6 +582,15 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                       <>
                         <select name={`q:${q.key}`} defaultValue={value ?? primarySignatoryId ?? ""} style={{ ...input, maxWidth: 420 }}>
                           <option value="">Choose who signs…</option>
+                          {/* Finding 436: keeps an already-chosen signatory selected (and so
+                              re-submitted unchanged) even when this render's `people` read
+                              failed or otherwise left them out of the list below - without
+                              this, the browser falls back to the empty option above, and
+                              saving ANY other answer on this batch form silently clears the
+                              real, previously-saved signatory_person_id answer. */}
+                          {needsSignatoryFallbackOption(value, people) && (
+                            <option value={value as string}>Previously chosen person (not in this list right now)</option>
+                          )}
                           {people.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}{p.signatory_capacity ? ` - ${p.signatory_capacity}` : " - no signatory capacity on file"}

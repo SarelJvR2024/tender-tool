@@ -317,6 +317,37 @@ export function questionStates(questions: ManifestQuestion[], answers: TenderAns
   });
 }
 
+/**
+ * Finding 436 (2026-11-11): whether the "Who signs this bid?" <select>
+ * (SBD/MBD 1, general-workspace.tsx's own q.type === "person" block, the
+ * only person-type question - QUESTIONS' "signatory_person_id" in
+ * engine/general/requirements.py) needs a synthetic fallback <option> for
+ * the already-chosen person. Same shape, same reason, as
+ * dealEconomics.ts's needsCreditFallbackOption() (Finding 175) and
+ * registrations.ts's needsHolderFallbackOption() (Finding 177):
+ * GeneralTenderWorkspace()'s own `people` read discards its error
+ * (`const people = (peopleRows ?? []) as Person[];`), so a transient read
+ * failure there - or the chosen person simply missing from this render's
+ * list for any other reason - leaves `people` without the person this
+ * tender's tender_answers.signatory_person_id already names (migration
+ * 0044's own person-deletion cleanup trigger already removes that row
+ * outright when the person themselves is deleted, so this is a different,
+ * narrower case: the person still exists, this one render just didn't load
+ * them). Without this fallback, the <select>'s `defaultValue` matches no
+ * <option>, the browser silently selects the first one ("Choose who
+ * signs…", value ""), and saving ANY other answer on this same
+ * always-whole-batch form (general-actions.ts's saveGeneralAnswers(), one
+ * <form> covering every question and company field under one "Save
+ * answers" button) resubmits `q:signatory_person_id=""` - which that
+ * function treats as an explicit clear, deleting the real, previously-saved
+ * tender_answers row outright, with no error shown ("Answers saved.").
+ * Call this before building the <select>'s <option>s and add a synthetic
+ * option for the current value when it returns true.
+ */
+export function needsSignatoryFallbackOption(value: string | null, people: { id: string }[]): boolean {
+  return value !== null && !people.some((p) => p.id === value);
+}
+
 export function companyFieldStates(fields: ManifestCompanyField[], company: GeneralCompany | null) {
   return fields.map((f) => {
     const value = (company?.[f.column] as string | null | undefined) ?? null;
