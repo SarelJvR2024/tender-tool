@@ -11,7 +11,15 @@ import { buildOuterEnvelopeLines, deliveryAddressLines } from "./cover-page-line
  * delivery address when one was found at intake) - all already read
  * elsewhere on this page (tenderFacts/tenderPack's own `intake`) or on the
  * company record, nothing new queried except the company's own logo/legal
- * name.
+ * name/registered address/CIPC number.
+ *
+ * Finding 425: the real `_bidder_block()` prints the company's own
+ * `registered_address` and `cipc_registration_number` (each only if on
+ * file) right after the TENDERER line - this component read neither column
+ * and never showed either line, so a company with its registered address
+ * and/or CIPC number already on file (both ordinary /company fields most
+ * companies set) saw a preview missing content that genuinely prints on
+ * every real cover.
  *
  * Deliberately NOT editable. Sarel's spec asked for two user-editable
  * fields here (title wording, contact person) - checked `make_outer`/
@@ -49,18 +57,31 @@ export async function CoverPagePreview({
   // Set by the no-signup demo (spec §6) to skip the real company read below
   // and render with a hand-built sample company instead - every other prop
   // here is already plain data, so this is the one place this component
-  // reached for a live Supabase row itself.
-  company?: { legal_name: string | null; logo_storage_path: string | null };
+  // reached for a live Supabase row itself. registered_address/
+  // cipc_registration_number are optional here (Finding 425): the demo's
+  // own hand-built DEMO_COMPANY never set either, and ?? below already
+  // treats "not supplied" the same as "on file but blank".
+  company?: {
+    legal_name: string | null;
+    logo_storage_path: string | null;
+    registered_address?: string | null;
+    cipc_registration_number?: string | null;
+  };
 }) {
   let company = companyOverride ?? null;
   if (!company) {
     const supabase = await createClient();
-    const { data } = await supabase.from("companies").select("legal_name, logo_storage_path").maybeSingle();
+    const { data } = await supabase
+      .from("companies")
+      .select("legal_name, logo_storage_path, registered_address, cipc_registration_number")
+      .maybeSingle();
     company = data;
   }
 
   const closingText = closingDate ? (formatClosingDateTime(closingDate) ?? "—") : "- no closing date on file";
   const tendererLine = `TENDERER: ${company?.legal_name ?? "No company name on file"}`;
+  const registeredAddress = company?.registered_address ?? null;
+  const cipcRegistrationNumber = company?.cipc_registration_number ?? null;
   const addressLines = deliveryAddressLines(deliveryAddress);
   const printLines = buildOuterEnvelopeLines({
     hasLogo: !!company?.logo_storage_path,
@@ -71,6 +92,8 @@ export async function CoverPagePreview({
     buyer,
     tendererLine,
     deliveryAddress,
+    registeredAddress,
+    cipcRegistrationNumber,
   });
 
   return (
@@ -115,6 +138,10 @@ export async function CoverPagePreview({
         </div>
         <div className="mt-2.5 text-[11px] text-muted-foreground">Client: {buyer ?? "No client on file"}</div>
         <div className="mt-1.5 text-[11px] text-muted-foreground">{tendererLine}</div>
+        {registeredAddress && <div className="text-[11px] text-muted-foreground">{registeredAddress}</div>}
+        {cipcRegistrationNumber && (
+          <div className="text-[11px] text-muted-foreground">CIPC Registration No: {cipcRegistrationNumber}</div>
+        )}
       </div>
       <div className="mt-2.5 text-[11px] text-muted-foreground">
         Everything above comes from this tender and your company record - nothing here can be typed over yet.

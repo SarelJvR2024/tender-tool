@@ -19,6 +19,20 @@
  * stay true whenever a tender has a real delivery address on file, instead
  * of always rendering as if no delivery address was ever found (silently
  * wrong for any such tender, not merely incomplete).
+ *
+ * Finding 425: the real generator's own `_bidder_block()` (same file)
+ * prints the TENDERER heading/legal name, then - each only if actually on
+ * file - the company's own `registered_address` and, as "CIPC Registration
+ * No: <number>", its `cipc_registration_number`. This preview's own
+ * `tendererLine` only ever covered the legal-name half of that block; the
+ * other two real, commonly-populated company fields (both ordinary /company
+ * page columns most companies have on file, read by this exact pipeline for
+ * fill_docx_forms.py's own Address field too) were never read or shown here
+ * at all, so the preview silently omitted content that genuinely prints on
+ * every real Outer/Envelope cover for any company with either field set -
+ * the same "preview promises exactly what the generator prints, but doesn't"
+ * shape Finding 353 fixed for the delivery address, on the bidder block
+ * instead of the addressee block.
  */
 export function deliveryAddressLines(deliveryAddress?: string[] | null): string[] {
   return (deliveryAddress ?? []).filter((line) => !!line && line.trim() !== "");
@@ -33,6 +47,9 @@ export function buildOuterEnvelopeLines(input: {
   buyer: string | null;
   tendererLine: string;
   deliveryAddress?: string[] | null;
+  /** _bidder_block()'s own two optional lines, in its own order - each only printed (here, shown) when actually on file. */
+  registeredAddress?: string | null;
+  cipcRegistrationNumber?: string | null;
 }): string[] {
   return [
     input.hasLogo ? "Company logo" : "No logo on file",
@@ -45,5 +62,7 @@ export function buildOuterEnvelopeLines(input: {
     `TENDER CLOSES: ${input.closingText}`,
     `Client: ${input.buyer ?? "No client on file"}`,
     input.tendererLine,
+    ...(input.registeredAddress ? [input.registeredAddress] : []),
+    ...(input.cipcRegistrationNumber ? [`CIPC Registration No: ${input.cipcRegistrationNumber}`] : []),
   ];
 }
