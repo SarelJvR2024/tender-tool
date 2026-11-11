@@ -292,6 +292,73 @@ describe("savePerson - id_number is validated the same way its sibling savePrinc
   });
 });
 
+// Finding 432 (standing solution-architect review, 2026-11-11): the SAME
+// column this Finding-218/219 block above already hard-gates with
+// isValidSaId() for the manual savePerson() edit path has a SECOND write
+// path - applyCvExtraction()'s own id_number row (EXTRACTED_PERSON_FIELDS,
+// kind "secret") - rendered as a plain editable text input
+// (people/[id]/cv-review.tsx's ValueInput, type="password") that a reviewer
+// can freely retype before ticking "use" and saving, with no check of any
+// kind on what they typed. Finding 219's own write-up explicitly concluded
+// "the CV-extraction AUTOMATED write path ... is NOT affected" - true only
+// of the value the AI itself proposes (extract_cv_fields.py's own
+// _plausible_sa_id() already gates that); nobody checked the human-edited
+// override, which bypasses that gate entirely and reaches the exact same
+// people.id_number column printed verbatim onto real government tender
+// forms and generated CVs.
+describe("applyCvExtraction - id_number is validated via isValidSaId(), the same gate savePerson() already has (Finding 432)", () => {
+  it("refuses a ticked id_number that isn't a real South African ID number", async () => {
+    const { client, rpcCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [pendingExtraction], // cv_extraction_results select
+    ]);
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+
+    const fd = formDataWith({
+      person_id: "person-1",
+      extraction_id: "extraction-1",
+      use_id_number: "on",
+      f_id_number: "abc123def0123",
+    });
+    const url = await expectRedirect(applyCvExtraction(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("valid 13-digit South African ID number"));
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("still saves normally when the ticked id_number is genuinely valid", async () => {
+    const { client, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingExtraction],
+        [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs - already queued, skip insert
+      ],
+      undefined,
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+
+    const fd = formDataWith({
+      person_id: "person-1",
+      extraction_id: "extraction-1",
+      use_id_number: "on",
+      f_id_number: "8601205135087",
+    });
+    const url = await expectRedirect(applyCvExtraction(fd));
+
+    expect(url).toContain("/people/person-1");
+    expect(url).not.toContain("error=");
+    expect(rpcCalls).toHaveLength(1);
+    const params = rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ id_number: "8601205135087" });
+  });
+});
+
 // applyCvExtraction()'s own people-update/projects-insert/mark-applied
 // sequence used to be three separate, unlocked writes, the last of which
 // never re-checked review_status in its own .eq() chain - a genuine two-

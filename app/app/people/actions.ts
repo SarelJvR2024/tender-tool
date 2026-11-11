@@ -760,10 +760,24 @@ export async function applyCvExtraction(formData: FormData) {
   const edited: string[] = [];
   for (const f of EXTRACTED_PERSON_FIELDS) {
     if (formData.get(`use_${f.key}`) !== "on") continue;
-    const v = str(formData, `f_${f.key}`);
+    let v = str(formData, `f_${f.key}`);
     if (f.key === "name" && !v) back("A ticked name can't be empty.");
     if (v && f.kind === "date" && !ISO_DATE.test(v)) back(`${f.label}: "${v}" isn't a date (yyyy-mm-dd).`);
     if (v && f.kind === "select" && !(f.options ?? []).includes(v)) back(`${f.label}: choose one of SANRAL's options.`);
+    // Finding 432: this card's own id_number row (kind "secret") is a plain
+    // editable text input (cv-review.tsx's ValueInput, type="password") -
+    // the AI only ever PROPOSES a value extract_cv_fields.py's own
+    // _plausible_sa_id() already approved (Finding 219's own "the
+    // CV-extraction automated write path is NOT affected" claim is true only
+    // for that proposed value), but a reviewer can freely retype this box
+    // before ticking "use" and saving, and nothing here checked what they
+    // typed - the exact same unchecked write into people.id_number that
+    // savePerson() (Finding 219) was fixed for, reachable through a second,
+    // untouched door into the same column.
+    if (f.key === "id_number") {
+      v = v?.replace(/\s+/g, "") ?? null;
+      if (v && !isValidSaId(v)) back("That ID number isn't a valid 13-digit South African ID number.");
+    }
     personUpdate[f.key] = v;
     if ((proposal.person?.[f.key]?.value ?? null) !== v) edited.push(f.key);
   }

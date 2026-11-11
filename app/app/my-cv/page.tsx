@@ -181,16 +181,40 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
           // write-up. Using the same list the apply action now uses means
           // every field a checkbox is offered for here is one the action will
           // actually save.
-          const fields = EXTRACTED_PERSON_FIELDS.map((f) => f.key);
+          const fields = EXTRACTED_PERSON_FIELDS.filter((f) => proposal[f.key]);
           return (
             <Card key={ex.id} title="Review your AI-extracted CV">
               <form action={applyMyCvExtraction}>
                 <input type="hidden" name="extraction_id" value={ex.id} />
-                {fields.filter((f) => proposal[f]).map((f) => (
-                  <div key={f} className="flex items-center gap-2.5 py-1.5">
-                    <input type="checkbox" name={`use_${f}`} defaultChecked />
-                    <div className="w-40 shrink-0 text-xs text-muted-foreground">{f.replace(/_/g, " ")}</div>
-                    <input name={`f_${f}`} defaultValue={proposal[f]?.value ?? ""} className={`${inputClass} min-h-9`} />
+                {fields.map((f) => (
+                  <div key={f.key} className="flex items-center gap-2.5 py-1.5">
+                    <input type="checkbox" name={`use_${f.key}`} defaultChecked />
+                    <div className="w-40 shrink-0 text-xs text-muted-foreground">{f.key.replace(/_/g, " ")}</div>
+                    {/* Finding 432: used to be one plain text <input> for
+                        every field regardless of kind - a "select" field
+                        (ecsa_level/highest_level) could be retyped to any
+                        string at all, even though SANRAL's own form only
+                        accepts its exact dropdown label
+                        (engine/fill_conventional.py refuses any other one)
+                        and applyMyCvExtraction() now enforces that same
+                        option list server-side. Mirrors
+                        people/[id]/cv-review.tsx's own ValueInput: a real
+                        <select> for "select", password-masked for "secret",
+                        a date input for "date", plain text otherwise. */}
+                    {f.kind === "select" ? (
+                      <select className={`${inputClass} min-h-9`} name={`f_${f.key}`} defaultValue={proposal[f.key]?.value ?? ""}>
+                        <option value="">- choose -</option>
+                        {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        name={`f_${f.key}`}
+                        defaultValue={proposal[f.key]?.value ?? ""}
+                        type={f.kind === "date" ? "date" : f.kind === "secret" ? "password" : "text"}
+                        autoComplete="off"
+                        className={`${inputClass} min-h-9`}
+                      />
+                    )}
                   </div>
                 ))}
                 <div className="mt-2.5 flex gap-2.5">

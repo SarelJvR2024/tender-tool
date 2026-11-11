@@ -176,10 +176,15 @@ describe("saveMyDetails - real update still succeeds", () => {
   });
 });
 
+// Finding 432: must be one of lib/cvExtraction.ts's own ECSA_LEVELS strings
+// now that applyMyCvExtraction() validates "select"-kind fields the same
+// way its sibling applyCvExtraction() already does - "Pr Eng" (this
+// fixture's value before that fix) is not a real SANRAL dropdown label and
+// would now be refused.
 const EXTRACTION_FORM = {
   extraction_id: "extraction-1",
   use_ecsa_level: "on",
-  f_ecsa_level: "Pr Eng",
+  f_ecsa_level: "Professional Engineer",
 };
 
 // applyMyCvExtraction()'s own person-update-then-mark-applied sequence used
@@ -228,7 +233,7 @@ describe("applyMyCvExtraction - apply_my_cv_extraction_checked rpc succeeds", ()
     expect(supabase.rpcCalls).toHaveLength(1);
     expect(supabase.rpcCalls[0].name).toBe("apply_my_cv_extraction_checked");
     const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
-    expect(params.p_person_fields).toEqual({ ecsa_level: "Pr Eng" });
+    expect(params.p_person_fields).toEqual({ ecsa_level: "Professional Engineer" });
   });
 });
 
@@ -315,6 +320,81 @@ describe("applyMyCvExtraction - a field outside the old hand-typed 10-key subset
     expect(url).toBe("/my-cv?saved=extracted");
     const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
     expect(params.p_person_fields).toEqual({ initial_graduated: "2010-04-23", role: "Project Leader" });
+  });
+});
+
+// Finding 432 (standing solution-architect review, 2026-11-11): this
+// function had NO validation of any kind - not even the required-name/
+// ISO-date/select-options checks its sibling applyCvExtraction() already
+// has - so an employee retyping the id_number box this page's own review
+// card shows (a plain text input, not masked or constrained in any way
+// before this fix) could save a garbage value straight into people.id_number,
+// the same real-world column savePerson() (Finding 219) and now
+// applyCvExtraction() (Finding 432, above) are both gated on.
+describe("applyMyCvExtraction - id_number is validated via isValidSaId() (Finding 432)", () => {
+  it("refuses a ticked id_number that isn't a real South African ID number", async () => {
+    const supabase = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+    ]);
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(formDataWith({ extraction_id: "extraction-1", use_id_number: "on", f_id_number: "abc123def0123" })),
+    );
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("valid 13-digit South African ID number"));
+    expect(supabase.rpcCalls).toHaveLength(0);
+  });
+
+  it("still saves normally when the ticked id_number is genuinely valid", async () => {
+    const supabase = makeSupabase(
+      [
+        ...requireOwnPersonOk(),
+        [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+        [{ data: [], error: null }], // queueStandardCvs' own "already queued?" check - nothing pending
+      ],
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(formDataWith({ extraction_id: "extraction-1", use_id_number: "on", f_id_number: "8601205135087" })),
+    );
+
+    expect(url).toBe("/my-cv?saved=extracted");
+    const params = supabase.rpcCalls[0].params as { p_person_fields: Record<string, string> };
+    expect(params.p_person_fields).toEqual({ id_number: "8601205135087" });
+  });
+});
+
+// Finding 432: "select"-kind fields (ecsa_level/highest_level) must be one
+// of lib/cvExtraction.ts's own fixed option lists - SANRAL's real Form
+// B2.1 dropdown labels - the same check applyCvExtraction() already runs;
+// this function had none at all, and this page's own review card rendered
+// every field (select ones included) as a plain free-text input, so
+// nothing anywhere stopped an arbitrary string from reaching
+// people.ecsa_level, which engine/fill_conventional.py refuses outright
+// when it isn't one of those exact labels.
+describe("applyMyCvExtraction - a 'select'-kind field must be one of SANRAL's own options (Finding 432)", () => {
+  it("refuses an ecsa_level that isn't one of ECSA_LEVELS", async () => {
+    const supabase = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "extraction-1", person_id: "person-1", review_status: "pending_review", proposed: {} }, error: null }],
+    ]);
+    supabaseState.current = supabase;
+
+    const { applyMyCvExtraction } = await import("./actions");
+    const url = await expectRedirect(
+      applyMyCvExtraction(formDataWith({ extraction_id: "extraction-1", use_ecsa_level: "on", f_ecsa_level: "Pr Eng" })),
+    );
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("choose one of SANRAL's options"));
+    expect(supabase.rpcCalls).toHaveLength(0);
   });
 });
 

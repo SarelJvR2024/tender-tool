@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { safeFileName } from "@/lib/safeFileName";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
-import { EXTRACTED_PERSON_FIELDS } from "@/lib/cvExtraction";
+import { EXTRACTED_PERSON_FIELDS, ISO_DATE } from "@/lib/cvExtraction";
+import { isValidSaId } from "@/lib/principals";
 
 /**
  * Self-service actions for the My CV page (0065: employee role). Every
@@ -178,10 +179,35 @@ export async function applyMyCvExtraction(formData: FormData) {
   if (!row || row.person_id !== personId) fail("That extraction result wasn't found for you.");
   if (row.review_status !== "pending_review") fail("These extracted fields were already saved or discarded.");
 
+  // Finding 432: this loop used to write whatever was ticked straight
+  // through with NO validation at all - not even the three checks its own
+  // sibling applyCvExtraction() (app/app/people/actions.ts) already runs on
+  // the exact same canonical EXTRACTED_PERSON_FIELDS list (required name,
+  // ISO date format, and - crucially - that a "select" field's value is one
+  // of SANRAL's own fixed options; this page's own review card renders every
+  // field, select ones included, as a plain free-text <input>, so nothing
+  // ever constrained what could be typed into ecsa_level/highest_level
+  // before this fix). engine/fill_conventional.py "refuses any other label"
+  // than the exact ECSA_LEVELS/QUALIFICATION_LEVELS strings when it fills a
+  // real pack (lib/cvExtraction.ts's own header comment) - an employee
+  // retyping either field here, then confirming, could save a value that
+  // later hard-fails that person's own real SANRAL submission. id_number
+  // gets the same isValidSaId() gate savePerson() already has (Finding 219)
+  // and applyCvExtraction() now also has (Finding 432) - the AI only ever
+  // PROPOSES a plausible ID number, but this box is freely editable before
+  // ticking "use".
   const personUpdate: Record<string, string | null> = {};
-  for (const { key } of EXTRACTED_PERSON_FIELDS) {
-    if (formData.get(`use_${key}`) !== "on") continue;
-    personUpdate[key] = str(formData, `f_${key}`);
+  for (const f of EXTRACTED_PERSON_FIELDS) {
+    if (formData.get(`use_${f.key}`) !== "on") continue;
+    let v = str(formData, `f_${f.key}`);
+    if (f.key === "name" && !v) fail("A ticked name can't be empty.");
+    if (v && f.kind === "date" && !ISO_DATE.test(v)) fail(`${f.label}: "${v}" isn't a date (yyyy-mm-dd).`);
+    if (v && f.kind === "select" && !(f.options ?? []).includes(v)) fail(`${f.label}: choose one of SANRAL's options.`);
+    if (f.key === "id_number") {
+      v = v?.replace(/\s+/g, "") ?? null;
+      if (v && !isValidSaId(v)) fail("That ID number isn't a valid 13-digit South African ID number.");
+    }
+    personUpdate[f.key] = v;
   }
   if (Object.keys(personUpdate).length === 0) fail("Nothing was ticked. Tick the fields to save, or discard the extraction.");
 
