@@ -21,7 +21,7 @@ import { EmptyState } from "@/components/tt/empty-state";
 import { ErrorState } from "@/components/tt/error-state";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { packHealthStatusFromReadiness, primaryActionLabel, type PackHealth } from "@/lib/pipelineCardHelpers";
+import { isSameSastMonth, packHealthStatusFromReadiness, primaryActionLabel, type PackHealth } from "@/lib/pipelineCardHelpers";
 
 // Pack health (item 2, Sarel's own ask: "replace all '-' dashes"): derived
 // ONLY from computeTenderReadiness()'s own real Fix/Provide/Verify counts
@@ -421,11 +421,12 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   const valueCards = [...activeCards, ...byStage.submitted];
   const totalValueBeingBid = valueCards.reduce((sum, c) => sum + (toNumber(c.economics?.submitted_price_zar) ?? 0), 0);
   const now = new Date();
-  const submittedThisMonth = cards.filter((c) => {
-    if (!c.submittedAt) return false;
-    const d = new Date(c.submittedAt);
-    return d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth();
-  }).length;
+  // Finding 428: real SAST calendar month, not the raw UTC instant's own
+  // month - see isSameSastMonth()'s own header comment (lib/pipelineCardHelpers.ts)
+  // for why a naive getUTCFullYear()/getUTCMonth() comparison here silently
+  // showed the PREVIOUS month's count as "this month" for the first ~2
+  // hours of every real SAST month.
+  const submittedThisMonth = cards.filter((c) => c.submittedAt && isSameSastMonth(c.submittedAt, now)).length;
   const decided = byStage.won.length + byStage.lost.length;
   const winRate = decided === 0 ? null : Math.round((byStage.won.length / decided) * 100);
 
