@@ -7,6 +7,7 @@ import {
   COMPANY_VAULT_COLUMNS,
   beeProofValidAtClosing,
   qualitySystemFromVault,
+  matchGeneratedCvForPosition,
   type CompanyVault,
   type PersonFacts,
 } from "@/lib/tenderCompliance";
@@ -33,7 +34,7 @@ type Assignment = { position_code: string; confirmed_person_id: string | null; s
 type PersonRow = PersonFacts & { id: string };
 type ProjectRow = SanralProject & { person_id: string };
 type CvUpload = { person_id: string; mode: "as_is" | "ai_extract"; original_filename: string; created_at: string };
-type GeneratedCvRow = { position_code: string | null; status: string; storage_path_pdf: string | null };
+type GeneratedCvRow = { position_code: string | null; person_id: string | null; status: string; storage_path_pdf: string | null };
 
 export const loadTenderCompliance = cache(async (tenderId: string) => {
   const supabase = await createClient();
@@ -167,7 +168,12 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
       // the real usable condition instead of status alone - see Finding
       // 305/308's bug class (2026-11-10) on the sibling Pack Review/
       // Submission Plan screens.
-      supabase.from("generated_cvs").select("position_code, status, storage_path_pdf").eq("tender_id", tenderId),
+      // person_id: Finding 400 - matched by position_code alone until now,
+      // which could show a PREVIOUS position holder's own already-'ready'
+      // CV as this position's own (confirmPositionPerson() never cleans up
+      // an old row when a position is reassigned) - see
+      // matchGeneratedCvForPosition()'s own header in tenderCompliance.ts.
+      supabase.from("generated_cvs").select("position_code, person_id, status, storage_path_pdf").eq("tender_id", tenderId),
     ]);
     if (pplErr) console.error("people select failed (tender compliance)", pplErr);
     if (prjErr) console.error("projects select failed (tender compliance)", prjErr);
@@ -253,7 +259,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     // else R.396's table labelled as an assumption (tenderCompliance.ts).
     const min = checkMinimumRequirement(code, person, closingDate, req?.position_description ?? null, keyPersonMinimums);
     const cv = person ? cvUploads.find((c) => c.person_id === person.id) ?? null : null;
-    const tenderCv = generatedCvs.find((g) => g.position_code === code) ?? null;
+    const tenderCv = matchGeneratedCvForPosition(generatedCvs, code, asg?.confirmed_person_id ?? null);
     const personProjects = person ? projects.filter((p) => p.person_id === person.id) : [];
     // Role fit comes from the company's own tag (0016); the C3.1.11
     // heuristic above is kept only as a cross-check (tenderRoles.ts).

@@ -180,6 +180,39 @@ export function qualitySystemFromVault(c: CompanyVault | null, closingDate: stri
   return validityAtClosing(c.iso_9001_expiry, closingDate).status === "have" ? "iso" : null;
 }
 
+/**
+ * Which one (if any) of this tender's own `generated_cvs` rows for a key
+ * position is the real one to show - the row belonging to the person
+ * CURRENTLY confirmed for that position (tender_pack_assignments.
+ * confirmed_person_id), never a stale row left behind by a person this
+ * position used to be confirmed to.
+ *
+ * compliance-data.ts's own `generatedCvs.find((g) => g.position_code ===
+ * code)` matched by position_code alone - person-blind - because its own
+ * select never even read `person_id`. `confirmPositionPerson()` (pack-
+ * inputs-actions.ts) can reassign who fills a position at any time; it
+ * never deletes or disqualifies the PREVIOUS person's own already-'ready'
+ * generated_cvs row (by design - requestTenderCv() scopes a brand-new
+ * request to the newly-confirmed person_id, and nothing anywhere cleans up
+ * an old one). So after a reassignment, the position-only match kept
+ * finding the OLD person's 'ready' CV and reporting "Tender CV: ready" for
+ * the position - on compliance-report.tsx's own badge, on the Disqualification
+ * Guard's "Key personnel CVs" row (disqualification-guard.tsx) and on
+ * pack-review-data.ts's own hasCv/cvStatus - even though the person now
+ * actually confirmed for it has no usable CV at all. engine/pack/
+ * process_pack_jobs.py's own CV loop never has this gap: it already filters
+ * `g["person_id"] == pid` alongside position_code (gather(), line ~765) -
+ * this is that same guard, missing on this one TypeScript sibling.
+ */
+export function matchGeneratedCvForPosition<T extends { position_code: string | null; person_id: string | null }>(
+  rows: T[],
+  positionCode: string,
+  confirmedPersonId: string | null,
+): T | null {
+  if (!confirmedPersonId) return null;
+  return rows.find((r) => r.position_code === positionCode && r.person_id === confirmedPersonId) ?? null;
+}
+
 export type ProvenanceLite = { field_key: string; status: string };
 
 export type ExperienceSummary = {

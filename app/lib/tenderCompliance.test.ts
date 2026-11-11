@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { minimumRequirementFor, SANRAL_MIN_REQUIREMENTS, sanralConventionalDocumentChecks, type CompanyVault } from "./tenderCompliance.ts";
+import { minimumRequirementFor, SANRAL_MIN_REQUIREMENTS, sanralConventionalDocumentChecks, matchGeneratedCvForPosition, type CompanyVault } from "./tenderCompliance.ts";
 
 test("a position literally naming 'Geologist' resolves to the SACNASP requirement (unchanged by the fix)", () => {
   const req = minimumRequirementFor("DS1", "Design Specialist 1 - Engineering Geologist");
@@ -113,4 +113,42 @@ test("COID letter already expired is still 'missing', not 'expiring' (no regress
   const coid = coidItemFor(daysFromNow(-5), daysFromNow(10));
   assert.equal(coid.status, "missing");
   assert.equal(coid.expiring, false);
+});
+
+/**
+ * matchGeneratedCvForPosition(): Finding 400 (standing solution-architect
+ * review, 2026-11-11) - compliance-data.ts used to match a position's own
+ * `generated_cvs` row by position_code alone, which could keep showing a
+ * PREVIOUS position holder's own already-'ready' CV after the position was
+ * reassigned to someone else (confirmPositionPerson() never deletes the old
+ * person's row). engine/pack/process_pack_jobs.py's own CV loop already
+ * filters on `person_id` alongside `position_code` - this is that same
+ * guard, ported to its TypeScript sibling.
+ */
+
+test("a position's own CV match requires BOTH the right position_code AND the CURRENTLY confirmed person_id", () => {
+  const rows = [
+    { position_code: "PL", person_id: "person-old", status: "ready", storage_path_pdf: "x.pdf" },
+    { position_code: "PL", person_id: "person-new", status: "generating", storage_path_pdf: null },
+  ];
+  // The position is now confirmed to person-new, who has no ready CV yet -
+  // person-old's stale 'ready' row for the same position_code must NOT match.
+  const match = matchGeneratedCvForPosition(rows, "PL", "person-new");
+  assert.equal(match?.status, "generating", "must be person-new's own row, not person-old's leftover 'ready' one");
+});
+
+test("a position still confirmed to the SAME person it was generated for matches normally (no regression)", () => {
+  const rows = [{ position_code: "PL", person_id: "person-a", status: "ready", storage_path_pdf: "x.pdf" }];
+  const match = matchGeneratedCvForPosition(rows, "PL", "person-a");
+  assert.equal(match?.status, "ready");
+});
+
+test("no confirmed person for the position yields no match at all (nothing to show)", () => {
+  const rows = [{ position_code: "PL", person_id: "person-a", status: "ready", storage_path_pdf: "x.pdf" }];
+  assert.equal(matchGeneratedCvForPosition(rows, "PL", null), null);
+});
+
+test("a different position_code for the same confirmed person does not match", () => {
+  const rows = [{ position_code: "RE", person_id: "person-a", status: "ready", storage_path_pdf: "x.pdf" }];
+  assert.equal(matchGeneratedCvForPosition(rows, "PL", "person-a"), null);
 });
