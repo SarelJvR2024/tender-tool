@@ -243,6 +243,31 @@ def test_estimate_score_outlook_locality_match_is_still_none_with_no_offices():
           result["locality"]["match"]["status"] == "unknown", result["locality"]["match"])
 
 
+def test_experience_evidence_merge_keeps_scored_per_project_from_either_restatement():
+    print("extract_experience_evidence(): the SAME rule restated twice (SANRAL/Transnet's own documented "
+          "shape, this function's own docstring) - first as a plain 'at least 3 projects' statement with "
+          "no ladder, later (beyond the merge gap) as a real 1/2/3 -> points scoring table for the same "
+          "project count and evidence type. The two restatements must merge into one rule (same count, "
+          "same evidence, same 'requires_appointment_and_completion') - and that merged rule must not "
+          "silently lose the fact that the SECOND restatement showed it's scored per project, the same "
+          "way practical_completion_excluded/disqualification_mentioned are already OR'd across a merge.")
+    text = (
+        "3.2 Experience: Tenderers must have completed at least 3 (three) similar projects of similar "
+        "scope in the last 10 (ten) years. Submit reference letters as proof.\n"
+        + ("Padding line filler text to separate the two windows beyond the 1200-character merge gap. " * 40)
+        + "\nScoring table for company experience (reference letters):\n"
+        "1 Completed project 10\n"
+        "2 Completed projects 20\n"
+        "3 Completed projects 30\n"
+    )
+    result = so.extract_experience_evidence(text)
+    check("the two restatements merged into exactly one rule, not two", len(result["rules"]) == 1, result["rules"])
+    r = result["rules"][0]
+    check("the merged rule's projects_required is still 3", r["projects_required"] == 3, r)
+    check("the merged rule's scored_per_project is True - the ladder restatement must not be lost",
+          r["scored_per_project"] is True, r)
+
+
 def main():
     test_unrelated_municipalities_do_not_falsely_match()
     test_legitimate_city_of_prefix_still_matches()
@@ -257,6 +282,7 @@ def main():
     test_extract_locality_keeps_both_kinds_as_separate_rows_for_the_same_area()
     test_estimate_score_outlook_locality_match_does_not_leak_the_functionality_criterions_points()
     test_estimate_score_outlook_locality_match_is_still_none_with_no_offices()
+    test_experience_evidence_merge_keeps_scored_per_project_from_either_restatement()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
