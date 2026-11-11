@@ -309,6 +309,53 @@ def test_gather_pack_inputs_signatory_fallback():
           "does not crash", signatory4 is None, signatory4)
 
 
+def test_gather_pack_inputs_award_letter_alone_not_accepted_when_completion_also_required():
+    print("gather_pack_inputs(): a bare award letter is not bound into the pack as evidence when the "
+          "tender's own rule demands appointment AND completion proof per project (Finding 399)")
+    # The real, documented shape (score_outlook.py's PAIRED_PROOF_RE; e.g.
+    # Transnet TPT: "5 award letters/POs WITH completion proof"). The TS
+    # compliance side (app/lib/experienceEvidence.ts's acceptedDocTypes())
+    # already excludes "award_letter" from the accepted set in this exact
+    # case - this is the matching Python-side filter that feeds the ACTUAL
+    # submitted pack (build_general_pack.py's `evidence_items`, which its
+    # own docstring trusts as "already filtered to the tender's rule").
+    job = {"company_id": "co-a", "tender_id": "t-a"}
+    tender = {"id": "t-a"}
+    rule = {"accepted_evidence": ["award_letter", "completion_certificate"],
+            "requires_appointment_and_completion": True, "projects_required": 3}
+    manifest = {"experience_evidence": {"rules": [rule]}, "roles": []}
+    rows = [
+        {"id": "co-a"},  # the company row itself
+        {"id": "ei-award", "company_id": "co-a", "tagged_at": "2026-01-01T00:00:00Z",
+         "document_type": "award_letter", "project_name": "N3 Upgrade (award only)", "completion_date": "2024-01-01"},
+        {"id": "ei-complete", "company_id": "co-a", "tagged_at": "2026-01-01T00:00:00Z",
+         "document_type": "completion_certificate", "project_name": "N2 Widening (completion proof)",
+         "completion_date": "2024-01-01"},
+    ]
+    client = FakeClient(rows)
+    _, _, _, _, evidence, _ = pgj.gather_pack_inputs(client, job, tender, manifest, "/tmp")
+    titles = [e["title"] for e in evidence]
+    check("the completion-certificate project IS bound in as real evidence",
+          any("N2 Widening" in t for t in titles), titles)
+    check("the award-letter-only project is NOT bound in as evidence on its own - it proves nothing "
+          "without the matching completion document the tender's own rule demands",
+          not any("N3 Upgrade" in t for t in titles), titles)
+    check("exactly one qualifying item survives the filter, not two", len(evidence) == 1, evidence)
+
+    # Sibling case: the SAME rule's shape but requires_appointment_and_completion
+    # is False (most tenders) - a bare award letter alone is genuinely
+    # sufficient evidence there, and must still be accepted.
+    rule_no_pairing = {**rule, "requires_appointment_and_completion": False}
+    manifest2 = {"experience_evidence": {"rules": [rule_no_pairing]}, "roles": []}
+    client2 = FakeClient([dict(r) for r in rows])
+    _, _, _, _, evidence2, _ = pgj.gather_pack_inputs(client2, job, tender, manifest2, "/tmp")
+    titles2 = [e["title"] for e in evidence2]
+    check("when the tender's rule does NOT require both, a bare award letter is still accepted",
+          any("N3 Upgrade" in t for t in titles2), titles2)
+    check("both qualifying items survive the filter when pairing isn't required",
+          len(evidence2) == 2, evidence2)
+
+
 def test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails():
     print("poll_once(): a crash on one job's own claim does not skip every OTHER pending job")
     # Finding (2026-11-04): process_job()'s own claim (client.update(...))
@@ -468,6 +515,7 @@ def main():
     test_within_malformed_completion_date_alert_carries_company_id()
     test_fail_stale_jobs_could_not_mark_failed_alert_carries_company_id()
     test_gather_pack_inputs_signatory_fallback()
+    test_gather_pack_inputs_award_letter_alone_not_accepted_when_completion_also_required()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_run_pack_cleans_up_storage_when_a_later_upload_fails()
 

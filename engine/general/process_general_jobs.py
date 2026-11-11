@@ -734,6 +734,32 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
     if rules:
         rule = rules[0]
         accepted = {t for e in rule.get("accepted_evidence", []) for t in DOC_TYPES_FOR.get(e, [])}
+        if rule.get("requires_appointment_and_completion"):
+            # Finding 399 (standing solution-architect review, 2026-11-11):
+            # the identical guard app/lib/experienceEvidence.ts's own
+            # acceptedDocTypes() already applies ("an award letter alone
+            # proves nothing - the completion document is the one that
+            # counts") was missing here, on the ACTUAL pack-build path -
+            # build_general_pack.py's own `evidence_items` docstring says
+            # this list arrives "already filtered to the tender's rule" and
+            # trusts that completely; every item that survives this filter
+            # is physically merged into the submitted PDF, under the
+            # "Company Experience Evidence" envelope, as proof the project
+            # qualifies. Pre-fix, a tender whose own rule (score_outlook.py's
+            # PAIRED_PROOF_RE, e.g. Transnet TPT "5 award letters/POs WITH
+            # completion proof") demanded BOTH an appointment/award letter
+            # AND completion proof per project still let a bare
+            # document_type="award_letter" Experience Library item through
+            # on its own - so the generated pack would bind a mere award
+            # letter into the submission as if it fully proved a project,
+            # when the tender's own stated rule says it proves nothing
+            # without the matching completion document. The TS compliance
+            # report (chooseEvidenceRule()/acceptedDocTypes(), read by
+            # submission-pack.tsx) already excludes "award_letter" here and
+            # would correctly show "check" ("confirm both are on file"); this
+            # Python filter is the second, independent copy of the same
+            # DOC_TYPES_FOR mapping that never got the matching exclusion.
+            accepted.discard("award_letter")
         items = [i for i in client.select("experience_items", {"company_id": job["company_id"]}, order="completion_date.desc")
                  if i.get("tagged_at") and i.get("document_type") in accepted and _within(i, rule, tender.get("closing_date"))]
         for i in items[:max(int(rule.get("projects_required") or 5), 1) + 2]:
