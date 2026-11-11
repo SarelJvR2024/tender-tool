@@ -492,10 +492,23 @@ def fill_sbd_document(doc, ctx, log, forms):
         n = fill_blank_paragraphs(doc, r"Company\s+registration\s+number", reg) if reg else 0
         _log_fill(log, "sbd6_1.company_registration_number", reg, n, None if reg else "No CIPC registration number on file.")
         vat = comp.get("vat_number")
-        if vat:
-            n = fill_blank_paragraphs(doc, r"VAT\s+Registration\s+number", vat)
-            if n:
-                log.confirmed("sbd6_1.vat_registration_number", vat)
+        # Finding 371 (standing QA/robustness review, 2026-11-11): this field
+        # used to only ever call log.confirmed(), and only when a value was
+        # on file AND the label was actually found in this buyer's edition -
+        # every other outcome (no VAT on file; VAT on file but the label not
+        # found in this edition) logged NOTHING at all, unlike its own
+        # sibling field two lines above (sbd6_1.company_registration_number,
+        # which always calls _log_fill()). Since generate_action_checklist.py
+        # builds ACTIONS_TO_SIGN.md purely from logged assumed_default/missing
+        # entries, a company with no VAT number (or a buyer whose SBD 6.1
+        # edition this script's regex doesn't match) got no reminder at all to
+        # fill it in by hand - the action silently vanished, never appearing
+        # in the checklist. Live-confirmed: fill_sbd_document() with no
+        # vat_number on file produced zero log entries for this field key.
+        # Same bug class as Findings 368/369 (A-Forms fields read/computed but
+        # never actually logged/written), independently found here.
+        n = fill_blank_paragraphs(doc, r"VAT\s+Registration\s+number", vat) if vat else 0
+        _log_fill(log, "sbd6_1.vat_registration_number", vat, n, None if vat else "No VAT number on file.")
         n = 0
         if re.search(r"\(Pty\)", legal or ""):
             for p in doc.paragraphs:

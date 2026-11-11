@@ -88,6 +88,40 @@ def test_specialism_warning_shown_and_logged():
               for e in log.entries))
 
 
+def test_null_contract_no_is_logged_missing_not_falsely_confirmed():
+    print("cover page: tender has no contract/NRA number on file (e.g. a manually-entered, "
+          "non-SANRAL tender - app/app/tenders/new/ never collects one)")
+    d = docx.Document()
+    log = ProvenanceLog(source="test")
+    person = {"name": "Jane Doe"}
+    candidate = {"specialism_warning": False, "rationale": "Matches DS1 keyword overlap", "score": 0.82}
+    tender_ctx = {
+        "contract_no": None, "closing_date": "2026-12-01",
+        "position": {"code": "DS1", "description": "Structures specialist"},
+        "candidate": candidate,
+    }
+    gc.add_cover_page(d, person, "person_3", tender_ctx, log)
+    entry = next(e for e in log.entries if e["field_key"] == "cv_cover.contract_no")
+    check("Finding 371: a null contract_no is logged 'missing' (with a reason), never "
+          "'confirmed' with a null value - the real bug was a bare log.confirmed(..., None)",
+          entry["status"] == "missing" and entry["value"] is None and bool(entry["reason"]), entry)
+    check("the cover table cell itself is still left blank, not crashed or printed as 'None'",
+          not any("None" in (p.text or "") for p in d.paragraphs)
+          and not any("None" in c.text for t in d.tables for r in t.rows for c in r.cells))
+
+
+def test_real_contract_no_is_still_confirmed():
+    print("cover page: tender DOES have a contract/NRA number on file (regression guard - "
+          "the fix above must not turn a real value into 'missing' too)")
+    d = docx.Document()
+    log = ProvenanceLog(source="test")
+    person = {"name": "Jane Doe"}
+    gc.add_cover_page(d, person, "person_3", _tender_ctx(None), log)
+    entry = next(e for e in log.entries if e["field_key"] == "cv_cover.contract_no")
+    check("a real contract_no on file is still logged 'confirmed' with the real value",
+          entry["status"] == "confirmed" and entry["value"] == "X.001-001-2026/1F", entry)
+
+
 def test_person_name_cannot_escape_out_dir_via_path_traversal():
     print("output filename: a person name containing path-traversal characters")
     import tempfile
@@ -441,6 +475,8 @@ def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
     test_specialism_warning_shown_and_logged()
+    test_null_contract_no_is_logged_missing_not_falsely_confirmed()
+    test_real_contract_no_is_still_confirmed()
     test_person_name_cannot_escape_out_dir_via_path_traversal()
     test_person_name_extremely_long_does_not_crash_the_filename()
     test_null_projects_and_qualifications_degrade_instead_of_crashing()

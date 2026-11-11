@@ -193,7 +193,31 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
         ("Position applied for:", f"{pos['code']} - {pos['description']}"),
         ("Candidate:", person["name"]),
     ])
-    log.confirmed("cv_cover.contract_no", tender_ctx["contract_no"])
+    # contract_no is independently nullable on `tenders` (0001_init_schema.sql,
+    # no NOT NULL/check constraint) - genuinely null for any manually-entered,
+    # non-SANRAL tender (the manual intake form, app/app/tenders/new/, never
+    # collects a contract/NRA number at all; it is only ever set by the SANRAL
+    # discovery pipeline). Before this fix this line always called
+    # log.confirmed(..., None) for such a tender - the cover table cell
+    # already correctly guards with `_kv_table`'s own `"" if value is None`
+    # (left blank, no crash, no literal "None") but the provenance entry was
+    # unconditionally status "confirmed" with value null, contradicting this
+    # module's own documented contract ("confirmed - a human entered or
+    # approved this value"; "missing - genuinely not available; nothing was
+    # written into the document") - the exact same shape generate_action_
+    # checklist.py's actionable = [... status in ("assumed_default",
+    # "missing")] already treats specially: a "confirmed" entry is NEVER
+    # listed in ACTIONS_TO_SIGN.md, so a real, buyer-facing tender-specific
+    # CV cover page - included in the actual submitted pack, per this
+    # function's own comment a few lines below - could go out with a blank
+    # "Contract / Tender No." line with nobody ever told to fill it in by
+    # hand. QA pass, 2026-11-11, Finding 371.
+    if tender_ctx["contract_no"]:
+        log.confirmed("cv_cover.contract_no", tender_ctx["contract_no"])
+    else:
+        log.missing("cv_cover.contract_no",
+                    reason="No contract/tender number on file for this tender - the CV cover "
+                           "page's 'Contract / Tender No.' line was left blank.")
     log.confirmed("cv_cover.position_code", pos["code"])
 
     d.add_paragraph()
