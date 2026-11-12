@@ -359,6 +359,77 @@ describe("applyCvExtraction - id_number is validated via isValidSaId(), the same
   });
 });
 
+// A proposed project's value_rm (R million) is a plain editable number
+// input on this same review card (people/[id]/cv-review.tsx) - a reviewer
+// can retype whatever the AI proposed before ticking "use". saveProject()
+// (the manual "add project" form, same file) was hardened for this exact
+// column on 2026-10-30: "a negative number passed straight through and is
+// written verbatim onto the person's real SANRAL Form B1/B2 experience row
+// (engine/fill_tender.py/fill_conventional.py's wb.set_value(T, f"I{r}",
+// pr["value_rm"])) on an actual government bid" - but that fix only ever
+// touched saveProject()'s own check; this sibling entry point into the
+// identical projects.value_rm column, reached from the CV-extraction
+// review card instead of the manual form, kept the pre-fix "only reject
+// NaN" check (Number.isNaN(value) alone), so a reviewer retyping a
+// negative value here and ticking "use" still reaches the same real
+// document with no check at all - the same "one sibling hardened, one not"
+// shape already fixed twice for this exact column family on
+// experience_items.value_rm (saveExperienceTags(), confirmExperienceReferenceLetter()).
+describe("applyCvExtraction - a ticked project's value_rm rejects a negative number, same gate saveProject() already has", () => {
+  it("refuses a negative project value and never reaches the rpc", async () => {
+    const { client, rpcCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [pendingExtraction], // cv_extraction_results select
+    ]);
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+
+    const fd = formDataWith({
+      person_id: "person-1",
+      extraction_id: "extraction-1",
+      p0_use: "on",
+      p0_client_and_number: "ACME/123-2024",
+      p0_value_rm: "-5",
+    });
+    const url = await expectRedirect(applyCvExtraction(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("value (R million) must be a number of 0 or more"));
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("still saves normally when the ticked project value is zero or positive", async () => {
+    const { client, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingExtraction],
+        [{ data: [{ id: "existing-job" }], error: null }], // queueStandardCvs - already queued, skip insert
+      ],
+      undefined,
+      [{ data: null, error: null }],
+    );
+    supabaseState.current = client;
+
+    const { applyCvExtraction } = await import("./actions");
+
+    const fd = formDataWith({
+      person_id: "person-1",
+      extraction_id: "extraction-1",
+      p0_use: "on",
+      p0_client_and_number: "ACME/123-2024",
+      p0_value_rm: "12.5",
+    });
+    const url = await expectRedirect(applyCvExtraction(fd));
+
+    expect(url).toContain("/people/person-1");
+    expect(url).not.toContain("error=");
+    expect(rpcCalls).toHaveLength(1);
+    const params = rpcCalls[0].params as { p_project_rows: { value_rm: number }[] };
+    expect(params.p_project_rows).toEqual([expect.objectContaining({ value_rm: 12.5 })]);
+  });
+});
+
 // applyCvExtraction()'s own people-update/projects-insert/mark-applied
 // sequence used to be three separate, unlocked writes, the last of which
 // never re-checked review_status in its own .eq() chain - a genuine two-
