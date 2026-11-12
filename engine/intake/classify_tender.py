@@ -54,7 +54,7 @@ for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "general"), os.path.join(ENGINE_D
 
 import fingerprint  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
-from suggest_pack import read_required_positions, _excel_date, is_managerial  # noqa: E402
+from suggest_pack import read_required_positions, _excel_date, is_managerial, clean_description  # noqa: E402
 import assess_tender  # noqa: E402
 from score_outlook import estimate_score_outlook  # noqa: E402
 
@@ -139,7 +139,17 @@ def read_setup(technical_path):
     but non-managerial through this (manual-intake/general-pack) path for the
     exact same tender - see is_managerial()'s own docstring for the full
     write-path trace and downstream effect on app/lib/sanralScoring.ts's
-    management-points estimate."""
+    management-points estimate.
+
+    `description` uses suggest_pack.clean_description() for the identical
+    reason: this used to pass the raw SETUP!<col>7 cell straight through,
+    unlike process_pack_jobs.sync_tender_requirements()'s own inline
+    strip-or-None, so a blank-but-not-truly-empty description cell (e.g. a
+    single space) stored NULL via SANRAL discovery but a non-empty
+    whitespace string via this (manual-intake/general-pack) path for the
+    same tender - see clean_description()'s own docstring for the full
+    write-path trace and downstream UI effect (intake-card.tsx included,
+    since this function's own `positions` output is what it displays)."""
     wb = Workbook(technical_path)
     contract_no = wb.cached("SETUP", "C2")
     raw_closing = wb.cached("SETUP", "C3")
@@ -149,7 +159,7 @@ def read_setup(technical_path):
     except (TypeError, ValueError):
         closing = None
     primary, alternates = read_required_positions(wb)
-    positions = [{"code": p["code"], "description": p["description"],
+    positions = [{"code": p["code"], "description": clean_description(p["description"]),
                   "managerial": is_managerial(p.get("managerial")),
                   "managerial_raw": p.get("managerial"),
                   "has_alternate": p["code"] in alternates} for p in primary]

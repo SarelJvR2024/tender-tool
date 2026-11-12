@@ -313,6 +313,51 @@ def test_read_setup_managerial_flag_accepts_the_same_wordings_as_the_sync_job(tm
     shutil.rmtree(store, ignore_errors=True)
 
 
+def test_read_setup_blank_description_cell_is_read_as_none_not_a_whitespace_string(tmp_path="/tmp"):
+    """QA pass, standing solution-architect review (2026-11-12): same shape as
+    the managerial-wording test above, one column over. read_setup()'s own
+    `description` field used to pass SETUP!<col>7's raw cell straight
+    through, unlike process_pack_jobs.sync_tender_requirements()'s own
+    inline `(str(p["description"]).strip() or None) if p.get("description")
+    else None` - so a blank-but-not-truly-empty description cell (a single
+    space, exactly the kind of thing a human clears a cell with) stored NULL
+    via the SANRAL-discovery sync path but a non-empty whitespace string via
+    this (manual-intake/general-pack) path for the identical raw cell of the
+    SAME tender. Every real consumer assumes one of those two shapes, never
+    both - compliance-report.tsx/pack-review-data.ts/[id]/page.tsx all do a
+    plain truthy check (truthy for a whitespace string, so the manually-
+    loaded tender shows a spurious trailing " - "); intake-card.tsx's own
+    `p.description ?? "-"` only substitutes on null/undefined, so it shows a
+    bare blank inside its own parens instead of "-". Reproduced against a
+    copy of the real fixture, its own PL position's description cell
+    (SETUP!B7) changed from "Project Leader" to a single space - the exact
+    same real workbook/cell read_setup() already reads everything else from
+    in test_read_setup_against_the_real_fixture() above, one cell edited."""
+    print("read_setup: a blank-but-not-empty description cell (a single space) is read as None, "
+          "not stored as a whitespace string")
+    import shutil
+    import tempfile
+    store = tempfile.mkdtemp(prefix=f"blank_description_{os.getpid()}_")
+    copy_path = os.path.join(store, "blank_description.xlsm")
+    shutil.copy(TECH_WORKBOOK, copy_path)
+    wb = ct.Workbook(copy_path)
+    check("sanity: the real fixture's own PL description cell (SETUP!B7) is 'Project Leader' before this edit",
+          wb.cached("SETUP", "B7") == "Project Leader", wb.cached("SETUP", "B7"))
+    wb.set_value("SETUP", "B7", " ")
+    wb.save(copy_path)
+
+    setup = ct.read_setup(copy_path)
+    pl = next(p for p in setup["positions"] if p["code"] == "PL")
+    check("PL's description is None for a whitespace-only cell, not a blank/whitespace string "
+          "(every real UI consumer's truthy check or ??-on-null-only fallback depends on this)",
+          pl["description"] is None, pl)
+    check("its sibling DS1 (still 'Design Specialist 1 - Pavement and Materials', untouched) "
+          "keeps its real description - no over-widening",
+          next(p for p in setup["positions"] if p["code"] == "DS1")["description"] ==
+          "Design Specialist 1 - Pavement and Materials", setup)
+    shutil.rmtree(store, ignore_errors=True)
+
+
 def test_read_setup_closing_date_typed_as_text_is_still_read(tmp_path="/tmp"):
     """QA Finding, 2026-10-30: SETUP!C3 stores a genuine Excel date as a plain
     numeric serial (date FORMATTING is only a display style, not part of the
@@ -573,6 +618,7 @@ def main():
     test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline()
     test_read_setup_against_the_real_fixture()
     test_read_setup_managerial_flag_accepts_the_same_wordings_as_the_sync_job()
+    test_read_setup_blank_description_cell_is_read_as_none_not_a_whitespace_string()
     test_read_setup_closing_date_typed_as_text_is_still_read()
     test_find_nra_reference_single_ambiguous_and_none()
     test_find_closing_time_single_ambiguous_and_formats()
