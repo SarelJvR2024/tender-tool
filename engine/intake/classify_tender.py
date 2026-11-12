@@ -54,7 +54,7 @@ for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "general"), os.path.join(ENGINE_D
 
 import fingerprint  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
-from suggest_pack import read_required_positions, _excel_date  # noqa: E402
+from suggest_pack import read_required_positions, _excel_date, is_managerial  # noqa: E402
 import assess_tender  # noqa: E402
 from score_outlook import estimate_score_outlook  # noqa: E402
 
@@ -128,7 +128,18 @@ def classify_workbook(path):
 
 
 def read_setup(technical_path):
-    """The template's own SETUP sheet: contract number, closing date, positions."""
+    """The template's own SETUP sheet: contract number, closing date, positions.
+
+    `managerial` uses suggest_pack.is_managerial() - the same normalization
+    process_pack_jobs.sync_tender_requirements() applies to the identical raw
+    cell. QA pass, standing solution-architect review (2026-11-12): this used
+    to be its own, narrower inline check (`== "man"` after strip/lower only -
+    no "managerial"/"yes"/"y"), so a SETUP cell worded any other way than
+    literally "Man" read as managerial through the SANRAL-discovery sync path
+    but non-managerial through this (manual-intake/general-pack) path for the
+    exact same tender - see is_managerial()'s own docstring for the full
+    write-path trace and downstream effect on app/lib/sanralScoring.ts's
+    management-points estimate."""
     wb = Workbook(technical_path)
     contract_no = wb.cached("SETUP", "C2")
     raw_closing = wb.cached("SETUP", "C3")
@@ -139,7 +150,7 @@ def read_setup(technical_path):
         closing = None
     primary, alternates = read_required_positions(wb)
     positions = [{"code": p["code"], "description": p["description"],
-                  "managerial": str(p.get("managerial") or "").strip().lower() == "man",
+                  "managerial": is_managerial(p.get("managerial")),
                   "managerial_raw": p.get("managerial"),
                   "has_alternate": p["code"] in alternates} for p in primary]
     return {"contract_no": str(contract_no).strip() if contract_no else None, "closing_date": closing, "positions": positions}

@@ -101,7 +101,7 @@ for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "pack_generator"), os.path.join(E
         sys.path.insert(0, p)
 
 import confirm_pack  # noqa: E402
-from suggest_pack import read_required_positions, score_candidate  # noqa: E402
+from suggest_pack import read_required_positions, score_candidate, is_managerial  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
 import sanral_b7  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
@@ -1000,11 +1000,6 @@ def fail_stale_jobs(client, now=None):
                                           "tender_id": job.get("tender_id"), "started_at": started})
 
 
-def _managerial(v):
-    s = str(v or "").strip().lower().replace("-", "").replace(" ", "")
-    return s in ("man", "managerial", "yes", "y")
-
-
 def sync_tender_requirements(client, work_root):
     """tender_requirements from each uploaded blank Technical workbook's own
     SETUP sheet, for workbooks whose positions haven't been read yet (see
@@ -1057,7 +1052,7 @@ def sync_tender_requirements(client, work_root):
                     client.insert("tender_requirements", [{
                         "tender_id": d["tender_id"], "company_id": d.get("company_id"), "position_code": p["code"],
                         "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
-                        "managerial": _managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
+                        "managerial": is_managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
                 except Exception as e:
                     # QA pass, 2026-11-09: a hosted worker and a hand-run
                     # --once CAN overlap (Automated-Fulfillment-Deployment.md's

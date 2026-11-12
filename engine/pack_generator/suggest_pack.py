@@ -63,6 +63,38 @@ def _excel_date(serial):
     return datetime.date.fromisoformat(str(serial).strip()[:10])
 
 
+def is_managerial(v):
+    """SETUP row 8's own Man/Non-Man cell, however it's worded, -> a real
+    boolean. Every real tender seeded so far spells it exactly "Man"/
+    "Non-Man" (System-Status.md's own seeded-data note), but this is
+    normalized (strip/lower, hyphens and spaces removed) and widened to
+    "managerial"/"yes"/"y" too, matching this repo's own realistic-fixture
+    expectations (test_process_pack_jobs.py literally uses "Y"/"N" as SETUP
+    cell values).
+
+    QA pass, standing solution-architect review (2026-11-12): this used to
+    be process_pack_jobs.py's own private `_managerial()`, with an
+    INDEPENDENT, narrower copy living in classify_tender.read_setup() (just
+    `== "man"` after strip/lower - no "managerial"/"yes"/"y") even though
+    both read the exact same raw cell through this module's own
+    read_required_positions() below. The two are tender_requirements.
+    managerial's only two writers: process_pack_jobs.sync_tender_requirements()
+    for the SANRAL-discovery path, process_general_jobs.register_sanral_tender()
+    (via classify_tender.read_setup()) for the manual-intake/general-pack
+    path. A SETUP sheet that spells this cell "Y" or "Managerial" instead of
+    literally "Man" - exactly the shape this file's own sibling test fixture
+    treats as realistic - was stored (and shown on the intake preview card,
+    intake-card.tsx) as managerial=False for a tender loaded through
+    /tenders/new, while the identical cell on the identical tender loaded
+    through SANRAL discovery would correctly store True: two different
+    "is this position managerial" answers for the same real-world fact,
+    feeding straight into app/lib/sanralScoring.ts's own management-points
+    estimate on the compliance report. Moved here, as the one shared
+    reader's own sibling helper, so both writers can only ever agree."""
+    s = str(v or "").strip().lower().replace("-", "").replace(" ", "")
+    return s in ("man", "managerial", "yes", "y")
+
+
 def read_required_positions(wb):
     """SETUP row 5 = ALT marker, row 6 = position code, row 7 = description, row 8 = Man/Non-Man.
     Returns the PRIMARY (non-ALT) slots only, deduplicated by code, each with its alternate
