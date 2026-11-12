@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
-import { VAULT_BUCKET } from "@/lib/vaultDocuments";
+import { BEE_PROOF_TYPES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { safeRedirectPath } from "@/lib/safeRedirect";
 import { sastToday } from "@/lib/publicHolidays";
 import {
@@ -208,6 +208,36 @@ export async function confirmVaultDocument(formData: FormData) {
   const columns = VAULT_FIELD_COLUMNS[result.document_kind];
   const docColumn = VAULT_DOCUMENT_COLUMN[result.document_kind];
   if (!columns || !docColumn) fail("This document type isn't filed this way.");
+
+  // Standing solution-architect review (Finding 468): `proof_type`
+  // (bbbee_certificate -> companies.bee_proof_type) is the one field the
+  // generic loop below writes that has its own fixed vocabulary
+  // (BEE_PROOF_TYPES) - every other VAULT_FIELD_COLUMNS field (grade_class,
+  // pin, bank_name, insurer, ...) is genuinely free text, so this check is
+  // deliberately scoped to this one field/kind, not added to the loop
+  // itself. review.tsx now renders it as a real `<select>`, but a Server
+  // Action must never trust a client-rendered constraint alone (the same
+  // rule app/my-cv/actions.ts's saveMyDetails()/applyMyCvExtraction() and
+  // app/people/actions.ts's savePerson() already follow for ecsa_level/
+  // highest_level, Findings 432/466/467) - validated here before any write
+  // or storage side effect runs. Left unvalidated, an off-vocabulary value
+  // (a reviewer's own edit under the old free-text input, or an off-
+  // vocabulary model read) would write straight into companies.bee_proof_type,
+  // which engine/fill_a_forms.py, engine/sanral_fill.py,
+  // engine/general/fill_sbd_docx.py, engine/general/fill_flat_pdf.py and
+  // engine/general/build_general_pack.py all key a dict lookup off verbatim
+  // (a miss silently renders/ticks nothing on the real SANRAL/general
+  // B-BBEE form), and app/lib/tenderCompliance.ts's own
+  // BEE_PROOF_LABEL[...] lookup (read by the Tender Workspace's compliance
+  // status line, via compliance-data.ts, imported by submission-pack.tsx)
+  // would render the literal string "undefined" into text shown to the
+  // company.
+  if (result.document_kind === "bbbee_certificate" && ticked(formData, "proof_type")) {
+    const proof = str(formData, "f_proof_type");
+    if (proof && !BEE_PROOF_TYPES.some((t) => t.value === proof)) {
+      fail("B-BBEE proof type: choose one of SANRAL's options.");
+    }
+  }
 
   const update: Record<string, string | number | null | boolean> = {};
   const appliedFields: string[] = [];

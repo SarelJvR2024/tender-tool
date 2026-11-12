@@ -15,6 +15,7 @@ import {
   KIND_FIELDS,
   KIND_LABELS,
   MANUAL_REVIEW_LINK,
+  needsProofTypeFallbackOption,
   NUMBER_FIELDS,
   READ_ONLY_FIELDS,
   ROUTABLE_KINDS,
@@ -22,6 +23,7 @@ import {
   type DocumentKind,
   type OnboardingFields,
 } from "@/lib/onboardingScan";
+import { BEE_PROOF_TYPES } from "@/lib/vaultDocuments";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dates";
 
@@ -74,10 +76,14 @@ export type OnboardingResult = {
   created_at: string;
 };
 
-function FieldRow({ field, item }: { field: string; item: OnboardingFields[string] }) {
+function FieldRow({ field, item, kind }: { field: string; item: OnboardingFields[string]; kind: DocumentKind }) {
   const label = FIELD_LABELS[field] ?? field;
   const isDate = DATE_FIELDS.has(field);
   const isNumber = NUMBER_FIELDS.has(field);
+  // Finding 468: the one field here with its own fixed vocabulary - see
+  // needsProofTypeFallbackOption()'s own comment (lib/onboardingScan.ts).
+  const isBeeProofType = kind === "bbbee_certificate" && field === "proof_type";
+  const beeProofValue = (item.value as string | null) ?? null;
   const defaultTick = item.verified;
   return (
     <div className="obx-row grid grid-cols-[28px_1fr] items-start gap-2 border-t border-border py-2 sm:grid-cols-[28px_150px_1fr]">
@@ -88,13 +94,25 @@ function FieldRow({ field, item }: { field: string; item: OnboardingFields[strin
           <div className="mb-0.5 text-[11px] text-muted-foreground">
             {!item.verified && <Pill tone="warning">Provide - check this</Pill>}
           </div>
-          <input
-            className={fieldClass}
-            name={`f_${field}`}
-            type={isDate ? "date" : isNumber ? "number" : "text"}
-            step={isNumber ? "any" : undefined}
-            defaultValue={item.value ?? ""}
-          />
+          {isBeeProofType ? (
+            <select className={fieldClass} name={`f_${field}`} defaultValue={beeProofValue ?? ""}>
+              <option value="">- choose -</option>
+              {needsProofTypeFallbackOption(beeProofValue, BEE_PROOF_TYPES.map((t) => t.value)) && (
+                <option value={beeProofValue!}>{beeProofValue} (not one of SANRAL&apos;s options - check this)</option>
+              )}
+              {BEE_PROOF_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={fieldClass}
+              name={`f_${field}`}
+              type={isDate ? "date" : isNumber ? "number" : "text"}
+              step={isNumber ? "any" : undefined}
+              defaultValue={item.value ?? ""}
+            />
+          )}
           {item.evidence && (
             <div className="mt-1 text-[11px] break-words text-muted-foreground italic">Document says: &ldquo;{item.evidence}&rdquo;</div>
           )}
@@ -278,7 +296,7 @@ export function DocumentReviewCard({
             <div className="my-2 text-sm text-muted-foreground">No fields to confirm - the document itself will still be filed.</div>
           )}
           {kind !== "cv" && persistedFields.map((f) => (
-            <FieldRow key={f} field={f} item={result.fields[f]} />
+            <FieldRow key={f} field={f} item={result.fields[f]} kind={kind} />
           ))}
           {kind !== "cv" && <NotSavedFields fields={result.fields} names={notSavedFields} />}
 

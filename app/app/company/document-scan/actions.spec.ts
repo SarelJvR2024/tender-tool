@@ -212,6 +212,86 @@ describe("confirmVaultDocument - real update still succeeds", () => {
   });
 });
 
+// Standing solution-architect review, Finding 468, 2026-11-12:
+// confirmVaultDocument()'s generic VAULT_FIELD_COLUMNS loop used to write
+// `proof_type` (bbbee_certificate) straight into companies.bee_proof_type
+// with no validation at all - the one field in that loop with its own fixed
+// vocabulary (BEE_PROOF_TYPES, lib/vaultDocuments.ts), unlike
+// lib/companyProfileUpdate.ts's own manual-edit path for this SAME column,
+// which already constrains it. An off-vocabulary value reaching
+// companies.bee_proof_type breaks a BEE_PROOF_LABEL[...] dict lookup
+// (undefined, rendered as the literal string "undefined" in compliance
+// status text other companies see) and every real pack-build engine's own
+// `.get(bee_proof_type)` lookup (silently nothing ticked on the real
+// SANRAL/general B-BBEE form).
+const pendingBeeResult = {
+  data: {
+    id: "result-5",
+    company_id: "company-1",
+    onboarding_upload_id: "upload-5",
+    document_kind: "bbbee_certificate",
+    fields: {},
+    review_status: "pending_review",
+    onboarding_uploads: { storage_path: "company-1/onboarding/raw-bee.pdf", original_filename: "bee.pdf" },
+  },
+  error: null,
+};
+
+describe("confirmVaultDocument - bbbee_certificate proof_type must be one of BEE_PROOF_TYPES", () => {
+  it("refuses an off-vocabulary proof_type before any storage or companies write happens", async () => {
+    const { client, uploadCalls, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingBeeResult], // loadPendingResult
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmVaultDocument } = await import("./actions");
+
+    const fd = formDataWith({
+      result_id: "result-5",
+      use_proof_type: "on",
+      f_proof_type: "Sworn Affidavit (QSE)", // not one of BEE_PROOF_TYPES' own values
+    });
+    const url = await expectRedirect(confirmVaultDocument(fd));
+
+    expect(url).toContain("/company/document-scan?error=");
+    expect(url).not.toContain("saved=filed");
+    // Validated before any side effect: no storage copy attempted, no
+    // companies update attempted.
+    expect(uploadCalls.length).toBe(0);
+    expect(updateCalls.length).toBe(0);
+  });
+
+  it("files normally when proof_type is genuinely one of BEE_PROOF_TYPES' own values", async () => {
+    const { client, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingBeeResult],
+        [{ data: { id: "company-1" }, error: null }], // companies update - real match
+        [{ data: null, error: null }], // markApplied
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmVaultDocument } = await import("./actions");
+
+    const fd = formDataWith({
+      result_id: "result-5",
+      use_proof_type: "on",
+      f_proof_type: "qse_affidavit",
+    });
+    const url = await expectRedirect(confirmVaultDocument(fd));
+
+    expect(url).toContain("saved=filed");
+    const companiesUpdate = updateCalls.find(
+      (c): c is { bee_proof_type: string } => typeof c === "object" && c !== null && "bee_proof_type" in c,
+    );
+    expect(companiesUpdate?.bee_proof_type).toBe("qse_affidavit");
+  });
+});
+
 const pendingIdResult = {
   data: {
     id: "result-2",
