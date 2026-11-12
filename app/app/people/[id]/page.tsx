@@ -9,7 +9,7 @@ import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import { CvLedAddPerson } from "../_components/cv-led-add-person";
 import { RoleSourceInfo } from "../_components/role-source-info";
-import type { CvExtractionResult } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, QUALIFICATION_LEVELS, needsSelectFallbackOption, type CvExtractionResult } from "@/lib/cvExtraction";
 import { EmptyState } from "@/components/tt/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -524,7 +524,16 @@ export default async function PersonDetailPage({
             const ecsaOrSacpcmpHeld = "ECSA" in expiryByBody || "SACPCMP" in expiryByBody;
             const fields = (
               <div className={gridClass}>
-                <Field><label className={labelClass}>ECSA level</label><input className={fieldClass} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""} placeholder="e.g. Professional Engineer" /></Field>
+                <Field>
+                  <label className={labelClass}>ECSA level</label>
+                  <select className={fieldClass} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""}>
+                    <option value="">- not recorded -</option>
+                    {needsSelectFallbackOption(person?.ecsa_level ?? null, ECSA_LEVELS) && (
+                      <option value={person!.ecsa_level!}>{person!.ecsa_level} (not a SANRAL option - please update)</option>
+                    )}
+                    {ECSA_LEVELS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </Field>
                 <Field><label className={labelClass}>ECSA number</label><input className={fieldClass} name="ecsa_number" defaultValue={person?.ecsa_number ?? ""} /></Field>
                 <Field><label className={labelClass}>ECSA registration date</label><input className={fieldClass} type="date" name="ecsa_date" defaultValue={person?.ecsa_date ?? ""} /></Field>
                 <Field>
@@ -584,7 +593,16 @@ export default async function PersonDetailPage({
             {yearsFromInitial !== null && ` (As of today, that would be about ${yearsFromInitial} years.)`}
           </div>
           <div className={gridClass}>
-            <Field><label className={labelClass}>Highest qualification level</label><input className={fieldClass} name="highest_level" defaultValue={person?.highest_level ?? ""} placeholder="e.g. Masters Degree" /></Field>
+            <Field>
+              <label className={labelClass}>Highest qualification level</label>
+              <select className={fieldClass} name="highest_level" defaultValue={person?.highest_level ?? ""}>
+                <option value="">- not recorded -</option>
+                {needsSelectFallbackOption(person?.highest_level ?? null, QUALIFICATION_LEVELS) && (
+                  <option value={person!.highest_level!}>{person!.highest_level} (not a SANRAL option - please update)</option>
+                )}
+                {QUALIFICATION_LEVELS.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </Field>
             <Field><label className={labelClass}>Highest qualification</label><input className={fieldClass} name="highest_description" defaultValue={person?.highest_description ?? ""} placeholder="e.g. MEng (Civil Engineering)" /></Field>
             <Field><label className={labelClass}>Institution (highest)</label><input className={fieldClass} name="highest_institution" defaultValue={person?.highest_institution ?? ""} /></Field>
             <Field><label className={labelClass}>Date graduated (highest)</label><input className={fieldClass} type="date" name="highest_graduated" defaultValue={person?.highest_graduated ?? ""} /></Field>
