@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { briefingReminderCandidates, briefingThresholdFor, BRIEFING_REMINDER_EXCLUDED_STAGES, type BriefingReminderTenderRow } from "./briefingReminders";
+import {
+  briefingReminderCandidates,
+  briefingThresholdFor,
+  BRIEFING_REMINDER_EXCLUDED_STAGES,
+  tendersWithCancelledBriefing,
+  type BriefingReminderTenderRow,
+  type BriefingWatchedDocRow,
+} from "./briefingReminders";
 
 describe("briefingThresholdFor", () => {
   it("matches the full 5-day window down to just above 1 day", () => {
@@ -96,5 +103,72 @@ describe("briefingReminderCandidates", () => {
       const t: BriefingReminderTenderRow = { ...tender, id: `tender-${stage}`, tender_packs: [{ company_id: "company-a", pipeline_stage: stage }] };
       expect(briefingReminderCandidates([t], daysUntilFn).map((c) => c.companyId)).toEqual(["company-a"]);
     }
+  });
+});
+
+// Finding 448: tenders.briefing_date is never cleared when a briefing is
+// cancelled (watch_tender_updates.py's apply_briefing_date() never applies
+// a cancelled sentinel, and accept_tender_update_date() explicitly refuses
+// one) - so scripts/send-operational-alerts.ts must separately read the
+// same tender_watched_documents.changes.briefing.cancelled signal the
+// Tender Workspace page (and, since Finding 446, the corrigendum email)
+// already render correctly, and suppress the briefing reminder itself.
+describe("tendersWithCancelledBriefing", () => {
+  const doc = (tenderId: string, firstSeenAt: string, briefing: { cancelled?: boolean } | undefined): BriefingWatchedDocRow => ({
+    tender_id: tenderId,
+    first_seen_at: firstSeenAt,
+    changes: briefing ? { briefing } : {},
+  });
+
+  it("a lone cancellation marks its tender", () => {
+    const out = tendersWithCancelledBriefing([doc("tender-1", "2026-11-01T00:00:00Z", { cancelled: true })]);
+    expect(out.has("tender-1")).toBe(true);
+  });
+
+  it("no watched documents at all -> nothing marked", () => {
+    expect(tendersWithCancelledBriefing([]).size).toBe(0);
+  });
+
+  it("a document with no briefing change at all is ignored", () => {
+    const out = tendersWithCancelledBriefing([doc("tender-1", "2026-11-01T00:00:00Z", undefined)]);
+    expect(out.size).toBe(0);
+  });
+
+  it("a real (non-cancelled) briefing-date change does not mark the tender", () => {
+    const out = tendersWithCancelledBriefing([doc("tender-1", "2026-11-01T00:00:00Z", { cancelled: false })]);
+    expect(out.has("tender-1")).toBe(false);
+  });
+
+  it("a LATER addendum reinstating the briefing after an earlier cancellation un-marks the tender - only the latest signal decides", () => {
+    const out = tendersWithCancelledBriefing([
+      doc("tender-1", "2026-11-01T00:00:00Z", { cancelled: true }),
+      doc("tender-1", "2026-11-05T00:00:00Z", { cancelled: false }),
+    ]);
+    expect(out.has("tender-1")).toBe(false);
+  });
+
+  it("a LATER cancellation after an earlier real date change still marks the tender", () => {
+    const out = tendersWithCancelledBriefing([
+      doc("tender-1", "2026-11-01T00:00:00Z", { cancelled: false }),
+      doc("tender-1", "2026-11-05T00:00:00Z", { cancelled: true }),
+    ]);
+    expect(out.has("tender-1")).toBe(true);
+  });
+
+  it("document order in the input array doesn't matter - only first_seen_at does", () => {
+    const out = tendersWithCancelledBriefing([
+      doc("tender-1", "2026-11-05T00:00:00Z", { cancelled: true }),
+      doc("tender-1", "2026-11-01T00:00:00Z", { cancelled: false }),
+    ]);
+    expect(out.has("tender-1")).toBe(true);
+  });
+
+  it("scopes correctly across several tenders at once", () => {
+    const out = tendersWithCancelledBriefing([
+      doc("tender-cancelled", "2026-11-01T00:00:00Z", { cancelled: true }),
+      doc("tender-open", "2026-11-01T00:00:00Z", { cancelled: false }),
+    ]);
+    expect(out.has("tender-cancelled")).toBe(true);
+    expect(out.has("tender-open")).toBe(false);
   });
 });

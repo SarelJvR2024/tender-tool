@@ -102,3 +102,58 @@ export function briefingReminderCandidates(
   }
   return out;
 }
+
+export type BriefingWatchedDocRow = {
+  tender_id: string;
+  first_seen_at: string;
+  changes: { briefing?: { cancelled?: boolean } } | null;
+};
+
+/**
+ * Tender ids whose MOST RECENTLY detected briefing-change signal (by
+ * `first_seen_at`) says the compulsory briefing session was CANCELLED -
+ * `engine/discovery/tender_updates.py`'s `find_briefing_change()` writes
+ * `changes.briefing = {date: null, cancelled: true, ...}` for this (the
+ * same sentinel Finding 446 fixed for the corrigendum alert email).
+ *
+ * Finding 448: `tenders.briefing_date`/`briefing_time` is never cleared
+ * when a briefing is cancelled. `watch_tender_updates.py`'s own
+ * `apply_briefing_date()` only ever runs for a NEW date (`apply_b` requires
+ * `b.get("date")` truthy, false by design for the cancelled sentinel), and
+ * `accept_tender_update_date()` (migration 0111) explicitly REFUSES to
+ * accept a cancelled briefing ("The briefing was cancelled, there is no
+ * date to accept") - there is no automatic OR manual path anywhere that
+ * ever clears it. So `briefingReminderCandidates()` above, reading
+ * `tenders.briefing_date` alone, would otherwise keep firing the 5-day/
+ * 24-hour "Briefing session" reminder email for a session the Tender
+ * Workspace page (`tender-updates.tsx`) already correctly tells the SAME
+ * person was cancelled (`briefing.cancelled` - a truthy-object check,
+ * never `briefing.date`).
+ *
+ * This reads that identical signal to suppress the email the same way,
+ * rather than ever clearing the stored date itself: `BRIEFING_CANCELLED_RE`
+ * is matched against free text with no second source to corroborate it
+ * against (unlike a closing-date change, which only auto-applies when the
+ * source listing independently agrees) - a false match here should only
+ * ever suppress one duplicate notice, never silently delete a real
+ * briefing date nobody could then get back.
+ *
+ * A tender can have several watched documents over time; a cancellation
+ * later superseded by a new addendum reinstating or moving the briefing is
+ * no longer "cancelled" (that later document's own `changes.briefing` has
+ * no `cancelled` key) - only the LATEST document that says anything about
+ * the briefing at all decides this, per tender.
+ */
+export function tendersWithCancelledBriefing(docs: BriefingWatchedDocRow[]): Set<string> {
+  const latestByTender = new Map<string, BriefingWatchedDocRow>();
+  for (const doc of docs) {
+    if (!doc.tender_id || !doc.changes?.briefing) continue;
+    const prev = latestByTender.get(doc.tender_id);
+    if (!prev || doc.first_seen_at > prev.first_seen_at) latestByTender.set(doc.tender_id, doc);
+  }
+  const out = new Set<string>();
+  for (const [tenderId, doc] of latestByTender) {
+    if (doc.changes?.briefing?.cancelled) out.add(tenderId);
+  }
+  return out;
+}
