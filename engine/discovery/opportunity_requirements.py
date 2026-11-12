@@ -229,7 +229,20 @@ def classify_all(client, release_key=None, log=print):
     independently several times (watch_deadlines.days_until(), every
     fail_stale_jobs()). This file also had no system_alerts integration at
     all before this fix, unlike every other engine/ script - a repeated
-    failure here would have had no trace beyond this call's own stdout."""
+    failure here would have had no trace beyond this call's own stdout.
+
+    QA pass, 2026-11-12 (Finding 452): that fix only wrapped the
+    classify_release() CALL above - the actual DB write below
+    (client.upsert(...)) sat outside the try/except entirely, even though
+    this docstring already claimed protection against a failure "during its
+    own select()/upsert()". A RuntimeError from upsert() (never a benign
+    on_conflict race - this upsert is resolution=merge-duplicates, so a
+    genuine failure here is always a real problem: a network blip, a schema
+    mismatch, an RLS/service-role misconfiguration, a PostgREST 500) still
+    raised straight out of this function, aborting every OTHER release still
+    queued after it in the same run - the exact bug class this fix was
+    already supposed to close, left open on the write half of the same loop.
+    The upsert call now runs inside the same try/except as classify_release()."""
     if release_key:
         keys = [release_key]
     else:
@@ -240,16 +253,16 @@ def classify_all(client, release_key=None, log=print):
     for key in keys:
         try:
             result = classify_release(client, key, log=log)
+            if result is None:
+                summary["skipped_nothing_downloaded"] += 1
+                continue
+            client.upsert(REQ_TABLE, [result], on_conflict="release_key")
         except Exception as e:
             summary["errors"] += 1
             system_alerts.record("discovery", f"Could not classify requirements for release {key}: "
                                  f"{type(e).__name__}: {e}", "error", exc=e, context={"release_key": key})
             log(f"  ERROR classifying {key}: {type(e).__name__}: {e} - skipped, other releases still run")
             continue
-        if result is None:
-            summary["skipped_nothing_downloaded"] += 1
-            continue
-        client.upsert(REQ_TABLE, [result], on_conflict="release_key")
         summary["classified"] += 1
         log(f"  classified {key}: route={result['route']} family={result['family']} "
             f"fingerprint={result['fingerprint_status']} missing={len(result['missing'])}")

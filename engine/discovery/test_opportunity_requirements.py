@@ -305,6 +305,62 @@ def main():
     check("case 8: a system alert was recorded naming the real release key",
           len(alerts) == 1 and alerts[0]["p_source"] == "discovery" and "crash-release" in alerts[0]["p_message"], alerts)
 
+    # 9. QA Finding, 2026-11-12: Finding 104's own fix (case 8, above) only
+    # wraps the `classify_release(...)` CALL in try/except - this file's own
+    # docstring explicitly claims protection against "a transient failure on
+    # any ONE release (a Supabase network blip during its own select()/
+    # upsert()...)", naming upsert() by name, but the actual `client.upsert(
+    # REQ_TABLE, [result], on_conflict="release_key")` write in classify_all()
+    # sits OUTSIDE that try/except entirely (it runs after the try/except
+    # block, once classify_release() has already returned a real result) -
+    # so a failure on THAT call (not a benign on_conflict race - this upsert
+    # is `resolution=merge-duplicates`, never a unique-violation; a RuntimeError
+    # here is always genuine: a network blip, a schema problem, an RLS/
+    # service-role misconfiguration, a PostgREST 500) still raises straight
+    # out of classify_all(), aborting every OTHER release still queued after
+    # it in the same run - the exact bug class Finding 104 itself exists to
+    # close, left open on the write half of the same function.
+    # "aaa-upsert-crash-release" sorts alphabetically before
+    # "zzz-after-upsert-crash-release", proving a real, otherwise-successful
+    # release AFTER the one whose upsert fails is still reached and still
+    # gets its own row written in the same run.
+    # Both releases need at least one `status='downloaded'` document (not
+    # 'failed') to even be picked up by classify_all()'s own auto-discovery
+    # query (`select(DOCS_TABLE, {"status": "downloaded"})`) when it is
+    # called with no explicit release_key, the same way the real daily sweep
+    # (main()) always calls it.
+    pdf9_path = os.path.join(HERE, "__test_fixture_notice9.pdf")
+    with open(pdf9_path, "wb") as f:
+        f.write(b"%PDF-1.4 fake notice\n" * 5)
+    try:
+        fake.seed_docs("aaa-upsert-crash-release", [("Tender Notice.pdf", pdf9_path, "downloaded")])
+        fake.seed_docs("zzz-after-upsert-crash-release", [("Tender Notice.pdf", pdf9_path, "downloaded")])
+    finally:
+        os.remove(pdf9_path)
+    alerts9 = []
+    system_alerts.set_sink(lambda payload: alerts9.append(payload) or "test-alert")
+    real_upsert = client.upsert
+
+    def crashing_upsert(table, rows, on_conflict):
+        if any(r.get("release_key") == "aaa-upsert-crash-release" for r in rows):
+            raise RuntimeError("simulated transient Supabase failure writing this one release's row")
+        return real_upsert(table, rows, on_conflict)
+    client.upsert = crashing_upsert
+    try:
+        fake.tables[oreq.REQ_TABLE] = []  # fresh, so this run's own writes are easy to count
+        summary9 = oreq.classify_all(client)
+    finally:
+        client.upsert = real_upsert
+        system_alerts.set_sink(None)
+    check("case 9: a release whose own upsert write fails is counted as an error, not fatal to the whole run",
+          summary9["errors"] == 1, summary9)
+    check("case 9: a release sorting AFTER the upsert-failing one is still classified and written in the same run",
+          req_row(fake, "zzz-after-upsert-crash-release") is not None, summary9)
+    check("case 9: a system alert was recorded naming the real release key whose upsert failed",
+          len(alerts9) == 1 and alerts9[0]["p_source"] == "discovery" and "aaa-upsert-crash-release" in alerts9[0]["p_message"], alerts9)
+    check("case 9: no row was ever written for the upsert-failing release itself",
+          req_row(fake, "aaa-upsert-crash-release") is None, req_row(fake, "aaa-upsert-crash-release"))
+
     fake.stop()
     print(f"\n{len(FAILS)} failure(s)" if FAILS else "\nAll checks passed.")
     if FAILS:
