@@ -1,5 +1,44 @@
 import { describe, it, expect } from "vitest";
-import { looksLikeExistingProject } from "./cvExtraction";
+import { looksLikeExistingProject, personFieldDefaultTick, type ProposedValue } from "./cvExtraction";
+
+function pv(value: string | null, verified: boolean, warnings: string[] = []): ProposedValue {
+  return { value, evidence: null, verified, warnings };
+}
+
+// Finding 445: app/app/my-cv/page.tsx (the employee self-service "confirm
+// this AI-extracted CV" screen) ticked every proposed field's checkbox
+// unconditionally (`defaultChecked`, a literal boolean, no `verified` or
+// current-value check at all) - a complete bypass of the human-in-the-loop
+// gate people/[id]/cv-review.tsx's own inline defaultTick formula already
+// enforces for the identical cv_extraction_results data. This shared
+// function is that formula, factored out so both screens read the same
+// decision and can never independently drift on it again.
+describe("personFieldDefaultTick", () => {
+  it("ticks a verified value with nothing on file yet", () => {
+    expect(personFieldDefaultTick(pv("Jane Dlamini", true), null)).toBe(true);
+  });
+
+  it("does NOT tick an unverified (low-confidence/unterraced) value, even with nothing on file - the exact gap my-cv/page.tsx had", () => {
+    expect(personFieldDefaultTick(pv("Professional Engineer", false), null)).toBe(false);
+  });
+
+  it("does NOT tick a verified value that would silently replace a different value already on file", () => {
+    expect(personFieldDefaultTick(pv("0821234567", true), "0837654321")).toBe(false);
+  });
+
+  it("does NOT tick when the proposed value is empty", () => {
+    expect(personFieldDefaultTick(pv("", true), null)).toBe(false);
+    expect(personFieldDefaultTick(pv(null, true), null)).toBe(false);
+  });
+
+  it("does NOT tick when the proposed value is already the same as what's on file (nothing to apply)", () => {
+    expect(personFieldDefaultTick(pv("ECSA123", true), "ECSA123")).toBe(false);
+  });
+
+  it("ticks a verified value when what's on file is blank (empty string, not null) - not a 'replaces' case", () => {
+    expect(personFieldDefaultTick(pv("ECSA123", true), "")).toBe(true);
+  });
+});
 
 // Standing QA pass, 2026-11-06: looksLikeExistingProject() is the CV-review
 // page's pre-tick heuristic for "this proposed project is probably already

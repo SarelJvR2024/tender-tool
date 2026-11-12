@@ -102,6 +102,30 @@ export type Proposal = {
   other_registrations: { body: string; level: string | null; number: string | null; evidence: string; verified?: boolean }[];
 };
 
+/**
+ * Whether a proposed person field should start TICKED for save, on every
+ * screen that lets a human confirm an AI-extracted CV field - shared so
+ * people/[id]/cv-review.tsx (the full People page) and app/app/my-cv/page.tsx
+ * (the employee self-service page, which reviews the exact same
+ * cv_extraction_results.proposed rows) can never independently drift on this
+ * decision.
+ *
+ * Ticked by default only when the value was traced to the CV text
+ * (`verified` - extract_cv_fields.py's own quote-verification step) AND it
+ * would not replace a different, non-empty value already on file - an
+ * unverified/low-confidence guess (OCR uncertainty, a quote that couldn't be
+ * found, a value outside a known dropdown list) or one that would silently
+ * overwrite existing data needs a human to look at it first, never a
+ * default "yes" (Verify/Provide/Fix - app/AGENTS.md).
+ */
+export function personFieldDefaultTick(p: ProposedValue, currentValue: string | null | undefined): boolean {
+  const now = currentValue ?? null;
+  const proposed = p.value ?? "";
+  const same = now != null && now === proposed;
+  const replaces = now != null && now !== "" && !same;
+  return p.verified && !replaces && !same && proposed !== "";
+}
+
 export type CvExtractionResult = {
   id: string;
   cv_upload_id: string;

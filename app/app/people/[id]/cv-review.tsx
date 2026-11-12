@@ -2,6 +2,7 @@ import { applyCvExtraction, discardCvExtraction } from "../actions";
 import {
   EXTRACTED_PERSON_FIELDS,
   looksLikeExistingProject,
+  personFieldDefaultTick,
   type CvExtractionResult,
   type ExtractedPersonField,
 } from "@/lib/cvExtraction";
@@ -141,7 +142,11 @@ export function CvExtractionReview({
                 const proposed = p.value ?? "";
                 const same = now != null && now === proposed;
                 const replaces = now != null && now !== "" && !same;
-                const defaultTick = p.verified && !replaces && !same && proposed !== "";
+                // Shared with my-cv/page.tsx's identical review card
+                // (Finding 445) - same rule, one place, so the two screens
+                // reviewing the exact same cv_extraction_results data can
+                // never independently drift on what starts ticked.
+                const defaultTick = personFieldDefaultTick(p, now);
                 const reasons = [
                   ...(replaces ? ["Would replace what's on file."] : []),
                   ...p.warnings,
