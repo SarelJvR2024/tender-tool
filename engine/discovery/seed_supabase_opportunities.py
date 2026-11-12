@@ -52,9 +52,13 @@ import sys
 import json
 import argparse
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+for p in (HERE, os.path.join(os.path.abspath(os.path.join(HERE, "..")), "alerts")):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 import company_profiles  # noqa: E402
 import discovery_downgrades  # noqa: E402
+import system_alerts  # noqa: E402
 
 
 LISTING_SOURCES = ("etenders_ocds", "etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders",
@@ -107,7 +111,24 @@ def _existing(client, company_id, ocid):
 
 def seed(client, releases, log=print):
     """Writes one row per (company, release). Returns {company_id: rows
-    written}; downgrades flagged are logged."""
+    written}; downgrades flagged are logged.
+
+    QA pass, 2026-11-12 (Finding 453): one company's write used to run with no
+    try/except at all - a genuine failure on ANY single (company, release)
+    upsert/insert/update (a Supabase network blip, a schema mismatch, a bad
+    field value PostgREST rejects on just that one row) raised straight out
+    of this loop and aborted seed() entirely, so every OTHER company and
+    EVERY OTHER release still queued after it in the same batch never got
+    written - including companies that had nothing wrong with their own row.
+    Same bug class already fixed in this lineage for
+    download_discovered_documents.py (Finding 441) and
+    opportunity_requirements.py's classify_all() (Finding 104, then its own
+    write-call gap, Finding 452) - this file's own per-company write was the
+    one remaining unattended batch job in engine/discovery/ with zero
+    isolation between items. Each company's write is now its own try/except:
+    a failure is recorded via system_alerts (so a repeat is visible beyond
+    this call's own stdout, like every other engine/ writer) and that one
+    company is skipped - the run continues with the next company/release."""
     by_name = {}
     written = {}
 
@@ -132,32 +153,53 @@ def seed(client, releases, log=print):
             company_id = company_of(c, r)
             if not company_id:
                 continue
-            row = to_row(r, company_id, c)
-            if row["ocid"]:
-                existing = _existing(client, company_id, row["ocid"])
-                flag = discovery_downgrades.flag_update(existing, row["verdict"], c.get("rescored"))
-                if flag:
-                    row.update(flag)
-                    if flag["downgraded_from"]:
-                        log(f"  DOWNGRADE flagged: {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
-                            f"was {flag['downgraded_from']}, now {row['verdict']}")
-                client.upsert("discovered_opportunities", [row], "company_id,ocid")
-            else:
-                client.insert("discovered_opportunities", row)
+            try:
+                row = to_row(r, company_id, c)
+                if row["ocid"]:
+                    existing = _existing(client, company_id, row["ocid"])
+                    flag = discovery_downgrades.flag_update(existing, row["verdict"], c.get("rescored"))
+                    if flag:
+                        row.update(flag)
+                        if flag["downgraded_from"]:
+                            log(f"  DOWNGRADE flagged: {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
+                                f"was {flag['downgraded_from']}, now {row['verdict']}")
+                    client.upsert("discovered_opportunities", [row], "company_id,ocid")
+                else:
+                    client.insert("discovered_opportunities", row)
+            except Exception as e:
+                system_alerts.record("discovery", f"Could not seed a discovered opportunity for "
+                                     f"{r.get('contract_number')} / company {c.get('legal_name') or company_id}: "
+                                     f"{type(e).__name__}: {e}", "error", exc=e,
+                                     context={"contract_number": r.get("contract_number"), "ocid": r.get("ocid"),
+                                              "company_id": company_id})
+                log(f"  ERROR seeding {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
+                    f"{type(e).__name__}: {e} - skipped, other companies/releases still seeded")
+                continue
             written[company_id] = written.get(company_id, 0) + 1
         # Re-scored, no longer report-worthy: only an existing row is touched,
         # and only to flag a downgrade (never a new not_a_fit row).
         for c in r.get("company_reassessed") or []:
             company_id = company_of(c, r)
-            existing = _existing(client, company_id, r.get("ocid")) if company_id else None
-            if not existing or not discovery_downgrades.is_downgrade(existing.get("verdict"), c.get("verdict")):
+            try:
+                existing = _existing(client, company_id, r.get("ocid")) if company_id else None
+                if not existing or not discovery_downgrades.is_downgrade(existing.get("verdict"), c.get("verdict")):
+                    continue
+                flag = discovery_downgrades.flag_update(existing, c["verdict"], c.get("rescored"))
+                client.update("discovered_opportunities", {"id": existing["id"]},
+                              {"verdict": c["verdict"], "reasons": c.get("reasons") or [],
+                               "score_outlook": c.get("score_outlook"), **flag})
+                log(f"  DOWNGRADE flagged: {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
+                    f"was {flag['downgraded_from']}, now {c['verdict']}")
+            except Exception as e:
+                system_alerts.record("discovery", f"Could not flag a downgrade for "
+                                     f"{r.get('contract_number')} / company {c.get('legal_name') or company_id}: "
+                                     f"{type(e).__name__}: {e}", "error", exc=e,
+                                     context={"contract_number": r.get("contract_number"), "ocid": r.get("ocid"),
+                                              "company_id": company_id})
+                log(f"  ERROR flagging downgrade for {r.get('contract_number')} / "
+                    f"{c.get('legal_name') or company_id}: {type(e).__name__}: {e} - skipped, "
+                    "other companies/releases still seeded")
                 continue
-            flag = discovery_downgrades.flag_update(existing, c["verdict"], c.get("rescored"))
-            client.update("discovered_opportunities", {"id": existing["id"]},
-                          {"verdict": c["verdict"], "reasons": c.get("reasons") or [],
-                           "score_outlook": c.get("score_outlook"), **flag})
-            log(f"  DOWNGRADE flagged: {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
-                f"was {flag['downgraded_from']}, now {c['verdict']}")
             written[company_id] = written.get(company_id, 0) + 1
     return written
 
