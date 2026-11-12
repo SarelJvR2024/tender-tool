@@ -156,7 +156,11 @@ export function printSignCutoffEmail(opts: {
 // instead of a second dedupe mechanism for the same fact.
 export type TenderChange =
   | { kind: "closing_date"; date: string; previousDate: string | null; quote: string }
-  | { kind: "briefing"; date: string; previousDate: string | null; quote: string }
+  // date is `null` + cancelled: true for a briefing CANCELLED or made
+  // non-compulsory (Finding 446) - corrigendumAlerts.ts's changesForDoc()
+  // is the only producer of this shape; this type must allow it or the row
+  // mapping below has nothing typed to render and silently drops the fact.
+  | { kind: "briefing"; date: string | null; previousDate: string | null; quote: string; cancelled?: boolean }
   | { kind: "other"; label: string; quote: string };
 
 export function corrigendumAlertEmail(opts: {
@@ -173,10 +177,19 @@ export function corrigendumAlertEmail(opts: {
   const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
 
   const rows = opts.changes.map((c) => {
+    // Finding 446: a cancelled briefing (c.date === null, c.cancelled true)
+    // must be checked BEFORE the closing_date/briefing date-formatting
+    // branch below - that branch assumes a real date string (new Date(c.date)
+    // on a null date is Invalid Date, formatDate(null) would render nothing
+    // useful) and has no way to say "cancelled" at all.
+    if (c.kind === "briefing" && c.cancelled) {
+      return { label: "Briefing date", value: "Cancelled or no longer compulsory", emphasis: "warning" as const };
+    }
     if (c.kind === "closing_date" || c.kind === "briefing") {
+      const date = c.date as string; // the only other shape this branch can see - cancelled is handled above
+      const direction = c.previousDate && new Date(date) > new Date(c.previousDate) ? "moved later" : c.previousDate ? "moved earlier" : "now set";
       const label = c.kind === "closing_date" ? "Closing date" : "Briefing date";
-      const direction = c.previousDate && new Date(c.date) > new Date(c.previousDate) ? "moved later" : c.previousDate ? "moved earlier" : "now set";
-      return { label, value: `${escapeHtml(formatDate(c.date) ?? c.date)} (${direction}${c.previousDate ? `, was ${escapeHtml(formatDate(c.previousDate) ?? c.previousDate)}` : ""})`, emphasis: "warning" as const };
+      return { label, value: `${escapeHtml(formatDate(date) ?? date)} (${direction}${c.previousDate ? `, was ${escapeHtml(formatDate(c.previousDate) ?? c.previousDate)}` : ""})`, emphasis: "warning" as const };
     }
     return { label: c.label, value: escapeHtml(c.quote.slice(0, 160)) };
   });
