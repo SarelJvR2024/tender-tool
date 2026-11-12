@@ -45,6 +45,28 @@ from generate_narrative import SetupError, TransientError, GenerationFailed, gen
 
 STALE_AFTER_MINUTES = 30  # one LLM call (plus, rarely, one retry) + a docx build and upload
 
+# Worker container has no TZ set and runs in UTC by default, so a naive
+# `datetime.date.today()` is one calendar day behind the real SAST date for
+# the whole 00:00-01:59 SAST window every day - same constant/pattern as
+# fill_a_forms.py/fill_sbd_docx.py/generate_cv.py's own SAST (see those
+# files' own comments for the full reasoning). load_key_people()'s own
+# `years_experience` used `datetime.date.today()` directly, floor-dividing
+# `(today - graduated).days` by 365: a standing review pass (2026-11-xx)
+# had previously read this call site and dismissed it as "a 1-day error can
+# never change a `// 365` integer result - no reachable consequence", which
+# is not correct - floor division DOES flip exactly on the one real
+# calendar day per year a person's elapsed days since graduation crosses a
+# multiple of 365 (confirmed directly: for the real "today" 2026-10-21, 14
+# distinct real `highest_graduated` dates going back 1-14 years each flip
+# `// 365` down by exactly 1 when `today()` reads yesterday's UTC date
+# instead). This "years_experience" fact is handed straight to
+# generate_narrative.py's own prompt for a company's real cover letter /
+# methodology statement - a document the company submits - so a key
+# person's stated years of experience can print one year short, on the one
+# real calendar day a year this fires, for any company whose worker happens
+# to run a narrative job inside that 2-hour window. QA pass, Finding 407.
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
 
 def _now_iso():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -251,7 +273,7 @@ def load_key_people(url, key, company_id, limit=5):
         if row.get("highest_graduated"):
             try:
                 graduated = datetime.date.fromisoformat(row["highest_graduated"])
-                years_experience = max(0, (datetime.date.today() - graduated).days // 365)
+                years_experience = max(0, (datetime.datetime.now(SAST).date() - graduated).days // 365)
             except ValueError:
                 pass
         people.append({

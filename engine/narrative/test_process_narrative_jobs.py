@@ -356,6 +356,75 @@ def test_load_key_people_handles_unparseable_graduation_date():
           people[0]["years_experience"] is None)
 
 
+class FixedDateTime(datetime.datetime):
+    """The system clock at UTC 2026-10-20 23:30 (= SAST 2026-10-21 01:30,
+    inside the 00:00-01:59 SAST bad window every day) - same convention as
+    engine/pack/test_pdf_merge.py's own Finding 37/38/39 regression tests."""
+    @classmethod
+    def now(cls, tz=None):
+        base = datetime.datetime(2026, 10, 20, 23, 30, tzinfo=datetime.timezone.utc)
+        return base.astimezone(tz) if tz else base
+
+
+class FixedDate(datetime.date):
+    """What a naive datetime.date.today() would read under the same fake
+    UTC clock as FixedDateTime above - patched too (not just .datetime.now)
+    so this test still catches a regression to the OLD naive
+    `datetime.date.today()` form, not just a hypothetical one that happens
+    to keep using datetime.datetime.now(). Same near-miss this repo's own
+    Finding 38/39 tests document hitting on their first attempt."""
+    @classmethod
+    def today(cls):
+        return datetime.date(2026, 10, 20)
+
+
+def _patch_clock():
+    real_dt, real_date = pnj.datetime.datetime, pnj.datetime.date
+    pnj.datetime.datetime, pnj.datetime.date = FixedDateTime, FixedDate
+    return real_dt, real_date
+
+
+def _restore_clock(saved):
+    pnj.datetime.datetime, pnj.datetime.date = saved
+
+
+def test_load_key_people_years_experience_does_not_undercount_during_the_naive_utc_window():
+    print("load_key_people(): years_experience must use the real SAST 'today', not a naive UTC one")
+    # Finding 407: `years_experience = max(0, (datetime.date.today() - graduated).days
+    # // 365)` used a bare, naive-UTC `datetime.date.today()` - one calendar day
+    # behind the real SAST date for the whole 00:00-01:59 SAST window every day,
+    # the same bug class Findings 37-39/289-292/344-346 already fixed at every
+    # other site that reads an ambient "today". A standing review pass had
+    # previously read this exact call site and dismissed it ("a 1-day error can
+    # never change a `// 365` integer result - no reachable consequence") - that
+    # is not correct: floor division DOES flip, exactly on the one real calendar
+    # day a year a person's elapsed days since graduation crosses a multiple of
+    # 365. Confirmed directly (not just reasoned about): for the real SAST
+    # "today" used by this simulated clock (2026-10-21), a graduation date of
+    # 2016-10-23 is EXACTLY 3650 days earlier (10 * 365) - the real years figure
+    # is 10, but the naive-UTC date (2026-10-20) gives 3649 days, floor-dividing
+    # to 9. This feeds generate_narrative.py's own prompt for a company's real
+    # cover letter / methodology statement verbatim.
+    today_real = datetime.date(2026, 10, 21)
+    graduated = "2016-10-23"
+    true_years = (today_real - datetime.date.fromisoformat(graduated)).days // 365
+    check("sanity check: the chosen graduation date really is an exact 365-day-multiple boundary",
+          true_years == 10, true_years)
+
+    stub, original = _patch({
+        "people": [{"name": "Thabo Mahlangu", "role": "Site Agent", "ecsa_level": "Pr Eng",
+                    "highest_description": "BEng Civil", "highest_graduated": graduated}],
+    })
+    saved_clock = _patch_clock()
+    try:
+        people = pnj.load_key_people("url", "key", "company-1")
+    finally:
+        pnj.supabase_request = original
+        _restore_clock(saved_clock)
+    check("years_experience is the real SAST-today figure (10), not the naive-UTC one (9)",
+          people[0]["years_experience"] == 10, people[0]["years_experience"])
+
+
 def test_load_experience_maps_columns_through():
     stub, original = _patch({
         "experience_items": [{"project_name": "N4 Upgrade", "client_name": "SANRAL",
@@ -575,6 +644,7 @@ def main():
     test_load_key_people_computes_years_experience_from_graduation_date()
     test_load_key_people_handles_missing_graduation_date()
     test_load_key_people_handles_unparseable_graduation_date()
+    test_load_key_people_years_experience_does_not_undercount_during_the_naive_utc_window()
     test_load_experience_maps_columns_through()
     test_load_other_companies_text_excludes_empty_generated_text()
     test_build_context_raises_generation_failed_when_company_row_is_missing()
