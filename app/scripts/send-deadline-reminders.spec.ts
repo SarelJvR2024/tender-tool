@@ -9,7 +9,8 @@
 // a different claim RPC name, which is why that pass's grep for
 // claim_notification callers never found this one.
 import { describe, expect, it, vi } from "vitest";
-import { processDeadlineReminderCandidates } from "./send-deadline-reminders.ts";
+import { processDeadlineReminderCandidates, filterCancelledTenders } from "./send-deadline-reminders.ts";
+import { POSTGREST_PAGE_SIZE } from "../lib/supabasePaging.ts";
 import type { DeadlineReminderCandidate } from "../lib/deadlineReminders.ts";
 
 type RpcCall = { name: string; params: Record<string, unknown> };
@@ -82,5 +83,78 @@ describe("processDeadlineReminderCandidates", () => {
     const result = await processDeadlineReminderCandidates(supabase as never, [candidate()], "https://app.example");
 
     expect(result).toEqual({ sent: 0, skippedAlreadySent: 1, skippedNoMembers: 0 });
+  });
+});
+
+// QA finding (2026-11-12): nothing ever clears/marks stale tenders.closing_date
+// when the buyer cancels a tender outright - without filterCancelledTenders(),
+// a candidate for an already-cancelled tender would still reach
+// processDeadlineReminderCandidates() and fire the "closing in 3 days"/"24
+// hours" email the Tender Workspace page already contradicts. Same shape as
+// Finding 448's own fix for briefingReminders.ts/send-operational-alerts.ts,
+// a different signal (whole-tender cancellation) and a different consumer
+// (this deadline email).
+describe("filterCancelledTenders", () => {
+  /** Thenable, chainable .from() builder - same technique scripts/send-operational-alerts.spec.ts's own makeBuilder() uses, so .range()-paging is actually exercised rather than hidden by an over-generous mock. */
+  function makeBuilder(data: unknown, error: unknown = null) {
+    const capped = Array.isArray(data) ? data.slice(0, POSTGREST_PAGE_SIZE) : data;
+    const builder: Record<string, unknown> = {
+      select: () => builder,
+      eq: () => builder,
+      in: () => builder,
+      range: (from: number, to: number) => Promise.resolve({ data: Array.isArray(data) ? data.slice(from, to + 1) : data, error }),
+      then: (resolve: (v: { data: unknown; error: unknown }) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve({ data: capped, error }).then(resolve, reject),
+    };
+    return builder;
+  }
+
+  function mockSupabase(docRows: unknown, error: unknown = null) {
+    const from = vi.fn(() => makeBuilder(docRows, error));
+    return { from } as unknown as { from: typeof from };
+  }
+
+  it("returns every candidate unchanged when the secondary query finds no cancellation at all", async () => {
+    const supabase = mockSupabase([]);
+    const candidates = [candidate(), candidate({ tender: { ...candidate().tender, id: "tender-2" } })];
+
+    const result = await filterCancelledTenders(supabase as never, candidates);
+
+    expect(result).toEqual(candidates);
+  });
+
+  it("drops every candidate whose tender has a cancellation-kind watched document", async () => {
+    const supabase = mockSupabase([{ tender_id: "tender-1", kind: "cancellation" }]);
+
+    const result = await filterCancelledTenders(supabase as never, [candidate()]);
+
+    expect(result).toEqual([]);
+  });
+
+  it("keeps a still-live tender's own candidate while dropping a cancelled sibling tender's", async () => {
+    const supabase = mockSupabase([{ tender_id: "tender-1", kind: "cancellation" }]);
+    const liveCandidate = candidate({ tender: { ...candidate().tender, id: "tender-2" }, companyId: "company-2" });
+
+    const result = await filterCancelledTenders(supabase as never, [candidate(), liveCandidate]);
+
+    expect(result).toEqual([liveCandidate]);
+  });
+
+  it("fails open - keeps every candidate unfiltered - when the secondary query errors", async () => {
+    const supabase = mockSupabase(null, { message: "connection reset" });
+
+    const result = await filterCancelledTenders(supabase as never, [candidate()]);
+
+    expect(result).toEqual([candidate()]);
+  });
+
+  it("short-circuits with zero candidates without querying Supabase at all", async () => {
+    const from = vi.fn();
+    const supabase = { from } as unknown as { from: typeof from };
+
+    const result = await filterCancelledTenders(supabase as never, []);
+
+    expect(result).toEqual([]);
+    expect(from).not.toHaveBeenCalled();
   });
 });

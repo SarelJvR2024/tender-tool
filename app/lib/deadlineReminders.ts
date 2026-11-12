@@ -109,3 +109,58 @@ export function deadlineReminderCandidates(
   }
   return out;
 }
+
+export type DeadlineWatchedDocRow = { tender_id: string; kind: string | null };
+
+/**
+ * Tender ids with at least one `tender_watched_documents` row whose `kind`
+ * is "cancellation" - `engine/discovery/tender_updates.py`'s
+ * `classify_document()`, stored as a plain, check-constrained column
+ * (migration `0039`: `kind in ('addendum', 'clarification', 'cancellation',
+ * 'revised_document', 'supporting_document')`), not a sub-field of
+ * `changes`.
+ *
+ * Without this, `deadlineReminderCandidates()` above - reading
+ * `tenders.closing_date` alone - would still fire the "closing in 3 days"/
+ * "24 hours" email for a tender the buyer has already cancelled outright:
+ * nothing anywhere writes `tenders.closing_date` to NULL or otherwise marks
+ * it stale on a cancellation (the same "detected and recorded correctly,
+ * but nothing downstream ever clears the stale column a recurring reminder
+ * reads" shape Finding 448 fixed for `briefingReminders.ts`'s own
+ * `tendersWithCancelledBriefing()` - a different signal here, whole-tender
+ * cancellation rather than briefing cancellation, feeding a different
+ * consumer, this closing-date email rather than the operational-alerts
+ * briefing email). The Tender Workspace page already renders this
+ * document as a "Cancellation notice" card (critical urgency,
+ * `lib/tenderUpdates.ts`'s `UPDATE_KIND_LABEL`), and
+ * `scripts/send-corrigendum-alerts.ts` already emails every tracking
+ * company once, the moment the notice is first seen
+ * (`lib/corrigendumAlerts.ts`'s `DOC_KIND_LABEL.cancellation`) - so without
+ * this, the SAME recipients who were already told the tender is cancelled
+ * would then go on getting "closing in 3 days"/"24 hours" warnings about it
+ * right up to the original (now-meaningless) closing date.
+ *
+ * Deliberately NOT "latest wins" (unlike `tendersWithCancelledBriefing()`,
+ * which only trusts the MOST RECENT document that says anything about the
+ * briefing): `classify_document()` has no regex anywhere for a
+ * cancellation being withdrawn or a tender reinstated - confirmed by
+ * reading `engine/discovery/tender_updates.py`'s own `CANCELLATION_RE`,
+ * which has no "un-cancel" counterpart pattern. Every OTHER document kind
+ * (addendum/clarification/revised_document/supporting_document) says
+ * nothing at all about whether an earlier cancellation notice still holds,
+ * so treating a later, unrelated document (e.g. a late supporting
+ * attachment uploaded after the cancellation) as silently reinstating a
+ * real cancellation would be actively wrong, not merely a different
+ * design choice. Once any document says the tender is cancelled or
+ * withdrawn, it stays suppressed - the same monotonic reading this app's
+ * own Tender Workspace page and corrigendum-alert email already give the
+ * identical `kind` value (neither has a complementary "reinstated" kind to
+ * check against either).
+ */
+export function tendersWithCancellationNotice(docs: DeadlineWatchedDocRow[]): Set<string> {
+  const out = new Set<string>();
+  for (const doc of docs) {
+    if (doc.tender_id && doc.kind === "cancellation") out.add(doc.tender_id);
+  }
+  return out;
+}
