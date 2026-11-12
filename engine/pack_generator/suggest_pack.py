@@ -95,6 +95,36 @@ def is_managerial(v):
     return s in ("man", "managerial", "yes", "y")
 
 
+def clean_description(v):
+    """SETUP row 7's own position-description cell, normalized the same way
+    for every writer of tender_requirements.position_description: a falsy or
+    whitespace-only cell becomes None (never an empty/blank string); anything
+    else is trimmed. Same two real writers as is_managerial() above, reading
+    the SAME raw cell through this module's own read_required_positions():
+    process_pack_jobs.sync_tender_requirements() already did this inline
+    (`(str(p["description"]).strip() or None) if p.get("description") else
+    None`); classify_tender.read_setup() (-> process_general_jobs.
+    register_sanral_tender(), the manual-intake/general-pack path) wrote the
+    raw cell straight through, unnormalized.
+
+    QA pass, standing solution-architect review (2026-11-12): a SETUP
+    description cell that's blank-but-not-truly-empty (e.g. a single space,
+    or just leading/trailing whitespace) was stored as NULL via the SANRAL-
+    discovery path but as a non-empty whitespace string via the manual-
+    intake/general-pack path, for the IDENTICAL raw cell of the SAME tender.
+    Every real consumer of this column assumes exactly one of those two
+    shapes, never both: compliance-report.tsx / pack-review-data.ts / [id]/
+    page.tsx all do a plain truthy check (`position_description ? ... :
+    null`) - truthy for a whitespace string, so the manually-loaded tender
+    showed a spurious trailing " - " where the SANRAL-discovery-loaded
+    tender for the identical cell correctly showed nothing; intake-card.tsx's
+    own `p.description ?? "-"` only substitutes on null/undefined, so it
+    rendered a bare blank inside its own parens ("PL ( )") instead of "-".
+    Moved here, as the one shared reader's own sibling helper (same move
+    is_managerial() already made), so both writers can only ever agree."""
+    return (str(v).strip() or None) if v else None
+
+
 def read_required_positions(wb):
     """SETUP row 5 = ALT marker, row 6 = position code, row 7 = description, row 8 = Man/Non-Man.
     Returns the PRIMARY (non-ALT) slots only, deduplicated by code, each with its alternate
