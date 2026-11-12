@@ -218,7 +218,32 @@ export async function confirmVaultDocument(formData: FormData) {
     appliedFields.push(field);
   }
   if (result.document_kind === "bbbee_certificate" && ticked(formData, "bee_level")) {
-    update.bee_level = parseBeeLevel(str(formData, "f_bee_level"));
+    const level = parseBeeLevel(str(formData, "f_bee_level"));
+    // Standing solution-architect review (Finding 473): companies.bee_level
+    // is written verbatim into SANRAL's own K33 cell (whole 1-9 - SANRAL's
+    // template itself ships 9 = "non-compliant contributor" when no level is
+    // on file, engine/sanral_fill.py's own fill_company_front()) and into
+    // real submission text (engine/fill_a_forms.py's "Level {bee_level}"
+    // B-BBEE line, engine/pack_generator/confirm_pack.py's own company
+    // dict) - the same write-onto-a-real-signed-document severity as the
+    // sibling manual-edit/onboarding-wizard path shares
+    // (app/company/actions.ts's updateCompanyProfile() and
+    // app/onboarding/actions.ts, both via lib/companyProfileUpdate.ts's
+    // buildCompanyUpdate(), whose FIELD_MAX.bee_level = 9 was hardened
+    // 2026-10-30 after being found with no upper bound at all). That
+    // hardening never reached this third, independent writer:
+    // parseBeeLevel() just regex-extracts whatever digits appear in this
+    // card's own freely-editable text input (review.tsx's FieldRow -
+    // "bee_level" isn't in NUMBER_FIELDS, so it renders type="text", no
+    // HTML max either) with no range check at all, and companies.bee_level
+    // itself is a plain `int` column with no CHECK constraint
+    // (0001_init_schema.sql) - nothing anywhere stops a reviewer typo or a
+    // garbled OCR read ("Level 99") sailing straight through onto an actual
+    // government bid. Same bound buildCompanyUpdate() already enforces.
+    if (level !== null && (level < 0 || level > 9)) {
+      fail("B-BBEE level: must be a whole number between 0 and 9.");
+    }
+    update.bee_level = level;
   }
   if (result.document_kind === "iso_9001_certificate") {
     update.iso_9001_certified = true; // filing the certificate is the statement
