@@ -306,7 +306,23 @@ def register_sanral_tender(client, tender, decision, sources):
     """SANRAL route: the blank templates -> tender_documents (what
     engine/pack/process_pack_jobs.py reads), the template's SETUP positions ->
     tender_requirements (what the compliance report reads), and the
-    fingerprint check, reported but never stored as a baseline."""
+    fingerprint check, reported but never stored as a baseline.
+
+    Finding 459 (standing solution-architect review, 2026-11-12): the same
+    Storage-orphan shape Findings 396/397/398 already fixed for the CV, SANRAL-
+    pack and general-pack upload loops, found here independently - this
+    function's own loop called client.upload() then client.upsert() back to
+    back with no try/except around either. An upsert failure (an ordinary
+    transient Supabase write error, same realistic failure mode as 396/397/398)
+    right after that doc_type's own template upload succeeded left the file
+    sitting in the shared TENDER_DOCS_BUCKET forever: the exception propagates
+    straight out through run_extraction() into process_job()'s own blanket
+    except (which only marks the job 'failed'), and nothing else in this repo
+    sweeps this bucket for orphans. Only the file THIS iteration itself just
+    uploaded is ever cleaned up - never a reused company-upload path
+    (needs_upload is False for those; see _template_storage_path()) and never
+    an EARLIER doc_type's file, since that one's own upsert already succeeded
+    (it's a real, recorded row, not an orphan)."""
     files = decision["sanral_files"]
     tech = files["technical_xlsm"]
     setup = intake.read_setup(tech)
@@ -317,12 +333,22 @@ def register_sanral_tender(client, tender, decision, sources):
             ct = "application/vnd.ms-excel.sheet.macroEnabled.12" if local.lower().endswith(".xlsm") else \
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             client.upload(TENDER_DOCS_BUCKET, path, local, ct)
-        # company_id null: the shared copy - the buyer's own published file,
-        # the one source every company may build from (0045). Companies'
-        # own uploads (company_id set) are theirs and are not touched here.
-        client.upsert("tender_documents", [{"tender_id": tender["id"], "doc_type": doc_type, "company_id": None,
-                                            "storage_path": path, "downloaded_at": _now()}],
-                      "tender_id,doc_type,company_id")
+        try:
+            # company_id null: the shared copy - the buyer's own published file,
+            # the one source every company may build from (0045). Companies'
+            # own uploads (company_id set) are theirs and are not touched here.
+            client.upsert("tender_documents", [{"tender_id": tender["id"], "doc_type": doc_type, "company_id": None,
+                                                "storage_path": path, "downloaded_at": _now()}],
+                          "tender_id,doc_type,company_id")
+        except Exception as e:
+            if needs_upload:
+                try:
+                    client.remove(TENDER_DOCS_BUCKET, [path])
+                except Exception as e2:
+                    system_alerts.record("general", f"Could not clean up an orphaned Storage file ({path}) after a "
+                                         f"failed tender_documents write: {type(e2).__name__}: {e2}", "warning", exc=e2,
+                                         context={"tender_id": tender["id"], "doc_type": doc_type, "path": path})
+            raise
     client.delete("tender_requirements", {"tender_id": tender["id"], "company_id": None})
     rows = []
     for p in setup["positions"]:

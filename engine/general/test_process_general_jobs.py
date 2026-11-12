@@ -510,6 +510,83 @@ def test_run_pack_cleans_up_storage_when_a_later_upload_fails():
           (client.uploads, client.removed))
 
 
+class FailsOnFirstTenderDocumentUpsert(FakeClient):
+    """register_sanral_tender(): records every upload()/remove() call;
+    raises on the FIRST tender_documents upsert, simulating an ordinary
+    transient Supabase write failure immediately after that doc_type's own
+    template file already landed in the 'tender-documents' bucket."""
+
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.uploads = []
+        self.removed = []
+        self.upsert_calls = []
+
+    def upload(self, bucket, path, local, content_type):
+        self.uploads.append((bucket, path))
+
+    def remove(self, bucket, paths):
+        self.removed.append((bucket, list(paths)))
+
+    def upsert(self, table, rows, on_conflict):
+        self.upsert_calls.append(table)
+        if table == "tender_documents":
+            raise RuntimeError("simulated transient Supabase failure writing tender_documents")
+
+
+def test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_fails():
+    print("register_sanral_tender(): a template already uploaded to the 'tender-documents' bucket "
+          "is cleaned up when the tender_documents write that immediately follows it then fails")
+    # Finding 459 (standing solution-architect review, 2026-11-12): the same
+    # Storage-orphan shape Findings 396 (engine/cv/process_cv_jobs.py), 397
+    # (engine/pack/process_pack_jobs.py) and 398 (this file's own run_pack())
+    # already fixed, found here independently at a DIFFERENT call site in
+    # this same file - register_sanral_tender(), the real SANRAL-intake
+    # write path (run_extraction() -> classify_documents() route=='sanral'),
+    # never swept by Finding 398's own closing note ("third and final
+    # instance... across the three process_*_jobs.py pack/CV bridges" - that
+    # closure was scoped to the pack-BUILD upload loops, not this separate
+    # intake-registration function). Before this fix, this function's own
+    # per-doc_type loop called client.upload() then client.upsert() back to
+    # back with no try/except around either: an upsert failure (an ordinary
+    # transient Supabase write error - the exact same realistic failure mode
+    # Findings 396/397/398 already established) right after that doc_type's
+    # own upload succeeded left the file sitting in the shared
+    # 'tender-documents' bucket with no tender_documents row ever pointing
+    # at it, and the exception propagated straight out through
+    # run_extraction() into process_job()'s own blanket except, which marks
+    # the job failed - the file is never removed, since nothing else in this
+    # repo sweeps this bucket for orphans either (confirmed by grep: the
+    # only Storage-delete capability this class has, client.remove(), is
+    # Finding 398's own addition, used only by run_pack() until now).
+    real_read_setup, real_check_fingerprint = pgj.intake.read_setup, pgj.intake.check_fingerprint
+    pgj.intake.read_setup = lambda tech: {"positions": []}
+    pgj.intake.check_fingerprint = lambda tech, family: {"status": "ok"}
+    client = FailsOnFirstTenderDocumentUpsert([])
+    tender = {"id": "t-1", "slug": "t1"}
+    decision = {"family": "FAM_X", "sanral_files": {
+        "technical_xlsm": "/tmp/does-not-exist/technical.xlsm",
+        "financial_xlsm": "/tmp/does-not-exist/financial.docx",
+    }}
+    try:
+        try:
+            pgj.register_sanral_tender(client, tender, decision, {})
+            raised = False
+        except RuntimeError:
+            raised = True
+    finally:
+        pgj.intake.read_setup, pgj.intake.check_fingerprint = real_read_setup, real_check_fingerprint
+
+    check("the original exception still propagates unchanged (process_job()'s own failure-marking logic is untouched)",
+          raised)
+    check("only the FIRST doc_type's template was ever uploaded - the loop stopped there, nothing to clean up for the second",
+          len(client.uploads) == 1 and client.uploads[0][1] == "t1/technical_xlsm.xlsm", client.uploads)
+    check("only one tender_documents write was attempted before the exception stopped the loop",
+          client.upsert_calls == ["tender_documents"], client.upsert_calls)
+    check("the already-uploaded technical_xlsm template was cleaned up (the bug this test guards)",
+          client.removed == [(pgj.TENDER_DOCS_BUCKET, ["t1/technical_xlsm.xlsm"])], client.removed)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
@@ -521,6 +598,7 @@ def main():
     test_gather_pack_inputs_signatory_fallback()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_run_pack_cleans_up_storage_when_a_later_upload_fails()
+    test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_fails()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
