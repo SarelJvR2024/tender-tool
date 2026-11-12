@@ -147,6 +147,79 @@ check("the real en dash (–) is on the printed page, not a '?' placeholder",
 check("no '?' placeholder leaked into the printed page in place of the real punctuation",
       "?" not in page_text, repr(page_text))
 
+# --- Finding 391: SBD4's "I, ...., the undersigned" general declaration ---
+#     (the real, live SALB edition's own wording - name BEFORE "the
+#     undersigned", not after it as "I, (THE) UNDERSIGNED, (NAME)" assumes) -
+#     must still place the signatory's name, not come back "not_found" (which
+#     build_general_pack.py's own _log_overlay() silently drops exactly like
+#     "the buyer already printed it", leaving the real declaration blank with
+#     zero trace in field_provenance). ------------------------------------
+
+
+def _build_sbd4(out_path):
+    c = canvas.Canvas(out_path, pagesize=A4)
+    _, h = A4
+    y = h - 50
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "DECLARATION OF INTEREST")
+    y -= 40
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "Registered name of supplier:")
+    y -= 30
+    c.drawString(50, y, "2.1 Is the bidder employed by an organ of state?  YES/NO")
+    y -= 40
+    c.drawString(50, y, "I, " + "." * 60 + ", the")
+    y -= 20
+    c.drawString(50, y, "undersigned, in submitting the accompanying bid, do hereby make the")
+    c.showPage()
+    c.save()
+
+
+SBD4 = os.path.join(TMP, "sbd4.pdf")
+_build_sbd4(SBD4)
+
+
+def _declarant_name_field(signatory_name):
+    ctx = {"company": {"legal_name": "Test Co"}, "signatory": {"name": signatory_name}}
+    out = os.path.join(TMP, f"out_{len(os.listdir(TMP))}.pdf")
+    report = ffp.fill_flat_pdf(SBD4, out, ctx, ["4"])
+    return report["forms"]["4"]["fields"].get("sbd4.declarant_name")
+
+
+field = _declarant_name_field("Jane Smith")
+check("the real SALB-shaped 'I, ...., the undersigned' wording still gets the signatory's name placed",
+      field["status"] == "placed", field)
+check("...with the real name recorded as the value", field.get("value") == "Jane Smith", field)
+
+# The OLDER "I, (the) undersigned, (name) ...." wording (DSTI/Mthashana) must
+# still work too - this fix adds an alternate, it must not replace the first.
+OLD_SBD4 = os.path.join(TMP, "sbd4_old.pdf")
+
+
+def _build_sbd4_old_wording(out_path):
+    c = canvas.Canvas(out_path, pagesize=A4)
+    _, h = A4
+    y = h - 50
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "DECLARATION OF INTEREST")
+    y -= 40
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, "Registered name of supplier:")
+    y -= 30
+    c.drawString(50, y, "I, undersigned, (name) " + "." * 50 + " in submitting the")
+    c.showPage()
+    c.save()
+
+
+_build_sbd4_old_wording(OLD_SBD4)
+ctx = {"company": {"legal_name": "Test Co"}, "signatory": {"name": "Jane Smith"}}
+out = os.path.join(TMP, "out_old.pdf")
+report = ffp.fill_flat_pdf(OLD_SBD4, out, ctx, ["4"])
+field = report["forms"]["4"]["fields"].get("sbd4.declarant_name")
+check("the older 'I, (the) undersigned, (name) ....' wording is unaffected by the new alternate",
+      field["status"] == "placed", field)
+check("...with the real name recorded as the value", field.get("value") == "Jane Smith", field)
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)
