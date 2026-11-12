@@ -114,6 +114,40 @@ def test_control_characters_are_stripped_not_crashed_on():
         check("a bullet's control character is stripped", "Jane  Doe" in all_text)
 
 
+def test_subtitle_that_is_entirely_control_characters_does_not_crash():
+    print("Finding 367: a subtitle that is non-empty but entirely XML-invalid control "
+          "characters sanitizes to an EMPTY string, which must not crash the builder "
+          "the way a plain python-docx add_paragraph('') + runs[0] access would")
+    # Finding 66 (2026-10-23) added _safe_text() stripping to fix the ORIGINAL crash
+    # (a control character reaching lxml raw). Its own regression test always left at
+    # least one real character in the subtitle ("N.011-010\x00-2027/1F"), so
+    # add_paragraph(_safe_text(subtitle)) always got a non-empty string and always had
+    # a run at index 0 for ".runs[0].italic = True" to set. contract_no (the real,
+    # directly-reachable subtitle vector - read straight off a buyer's page/portal, no
+    # LLM involved) can plausibly come through as NOTHING BUT control bytes (a single
+    # stray NUL byte alone is enough: "\x00" is already non-empty/truthy, so it passes
+    # `if subtitle:`, but _safe_text("\x00") == "" strips it to nothing). python-docx's
+    # own add_paragraph("") adds a paragraph with ZERO runs (confirmed: only calls
+    # paragraph.add_run(text) when text is truthy) - subtitle_paragraph.runs[0] then
+    # raises IndexError, failing the whole job for a tender whose only problem is a
+    # single garbled byte in its own reference number.
+    sections = [{"heading": "Our Approach", "kind": "prose", "paragraphs": ["We build roads safely."], "bullets": []}]
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, "out.docx")
+        try:
+            build_docx(sections, out_path, title="Cover Letter", subtitle="\x00")
+        except Exception as e:
+            check("build_docx does not crash when subtitle sanitizes to an empty string", False,
+                  f"{type(e).__name__}: {e}")
+            return
+        check("build_docx does not crash when subtitle sanitizes to an empty string", True)
+        doc = docx.Document(out_path)
+        all_text = "\n".join(p.text for p in doc.paragraphs)
+        check("the document still has its real body content", "We build roads safely." in all_text)
+        check("no empty leftover subtitle paragraph is added (it had nothing left to show)",
+              not any(p.text == "" for p in doc.paragraphs))
+
+
 def main():
     test_builds_a_real_readable_docx()
     test_bullets_use_the_list_bullet_style_not_plain_prose()
@@ -122,6 +156,7 @@ def main():
     test_unknown_color_theme_falls_back_to_default_rather_than_crashing()
     test_visual_rich_adds_a_rule_plain_does_not()
     test_control_characters_are_stripped_not_crashed_on()
+    test_subtitle_that_is_entirely_control_characters_does_not_crash()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
