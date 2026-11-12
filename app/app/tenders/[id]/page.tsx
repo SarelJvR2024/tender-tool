@@ -40,6 +40,7 @@ import { startTenderPack } from "./pack-inputs-actions";
 import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { loadPackReviewSnapshot } from "./pack-review-data";
+import { humanizeFieldKey } from "./pack-review-logic";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import type { TenderIntake } from "@/lib/manualTender";
 import { formatDate, formatDateTime, formatClosingDateTime, closingCountdown, daysUntil } from "@/lib/dates";
@@ -190,33 +191,6 @@ const PRICING_MODEL_LABEL: Record<string, string> = {
   time_based: "Time-based",
 };
 
-function titleCaseWords(s: string): string {
-  return s
-    .replace(/_/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .split(" ")
-    .filter(Boolean)
-    .map((w) => (w.length <= 3 && w === w.toUpperCase() ? w : w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(" ");
-}
-
-// Known field_key -> real document/section name overrides, for the exact
-// keys this engine's real callers write today (0002_field_provenance.sql's
-// own fill_a_forms.py/process_general_jobs.py/seed_demo_company.py). QA
-// finding, 2026-10-26: the generic humanization below is only a best-effort
-// cosmetic pass (drop the owning-script prefix, title-case the rest) - it
-// still let real internal identifiers through, e.g. "signatory_person_id"
-// humanized to "Signatory Person Id" (a raw DB column suffix, not a
-// real-world name) and "company.bee_level" to "Bee Level" (loses the
-// B-BBEE term entirely). Anything not listed here still falls back to the
-// generic pass - there's still no full display-name table.
-const FIELD_KEY_LABELS: Record<string, string> = {
-  signatory_person_id: "Signatory",
-  "company.bee_level": "B-BBEE level",
-  "contract_data.client_name": "Client name (Contract Data form)",
-  "financial_hours.summary": "Financial & hours workbook",
-};
-
 // The exact field_keys engine/general/fill_flat_pdf.py sources from
 // people.signatory_capacity (confirmed by reading that file directly,
 // 2026-10-31, after an earlier wrong guess at company_members.tender_role -
@@ -229,20 +203,6 @@ const SIGNATORY_CAPACITY_FIELD_KEYS = new Set([
   "sbd9.position_footer",
   "form_of_offer.capacity",
 ]);
-
-function humanizeFieldKey(fieldKey: string): string {
-  if (FIELD_KEY_LABELS[fieldKey]) return FIELD_KEY_LABELS[fieldKey];
-  const parts = fieldKey.split(".");
-  // "a_forms.A8.litigation" -> "Form A8 - Litigation", matching this app's
-  // own "Form A12"/"Form B6" convention for a real SANRAL document code
-  // (compliance-report.tsx) rather than silently dropping the word "Form".
-  if (parts[0] === "a_forms" && parts.length > 1) {
-    const rest = parts.slice(2);
-    return rest.length > 0 ? `Form ${parts[1]} - ${titleCaseWords(rest.join(" "))}` : `Form ${parts[1]}`;
-  }
-  const rest = parts.length > 1 ? parts.slice(1) : parts;
-  return titleCaseWords(rest.join(" "));
-}
 
 export default async function TenderWorkspacePage({
   params,
