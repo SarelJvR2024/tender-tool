@@ -899,10 +899,31 @@ def fail_stale_jobs(client, now=None):
                                                       "started_at": started})
             continue
         if started_dt < cutoff:
-            client.update(JOBS_TABLE, {"id": job["id"], "status": "generating"}, {
-                "status": "failed", "completed_at": _now(),
-                "error_message": f"The general engine stopped mid-job (no result after {STALE_AFTER_MINUTES} "
-                                 "minutes). Nothing was produced - request it again."})
+            # Standing review, 2026-11-12 (Finding 454's own write-side sibling
+            # lead): this write used to sit outside any try/except - a write
+            # failure marking THIS stale job failed (a transient Supabase
+            # error, a 500, same realistic failure mode already guarded for
+            # process_job()'s own mark-failed write just below, Finding 188's
+            # nested except) raised straight out of this loop, aborting the
+            # stale-reclaim sweep for every OTHER genuinely stale job queued
+            # after it. The read-side guard immediately above (the malformed
+            # started_at ValueError) already protects the PARSE; this
+            # protects the WRITE the same way.
+            try:
+                client.update(JOBS_TABLE, {"id": job["id"], "status": "generating"}, {
+                    "status": "failed", "completed_at": _now(),
+                    "error_message": f"The general engine stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                     "minutes). Nothing was produced - request it again."})
+            except Exception as e:
+                system_alerts.record("general", f"Could not mark a stuck general engine job as failed "
+                                                f"({type(e).__name__}: {e}) - it is still stuck 'generating' and "
+                                                "will be retried on the next stale-reclaim sweep.", "error", exc=e,
+                                     context={"job_id": job["id"], "kind": job.get("kind"),
+                                              "company_id": job.get("company_id"), "tender_id": job.get("tender_id"),
+                                              "started_at": started})
+                print(f"[skipped] {job['id']}: could not mark stale job failed ({type(e).__name__}: {e}) - "
+                      "the rest of this sweep continues")
+                continue
             print(f"[failed] {job['id']}: stale 'generating' since {started}")
             system_alerts.record("general", f"A general engine job was stuck in 'generating' for over "
                                             f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "

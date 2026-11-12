@@ -120,6 +120,56 @@ def test_fail_stale_jobs_recovers_a_stuck_general_job():
           malformed_alert.get("context", {}).get("company_id") == "co-a", malformed_alert)
 
 
+class RaisingOnFirstUpdate(FakeClient):
+    """The identical shape as RaisingOnSecondUpdate below, just inverted: the
+    FIRST update() call (marking the first stale job in the sweep as failed)
+    itself raises; every later update() call succeeds normally. Models a
+    transient Supabase failure (a network blip, a 500) hitting one stale
+    row's own write, not a malformed value on the row itself - the write-side
+    gap fail_stale_jobs() never got, unlike process_job()'s own mark-failed
+    write (Finding 188's RaisingOnSecondUpdate test below)."""
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.updates = 0
+
+    def update(self, table, filters, body):
+        self.updates += 1
+        if self.updates == 1:
+            raise RuntimeError("simulated transient Supabase failure marking a stale job failed")
+        return super().update(table, filters, body)
+
+
+def test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed():
+    print("fail_stale_jobs(): a write failure (transient Supabase error) marking ONE stale general "
+          "job failed must not abort the sweep for every OTHER genuinely stale job - the write-side "
+          "half of the 2026-10-29 QA pass's own bug class, never applied to this function's own "
+          "client.update() call (only its read-side started_at parse was guarded)")
+    now = datetime.datetime(2026, 11, 12, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    stale_started = now - datetime.timedelta(minutes=90)  # past STALE_AFTER_MINUTES=60
+    rows = [
+        {"id": "job-first", "kind": "generate_pack", "status": "generating", "engine": "general",
+         "started_at": iso(stale_started), "company_id": "co-a", "tender_id": "t-a"},
+        {"id": "job-second", "kind": "generate_pack", "status": "generating", "engine": "general",
+         "started_at": iso(stale_started), "company_id": "co-b", "tender_id": "t-b"},
+    ]
+    client = RaisingOnFirstUpdate(rows)
+    alerts = []
+    real_record = pgj.system_alerts.record
+    pgj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        pgj.fail_stale_jobs(client, now=now)
+    finally:
+        pgj.system_alerts.record = real_record
+    by_id = {r["id"]: r for r in rows}
+    check("the job whose own mark-failed write failed is reported, not silently stuck forever",
+          any("Could not mark" in a[1] for a, kw in alerts), alerts)
+    check("the OTHER stale job, queued after the one whose write failed, is still reached and "
+          "marked failed - the sweep does not abort on the first row's own write failure",
+          by_id["job-second"]["status"] == "failed", by_id["job-second"])
+    check("completed_at is set on the job that was actually marked failed",
+          bool(by_id["job-second"].get("completed_at")))
+
+
 class FixedDateTime(datetime.datetime):
     """Freezes datetime.datetime.now() to a given instant, same pattern as
     engine/pack/test_pdf_merge.py / engine/cv/test_generate_cv.py's own
@@ -462,6 +512,7 @@ def test_run_pack_cleans_up_storage_when_a_later_upload_fails():
 
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
+    test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
     test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
     test_within_real_closing_date_uses_its_own_sast_day_not_a_naive_utc_slice()
