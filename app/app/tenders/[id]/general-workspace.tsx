@@ -269,8 +269,27 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   // Verify/Provide/Fix (app/AGENTS.md): same gate as SANRAL's submission-pack.tsx,
   // reusing the exact same cached snapshot GeneralPackReview itself reads.
   const generalReviewSnapshot = await loadGeneralPackReviewSnapshot(tenderId);
+  // Standing review finding, 2026-11-06: reaching this line already means
+  // `manifest` (above, from this same function's own earlier tenders/
+  // tender_packs read) is truthy, so generalReviewSnapshot.mapped === false
+  // here is never the genuine "not read yet" case the same flag means
+  // higher up this file - it means loadGeneralPackReviewSnapshot's OWN
+  // separate tenders/tender_packs read failed on THIS render. The old
+  // `generalFixCount = ... : 0` fallback silently zeroed the Fix count on
+  // that failure (same shape as submission-pack.tsx's own fix, same pass) -
+  // treating it as "can't check it right now" (disabled) instead keeps this
+  // button and requestGeneralPack()'s own server-side re-check in agreement.
+  // badges.generalFixCount (the tab badge, below) stays the plain 0-on-
+  // unmapped number - cosmetic, same already-accepted tier as every other
+  // badge/count this review loop has left alone. The button's own gate
+  // keeps the real tri-state (unknown vs 0 vs >0) so a read failure can
+  // only ever make it MORE cautious, never silently permissive.
   const generalFixCount = generalReviewSnapshot.mapped ? computeTenderReadiness(generalReviewSnapshot.sections).fix.length : 0;
-  const generalDisabledReason = generalFixCount > 0 ? `Fix ${generalFixCount} item${generalFixCount === 1 ? "" : "s"} first - see the Pack review above` : null;
+  const generalDisabledReason = !generalReviewSnapshot.mapped
+    ? "Couldn't check compliance readiness just now - refresh and try again"
+    : generalFixCount > 0
+      ? `Fix ${generalFixCount} item${generalFixCount === 1 ? "" : "s"} first - see the Pack review above`
+      : null;
   const docsMissing = returnables.filter((r) => r.status === "missing").length;
   const autoForms = manifest.forms.filter((f) => f.status === "auto");
   const byHandForms = manifest.forms.filter((f) => f.status === "by_hand");
