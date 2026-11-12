@@ -1009,6 +1009,17 @@ select 1;""")
             f"set hide_sanral_board = excluded.hide_sanral_board, interested_disciplines = excluded.interested_disciplines",
         uEmp)
     check(bad, "employee can't change the company's opportunity preferences")
+    # 0121 (Finding 169): company_packs_this_period()/company_can_request_pack()
+    # are both SECURITY DEFINER and client-callable directly via
+    # supabase.rpc() - neither checked role, only membership, so both
+    # bypassed 0117's own RESTRICTIVE "employee has no billing access"
+    # policy on company_subscriptions entirely. Same "null means no answer
+    # for this caller" contract 0109 already established for a non-member,
+    # extended here to an employee too.
+    check(db.one(f"select coalesce(company_packs_this_period('{c}')::text, 'null')", uEmp) == "null",
+          "employee learns nothing of the company's pack quota via company_packs_this_period (null, not a real count)")
+    check(db.one(f"select coalesce(company_can_request_pack('{c}')::text, 'null')", uEmp) == "null",
+          "employee learns nothing of the company's pack quota via company_can_request_pack (null, not true/false)")
 
     print("  -- owner/admin/member access is completely unchanged by the restrictive policies --")
     check(db.one(f"select count(*) from people where company_id = '{c}'", uOwner) == "2", "owner still sees every person in the company")
@@ -1017,6 +1028,8 @@ select 1;""")
     ok, _, err = db.run(
         f"update company_tender_preferences set hide_sanral_board = true where company_id = '{c}'", uOwner)
     check(ok, f"owner can still change the company's opportunity preferences ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select coalesce(company_can_request_pack('{c}')::text, 'null')", uOwner) != "null",
+          "owner still gets a real answer from company_can_request_pack")
 
     print("  -- cross-tenant: an employee gets no MORE access to another company than a member would --")
     other = str(uuid.uuid4())
