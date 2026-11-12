@@ -22,10 +22,27 @@
  *     per-position tender_pack_assignments + positionStatus, but tag-based
  *     (any number of people per role) rather than one-person-per-position.
  *   - signatureAnswerStatus: who signs, from the tender's own "person" type
- *     question (same field_key convention, "signatory_person_id") - no
- *     region/industry/discipline default-signer matching exists for general
- *     tenders (that's SANRAL's signatory_scopes, 0061), so there is no
- *     fallback to suggest: either someone eligible is chosen, or they are not.
+ *     question (same field_key convention, "signatory_person_id"). No
+ *     region/industry/discipline SCOPE-MATCHED default-signer suggestion
+ *     exists for general tenders (that's SANRAL's signatory_scopes, 0061) -
+ *     but engine/general/process_general_jobs.py's own gather_pack_inputs()
+ *     DOES fall back to the company's own designated signatory (first person
+ *     on file with a signatory_capacity, oldest first) whenever no
+ *     signatory_person_id answer exists for this specific tender - the same
+ *     convention engine/pack/process_pack_jobs.py already uses for SANRAL's
+ *     Form of Offer/A-Forms signatory, "so a company with a Director/
+ *     signatory on file for one engine isn't blank for the other" (that
+ *     function's own comment, added after a real incident, 2026-10-28: a
+ *     company with a Director on file still showed "Not on file" for a
+ *     tender nobody had picked a signatory for). This screen used to not
+ *     know about that fallback at all and reported "missing" unconditionally
+ *     whenever nobody had explicitly chosen a signatory for THIS tender -
+ *     wrongly telling a reviewer to "choose who signs this bid ... before
+ *     generating the pack" even when the pack would, in fact, generate just
+ *     fine with the company's own designated signatory filled in
+ *     automatically. `fallback` (mirroring pack-review-logic.ts's own
+ *     signatureStatus()) is whoever that would be; this function doesn't
+ *     care which kind of fallback it was given, only that a choice exists.
  *   - localityStatus: lib/locality.ts's matchLocality() result -> this
  *     screen's vocabulary, respecting whether a local office is mandatory
  *     and disqualifying.
@@ -89,8 +106,31 @@ export function signatureAnswerStatus(input: {
   chosenId: string | null;
   chosenPerson: { name: string; signatory_capacity: string | null } | null;
   optional: boolean;
+  /**
+   * Whoever gather_pack_inputs() would actually fall back to for THIS
+   * company if nobody has explicitly chosen a signatory for this tender -
+   * the company's own first person on file with a signatory_capacity,
+   * oldest first (null when nobody on file has one). Optional/defaults to
+   * null so existing callers/tests that don't thread it through keep their
+   * old "no fallback at all" behaviour unchanged.
+   */
+  fallback?: { name: string; signatory_capacity: string } | null;
 }): { reviewStatus: ReviewStatus; checklistStatus: ChecklistStatus; value: string | null; note: string | null } {
   if (!input.chosenId) {
+    // The engine's own fallback applies unconditionally whenever nobody has
+    // picked a signatory for this specific tender - regardless of whether
+    // this question happens to be optional on this tender's manifest (the
+    // Python side never looks at that flag at all, see gather_pack_inputs()).
+    // So a real fallback existing takes priority over the plain optional/
+    // required branches below: the pack will not, in fact, come out blank.
+    if (input.fallback) {
+      return {
+        reviewStatus: "needs_input",
+        checklistStatus: "included_warning",
+        value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`,
+        note: `Not chosen for this tender - will default to ${input.fallback.name} (your company's designated signatory).`,
+      };
+    }
     return input.optional
       ? { reviewStatus: "needs_input", checklistStatus: "included_warning", value: null, note: "Not chosen yet - left blank until you choose who signs." }
       : { reviewStatus: "missing", checklistStatus: "not_included", value: null, note: "Choose who signs this bid on the People/questions card before generating the pack." };
@@ -102,6 +142,31 @@ export function signatureAnswerStatus(input: {
     return { reviewStatus: "warning", checklistStatus: "included_warning", value: input.chosenPerson.name, note: "This person has no signatory capacity on file - add it on their People page so the forms can show it." };
   }
   return { reviewStatus: "confirmed", checklistStatus: "included", value: `${input.chosenPerson.name} - ${input.chosenPerson.signatory_capacity}`, note: null };
+}
+
+/**
+ * The exact fallback signatory gather_pack_inputs() (engine/general/
+ * process_general_jobs.py) would pick for this company if nobody has chosen
+ * one for this specific tender: the first person on file with a
+ * signatory_capacity, oldest `created_at` first. One shared implementation
+ * so general-pack-review-data.ts and submission-plan-data.ts can't drift
+ * apart on it the way signatureAnswerStatus() itself just had to be fixed
+ * for - see that function's own doc comment for the real incident this
+ * mirrors. `people` need not be pre-sorted; this does its own sort.
+ */
+export function designatedSignatoryFallback<
+  T extends { name: string; signatory_capacity: string | null; created_at: string | null },
+>(people: T[]): { name: string; signatory_capacity: string } | null {
+  // created_at is `not null default now()` in the real schema (0001), but
+  // this still sorts defensively rather than crashing on a malformed/mocked
+  // row with no created_at - treated as "unknown, sort last" rather than
+  // `localeCompare` on `undefined` throwing and taking the whole screen down
+  // with it, same "never let one bad row break the page" discipline this
+  // file's other classifiers already follow.
+  const candidates = people
+    .filter((p): p is T & { signatory_capacity: string } => !!p.signatory_capacity)
+    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+  return candidates[0] ? { name: candidates[0].name, signatory_capacity: candidates[0].signatory_capacity } : null;
 }
 
 /**

@@ -15,7 +15,7 @@ import { matchLocality, COMPANY_OFFICE_COLUMNS, type CompanyOffice, type Localit
 import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
 import { evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
-import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus, specificGoalsLocalityRows } from "./general-pack-review-logic";
+import { answerStatus, designatedSignatoryFallback, localityStatus, roleStatus, signatureAnswerStatus, specificGoalsLocalityRows } from "./general-pack-review-logic";
 import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
 
 /**
@@ -147,7 +147,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
   ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
-    supabase.from("people").select("id, name, signatory_capacity").order("name"),
+    supabase.from("people").select("id, name, signatory_capacity, created_at").order("name"),
     supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
     supabase.from("person_role_eligibility").select("person_id, role_code"),
     supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
@@ -160,10 +160,14 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
   if (officeRowsErr) console.error("company_offices select failed (general pack review)", officeRowsErr);
   const company = (companyRow as unknown as GeneralCompany | null) ?? null;
   const answers = (answerRows ?? []) as TenderAnswer[];
-  const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null }[];
+  const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null; created_at: string }[];
   const roles = (roleRows ?? []) as TenderRole[];
   const tags = (tagRows ?? []) as { person_id: string; role_code: string }[];
   const offices = (officeRows ?? []) as CompanyOffice[];
+  // Finding (this pass): the company's own designated-signatory fallback -
+  // see signatureAnswerStatus()'s own doc comment (general-pack-review-logic.ts)
+  // for why this screen needs to know about it at all.
+  const signatoryFallback = designatedSignatoryFallback(people);
 
   // --- 1. Form answers: company details, tender questions, signature -------
   try {
@@ -176,7 +180,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
       if (q.type === "person") {
         const chosenId = value;
         const chosenPerson = chosenId ? people.find((p) => p.id === chosenId) ?? null : null;
-        const sig = signatureAnswerStatus({ chosenId, chosenPerson, optional: q.optional ?? false });
+        const sig = signatureAnswerStatus({ chosenId, chosenPerson, optional: q.optional ?? false, fallback: signatoryFallback });
         items.push({ key: `question-${q.key}`, label: q.label, value: sig.value, status: sig.reviewStatus, note: sig.note });
         continue;
       }
@@ -211,7 +215,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
       const role = roles.find((r) => r.code === mr.role_code) ?? null;
       const label = role?.title ?? mr.role_code;
       const taggedIds = tags.filter((t) => t.role_code === mr.role_code).map((t) => t.person_id);
-      const taggedPeople = taggedIds.map((id) => people.find((p) => p.id === id)).filter((p): p is { id: string; name: string; signatory_capacity: string | null } => !!p);
+      const taggedPeople = taggedIds.map((id) => people.find((p) => p.id === id)).filter((p): p is (typeof people)[number] => !!p);
       let withCv = 0;
       if (taggedIds.length > 0) {
         const [{ data: gen, error: genErr }, { data: up, error: upErr }] = await Promise.all([
