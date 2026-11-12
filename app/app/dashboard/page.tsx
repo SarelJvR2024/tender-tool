@@ -7,6 +7,7 @@ import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
 import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
 import { computeDashboardStats, stageOf } from "@/lib/dashboardStats";
+import { tendersWithCancellationNotice, type DeadlineWatchedDocRow } from "@/lib/deadlineReminders";
 import { loadDocumentExpiryOverview, type DocumentExpiryStatus } from "@/lib/documentExpiry";
 import { sarsTcsPinOnFile } from "@/lib/vaultDocuments";
 import type { StatusChip } from "@/lib/dates";
@@ -166,7 +167,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities, error: opportunitiesError }, { data: companyRow, error: companyError }, { summary: savingsSummary, error: savingsSummaryError }, { rows: documentExpiryRows, error: documentExpiryError }, { data: peopleRows, error: peopleRowsError }] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities, error: opportunitiesError }, { data: companyRow, error: companyError }, { summary: savingsSummary, error: savingsSummaryError }, { rows: documentExpiryRows, error: documentExpiryError }, { data: peopleRows, error: peopleRowsError }, { data: cancellationDocs, error: cancellationDocsError }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -205,6 +206,16 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
     // so the setup checklist's "signatory on file" item (below) doesn't need
     // its own extra round trip - same rows, one more column.
     supabase.from("people").select("id, signatory_capacity"),
+    // QA finding (2026-11-12): feeds tendersWithCancellationNotice() below,
+    // the same helper scripts/send-deadline-reminders.ts's own
+    // filterCancelledTenders() uses (Finding 449) - without this, "Closing
+    // this week" kept counting a tender right up to its original closing
+    // date even once the buyer had cancelled it outright (Finding 449's own
+    // write-up named this exact stat card as a not-yet-fixed sibling
+    // consumer of the same tenders.closing_date fact). RLS-scoped like
+    // every other read here (members read the documents of tenders they
+    // can see - migration 0039's own header).
+    supabase.from("tender_watched_documents").select("tender_id, kind").eq("kind", "cancellation"),
   ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
@@ -231,6 +242,11 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   if (opportunitiesError) console.error("discovered_opportunities select failed for dashboard", opportunitiesError);
   if (peopleRowsError) console.error("people select failed for dashboard", peopleRowsError);
   if (documentExpiryError) console.error("document expiry overview load failed for dashboard", documentExpiryError);
+  // Fails open, same as filterCancelledTenders()'s own identical read: a
+  // flaky secondary query here must not risk masking the dashboard's main
+  // stats behind a thrown error, and losing the cancellation exclusion for
+  // one request is a cosmetic staleness, not a missed deadline.
+  if (cancellationDocsError) console.error("tender_watched_documents select failed for dashboard", cancellationDocsError);
 
   const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
@@ -240,7 +256,8 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // See lib/dashboardStats.ts's own header for why this can't just filter
   // `rows` directly in place: `rows` is every tender in the shared,
   // not-tenant-scoped `tenders` table, not this company's own list.
-  const { myRows, activeBidsCount, packsReadyCount, closingThisWeekCount } = computeDashboardStats(rows, ACTION_WINDOW_DAYS);
+  const cancelledTenderIds = tendersWithCancellationNotice((cancellationDocs ?? []) as unknown as DeadlineWatchedDocRow[]);
+  const { myRows, activeBidsCount, packsReadyCount, closingThisWeekCount } = computeDashboardStats(rows, ACTION_WINDOW_DAYS, cancelledTenderIds);
   const documentsExpiringCount = notifications.filter((n) => n.kind === "document").length;
 
   // Tender Command Center (Sarel's own brief, 2026-10-24): every active bid

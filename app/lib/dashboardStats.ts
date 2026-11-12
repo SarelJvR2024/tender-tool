@@ -36,6 +36,7 @@ export type DashboardPack = {
 };
 
 export type DashboardTenderRow = {
+  id: string;
   closing_date: string | null;
   tender_packs: DashboardPack[];
 };
@@ -63,7 +64,30 @@ export type DashboardStats<T extends DashboardTenderRow> = {
   closingThisWeekCount: number;
 };
 
-export function computeDashboardStats<T extends DashboardTenderRow>(rows: T[], actionWindowDays: number): DashboardStats<T> {
+/**
+ * `cancelledTenderIds` - tender ids with a whole-tender cancellation notice
+ * on file (`tender_watched_documents.kind === "cancellation"`, via
+ * `lib/deadlineReminders.ts`'s own `tendersWithCancellationNotice()`).
+ * Optional/defaulted so this stays source-compatible with any caller that
+ * can't supply it.
+ *
+ * QA finding (2026-11-12, this track's own pass): without this, "Closing
+ * this week" kept counting a tender right up to its original closing date
+ * even once the buyer had cancelled it outright - the same stale-signal
+ * shape Finding 449 fixed for the "closing in 3 days/24 hours" deadline
+ * email, and Finding 449's own write-up explicitly named this exact stat
+ * card (plus the topbar bell, `lib/notifications.ts`) as a not-yet-fixed
+ * sibling consumer of the same `tenders.closing_date` fact. Scoped to only
+ * `closingThisWeekCount`, deliberately: `myRows`/`activeBidsCount`/
+ * `packsReadyCount` answer "is this still mine"/"is it in progress"/"is the
+ * pack ready", not "does the deadline still matter" - the same narrow scope
+ * the stage-exclusion fix just above (Finding 435) already uses.
+ */
+export function computeDashboardStats<T extends DashboardTenderRow>(
+  rows: T[],
+  actionWindowDays: number,
+  cancelledTenderIds: ReadonlySet<string> = new Set(),
+): DashboardStats<T> {
   const myRows = myTenderRows(rows);
   const activeBidsCount = myRows.filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t))).length;
   const packsReadyCount = myRows.filter(isPackReady).length;
@@ -74,6 +98,7 @@ export function computeDashboardStats<T extends DashboardTenderRow>(rows: T[], a
     // submitted/briefing_shortlisted/won/lost is done, even if it's still
     // "mine" and still closing within the window (Finding 435).
     if ((DEADLINE_REMINDER_EXCLUDED_STAGES as readonly string[]).includes(stageOf(t))) return false;
+    if (cancelledTenderIds.has(t.id)) return false;
     const left = daysUntil(t.closing_date);
     return left !== null && left >= 0 && left <= actionWindowDays;
   }).length;
