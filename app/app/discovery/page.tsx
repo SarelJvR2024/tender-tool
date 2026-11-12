@@ -13,6 +13,7 @@ import {
   type ListingSource,
 } from "@/lib/listingChanges";
 import { DowngradeFlag } from "./downgrade-flag";
+import { scopeNeedsHumanReview } from "@/lib/tenderScope";
 import {
   ACTIVE_PURSUIT_STAGES,
   DOWNGRADE_COLUMNS,
@@ -56,7 +57,7 @@ import { displayTenderTitle } from "@/lib/titleCase";
 // for almost every row. Shown only when a row genuinely has one - never
 // faked. Wiring the enrichment script into the pipeline is a Python/engine
 // change, outside this PR's own ground rule (see docs/specs/System-Status.md).
-const SCOPE_RECORD_COLUMNS = "tender_id, scope_summary, scope_source, pricing_model, value_band, value_band_basis, confidence";
+const SCOPE_RECORD_COLUMNS = "tender_id, scope_summary, scope_source, pricing_model, value_band, value_band_basis, confidence, source_note";
 type ScopeRecord = {
   tender_id: string;
   scope_summary: string | null;
@@ -65,7 +66,13 @@ type ScopeRecord = {
   value_band: string | null;
   value_band_basis: string;
   confidence: string;
+  source_note: string | null;
 };
+// source_note's own "NEEDS HUMAN REVIEW" stamp - see
+// @/lib/tenderScope.ts's scopeNeedsHumanReview() header comment for the full
+// AI-Call-Quality-Standard.md reasoning. Shared with tenders/[id]/page.tsx's
+// own "Scope & pricing" card so the two readers of the same column can't
+// drift apart on what counts as flagged.
 const PRICING_MODEL_LABEL: Record<string, string> = {
   lump_sum: "Lump sum",
   schedule_of_rates: "Schedule of rates",
@@ -1068,6 +1075,9 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                         {scope.value_band && <span>Estimated value: {scope.value_band}</span>}
                       </div>
                       {scope.confidence === "heuristic" && <div className="mt-0.5 text-[10px]">Keyword-matched from the listing text, not document-confirmed - treat as a starting point.</div>}
+                      {scopeNeedsHumanReview(scope.source_note) && (
+                        <div className="mt-0.5 text-[10px] font-semibold text-destructive">AI-extracted summary still needs human review - treat as unverified.</div>
+                      )}
                     </div>
                   )}
                 </div>
