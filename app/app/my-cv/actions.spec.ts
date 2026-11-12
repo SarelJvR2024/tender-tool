@@ -176,6 +176,73 @@ describe("saveMyDetails - real update still succeeds", () => {
   });
 });
 
+// Finding 467: saveMyDetails() is this page's OWN separate manual "My
+// details" edit form (app/app/my-cv/page.tsx's first Card, a plain <input>
+// via the page's local Field() helper) - a different form entirely from the
+// CV-extraction-review card further down the same page, which submits
+// through applyMyCvExtraction() instead. Finding 432 constrained
+// ecsa_level/highest_level only on that second form (both the <select> in
+// the page and the "choose one of SANRAL's options" check in
+// applyMyCvExtraction()) - its own write-up, and lib/cvExtraction.ts's own
+// header comment, call out "my-cv/page.tsx" as fixed for this exact gap, but
+// both actually meant this CV-review card, not this separate manual form on
+// the same route, so saveMyDetails() itself was never touched: it still
+// takes ecsa_level/highest_level as plain strings with no check at all - the
+// exact same door Finding 466 closed on people/[id]/page.tsx's own manual
+// "edit this person" form, just left open here. A value that doesn't match
+// one of SANRAL's own Form B2.1 dropdown labels saves fine through this form
+// with zero warning, only for engine/fill_conventional.py's set_dropdown_for()
+// to later refuse it with a FieldError when a real pack is generated.
+describe("saveMyDetails - a 'select'-kind field must be one of SANRAL's own options (Finding 467)", () => {
+  it("refuses an ecsa_level that isn't one of ECSA_LEVELS", async () => {
+    const supabase = makeSupabase([...requireOwnPersonOk()]);
+    supabaseState.current = supabase;
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ ecsa_level: "Pr Eng" })));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("choose one of SANRAL's options"));
+  });
+
+  it("refuses a highest_level that isn't one of QUALIFICATION_LEVELS", async () => {
+    const supabase = makeSupabase([...requireOwnPersonOk()]);
+    supabaseState.current = supabase;
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ highest_level: "BEng" })));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent("choose one of SANRAL's options"));
+  });
+
+  it("still saves normally when both are genuinely one of SANRAL's own options", async () => {
+    supabaseState.current = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "person-1" }, error: null }], // real match
+    ]);
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(
+      saveMyDetails(formDataWith({ ecsa_level: "Professional Engineer", highest_level: "Masters Degree" })),
+    );
+
+    expect(url).toBe("/my-cv?saved=details");
+  });
+
+  it("still saves normally when both are left blank (not recorded)", async () => {
+    supabaseState.current = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "person-1" }, error: null }], // real match
+    ]);
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ phone: "0821234567" })));
+
+    expect(url).toBe("/my-cv?saved=details");
+  });
+});
+
 // Finding 432: must be one of lib/cvExtraction.ts's own ECSA_LEVELS strings
 // now that applyMyCvExtraction() validates "select"-kind fields the same
 // way its sibling applyCvExtraction() already does - "Pr Eng" (this

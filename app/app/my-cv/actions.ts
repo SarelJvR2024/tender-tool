@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { safeFileName } from "@/lib/safeFileName";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
-import { EXTRACTED_PERSON_FIELDS, ISO_DATE } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, ISO_DATE, QUALIFICATION_LEVELS } from "@/lib/cvExtraction";
 import { isValidSaId } from "@/lib/principals";
 
 /**
@@ -56,15 +56,37 @@ async function requireOwnPerson() {
 export async function saveMyDetails(formData: FormData) {
   const { supabase, personId } = await requireOwnPerson();
 
+  // Finding 467: ecsa_level/highest_level must be one of SANRAL's own fixed
+  // Form B2.1 option lists (lib/cvExtraction.ts's ECSA_LEVELS/QUALIFICATION_LEVELS)
+  // - the same check applyMyCvExtraction() below already runs on these exact
+  // two fields (Finding 432), and the same one people/[id]/page.tsx's own
+  // manual "edit this person" form now enforces client-side (Finding 466).
+  // This is that same manual-edit form's self-service twin - a separate
+  // "My details" card on this page, submitted here, not through
+  // applyMyCvExtraction() - and it had no such check at all: the page itself
+  // still rendered these two as plain free-text <input>s (see page.tsx), so
+  // nothing stopped an arbitrary string reaching people.ecsa_level/
+  // highest_level here, only for engine/fill_conventional.py's
+  // set_dropdown_for() to refuse it outright with a FieldError once a real
+  // pack is generated from this exact self-service record.
+  const ecsaLevel = str(formData, "ecsa_level");
+  if (ecsaLevel && !(ECSA_LEVELS as readonly string[]).includes(ecsaLevel)) {
+    fail("ECSA level: choose one of SANRAL's options.");
+  }
+  const highestLevel = str(formData, "highest_level");
+  if (highestLevel && !(QUALIFICATION_LEVELS as readonly string[]).includes(highestLevel)) {
+    fail("Highest qualification level: choose one of SANRAL's options.");
+  }
+
   const row = {
     phone: str(formData, "phone"),
     email: str(formData, "email"),
-    ecsa_level: str(formData, "ecsa_level"),
+    ecsa_level: ecsaLevel,
     ecsa_number: str(formData, "ecsa_number"),
     ecsa_expiry: str(formData, "ecsa_expiry"),
     sacpcmp_number: str(formData, "sacpcmp_number"),
     sacpcmp_expiry: str(formData, "sacpcmp_expiry"),
-    highest_level: str(formData, "highest_level"),
+    highest_level: highestLevel,
     highest_description: str(formData, "highest_description"),
     highest_institution: str(formData, "highest_institution"),
     highest_graduated: str(formData, "highest_graduated"),

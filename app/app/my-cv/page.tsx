@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { ConfirmSubmitButton } from "../_components/ConfirmSubmitButton";
 import { saveMyDetails, uploadMyCv, applyMyCvExtraction, discardMyCvExtraction } from "./actions";
-import { EXTRACTED_PERSON_FIELDS, personFieldDefaultTick } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, needsSelectFallbackOption, personFieldDefaultTick, QUALIFICATION_LEVELS } from "@/lib/cvExtraction";
 
 export const instant = false;
 
@@ -52,6 +52,37 @@ function Field({ name, label, defaultValue, type = "text" }: { name: string; lab
     <div>
       <label className="mb-1.5 block text-[11.5px] font-semibold text-foreground">{label}</label>
       <input name={name} type={type} defaultValue={defaultValue ?? ""} className={inputClass} />
+    </div>
+  );
+}
+
+// Finding 467: ecsa_level/highest_level on this page's own separate manual
+// "My details" form used to be plain Field() <input>s, same gap Finding 466
+// closed on people/[id]/page.tsx's manual edit form, and the exact helper
+// that fix introduced (needsSelectFallbackOption) to keep a pre-existing
+// non-canonical stored value round-tripping unchanged on save instead of
+// being silently swapped for the <select>'s first real option.
+function SelectField({
+  name,
+  label,
+  defaultValue,
+  options,
+}: {
+  name: string;
+  label: string;
+  defaultValue: string | null;
+  options: readonly string[];
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-[11.5px] font-semibold text-foreground">{label}</label>
+      <select name={name} defaultValue={defaultValue ?? ""} className={inputClass}>
+        <option value="">- not recorded -</option>
+        {needsSelectFallbackOption(defaultValue, options) && (
+          <option value={defaultValue!}>{defaultValue} (not a SANRAL option - please update)</option>
+        )}
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
     </div>
   );
 }
@@ -161,12 +192,12 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
             <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
               <Field name="phone" label="Phone" defaultValue={person.phone} />
               <Field name="email" label="Email" defaultValue={person.email} />
-              <Field name="ecsa_level" label="ECSA level" defaultValue={person.ecsa_level} />
+              <SelectField name="ecsa_level" label="ECSA level" defaultValue={person.ecsa_level} options={ECSA_LEVELS} />
               <Field name="ecsa_number" label="ECSA number" defaultValue={person.ecsa_number} />
               <Field name="ecsa_expiry" label="ECSA expiry" type="date" defaultValue={person.ecsa_expiry} />
               <Field name="sacpcmp_number" label="SACPCMP number" defaultValue={person.sacpcmp_number} />
               <Field name="sacpcmp_expiry" label="SACPCMP expiry" type="date" defaultValue={person.sacpcmp_expiry} />
-              <Field name="highest_level" label="Highest qualification level" defaultValue={person.highest_level} />
+              <SelectField name="highest_level" label="Highest qualification level" defaultValue={person.highest_level} options={QUALIFICATION_LEVELS} />
               <Field name="highest_description" label="Qualification" defaultValue={person.highest_description} />
               <Field name="highest_institution" label="Institution" defaultValue={person.highest_institution} />
               <Field name="highest_graduated" label="Graduated" type="date" defaultValue={person.highest_graduated} />

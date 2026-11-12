@@ -52,6 +52,14 @@ export const QUALIFICATION_LEVELS = [
 // stored value with a different, wrong one. Call this before building the
 // `<select>`'s options, and add a synthetic option for the current value
 // when it returns true.
+//
+// Caution for whoever reads the paragraph above next: "my-cv/page.tsx
+// (fixed by Finding 432...)" means that page's CV-extraction-review card
+// only (applyMyCvExtraction()'s form) - this same page ALSO has its own
+// separate manual "My details" edit form (saveMyDetails()), which Finding
+// 432 never touched and which had this exact same free-text gap until
+// Finding 467 gave it the same `<select>` + this same fallback helper. Don't
+// re-read "my-cv/page.tsx: fixed" as "every form on my-cv/page.tsx: fixed".
 export function needsSelectFallbackOption(value: string | null, options: readonly string[]): boolean {
   return !!value && !options.includes(value);
 }
