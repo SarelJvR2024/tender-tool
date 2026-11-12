@@ -796,7 +796,16 @@ export async function applyCvExtraction(formData: FormData) {
     if (!client) back(`Project ${i + 1}: client and contract number can't be empty.`);
     const valueRaw = str(formData, `p${i}_value_rm`);
     const value = valueRaw ? Number(valueRaw) : null;
-    if (value !== null && Number.isNaN(value)) back(`Project ${i + 1}: value must be a number (R million).`);
+    // Same gate saveProject() (the manual "add project" form, this same
+    // file) already has for this exact column (Finding, 2026-10-30): this
+    // field used to reject NaN only, never a negative number, and a
+    // reviewer can freely retype what the AI proposed here before ticking
+    // "use" - the value is written verbatim onto the person's real SANRAL
+    // Form B1/B2 experience row (engine/fill_tender.py/fill_conventional.py's
+    // wb.set_value(T, f"I{r}", pr["value_rm"])) on an actual government bid.
+    if (value !== null && (Number.isNaN(value) || value < 0)) {
+      back(`Project ${i + 1}: value (R million) must be a number of 0 or more.`);
+    }
     const dates: Record<string, string | null> = {};
     for (const d of ["start_date", "end_date"]) {
       const v = str(formData, `p${i}_${d}`);
