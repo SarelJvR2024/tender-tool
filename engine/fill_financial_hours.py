@@ -8,11 +8,13 @@ tender data - see docs/specs).
 
 Confirmed by direct inspection of a real file (R.334-030-2025.1F Financial
 Submission, 2026-10-16), not assumed: all 7 sheets share an identical layout -
-4 categories (A-D) at rows 7/29/51/73, each with a PL row (base+1) and a DS1
-row (base+2). Column E on each key-person row is a plain value (no <f> tag),
-confirmed as the real unlocked input cell; columns B/C/F/G on the same rows
-all carry formulas (position label, rate lookup, computed amount) and must
-never be written to.
+4 categories (A-D) at rows 7/29/51/73, each with up to 20 key-person rows
+(base+1..base+20, row_for_position() below) before a fixed base+21 "OTHER:
+Various non-key personnel" catch-all row. Column E on each key-person row is
+a plain value (no <f> tag), confirmed as the real unlocked input cell;
+columns B/C/F/G on the same rows all carry formulas (position label - read
+dynamically from the tender's own key-person list, never assumed to be
+PL/DS1 only; rate lookup; computed amount) and must never be written to.
 
 This deliberately stops at the Hours sheets. SUMMARY TENDERED FEE's "Tendered
 fee" column, checked the same day, turned out to ALSO be a formula (rolling up
@@ -41,16 +43,61 @@ DISCIPLINE_SHEETS = [
     "Hours Building", "Hours Mechanical", "Hours Electronic", "Hours Other",
 ]
 CATEGORY_BASE_ROWS = {"A": 7, "B": 29, "C": 51, "D": 73}
+# Fallback only (see row_for_position() below) - the real shipped file's own
+# PL/DS1 rows, for the rare case the cached formula values aren't there to
+# read (e.g. a hand-built test fixture).
 KEY_PERSON_OFFSET = {"PL": 1, "DS1": 2}
+# Rows base+1..base+20 are each a live key-person slot (confirmed directly
+# against the real file's XML - row 8's own B8 is `=IF(DATA!A1051="","",
+# DATA!A1051)`, row 9 reads A1052, incrementing one row at a time); row
+# base+21 is the fixed "OTHER: Various non-key personnel" catch-all and is
+# never a named position's own row.
+MAX_PERSON_OFFSET = 20
+
+
+def row_for_position(wb, sheet, base, code):
+    """The Hours-sheet row, within this category's own key-person block
+    (base+1..base+MAX_PERSON_OFFSET - base+(MAX_PERSON_OFFSET+1) is the fixed
+    "OTHER" catch-all, never a named position), whose own cached column-B
+    position code equals `code` - read dynamically from the real shipped
+    file, same approach and same reasoning as fill_financial.py's own
+    row_for_position() (Form-Field-Audit, 2026-10-18): that sibling function
+    used to hardcode PL->row 12/DS1->row 13 because all 6 real samples it was
+    built from tender exactly those two positions, and a tender with any
+    other position (DS2, CE, RE...) lost its whole Financial workbook. The
+    identical hardcoded-offset shape (KEY_PERSON_OFFSET = {"PL": 1, "DS1": 2})
+    was never swept into THIS sibling file, confirmed live against the real
+    "Hours Roadworks" sheet's own XML: B8/B9 are each a live formula reading
+    the tender's own key-person list off the DATA sheet, not a fixed
+    PL/DS1-only pair - rows 10-27 are the SAME kind of cell, just empty on
+    every one of the 6 real samples on file (all of which tender only PL +
+    DS1), so a tender that confirms a THIRD or further key person (a second
+    Design Specialist, a Contracts Engineer, a Resident Engineer - all real
+    SANRAL key-position codes per engine/discovery/key_person_minimums.py's
+    own POSITION_CODES) had that person's hours silently excluded from the
+    capture skeleton suggest() built (never even offered to the human to
+    fill in) and, if added to the capture file by hand anyway, outright
+    refused by fill() ("Unknown position") - losing the WHOLE Hours capture
+    for every discipline/category, not just that one position's row, since
+    fill() raises before wb.save() runs. QA pass, 2026-11-11 (Finding 417)."""
+    want = str(code or "").strip().upper()
+    if want:
+        for offset in range(1, MAX_PERSON_OFFSET + 1):
+            r = base + offset
+            if str(wb.cached(sheet, f"B{r}") or "").strip().upper() == want:
+                return r
+    return base + KEY_PERSON_OFFSET[code] if code in KEY_PERSON_OFFSET else None
 
 
 def suggest(pack_path, out_path):
     """Writes a blank capture skeleton for a human to fill in - every hours
-    value starts as null, never 0 or a guess. Only lists the key persons and
-    disciplines actually confirmed in the pack; anything else (additional
-    non-key staff, other disciplines) isn't in scope until it's in the pack."""
+    value starts as null, never 0 or a guess. Lists every key person actually
+    confirmed in the pack (not just PL/DS1 - the real Hours sheets have a row
+    for any confirmed key position, see row_for_position() above) and every
+    discipline; anything else (additional non-key staff, other disciplines)
+    isn't in scope until it's in the pack."""
     pack = yaml.safe_load(open(pack_path))
-    positions = [kp["position"] for kp in pack["key_persons"] if kp["position"] in KEY_PERSON_OFFSET]
+    positions = [kp["position"] for kp in pack["key_persons"]]
 
     capture = {
         "_note": (
@@ -88,8 +135,12 @@ def fill(tpl, capture_path, out, provenance_out=None):
                 raise ValueError(f"Unknown category '{cat}' in capture file")
             base = CATEGORY_BASE_ROWS[cat]
             for pos, hours in positions.items():
-                if pos not in KEY_PERSON_OFFSET:
-                    raise ValueError(f"Unknown position '{pos}' in capture file")
+                row = row_for_position(wb, sheet, base, pos)
+                if row is None:
+                    raise ValueError(
+                        f"Position '{pos}' has no row on this Financial workbook's '{sheet}' sheet for category "
+                        f"{cat} - fill it in by hand"
+                    )
                 field_key = f"financial_hours.{sheet_key}.{cat}.{pos}"
                 if hours is None:
                     missing.append(f"{sheet_key}/{cat}/{pos}")
@@ -110,7 +161,6 @@ def fill(tpl, capture_path, out, provenance_out=None):
                         f"{sheet_key}/{cat}/{pos}: hours must be a real, finite, non-negative number, got "
                         f"{hours!r} ({type(hours).__name__}) - fix the capture file, don't guess"
                     )
-                row = base + KEY_PERSON_OFFSET[pos]
                 wb.set_value(sheet, f"E{row}", hours)
                 # Confirmed, not computed: this number came straight from a human-
                 # supplied capture file (see suggest()'s own refusal-while-null rule),
