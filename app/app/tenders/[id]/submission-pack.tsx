@@ -297,8 +297,24 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
               Who signs this bid
               <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
                 className="min-h-9 max-w-full rounded-md border border-border px-2 text-xs">
+                {/*
+                  Finding (standing solution-architect review pass,
+                  2026-11-12): this used to read "Not chosen - {suggested
+                  name} (... the pack will say so)" - but engine/pack/
+                  process_pack_jobs.py's own fallback is signatories[0] (the
+                  company's first signatory, oldest on file), which never
+                  reads signatory_scopes at all - so whenever `suggested`
+                  (the region/industry/discipline scope match) named someone
+                  OTHER than signers[0], this literally promised the wrong
+                  person would sign the real, submitted Form of
+                  Offer/A-Forms/authority letter. Now states the fact the
+                  pack build actually acts on (signers[0]), and only adds the
+                  scope match as a separate suggestion to actively pick when
+                  it differs.
+                */}
                 <option value="">
-                  Not chosen - {suggested?.name ?? signers[0].name} (suggested for this tender; the pack will say so)
+                  Not chosen - defaults to {signers[0].name} (your first signatory on file)
+                  {suggested && suggested.id !== signers[0].id ? `; ${suggested.name} looks like a better match for this tender - choose them below` : ""}
                 </option>
                 {signers.map((p) => (
                   <option key={p.id} value={p.id}>{p.name} - {p.signatory_capacity}{p.id === suggested?.id ? " (suggested)" : ""}</option>

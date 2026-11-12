@@ -99,6 +99,45 @@ test("signatureStatus: nobody chosen but a fallback exists needs input, still in
   assert.match(r.note ?? "", /default to Jane Soap/);
 });
 
+// Finding (standing solution-architect review pass, 2026-11-12):
+// `fallback` must always be whoever engine/pack/process_pack_jobs.py will
+// ACTUALLY sign with if nobody chooses for this tender - its own
+// `signatories[0]` (the company's first signatory on file, oldest
+// created_at first; that engine never reads signatory_scopes at all). Both
+// real callers used to pass the migration-0061 region/industry/discipline
+// scope match (signatory-logic.ts's pickDefaultSignatory()) as `fallback`
+// itself - so whenever a company had more than one signatory and a scope
+// row made a non-first one score higher, this card's "Who signs this bid"
+// value/note named a DIFFERENT person than who the real submitted pack
+// would sign with, a false promise about a document the company submits.
+test("signatureStatus: the true pack fallback (first signatory on file) is shown, even when a scope-matched suggestion differs", () => {
+  const r = signatureStatus({
+    chosenId: null,
+    chosenPerson: null,
+    fallback: { name: "Jane Soap", signatory_capacity: "Director" }, // signers[0] - who the pack will actually sign with
+    suggestion: { name: "Henning Botha", signatory_capacity: "Regional Director" }, // the scope match - a different person
+  });
+  assert.equal(r.reviewStatus, "needs_input");
+  assert.equal(r.checklistStatus, "included_warning");
+  // The real fallback's name, never the suggestion's - this is who the pack build will actually name.
+  assert.equal(r.value, "Jane Soap - Director");
+  assert.match(r.note ?? "", /default to Jane Soap/);
+  assert.match(r.note ?? "", /first signatory on file/);
+  // The suggestion is a separate, honestly-labelled recommendation, not folded into the same claim.
+  assert.match(r.note ?? "", /Henning Botha looks like a better match/);
+});
+
+test("signatureStatus: a scope-matched suggestion that agrees with the true fallback adds no redundant note", () => {
+  const r = signatureStatus({
+    chosenId: null,
+    chosenPerson: null,
+    fallback: { name: "Jane Soap", signatory_capacity: "Director" },
+    suggestion: { name: "Jane Soap", signatory_capacity: "Director" },
+  });
+  assert.equal(r.value, "Jane Soap - Director");
+  assert.doesNotMatch(r.note ?? "", /better match/);
+});
+
 test("signatureStatus: an explicit choice matching the fallback is confirmed", () => {
   const r = signatureStatus({
     chosenId: "person-1",
