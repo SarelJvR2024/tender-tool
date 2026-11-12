@@ -448,10 +448,37 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     log.missing("a_forms.A7.delivery_location",
                 "No CSD delivery location on file.")
 
-    # A17: the one unambiguous field (who the cover is for); policy numbers/values are unknown.
+    # A17: "who the cover is for" is unambiguous; public liability/third
+    # party liability policy numbers/values are genuinely unknown (nothing
+    # on file). Professional indemnity is different - when a real policy IS
+    # on file, it used to be logged `confirmed` here without ever being
+    # written into the document (standing review, 2026-11-11, Finding 369 -
+    # found by generating a real pack with a real policy on file and reading
+    # the actual output .docx, the same way Finding 368 found the identical
+    # gap for Form A9's SARS TCS PIN one function away). Confirmed against
+    # all 6 real SANRAL A_Forms.docx editions on file: each has exactly one
+    # "Period of Validity:" paragraph and exactly 3 "Company:"/"Value:" pairs
+    # in document order - Professional Indemnity, General public liability,
+    # Third party liability, in that order - so the FIRST "Company:"/
+    # "Value:" paragraph `para_matching()` finds anywhere in the whole
+    # document is always the Professional Indemnity one. Because the status
+    # was `confirmed`, not `missing`, generate_action_checklist.py's
+    # ACTIONS_TO_SIGN.md never flagged the gap either - a signatory would
+    # sign Form A17 with these three blanks still empty, with no signal
+    # anywhere that they needed attention.
     append_after_label(d, "Name of Tenderer:", company, log, "a_forms.A17.tenderer_name")
     pi = comp.get("professional_indemnity_insurance")
     if pi:
+        period_p = para_matching(d, "Period of Validity:")
+        if period_p is not None:
+            set_paragraph_text(period_p, period_p.text.rstrip() + "  " + f"{pi['period_from']} to {pi['period_to']}")
+        company_p = para_matching(d, "Company:")
+        if company_p is not None:
+            set_paragraph_text(company_p, company_p.text.rstrip() + "  " + pi["insurer"])
+        value_p = para_matching(d, "Value:")
+        if value_p is not None:
+            set_paragraph_text(value_p, value_p.text.rstrip() + "  "
+                                + f"R{pi['limit_of_indemnity_zar']:,} (policy {pi['policy_number']})")
         log.confirmed("a_forms.A17.professional_indemnity_value",
                        f"R{pi['limit_of_indemnity_zar']:,} (policy {pi['policy_number']}, "
                        f"{pi['insurer']}, valid {pi['period_from']} to {pi['period_to']})")
