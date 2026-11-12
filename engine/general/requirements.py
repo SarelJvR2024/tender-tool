@@ -758,10 +758,36 @@ def _is_buyers_own_person(text, match_start, buyer_words):
     ("the Transnet Contract Manager")? A short, immediately-preceding
     window only (not the whole ±250-char context window) - this is about
     what qualifies THIS specific mention, not the document's general
-    subject matter."""
+    subject matter.
+
+    Finding 447 (standing QA/robustness review, 2026-11-12): the 60-char
+    window used to run all the way back with no regard for a sentence
+    boundary in between - fine for a buyer name that's rare in its own
+    documents (Transnet, Finding 47's own real sample), but a buyer whose
+    name is the constant subject of its own documents (ESKOM: "the Eskom
+    site", "Eskom standards", "Eskom policy"...) can have its name land in
+    this window from an entirely separate, earlier sentence that has
+    nothing to do with naming a specific Eskom staff member - silently
+    excluding a genuine bidder-role ask that merely happens to follow a
+    sentence that also mentions the buyer. Live-reproduced: "Work shall be
+    carried out at the Eskom site. The Contractor must appoint a Project
+    Manager..." dropped the Contractor's own Project Manager entirely with
+    buyer="ESKOM" (kept correctly with no buyer passed) - confirmed first
+    via general_harness.py flagging a stale roles-baseline diff on the real
+    `eskom_e3689` sample, which turned out (on inspection) to be 3 genuinely
+    correct exclusions, not a regression - but the same code path has no
+    defence against this unrelated-prior-sentence shape. Stops the window
+    at the nearest preceding sentence boundary so only the CURRENT
+    sentence is searched - confirmed this doesn't change either of
+    `eskom_e3689`'s own real exclusions (both the buyer name and the role
+    mention sit in the same sentence there) or Finding 47's own Transnet
+    fixture (also one sentence)."""
     if not buyer_words:
         return False
     window = text[max(0, match_start - 60): match_start]
+    sentence_ends = list(re.finditer(r"[.!?]\s", window))
+    if sentence_ends:
+        window = window[sentence_ends[-1].end():]
     return any(re.search(r"\b" + re.escape(w) + r"\b", window, re.IGNORECASE) for w in buyer_words)
 
 

@@ -292,6 +292,41 @@ def check_buyers_own_manager_excluded():
           "contractor.contract_manager" in _roles_for(GENUINE_CONTRACT_MANAGER_ASK, buyer="Transnet SOC Ltd"))
 
 
+# Finding 447 (standing QA/robustness review, 2026-11-12): Finding 47's own
+# buyer-name exclusion has no sentence-boundary guard - fine for a buyer
+# whose own name is rare in its own documents (Transnet, above), but a
+# buyer whose name is the constant subject of its own documents (ESKOM)
+# can have its name land in the 60-char lookback window from an entirely
+# separate, earlier sentence, wrongly excluding a genuine bidder-role ask
+# that merely follows a sentence that also happens to mention the buyer.
+# Found via general_harness.py flagging a stale baseline on the real
+# `eskom_e3689` sample - on inspection the 2 role mentions THAT document
+# makes are genuinely Eskom's own staff (correctly still excluded, kept as
+# a regression check below), but the same lookback has no defence against
+# an unrelated prior sentence, confirmed with this realistic synthetic case.
+GENUINE_ASK_AFTER_UNRELATED_BUYER_SENTENCE = (
+    "Work shall be carried out at the Eskom site. The Contractor must appoint a dedicated "
+    "Project Manager who shall hold a minimum of 5 years relevant experience."
+)
+# The real eskom_e3689 sample's own 2 genuine exclusions (buyer name and role
+# mention in the SAME sentence) - verbatim phrasing, read by hand from the
+# real document (templates/general_samples/eskom_e3689/Technical.zip).
+ESKOM_OWN_PROJECT_MANAGER_REAL_TEXT = "Eskom System engineer, quality control and project manager."
+ESKOM_OWN_SAFETY_OFFICER_REAL_TEXT = "The Supplier shall appoint a person who will liaise with the Eskom Safety Officer responsible for the site."
+
+
+def check_buyer_name_exclusion_stops_at_the_previous_sentence():
+    print("Finding 447: the buyer-name-exclusion window doesn't reach back across a sentence boundary into an unrelated mention")
+    check("a genuine Project Manager ask right after an unrelated sentence mentioning the buyer's own name is NOT excluded",
+          "contractor.project_manager" in _roles_for(GENUINE_ASK_AFTER_UNRELATED_BUYER_SENTENCE, buyer="ESKOM"))
+    check("without a buyer name passed, the same genuine ask still matches (unchanged default behaviour)",
+          "contractor.project_manager" in _roles_for(GENUINE_ASK_AFTER_UNRELATED_BUYER_SENTENCE))
+    check("the real eskom_e3689 sample's own 'Eskom...project manager' (same sentence) stays correctly excluded",
+          "contractor.project_manager" not in _roles_for(ESKOM_OWN_PROJECT_MANAGER_REAL_TEXT, buyer="ESKOM"))
+    check("the real eskom_e3689 sample's own 'Eskom Safety Officer' (same sentence) stays correctly excluded",
+          "hs.safety_officer" not in _roles_for(ESKOM_OWN_SAFETY_OFFICER_REAL_TEXT, buyer="ESKOM"))
+
+
 def check_unrecognized_format_is_flagged_not_silently_blank():
     print("Finding 112: a document whose saved file has no recognized extension "
           "used to come back silently blank (0 chars, unreadable=None) instead of flagged")
@@ -550,6 +585,7 @@ def main():
     check_past_corrections_feedback()
     check_key_personnel_false_positive()
     check_buyers_own_manager_excluded()
+    check_buyer_name_exclusion_stops_at_the_previous_sentence()
     check_unrecognized_format_is_flagged_not_silently_blank()
     check_combined_bulletin_detection()
     check_person_registration_detection()
