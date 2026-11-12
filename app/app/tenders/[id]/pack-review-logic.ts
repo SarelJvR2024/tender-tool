@@ -123,13 +123,33 @@ export function b7Status(input: {
 
 /**
  * Signature status: who signs, given the chosen person (if any) and the
- * default fallback signer. `fallback` is whichever signatory would be
- * pre-selected if nobody has chosen one yet - with migration 0061 that's
- * the best region/industry/discipline scope match for this tender
- * (signatory-logic.ts pickDefaultSignatory), falling back to the first
- * signatory on file when there's no scope data or no match; before 0061 it
- * was always "first signatory on file". Either way this function doesn't
- * care which kind of fallback it was given - only that a choice exists.
+ * default fallback signer. `fallback` must always be whoever
+ * engine/pack/process_pack_jobs.py will ACTUALLY sign with if nobody has
+ * chosen for this tender - that function's own code (not just its comment)
+ * is `signatory = signatories[0]`, the company's first person given a
+ * signatory capacity, oldest `created_at` first; it never reads
+ * `signatory_scopes` at all (confirmed: zero hits for that table name
+ * anywhere under `engine/`). So `fallback` here must be that same
+ * oldest-first person, never the migration-0061 region/industry/discipline
+ * scope match (signatory-logic.ts's `pickDefaultSignatory()`) - that match
+ * is a real, deliberate feature (its own commit: "advisory only ... pack
+ * generation need no read-path changes"), but only as a SUGGESTION for the
+ * company to actively choose on the submission form, not a second,
+ * competing idea of what "the default" already is.
+ *
+ * Finding (standing solution-architect review pass, 2026-11-12): both real
+ * callers (pack-review-data.ts, submission-pack.tsx) used to pass the
+ * SCOPE MATCH itself as `fallback` - so whenever a company had more than
+ * one signatory and a signatory_scopes row made a non-first one score
+ * higher, this card's "Who signs this bid" line (and submission-pack.tsx's
+ * own "(suggested for this tender; the pack will say so)" dropdown copy)
+ * named a DIFFERENT person than who the real submitted Form of
+ * Offer/A-Forms/authority letter will actually be signed by if the
+ * reviewer takes no action - a false promise about who signs a document
+ * the company submits, not a mere wording nuance. `suggestion`, new and
+ * optional, carries the scope match separately now - only surfaced as an
+ * extra note when it names someone other than the true `fallback`, never
+ * substituted for it.
  *
  * QA pass, 2026-11-08: when `chosenId` IS set, this used to show the
  * FALLBACK's own name/capacity as `value` - never the actually-chosen
@@ -153,6 +173,14 @@ export function signatureStatus(input: {
   chosenId: string | null;
   chosenPerson: { name: string; signatory_capacity: string } | null;
   fallback: { name: string; signatory_capacity: string } | null;
+  /**
+   * The best region/industry/discipline scope match for this tender
+   * (signatory-logic.ts's `pickDefaultSignatory()`) - advisory only, never
+   * what the real pack build falls back to on its own. Omit, or pass the
+   * same person as `fallback`, when there's nothing to add; only a
+   * genuinely DIFFERENT name produces the extra note below.
+   */
+  suggestion?: { name: string; signatory_capacity: string } | null;
 }): { reviewStatus: ReviewStatus; checklistStatus: ChecklistStatus; value: string | null; note: string | null } {
   if (input.chosenId) {
     if (!input.chosenPerson) {
@@ -163,11 +191,16 @@ export function signatureStatus(input: {
   if (!input.fallback) {
     return { reviewStatus: "missing", checklistStatus: "not_included", value: null, note: "No one on your People page has a signatory capacity set." };
   }
+  const suggestionDiffers =
+    !!input.suggestion &&
+    (input.suggestion.name !== input.fallback.name || input.suggestion.signatory_capacity !== input.fallback.signatory_capacity);
   return {
     reviewStatus: "needs_input",
     checklistStatus: "included_warning",
     value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`,
-    note: `Not chosen - will default to ${input.fallback.name} (suggested signatory for this tender).`,
+    note: suggestionDiffers
+      ? `Not chosen - will default to ${input.fallback.name} (your company's first signatory on file). ${input.suggestion!.name} looks like a better match for this tender (region/industry/discipline) - choose them on the submission form if you'd rather they sign.`
+      : `Not chosen - will default to ${input.fallback.name} (suggested signatory for this tender).`,
   };
 }
 

@@ -284,9 +284,20 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
     const tenderScope = tenderRow
       ? { region: (tenderRow.region as string | null) ?? null, industryTags: (tenderRow.industry_tags as string[] | null) ?? [], disciplineTags: (tenderRow.discipline_tags as string[] | null) ?? [] }
       : NO_TENDER_SCOPE;
-    const fallback = pickDefaultSignatory({ signers: signerList, scopes, tender: tenderScope });
+    // Finding (standing solution-architect review pass, 2026-11-12):
+    // `fallback` must be the person engine/pack/process_pack_jobs.py
+    // actually signs with when nobody has chosen - that function's own
+    // `signatories[0]` (its own `people` read is ordered `created_at.asc`,
+    // same as `signerList` here), never the migration-0061 scope match
+    // (`pickDefaultSignatory()`), which that engine never reads at all. The
+    // scope match is still a genuine, useful suggestion - passed through
+    // separately as `suggestion` - but it must never stand in for the real
+    // fallback. See signatureStatus()'s own doc comment for the full
+    // incident this fixes.
+    const fallback = signerList[0] ?? null;
+    const suggestion = pickDefaultSignatory({ signers: signerList, scopes, tender: tenderScope });
     const chosenPerson = chosenId ? signerList.find((p) => p.id === chosenId) ?? null : null;
-    const { reviewStatus, checklistStatus, value, note } = signatureStatus({ chosenId, chosenPerson, fallback });
+    const { reviewStatus, checklistStatus, value, note } = signatureStatus({ chosenId, chosenPerson, fallback, suggestion });
     pushChecklist({ title: "Signature", envelope: "Technical", status: checklistStatus, pages: null, note });
     sections.push(section("signature", "Signature", "#submission-pack", "Choose signatory", [{ key: "signatory", label: "Who signs this bid", value, status: reviewStatus, note }]));
   } catch (err) {
