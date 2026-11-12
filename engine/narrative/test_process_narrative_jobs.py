@@ -242,6 +242,57 @@ def test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_
           ALERTS[1]["p_context"].get("company_id") == "c-corrupt", ALERTS)
 
 
+class RaisingOnFirstStaleWrite(FakeDB):
+    """The identical shape as process_pack_jobs.py's own RaisingOnFirstUpdate
+    (Finding 454): the FIRST mark-failed PATCH (for the first stale job the
+    sweep reaches) itself raises; every later PATCH succeeds normally.
+    Models a transient Supabase failure (a network blip, a 500) hitting one
+    stale row's own write, not a malformed value on the row itself - the
+    write-side gap this function's own fail_stale_jobs() never got, only its
+    read-side started_at parse was guarded (2026-10-29)."""
+    def __init__(self, tables):
+        super().__init__(tables)
+        self._raised = False
+
+    def __call__(self, url, key, method, path, body=None):
+        resource = path.split("?", 1)[0]
+        if (not self._raised and resource == "narrative_documents" and method == "PATCH"
+                and (body or {}).get("status") == "failed"):
+            self._raised = True
+            raise RuntimeError("simulated transient Supabase failure marking a stale job failed")
+        return super().__call__(url, key, method, path, body)
+
+
+def test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed():
+    print("fail_stale_jobs(): a write failure (transient Supabase error) marking ONE stale narrative "
+          "job failed must not abort the sweep for every OTHER genuinely stale job - the write-side "
+          "half of the 2026-10-29 QA pass's own bug class, never applied to this function's own "
+          "mark-failed PATCH call")
+    now = datetime.datetime(2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    stale = (now - datetime.timedelta(minutes=45)).isoformat()  # past STALE_AFTER_MINUTES=30
+    db = RaisingOnFirstStaleWrite({"narrative_documents": [
+        {"id": "job-first", "company_id": "co-a", "status": "generating", "started_at": stale},
+        {"id": "job-second", "company_id": "co-b", "status": "generating", "started_at": stale},
+    ]})
+    ALERTS.clear()
+    original = pnj.supabase_request
+    pnj.supabase_request = db
+    try:
+        pnj.fail_stale_jobs("url", "key", now=now)
+    finally:
+        pnj.supabase_request = original
+    rows = {r["id"]: r for r in db.tables["narrative_documents"]}
+    check("the job whose own mark-failed write failed is reported, not silently stuck forever",
+          any("Could not mark" in a["p_message"] for a in ALERTS), ALERTS)
+    check("that job is left 'generating' (untouched), not left in some half-updated state",
+          rows["job-first"]["status"] == "generating", rows["job-first"])
+    check("the OTHER stale job, queued after the one whose write failed, is still reached and "
+          "marked failed - the sweep does not abort on the first row's own write failure",
+          rows["job-second"]["status"] == "failed", rows["job-second"])
+    check("error_message is set on the job that was actually marked failed",
+          bool(rows["job-second"].get("error_message")))
+
+
 def test_process_one_happy_path_writes_ready_with_every_generation_field():
     db = FakeDB({
         "narrative_documents": [{"id": "job-1", "status": "requested"}],
@@ -583,6 +634,7 @@ def main():
     test_claim_job_is_atomic_a_second_claim_on_the_same_row_fails()
     test_claim_job_defers_not_fails_when_a_different_company_already_holds_the_same_tender_kind_slot()
     test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_alone()
+    test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
     test_process_one_happy_path_writes_ready_with_every_generation_field()
     test_process_one_transient_error_requeues_quietly_but_setup_error_requeues_and_raises()
     test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()

@@ -187,11 +187,30 @@ def fail_stale_jobs(url, key, now=None):
                                                       "started_at": started})
             continue
         if started_dt < cutoff:
-            supabase_request(
-                url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}&status=eq.generating",
-                {"status": "failed", "error_message": "Worker stopped responding partway through generation - request again.",
-                 "completed_at": _now_iso()},
-            )
+            # Standing review, 2026-11-12 (Finding 454's own write-side sibling
+            # lead): this write used to sit outside any try/except - a write
+            # failure marking THIS stale job failed (a transient Supabase
+            # error, a 500) raised straight out of this loop, aborting the
+            # stale-reclaim sweep for every OTHER genuinely stale job queued
+            # after it. The read-side guard immediately above (the malformed
+            # started_at ValueError) already protects the PARSE; this
+            # protects the WRITE the same way.
+            try:
+                supabase_request(
+                    url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}&status=eq.generating",
+                    {"status": "failed", "error_message": "Worker stopped responding partway through generation - request again.",
+                     "completed_at": _now_iso()},
+                )
+            except Exception as e:
+                system_alerts.record("narrative", f"Could not mark a stuck narrative document job as failed "
+                                                   f"({type(e).__name__}: {e}) - it is still stuck 'generating' "
+                                                   "and will be retried on the next stale-reclaim sweep.",
+                                     "error", exc=e,
+                                     context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                              "started_at": started})
+                print(f"[skipped] {job['id']}: could not mark stale job failed ({type(e).__name__}: {e}) - "
+                      "the rest of this sweep continues")
+                continue
             print(f"[failed] {job['id']}: stale 'generating' since {started}")
             system_alerts.record("narrative", f"A narrative document job was stuck in 'generating' for over "
                                               f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "
