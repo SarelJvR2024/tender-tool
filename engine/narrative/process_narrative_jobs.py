@@ -38,12 +38,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ENGINE, "worker"))
+sys.path.insert(0, os.path.join(ENGINE, "pack_generator"))
 
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 from build_docx import build_docx  # noqa: E402
 from generate_narrative import SetupError, TransientError, GenerationFailed, generate_with_uniqueness_check  # noqa: E402
+from suggest_pack import years_experience_at  # noqa: E402
 
 STALE_AFTER_MINUTES = 30  # one LLM call (plus, rarely, one retry) + a docx build and upload
+
+# Same constant/pattern as engine/compliance/watch_deadlines.py's and
+# engine/cv/generate_cv.py's own SAST constant: the worker container has no
+# TZ set and runs in UTC by default, so a naive datetime.date.today() is one
+# calendar day BEHIND the real SAST date for the 00:00-01:59 SAST window
+# every day - load_key_people()'s own fallback "as of" date, below, uses
+# this rather than a naive today().
+SAST = datetime.timezone(datetime.timedelta(hours=2))
 
 
 def _now_iso():
@@ -233,27 +243,59 @@ def load_tender_context(url, key, tender_id):
     }
 
 
-def load_key_people(url, key, company_id, limit=5):
+def load_key_people(url, key, company_id, closing_date=None, limit=5):
     """The company's own named people with a role on file - a reasonable
     default "who's on this submission" list. Does NOT specifically pick the
     key people CONFIRMED for this one tender (tender_pack_assignments is
     SANRAL-specific and general-family tenders have no equivalent) - a
     deliberate, flagged simplification for this first pass. See this
-    module's own README for the follow-up."""
+    module's own README for the follow-up.
+
+    Finding (standing solution-architect review, 2026-11-12): years_experience
+    used to be computed from `highest_graduated` (the date of a person's
+    MOST SENIOR qualification) via a naive `datetime.date.today()` - the
+    one place in this codebase that reimplemented this calculation instead
+    of reusing `suggest_pack.years_experience_at()`, and it got both halves
+    wrong relative to every sibling consumer of the identical underlying
+    fact: `years_experience_at()` itself (CV generation, candidate-ranking),
+    and `app/lib/tenderCompliance.ts`'s own inline copy both compute years
+    of experience from `initial_graduated` (when a person FIRST qualified -
+    `extract_cv_fields.py`'s own comment states this as the one rule for
+    this codebase: "years_experience (never stored - computed per tender
+    from initial_graduated)"), not `highest_graduated` (e.g. a later
+    master's degree) - for anyone whose highest qualification came years
+    after their first, this understated real years of experience, sometimes
+    drastically. This value is not cosmetic: `build_prompt.py`'s
+    `_key_people_lines()` prints it straight into the LLM prompt that
+    generates this company's real cover letter / methodology statement
+    narrative document, submitted as part of a real bid.
+
+    Now reuses `years_experience_at()` directly (the already-hardened,
+    already-tested helper - malformed/non-string dates and a future-dated
+    "experience" are both treated as unknown, never a confidently-wrong
+    number or a crash) against `initial_graduated`, "as of" the tender's own
+    `closing_date` when the caller has one (the same "computed per tender"
+    convention CV generation uses), falling back to SAST "today" otherwise
+    (not a naive `date.today()` - the same one-day-behind bug class already
+    fixed elsewhere in this codebase for a UTC-by-default worker
+    container)."""
     rows = supabase_request(
         url, key, "GET",
         f"people?company_id=eq.{company_id}&role=not.is.null&select=name,role,ecsa_level,"
-        f"highest_description,highest_graduated&order=name.asc&limit={limit}",
+        f"highest_description,initial_graduated&order=name.asc&limit={limit}",
     )
+    as_of = None
+    if closing_date:
+        try:
+            as_of = datetime.date.fromisoformat(closing_date)
+        except (TypeError, ValueError):
+            as_of = None
+    if as_of is None:
+        as_of = datetime.datetime.now(SAST).date()
     people = []
     for row in rows:
-        years_experience = None
-        if row.get("highest_graduated"):
-            try:
-                graduated = datetime.date.fromisoformat(row["highest_graduated"])
-                years_experience = max(0, (datetime.date.today() - graduated).days // 365)
-            except ValueError:
-                pass
+        person = {"name": row.get("name"), "qualifications": {"initial_graduated": row.get("initial_graduated")}}
+        years_experience = years_experience_at(person, as_of)
         people.append({
             "name": row.get("name"), "role": row.get("role"), "ecsa_level": row.get("ecsa_level"),
             "highest_description": row.get("highest_description"), "years_experience": years_experience,
@@ -296,7 +338,7 @@ def build_context(url, key, job):
         "kind": job["kind"],
         "tender": tender,
         "company": company,
-        "key_people": load_key_people(url, key, job["company_id"]),
+        "key_people": load_key_people(url, key, job["company_id"], closing_date=tender.get("closing_date")),
         "experience": load_experience(url, key, job["company_id"]),
         "user_guidance": job.get("user_guidance") or "",
         "style": {

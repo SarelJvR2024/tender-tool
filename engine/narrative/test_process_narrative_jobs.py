@@ -318,7 +318,7 @@ def test_load_key_people_computes_years_experience_from_graduation_date():
     graduated = today.replace(year=today.year - 10)
     stub, original = _patch({
         "people": [{"name": "Thabo Mahlangu", "role": "Site Agent", "ecsa_level": "Pr Eng",
-                    "highest_description": "BEng Civil", "highest_graduated": graduated.isoformat()}],
+                    "highest_description": "BEng Civil", "initial_graduated": graduated.isoformat()}],
     })
     try:
         people = pnj.load_key_people("url", "key", "company-1")
@@ -333,7 +333,7 @@ def test_load_key_people_computes_years_experience_from_graduation_date():
 def test_load_key_people_handles_missing_graduation_date():
     stub, original = _patch({
         "people": [{"name": "Jane Doe", "role": "QA Manager", "ecsa_level": None,
-                    "highest_description": None, "highest_graduated": None}],
+                    "highest_description": None, "initial_graduated": None}],
     })
     try:
         people = pnj.load_key_people("url", "key", "company-1")
@@ -346,7 +346,7 @@ def test_load_key_people_handles_missing_graduation_date():
 def test_load_key_people_handles_unparseable_graduation_date():
     stub, original = _patch({
         "people": [{"name": "Jane Doe", "role": "QA Manager", "ecsa_level": None,
-                    "highest_description": None, "highest_graduated": "not-a-date"}],
+                    "highest_description": None, "initial_graduated": "not-a-date"}],
     })
     try:
         people = pnj.load_key_people("url", "key", "company-1")
@@ -354,6 +354,64 @@ def test_load_key_people_handles_unparseable_graduation_date():
         pnj.supabase_request = original
     check("an unparseable graduation date does not raise - years_experience stays None",
           people[0]["years_experience"] is None)
+
+
+def test_load_key_people_uses_initial_graduated_not_highest_graduated():
+    # Finding (standing solution-architect review, 2026-11-12): this used to
+    # read `highest_graduated` (a person's MOST SENIOR qualification) - for
+    # someone who first qualified long before their highest qualification,
+    # that silently understated real years of experience in the real LLM
+    # prompt this feeds (build_prompt.py's _key_people_lines()). A person
+    # who first qualified 20 years ago but only got a master's degree 3
+    # years ago must show ~20 years' experience, not ~3.
+    today = datetime.date.today()
+    stub, original = _patch({
+        "people": [{"name": "Thabo Mahlangu", "role": "Site Agent", "ecsa_level": "Pr Eng",
+                    "highest_description": "MEng Civil",
+                    "initial_graduated": today.replace(year=today.year - 20).isoformat()}],
+    })
+    try:
+        people = pnj.load_key_people("url", "key", "company-1")
+    finally:
+        pnj.supabase_request = original
+    check("years_experience reflects the FIRST (initial) qualification, not a later/highest one",
+          people[0]["years_experience"] == 20, people[0]["years_experience"])
+
+
+def test_load_key_people_computes_years_experience_as_of_the_tenders_own_closing_date():
+    # Same "computed per tender" convention suggest_pack.years_experience_at()
+    # already uses for CV generation/candidate ranking - a narrative document
+    # is tender-specific too, so passing the real tender's closing_date (not
+    # today's wall-clock date) is the consistent, already-established rule
+    # (extract_cv_fields.py's own comment: "years_experience (never stored -
+    # computed per tender from initial_graduated)").
+    stub, original = _patch({
+        "people": [{"name": "Thabo Mahlangu", "role": "Site Agent", "ecsa_level": "Pr Eng",
+                    "highest_description": "BEng Civil", "initial_graduated": "2016-01-01"}],
+    })
+    try:
+        people = pnj.load_key_people("url", "key", "company-1", closing_date="2026-01-01")
+    finally:
+        pnj.supabase_request = original
+    check("years_experience is computed relative to the tender's own closing date (10 years), not today",
+          people[0]["years_experience"] == 10, people[0]["years_experience"])
+
+
+def test_load_key_people_treats_a_future_dated_graduation_as_unknown_not_a_negative_or_zero():
+    # Same "a future-dated/transposed-year grad date is unknown, never a
+    # confidently-wrong negative (or, as this file's own pre-fix `max(0,
+    # ...)` clamp would have silently shown, zero)" rule Findings 5/6 already
+    # established for years_experience_at()'s other two call sites.
+    stub, original = _patch({
+        "people": [{"name": "Jane Doe", "role": "QA Manager", "ecsa_level": None,
+                    "highest_description": None, "initial_graduated": "2027-01-01"}],
+    })
+    try:
+        people = pnj.load_key_people("url", "key", "company-1", closing_date="2026-01-01")
+    finally:
+        pnj.supabase_request = original
+    check("a future-dated graduation relative to the 'as of' date is treated as unknown, not 0",
+          people[0]["years_experience"] is None, people[0]["years_experience"])
 
 
 def test_load_experience_maps_columns_through():
@@ -575,6 +633,9 @@ def main():
     test_load_key_people_computes_years_experience_from_graduation_date()
     test_load_key_people_handles_missing_graduation_date()
     test_load_key_people_handles_unparseable_graduation_date()
+    test_load_key_people_uses_initial_graduated_not_highest_graduated()
+    test_load_key_people_computes_years_experience_as_of_the_tenders_own_closing_date()
+    test_load_key_people_treats_a_future_dated_graduation_as_unknown_not_a_negative_or_zero()
     test_load_experience_maps_columns_through()
     test_load_other_companies_text_excludes_empty_generated_text()
     test_build_context_raises_generation_failed_when_company_row_is_missing()
