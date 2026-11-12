@@ -14,6 +14,18 @@ describe("packHealthStatusFromReadiness", () => {
     expect(packHealthStatusFromReadiness(78, 0)).toBe("in_progress");
     expect(packHealthStatusFromReadiness(0, 0)).toBe("in_progress");
   });
+
+  it("a 100%-looking score with hasUnreadSection true is in_progress, not ready - a failed section read, not a genuinely clean tender", () => {
+    expect(packHealthStatusFromReadiness(100, 0, true)).toBe("in_progress");
+  });
+
+  it("hasUnreadSection never downgrades an already-real blocked verdict", () => {
+    expect(packHealthStatusFromReadiness(90, 1, true)).toBe("blocked");
+  });
+
+  it("hasUnreadSection defaults to false (unaffected) when the caller doesn't pass it", () => {
+    expect(packHealthStatusFromReadiness(100, 0)).toBe("ready");
+  });
 });
 
 describe("primaryActionLabel", () => {

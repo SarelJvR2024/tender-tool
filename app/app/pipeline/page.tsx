@@ -367,13 +367,19 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
           const snap = await loadPackReviewSnapshot(c.id);
           if (!snap.mapped) return NOT_STARTED;
           const readiness = computeTenderReadiness(snap.sections);
-          const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length);
+          // Standing review, 2026-11-06: a section whose own read failed
+          // this render is excluded from both readiness.score and
+          // readiness.fix - without hasUnreadSection here, this board's own
+          // "Pack Ready" badge could show on a transient read blip, the
+          // exact bug class this review loop watches for, just reached
+          // through this card instead of the Submit button.
+          const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length, readiness.hasUnreadSection);
           return { status, score: readiness.score, confirmedCount: readiness.confirmedCount, totalCount: readiness.totalCount, fixCount: readiness.fix.length };
         } else if (c.family === GENERAL_FAMILY) {
           const snap = await loadGeneralPackReviewSnapshot(c.id);
           if (!snap.mapped) return NOT_STARTED;
           const readiness = computeTenderReadiness(snap.sections);
-          const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length);
+          const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length, readiness.hasUnreadSection);
           return { status, score: readiness.score, confirmedCount: readiness.confirmedCount, totalCount: readiness.totalCount, fixCount: readiness.fix.length };
         }
       } catch (e) {
