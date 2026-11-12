@@ -212,6 +212,77 @@ describe("confirmVaultDocument - real update still succeeds", () => {
   });
 });
 
+const pendingBbbeeResult = {
+  data: {
+    id: "result-3",
+    company_id: "company-1",
+    onboarding_upload_id: "upload-3",
+    document_kind: "bbbee_certificate",
+    fields: {},
+    review_status: "pending_review",
+    onboarding_uploads: { storage_path: "company-1/onboarding/raw-bee.pdf", original_filename: "bee.pdf" },
+  },
+  error: null,
+};
+
+// Standing solution-architect review (Finding 473): companies.bee_level is
+// written verbatim into SANRAL's own K33 cell (engine/sanral_fill.py) and
+// into real submission text (engine/fill_a_forms.py's "Level {bee_level}"
+// line) - the same severity as the manual-edit/onboarding-wizard sibling
+// path (app/company/actions.ts's updateCompanyProfile(), via
+// lib/companyProfileUpdate.ts's buildCompanyUpdate(), FIELD_MAX.bee_level =
+// 9), but this card's own text input (review.tsx's FieldRow - "bee_level"
+// isn't in NUMBER_FIELDS) feeds parseBeeLevel()'s bare regex digit-extract
+// straight onto `update.bee_level` with no range check anywhere on this
+// third, independent writer, and companies.bee_level has no DB-level CHECK
+// constraint either.
+describe("confirmVaultDocument - bee_level out of SANRAL's 0-9 range", () => {
+  it("refuses an out-of-range bee_level (reviewer typo / garbled OCR) without writing or filing it", async () => {
+    const { client, removeCalls, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingBbbeeResult], // loadPendingResult
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmVaultDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-3", use_bee_level: "on", f_bee_level: "99" });
+    const url = await expectRedirect(confirmVaultDocument(fd));
+
+    expect(url).toContain("/company/document-scan?error=");
+    expect(decodeURIComponent(url)).toContain("must be a whole number between 0 and 9");
+    // Rejected before the companies write or the storage copy/removal ran at all.
+    expect(updateCalls.length).toBe(0);
+    expect(removeCalls.length).toBe(0);
+  });
+});
+
+describe("confirmVaultDocument - bee_level in range still files normally", () => {
+  it("writes the parsed bee_level and files the document when it's a real 0-9 value", async () => {
+    const { client, removeCalls, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingBbbeeResult],
+        [{ data: { id: "company-1" }, error: null }], // real companies update match
+        [{ data: null, error: null }], // markApplied
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmVaultDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-3", use_bee_level: "on", f_bee_level: "Level 2" });
+    const url = await expectRedirect(confirmVaultDocument(fd));
+
+    expect(url).toContain("saved=filed");
+    expect(updateCalls.some((c) => (c as { bee_level?: number }).bee_level === 2)).toBe(true);
+    const removedPaths = removeCalls.flat();
+    expect(removedPaths).toContain("company-1/onboarding/raw-bee.pdf");
+  });
+});
+
 const pendingIdResult = {
   data: {
     id: "result-2",
