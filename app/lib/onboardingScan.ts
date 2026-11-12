@@ -88,6 +88,32 @@ export const FIELD_LABELS: Record<string, string> = {
 };
 export const DATE_FIELDS = new Set(["expiry_date", "letter_date", "completion_date"]);
 export const NUMBER_FIELDS = new Set(["cover_zar", "project_value_rm"]);
+
+// Standing solution-architect review (Finding 468): `proof_type`
+// (bbbee_certificate -> companies.bee_proof_type) is the one field in this
+// screen's KIND_FIELDS with its own fixed vocabulary (BEE_PROOF_TYPES,
+// lib/vaultDocuments.ts, read directly by engine/onboarding/classify_documents.py's
+// own system prompt) - every other field here (grade_class, pin, bank_name,
+// insurer, ...) is genuinely free text. review.tsx used to render EVERY field
+// in KIND_FIELDS, this one included, as a plain free-text `<input>`, and
+// confirmVaultDocument() (actions.ts) wrote whatever that input held straight
+// into companies.bee_proof_type with no validation at all - unlike this exact
+// column's OTHER real consumer, lib/companyProfileUpdate.ts's own manual
+// "Company profile" edit form, which already constrains it to BEE_PROOF_TYPES.
+// The same "did it fix the COMPLETE set of real consumers" blind spot
+// Findings 466/467 found for ecsa_level/highest_level, on a genuinely
+// different field pair. Same shape, same reason, as `cvExtraction.ts`'s
+// `needsSelectFallbackOption()` (Findings 432/466/467), `registrations.ts`'s
+// `needsHolderFallbackOption()` (177) and `dealEconomics.ts`'s
+// `needsCreditFallbackOption()` (175): call this before building the
+// `<select>`'s options, and add a synthetic option for the current/proposed
+// value when it returns true, so a value outside BEE_PROOF_TYPES (an
+// off-vocabulary model read, or a value saved before this fix existed) is
+// still visible and editable rather than the browser silently selecting the
+// first real option instead.
+export function needsProofTypeFallbackOption(value: string | null, options: readonly string[]): boolean {
+  return !!value && !options.includes(value);
+}
 // id_number is matched locally (never written to/edited via the model's
 // fields) - shown read-only on the review screen, not as an editable row.
 export const READ_ONLY_FIELDS = new Set(["id_number"]);
