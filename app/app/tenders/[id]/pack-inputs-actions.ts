@@ -125,16 +125,42 @@ export async function confirmPositionPerson(
   if (reqErr) console.error("tender_requirements select failed for confirmPositionPerson suggestion", reqErr);
   if (tagsErr) console.error("person_role_eligibility select failed for confirmPositionPerson suggestion", tagsErr);
   if (pplErr) console.error("people select failed for confirmPositionPerson suggestion", pplErr);
+  const candidateScores = (current?.candidate_scores as CandidateScore[] | null | undefined) ?? null;
   const sugg = suggestForPosition({
     positionCode,
     description: (req?.position_description as string | null | undefined) ?? null,
-    candidateScores: (current?.candidate_scores as CandidateScore[] | null | undefined) ?? null,
+    candidateScores,
     tags: (tags ?? []) as RoleTag[],
     peopleIds: new Set((ppl ?? []).map((p) => p.id as string)),
   });
   const suggestedFields = sugg.suggestion
     ? { suggested_person_id: sugg.suggestion.id, suggested_score: sugg.suggestion.score, suggested_rationale: sugg.suggestion.why }
     : {};
+  // Finding 469 (standing solution-architect review, 2026-11-12):
+  // tender_pack_assignments.specialism_warning (0001) is a real scalar
+  // column - read verbatim by compliance-report.tsx's own "Specialism not
+  // evidenced" chip, by process_pack_jobs.py's pack_suggestions_positions()
+  // (which feeds run_forms_pipeline.py's ACTIONS_TO_SIGN.md "Specialism
+  // judgment call" note) and by process_cv_jobs.py (which feeds
+  // generate_cv.py's own bold warning paragraph on the tender-specific CV
+  // cover page that is "the one [document] that goes into the actual
+  // submitted pack" per that file's own comment). This action is the ONLY
+  // place in the app that writes a position's confirmed_person_id, and
+  // until now it never wrote specialism_warning at all - sync_position_
+  // suggestions() (process_pack_jobs.py) only ever writes candidate_scores/
+  // scored_at, never this scalar column either. So every real confirmation
+  // left specialism_warning at its schema default (false) forever, no
+  // matter what the actually-confirmed person's own candidate_scores entry
+  // said - the whole "specialism not evidenced" feature (keyword-overlap
+  // scoring, matched/missing evidence, three separate downstream
+  // consumers) was silently dead for every real assignment; it only ever
+  // read true via two manual CLI tools (engine/seed_supabase_company.py,
+  // engine/pack/bridge_selftest.py), never a live confirmation. Fixed by
+  // looking the just-confirmed person up in this same candidate_scores
+  // ranking and carrying their own specialism_warning across - false (the
+  // column's own existing default) when the person was never scored, or
+  // when the position is being cleared (personId null).
+  const confirmedCandidate = personId ? candidateScores?.find((c) => c.person_id === personId) ?? null : null;
 
   // Logging only, no behavioral branch changed - found via the TS-sweep's
   // own grep blind spot: a bare `await supabase....upsert(...)` with no
@@ -153,7 +179,13 @@ export async function confirmPositionPerson(
   const { error: assignError } = await supabase
     .from("tender_pack_assignments")
     .upsert(
-      { tender_pack_id: tenderPackId, position_code: positionCode, confirmed_person_id: personId || null, ...suggestedFields },
+      {
+        tender_pack_id: tenderPackId,
+        position_code: positionCode,
+        confirmed_person_id: personId || null,
+        specialism_warning: !!confirmedCandidate?.specialism_warning,
+        ...suggestedFields,
+      },
       { onConflict: "tender_pack_id,position_code" },
     );
   if (assignError) console.error("tender_pack_assignments upsert failed for confirmPositionPerson", assignError);
