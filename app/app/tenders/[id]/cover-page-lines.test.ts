@@ -13,7 +13,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { buildOuterEnvelopeLines, deliveryAddressLines } from "./cover-page-lines.ts";
+import { buildOuterEnvelopeLines, coverOmittedReason, deliveryAddressLines } from "./cover-page-lines.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -98,6 +98,48 @@ test("cover-page-preview.tsx's own source actually reads and wires registered_ad
   assert.match(src, /buildOuterEnvelopeLines\(\{[\s\S]*?registeredAddress[\s\S]*?cipcRegistrationNumber[\s\S]*?\}\)/, "printLines must be built with registeredAddress/cipcRegistrationNumber passed through");
   assert.match(src, /\{registeredAddress\s*&&/, "the on-screen box must also render the registered address when present");
   assert.match(src, /\{cipcRegistrationNumber\s*&&/, "the on-screen box must also render the CIPC registration number when present");
+});
+
+test("coverOmittedReason (Finding 465): all three present -> null, matching assemble_pack.py's own `if not (nra_ref and description and closing)` gate", () => {
+  assert.equal(coverOmittedReason({ nraReference: "NRA 2026/0073", description: "Routine road maintenance", closingDate: "2026-10-22" }), null);
+});
+
+test("coverOmittedReason (Finding 465): one missing field names itself, in assemble_pack.py's own field order (NRA reference, description, closing date)", () => {
+  assert.equal(
+    coverOmittedReason({ nraReference: null, description: "Routine road maintenance", closingDate: "2026-10-22" }),
+    "tender record has no NRA reference - never invented",
+  );
+  assert.equal(
+    coverOmittedReason({ nraReference: "NRA 2026/0073", description: null, closingDate: "2026-10-22" }),
+    "tender record has no description - never invented",
+  );
+  assert.equal(
+    coverOmittedReason({ nraReference: "NRA 2026/0073", description: "Routine road maintenance", closingDate: null }),
+    "tender record has no closing date - never invented",
+  );
+});
+
+test("coverOmittedReason (Finding 465): all three missing lists all three, comma-joined, exactly matching assemble_pack.py's own `', '.join(missing)`", () => {
+  assert.equal(
+    coverOmittedReason({ nraReference: null, description: null, closingDate: null }),
+    "tender record has no NRA reference, description, closing date - never invented",
+  );
+});
+
+test("coverOmittedReason (Finding 465): empty-string fields count as missing too, same falsy/truthiness test assemble_pack.py's own `not v` uses", () => {
+  assert.equal(
+    coverOmittedReason({ nraReference: "", description: "Routine road maintenance", closingDate: "2026-10-22" }),
+    "tender record has no NRA reference - never invented",
+  );
+});
+
+test("cover-page-preview.tsx's own source actually checks coverOmittedReason() before rendering the fake cover box, and renders an honest notice instead when it's set (Finding 465)", () => {
+  const src = readFileSync(join(HERE, "cover-page-preview.tsx"), "utf8");
+  assert.match(src, /coverOmittedReason\(\{\s*nraReference,\s*description,\s*closingDate\s*\}\)/, "must call coverOmittedReason() with the three real props");
+  assert.match(src, /\{omittedReason\s*\?/, "must branch on whether a reason was returned");
+  assert.match(src, /No cover pages will be generated/, "must show an honest notice naming what's missing");
+  assert.match(src, /\{!omittedReason\s*&&\s*<PrintPreviewButton/, "must not offer to print-preview a cover that will not actually be generated");
+  assert.match(src, /\{!omittedReason\s*&&\s*\(/, "must not render the fake OUTER ENVELOPE box at all when a cover will not actually be generated");
 });
 
 test("page.tsx's own source reads tender_packs.intake / tenders.intake with the same precedence intake-card.tsx already uses, and passes it to CoverPagePreview", () => {
