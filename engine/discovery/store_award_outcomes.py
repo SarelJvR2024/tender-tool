@@ -97,6 +97,83 @@ def plausible(amount):
     return amount if amount is not None and 0 < amount <= MAX_PLAUSIBLE_ZAR else None
 
 
+# A R0 amount is already turned into None by plausible() above (0 < amount
+# fails), everywhere it's applied - part_from_sanral()/part_from_portal()'s
+# own amount AND every bidder amount in the register. R1 is NOT caught by
+# that guard (0 < 1 <= MAX_PLAUSIBLE_ZAR is true) and is real, common live
+# data: a Phase 1 live read (2026-11-13, 593 real tenders) found many
+# genuine "R1,00" awards on both the portal and SANRAL - a buyer's own
+# nominal/non-disclosed-value convention, not a real price. Phase 2
+# (Sarel, 2026-11-13): "Exclude R0, R1 ... from pricing ranges" - this is
+# the one gap plausible() didn't already close. Deliberately NOT folded
+# into plausible() itself: plausible() is a believability/parsing-sanity
+# check (used for winner_amount_zar storage and the batch-text-garbling
+# guard), not a "is this a competitive price" judgement - storage keeps the
+# real recorded value; this guard only keeps a nominal amount OUT of a
+# pricing-RANGE calculation (the register's low/median/high/winner_rank).
+NOMINAL_PLACEHOLDER_MAX_ZAR = 1
+
+
+def is_nominal_placeholder(amount):
+    return amount is not None and 0 < amount <= NOMINAL_PLACEHOLDER_MAX_ZAR
+
+
+def buyer_key(name):
+    """A buyer/department name's grouping key: whitespace collapsed, upper
+    case - nothing fuzzy, nothing guessed. Phase 2 (Sarel, 2026-11-13):
+    "Standardize department and buyer names so awards group cleanly by
+    purchasing authority." Real live data (2026-11-13) had the SAME
+    department typed with inconsistent spacing/case ("Kwazulu Natal - Social
+    Development" vs differently-cased variants, double spaces inside
+    "Eastern Cape - Cooperative Governance  and Traditional Affairs") -
+    those now group together. A genuine typo in the buyer's OWN name (a
+    missing space, e.g. the real live "DEPARTMENTOF COMMUNICATIONS AND
+    DIGITAL TECHNOLOGIES") is never guessed at or auto-corrected here, same
+    caution this project already applies to company names (norm_name()) and
+    tender references (award_match_keys()) - it stays its own distinct key,
+    not silently merged into a different real department's."""
+    if not name:
+        return None
+    return re.sub(r"\s+", " ", name).strip().upper() or None
+
+
+# The exact human-readable tags Sarel asked for (Phase 2, 2026-11-13),
+# keyed by the internal reason code stored in pricing_exclusion_reasons.
+PRICING_EXCLUSION_LABELS = {
+    "non_competitive": "Non-competitive award (deviation/emergency)",
+    "panel_award": "Multi-supplier panel award (no single winning price)",
+    "nominal_placeholder": "Nominal/placeholder amount (R1 or less)",
+}
+
+_BBBEE_NON_COMPLIANT_RE = re.compile(r"NON[\s-]?COMPLIANT|NOT\s+COMPLIANT")
+_BBBEE_LEVEL_RE = re.compile(r"(?:LEVEL\s*)?([1-8])$")
+
+
+def classify_bbbee_level(raw):
+    """A register's own free-text B-BBEE column value -> one of 'EME',
+    'QSE', 'Level 1'..'Level 8', 'Non-compliant', or None - not confidently
+    recognised, never a guessed percentage/points conversion (see migration
+    0144's own comment: no real captured register in this repo's own
+    fixtures has ever shown a populated `bbbee` value, so this is built
+    only against the handful of literal terms SA B-BBEE registers are known
+    to use verbatim - EME/QSE appear literally on tenders-for-africa.co.za's
+    own public award listing too, confirmed 2026-11-13 - not a parser tuned
+    against data nobody has actually seen)."""
+    if not raw:
+        return None
+    s = re.sub(r"\s+", " ", str(raw)).strip().upper()
+    if s == "EME":
+        return "EME"
+    if s == "QSE":
+        return "QSE"
+    if _BBBEE_NON_COMPLIANT_RE.fullmatch(s):
+        return "Non-compliant"
+    m = _BBBEE_LEVEL_RE.fullmatch(s)
+    if m:
+        return f"Level {m.group(1)}"
+    return None
+
+
 # ---------------------------------------------------------------- source rows -> parts
 
 def sanral_closing_date(raw):
@@ -260,7 +337,13 @@ def merge(key, parts, existing_first_seen=None):
         or next((p for p in ordered if p.get("bidders")), None)
     winner_part = next((p for p in ordered if p.get("winner")), None)
     notes = [n for p in ordered for n in p.get("notes") or []]
-    bidders = [dict(b) for b in (register["bidders"] if register else [])]
+    # Phase 3 (Claude-Brief-Awards-Intelligence_v2.md section 2, 2026-11-13):
+    # bbbee_level is a conservative classification of each bidder's own raw
+    # `bbbee` register text - see classify_bbbee_level()'s own docstring for
+    # why it's deliberately narrow. price_rank is filled in further down,
+    # only where low_bid_zar/median_bid_zar/high_bid_zar are.
+    bidders = [dict(b, bbbee_level=classify_bbbee_level(b.get("bbbee")), price_rank=None)
+               for b in (register["bidders"] if register else [])]
     columns = register["register_columns"] if register else 0
     winner = winner_part["winner"] if winner_part else None
     amount = winner_part.get("winner_amount_zar") if winner_part else None
@@ -332,6 +415,9 @@ def merge(key, parts, existing_first_seen=None):
         "winner_name": winner, "winner_amount_zar": amount,
         "winner_points": winner_points, "winner_bbbee_points": winner_bbbee_points,
         "winner_count": winner_count,
+        "buyer_key": buyer_key(first("buyer")),
+        "winner_key": norm_name(winner) or None if winner else None,
+        "is_panel_award": winner_count > 1,
         "bidders_source": register["bidders_source"] if register else None,
         "register_columns": columns,
         "bidder_count": len(bidders),
@@ -354,7 +440,15 @@ def merge(key, parts, existing_first_seen=None):
     cats = [c for c in assess_tender.categorize(row["title"], None) if not c.startswith("uncategorized")]
     row["categories"] = cats
 
-    priced = [b["amounts"][0]["amount_zar"] for b in bidders if b["amounts"] and b["amounts"][0]["amount_zar"]]
+    # Phase 2 (Sarel, 2026-11-13): a nominal/placeholder amount (R1 or less -
+    # R0 is already None by this point, see plausible()'s own docstring)
+    # must not pull down a real pricing range. Filtered here, not inside
+    # without_typos()/OUTLIER_FACTOR below: a placeholder isn't an outlier
+    # relative to the real field, it's not a price at all.
+    priced_with_idx = [(i, b["amounts"][0]["amount_zar"]) for i, b in enumerate(bidders)
+                       if b["amounts"] and b["amounts"][0]["amount_zar"]
+                       and not is_nominal_placeholder(b["amounts"][0]["amount_zar"])]
+    priced = [amt for _, amt in priced_with_idx]
     row["priced_bidder_count"] = sum(1 for b in bidders if any(a["amount_zar"] for a in b["amounts"]))
     wi, basis = (None, None)
     if winner_count == 1:
@@ -367,9 +461,20 @@ def merge(key, parts, existing_first_seen=None):
                      f"register - closest candidate by first word: {bidders[wi]['name']} (not assumed; verify manually).")
     elif winner and bidders and winner_count == 1:
         notes.append(f"The winner ({winner}) could not be matched to a name on the published register.")
+
+    # Phase 2: the per-tender low/median/high/winner_rank numbers below are a
+    # competitive-benchmark calculation - never worked out for a
+    # non-competitive award (sole/single source, emergency, deviation; the
+    # buyer declared there was no open price competition to benchmark
+    # against in the first place, even if it happened to publish a register
+    # or multiple quotes) or a panel/multi-supplier award (no single winning
+    # price to rank). Both are reported in pricing_exclusion_reasons below,
+    # not just inferred from a free-text note.
     if columns > 1:
         notes.append(f"Batch tender: the register has one price per contract ({columns} columns), so no "
                      "single field-wide numbers are worked out.")
+    elif not row["competitive"] or row["is_panel_award"]:
+        pass  # pricing_exclusion_reasons below says why; nothing to compute.
     elif len(priced) >= 2:
         s = sorted(priced)
         kept = without_typos(s)
@@ -379,8 +484,17 @@ def merge(key, parts, existing_first_seen=None):
         s = kept
         row["low_bid_zar"], row["high_bid_zar"] = s[0], s[-1]
         row["median_bid_zar"] = round(statistics.median(s), 2)
-        if wi is not None and bidders[wi]["amounts"] and bidders[wi]["amounts"][0]["amount_zar"]:
-            wa = bidders[wi]["amounts"][0]["amount_zar"]
+        # Phase 3: per-bidder price_rank (1 = lowest), for every bidder whose
+        # own amount survived the SAME outlier filter the field-wide numbers
+        # above did. `kept` (== s here) is a contiguous slice of the sorted,
+        # unfiltered amounts (without_typos() is a value-range filter on an
+        # already-sorted list, so nothing excluded can fall back inside
+        # [s[0], s[-1]]) - a plain bounds check is exact, not approximate.
+        for bi, bamt in priced_with_idx:
+            if s[0] <= bamt <= s[-1]:
+                bidders[bi]["price_rank"] = 1 + sum(1 for a in s if a < bamt)
+        wa = bidders[wi]["amounts"][0]["amount_zar"] if wi is not None and bidders[wi]["amounts"] else None
+        if wa and not is_nominal_placeholder(wa):
             # A real backfill run crashed the whole store() on a numeric
             # overflow: without_typos() (above) screens the general bid
             # list before the median is taken, but never the WINNER's own
@@ -399,8 +513,25 @@ def merge(key, parts, existing_first_seen=None):
                 notes.append(f"The winner's own recorded amount is more than {OUTLIER_FACTOR}x away from the "
                              "median bid (most likely a typing error on the register) - left out of the "
                              "field-wide numbers, shown as published.")
+
+    # Phase 2: structured, typed exclusion reasons - never require a UI or
+    # analysis consumer to regex-parse data_notes to know whether this row's
+    # own price numbers are safe to use in a competitive benchmark.
+    reason_codes = []
     if not row["competitive"]:
+        reason_codes.append("non_competitive")
+    if row["is_panel_award"]:
+        reason_codes.append("panel_award")
+    if amount is not None and is_nominal_placeholder(amount):
+        reason_codes.append("nominal_placeholder")
+    row["pricing_excluded"] = bool(reason_codes)
+    row["pricing_exclusion_reasons"] = [PRICING_EXCLUSION_LABELS[c] for c in reason_codes]
+    if "non_competitive" in reason_codes:
+        notes.insert(0, PRICING_EXCLUSION_LABELS["non_competitive"])
         notes.append(f"The buyer recorded this as '{row['procurement_type']}' - no open price competition.")
+    if "panel_award" in reason_codes:
+        notes.insert(0, PRICING_EXCLUSION_LABELS["panel_award"])
+
     row["bidders"] = bidders
     row["data_notes"] = list(dict.fromkeys(notes))
     return row

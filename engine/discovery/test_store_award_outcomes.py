@@ -214,6 +214,203 @@ def test_points_fallback_still_works_for_the_same_winner_spelled_differently():
           not any("different winner name" in n for n in row["data_notes"]), row["data_notes"])
 
 
+# --- Phase 2 (Sarel, 2026-11-13): exclusion filters + buyer standardization -
+
+def test_non_competitive_award_with_a_register_is_excluded_from_pricing():
+    rec = {
+        "awards": [{"supplier": "Alpha Supplies", "amount_zar": 500000}],
+        "bidders": [{"bidder": "Alpha Supplies", "amount_zar": 500000},
+                    {"bidder": "Beta Co", "amount_zar": 480000},
+                    {"bidder": "Gamma Co", "amount_zar": 520000}],
+        "procurement_type": "Sole source bidding",
+        "buyer": "Test Department", "bid_number": "SOLE/001", "title": "Test sole-source tender",
+    }
+    row = sao.merge("ocid:test-phase2-1", [sao.part_from_portal(rec)])
+    check("non-competitive flag set", row["competitive"] is False)
+    check("even with a 3-bid register, no median/low/high computed for a non-competitive award",
+          row["median_bid_zar"] is None and row["low_bid_zar"] is None and row["high_bid_zar"] is None,
+          (row["median_bid_zar"], row["low_bid_zar"], row["high_bid_zar"]))
+    check("winner_rank not computed either", row["winner_rank"] is None)
+    check("pricing_excluded is True", row["pricing_excluded"] is True)
+    check("the exact requested tag is in pricing_exclusion_reasons",
+          "Non-competitive award (deviation/emergency)" in row["pricing_exclusion_reasons"], row["pricing_exclusion_reasons"])
+    check("the exact tag also appears in data_notes, clearly visible",
+          "Non-competitive award (deviation/emergency)" in row["data_notes"], row["data_notes"])
+
+
+def test_panel_award_is_flagged_and_excluded_from_pricing():
+    rec = {
+        "awards": [{"supplier": "Firm A", "amount_zar": 100000}, {"supplier": "Firm B", "amount_zar": 150000}],
+        "bidders": [], "procurement_type": "Request for Bid",
+        "buyer": "Test Department", "bid_number": "PANEL/001", "title": "Panel appointment",
+    }
+    row = sao.merge("ocid:test-phase2-2", [sao.part_from_portal(rec)])
+    check("is_panel_award is True", row["is_panel_award"] is True)
+    check("winner_count is 2", row["winner_count"] == 2)
+    check("pricing_excluded is True for a panel award", row["pricing_excluded"] is True)
+    check("the panel label is present",
+          "Multi-supplier panel award (no single winning price)" in row["pricing_exclusion_reasons"],
+          row["pricing_exclusion_reasons"])
+
+
+def test_nominal_r1_amount_excluded_from_pricing_but_not_destroyed():
+    rec = {
+        "awards": [{"supplier": "Nominal Co", "amount_zar": 1.0}],
+        "bidders": [], "procurement_type": "Request for Bid",
+        "buyer": "Test Department", "bid_number": "NOM/001", "title": "Nominal value framework agreement",
+    }
+    row = sao.merge("ocid:test-phase2-3", [sao.part_from_portal(rec)])
+    check("competitive (not excluded for THAT reason)", row["competitive"] is True)
+    check("winner_amount_zar keeps the real recorded R1 value - not destroyed", row["winner_amount_zar"] == 1.0)
+    check("pricing_excluded is True because of the nominal amount", row["pricing_excluded"] is True)
+    check("the nominal-placeholder reason is present",
+          "Nominal/placeholder amount (R1 or less)" in row["pricing_exclusion_reasons"], row["pricing_exclusion_reasons"])
+
+
+def test_r1_placeholder_bidder_amounts_excluded_from_the_priced_register():
+    rec = {
+        "awards": [{"supplier": "Winner Co", "amount_zar": 500000}],
+        "bidders": [{"bidder": "Winner Co", "amount_zar": 500000},
+                    {"bidder": "Placeholder Bidder", "amount_zar": 1},
+                    {"bidder": "Real Bidder 2", "amount_zar": 520000},
+                    {"bidder": "Real Bidder 3", "amount_zar": 480000}],
+        "procurement_type": "Request for Bid",
+        "buyer": "Test Department", "bid_number": "R1REG/001", "title": "Register with one nominal R1 bid",
+    }
+    row = sao.merge("ocid:test-phase2-4", [sao.part_from_portal(rec)])
+    check("priced_bidder_count counts all 4 (coverage metric, unchanged scope)",
+          row["priced_bidder_count"] == 4, row["priced_bidder_count"])
+    check("but the R1 bid never enters the median/low/high calc (only 3 real prices)",
+          row["median_bid_zar"] == 500000.0, row["median_bid_zar"])
+    check("low_bid_zar is the lowest REAL price, not the R1 placeholder", row["low_bid_zar"] == 480000.0, row["low_bid_zar"])
+    check("winner correctly ranked among the 3 real prices (2nd lowest)", row["winner_rank"] == 2, row["winner_rank"])
+    check("pricing_excluded is False - this one's genuinely usable", row["pricing_excluded"] is False)
+
+
+def test_buyer_key_normalizes_whitespace_and_case_without_guessing():
+    check("collapses internal double spaces and upper-cases",
+          sao.buyer_key("Eastern Cape - Cooperative Governance  and Traditional Affairs") ==
+          "EASTERN CAPE - COOPERATIVE GOVERNANCE AND TRADITIONAL AFFAIRS",
+          sao.buyer_key("Eastern Cape - Cooperative Governance  and Traditional Affairs"))
+    check("two differently-spaced/cased real names produce the SAME key",
+          sao.buyer_key("Kwazulu Natal - Social Development ") == sao.buyer_key("KWAZULU NATAL - SOCIAL DEVELOPMENT"))
+    check("a genuine missing-space typo in the buyer's own name is left as published, not guessed at",
+          sao.buyer_key("DEPARTMENTOF COMMUNICATIONS AND DIGITAL TECHNOLOGIES") !=
+          sao.buyer_key("DEPARTMENT OF COMMUNICATIONS AND DIGITAL TECHNOLOGIES"))
+    check("None in, None out", sao.buyer_key(None) is None)
+    row = sao.merge("ocid:test-phase2-5", [sao.part_from_portal({
+        "awards": [{"supplier": "X", "amount_zar": 1000}], "bidders": [], "procurement_type": "Request for Bid",
+        "buyer": "Eastern Cape - Cooperative Governance  and Traditional Affairs",
+        "bid_number": "BK/001", "title": "t",
+    })])
+    check("buyer_key is set on a real merged row",
+          row["buyer_key"] == "EASTERN CAPE - COOPERATIVE GOVERNANCE AND TRADITIONAL AFFAIRS", row["buyer_key"])
+
+
+# --- Phase 3 (Claude-Brief-Awards-Intelligence_v2.md, 2026-11-13):
+# winner_key, per-bidder bbbee_level/price_rank ------------------------------
+
+def test_classify_bbbee_level_recognises_only_literal_known_terms():
+    check("'EME' -> 'EME'", sao.classify_bbbee_level("EME") == "EME")
+    check("lower-case 'qse' -> 'QSE'", sao.classify_bbbee_level("qse") == "QSE")
+    check("'Level 3' -> 'Level 3'", sao.classify_bbbee_level("Level 3") == "Level 3")
+    check("a bare '3' -> 'Level 3' (SANRAL registers sometimes give the number alone)",
+          sao.classify_bbbee_level("3") == "Level 3")
+    check("'level 8' (lower case, extra space) -> 'Level 8'",
+          sao.classify_bbbee_level("level  8") == "Level 8")
+    check("'Non-Compliant' -> 'Non-compliant'", sao.classify_bbbee_level("Non-Compliant") == "Non-compliant")
+    check("'non compliant' (no hyphen) -> 'Non-compliant'", sao.classify_bbbee_level("non compliant") == "Non-compliant")
+    check("None -> None", sao.classify_bbbee_level(None) is None)
+    check("empty string -> None", sao.classify_bbbee_level("") is None)
+    check("a points score ('92.1000') is NEVER guessed into a level - stays None",
+          sao.classify_bbbee_level("92.1000") is None)
+    check("a bare percentage ('50%') is NEVER guessed into a level - stays None",
+          sao.classify_bbbee_level("50%") is None)
+    check("'Level 9' (not a real B-BBEE level, 1-8 only) stays None, not guessed",
+          sao.classify_bbbee_level("Level 9") is None)
+    check("free text with no recognised term stays None", sao.classify_bbbee_level("Pending verification") is None)
+
+
+def test_winner_key_set_on_merged_row():
+    row = sao.merge("ocid:test-phase3-1", [sao.part_from_portal({
+        "awards": [{"supplier": "Klipcorp (Pty) Ltd", "amount_zar": 100000}],
+        "bidders": [], "procurement_type": "Request for Bid",
+        "buyer": "Test Dept", "bid_number": "WK/001", "title": "t",
+    })])
+    check("winner_key is the normalised identity (store_award_outcomes.norm_name())",
+          row["winner_key"] == sao.norm_name("Klipcorp (Pty) Ltd"), row["winner_key"])
+    check("...which strips legal-form noise, same as every other identity match in this file",
+          row["winner_key"] == "KLIPCORP", row["winner_key"])
+    no_winner_row = sao.merge("ocid:test-phase3-1b", [sao.part_from_portal({
+        "awards": [], "bidders": [], "procurement_type": "Request for Bid",
+        "buyer": "Test Dept", "bid_number": "WK/002", "title": "t",
+    })])
+    check("no winner -> winner_key is None, not an empty string", no_winner_row["winner_key"] is None,
+          no_winner_row["winner_key"])
+
+
+def test_price_rank_assigned_per_bidder_and_matches_winner_rank():
+    rec = {
+        "awards": [{"supplier": "Winner Co", "amount_zar": 480000}],
+        "bidders": [{"bidder": "Winner Co", "amount_zar": 480000},
+                    {"bidder": "Second Place", "amount_zar": 500000},
+                    {"bidder": "Third Place", "amount_zar": 520000},
+                    {"bidder": "Fourth Place", "amount_zar": 540000}],
+        "procurement_type": "Request for Bid",
+        "buyer": "Test Dept", "bid_number": "RANK/001", "title": "t",
+    }
+    row = sao.merge("ocid:test-phase3-2", [sao.part_from_portal(rec)])
+    by_name = {b["name"]: b for b in row["bidders"]}
+    check("the winner (lowest bid) is price_rank 1", by_name["Winner Co"]["price_rank"] == 1, by_name["Winner Co"])
+    check("second place is price_rank 2", by_name["Second Place"]["price_rank"] == 2)
+    check("third place is price_rank 3", by_name["Third Place"]["price_rank"] == 3)
+    check("fourth place is price_rank 4", by_name["Fourth Place"]["price_rank"] == 4)
+    check("the winner's own price_rank matches the row-level winner_rank",
+          by_name["Winner Co"]["price_rank"] == row["winner_rank"], (by_name["Winner Co"]["price_rank"], row["winner_rank"]))
+
+
+def test_price_rank_excludes_nominal_and_outlier_bidders():
+    rec = {
+        "awards": [{"supplier": "Winner Co", "amount_zar": 480000}],
+        "bidders": [{"bidder": "Winner Co", "amount_zar": 480000},
+                    {"bidder": "Real Bidder 2", "amount_zar": 500000},
+                    {"bidder": "Real Bidder 3", "amount_zar": 520000},
+                    {"bidder": "Placeholder Bidder", "amount_zar": 1},
+                    {"bidder": "Typo Outlier Bidder", "amount_zar": 480000 * 50}],
+        "procurement_type": "Request for Bid",
+        "buyer": "Test Dept", "bid_number": "RANK/002", "title": "t",
+    }
+    row = sao.merge("ocid:test-phase3-3", [sao.part_from_portal(rec)])
+    by_name = {b["name"]: b for b in row["bidders"]}
+    check("real bidders still get a price_rank",
+          by_name["Winner Co"]["price_rank"] == 1 and by_name["Real Bidder 2"]["price_rank"] == 2
+          and by_name["Real Bidder 3"]["price_rank"] == 3)
+    check("the R1 placeholder bidder gets no price_rank", by_name["Placeholder Bidder"]["price_rank"] is None)
+    check("the >5x-median outlier bidder gets no price_rank", by_name["Typo Outlier Bidder"]["price_rank"] is None)
+
+
+def test_bbbee_level_present_on_bidders_from_a_real_shaped_sanral_register():
+    awarded_rec = {
+        "source": "sanral_awarded", "reference": "X.009-001-2026/1", "title": "Phase 3 bbbee test tender",
+        "awarded_to": "Winner Co", "full_points": None, "bbbee_points": None,
+        "opening_register": [
+            {"tenderer": "Winner Co", "amounts": [{"column": "Amount", "amount_zar": 480000, "amount_raw": None}],
+             "bbbee": "Level 2"},
+            {"tenderer": "Second Place", "amounts": [{"column": "Amount", "amount_zar": 500000, "amount_raw": None}],
+             "bbbee": "EME"},
+            {"tenderer": "Third Place", "amounts": [{"column": "Amount", "amount_zar": 520000, "amount_raw": None}],
+             "bbbee": None},
+        ],
+    }
+    row = sao.merge("sanral:X.009-001-2026/1", [sao.part_from_sanral(awarded_rec)])
+    by_name = {b["name"]: b for b in row["bidders"]}
+    check("a 'Level 2' register value is classified", by_name["Winner Co"]["bbbee_level"] == "Level 2")
+    check("an 'EME' register value is classified", by_name["Second Place"]["bbbee_level"] == "EME")
+    check("no raw bbbee text -> bbbee_level is None, not guessed", by_name["Third Place"]["bbbee_level"] is None)
+    check("the raw bbbee text is still kept untouched alongside the classification",
+          by_name["Winner Co"]["bbbee"] == "Level 2")
+
+
 def main():
     test_unrelated_company_sharing_a_first_word_is_not_assumed_the_winner()
     test_exact_name_match_still_sets_the_winner()
@@ -225,6 +422,16 @@ def main():
     test_amount_fallback_still_works_for_the_same_winner_spelled_differently()
     test_points_fallback_never_crosses_to_a_different_winners_source()
     test_points_fallback_still_works_for_the_same_winner_spelled_differently()
+    test_non_competitive_award_with_a_register_is_excluded_from_pricing()
+    test_panel_award_is_flagged_and_excluded_from_pricing()
+    test_nominal_r1_amount_excluded_from_pricing_but_not_destroyed()
+    test_r1_placeholder_bidder_amounts_excluded_from_the_priced_register()
+    test_buyer_key_normalizes_whitespace_and_case_without_guessing()
+    test_classify_bbbee_level_recognises_only_literal_known_terms()
+    test_winner_key_set_on_merged_row()
+    test_price_rank_assigned_per_bidder_and_matches_winner_rank()
+    test_price_rank_excludes_nominal_and_outlier_bidders()
+    test_bbbee_level_present_on_bidders_from_a_real_shaped_sanral_register()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

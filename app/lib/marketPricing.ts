@@ -24,7 +24,16 @@ import { median, toNumber } from "@/lib/dealEconomics";
 import { fetchAllRows } from "@/lib/supabasePaging";
 
 export type BidAmount = { column: string | null; amount_zar: number | null; amount_raw: string | null };
-export type Bidder = { name: string; amounts: BidAmount[]; bbbee?: string | null; notes?: string | null; is_winner?: boolean };
+export type Bidder = {
+  name: string; amounts: BidAmount[]; bbbee?: string | null; notes?: string | null; is_winner?: boolean;
+  // Phase 3 (Claude-Brief-Awards-Intelligence_v2.md, migration 0144):
+  // bbbee_level is a conservative classification of `bbbee`'s own raw text
+  // (EME | QSE | "Level 1".."Level 8" | "Non-compliant" | null - never a
+  // guessed percentage/points conversion, see store_award_outcomes.
+  // classify_bbbee_level()'s own docstring). price_rank (1 = lowest) is set
+  // only where low_bid_zar/median_bid_zar/high_bid_zar are.
+  bbbee_level?: string | null; price_rank?: number | null;
+};
 
 export type TenderOutcome = {
   id: string;
@@ -44,12 +53,21 @@ export type TenderOutcome = {
   winner_amount_zar: number | string | null;
   winner_points: string | null;
   winner_count: number;
+  // Phase 2/3 (migrations 0143/0144) - additive, every existing caller of
+  // this type/OUTCOME_COLUMNS is unaffected by their presence.
+  buyer_key: string | null;
+  winner_key: string | null;
+  is_panel_award: boolean;
+  pricing_excluded: boolean;
+  pricing_exclusion_reasons: string[];
   bidders: Bidder[];
   bidders_source: "sanral_register" | "etenders_bidders" | null;
   register_columns: number;
   bidder_count: number;
   priced_bidder_count: number;
+  low_bid_zar: number | string | null;
   median_bid_zar: number | string | null;
+  high_bid_zar: number | string | null;
   winner_rank: number | null;
   winner_vs_median: number | string | null;
   lowest_bid_won: boolean | null;
@@ -62,7 +80,7 @@ export type TenderOutcome = {
 };
 
 export const OUTCOME_COLUMNS =
-  "id, outcome_key, reference, buyer, title, project_type, procurement_type, province, categories, competitive, status, closing_date, award_date, winner_name, winner_amount_zar, winner_points, winner_count, bidders, bidders_source, register_columns, bidder_count, priced_bidder_count, median_bid_zar, winner_rank, winner_vs_median, lowest_bid_won, winner_match_basis, data_notes, sources, source_urls, attribution, refreshed_at";
+  "id, outcome_key, reference, buyer, buyer_key, title, project_type, procurement_type, province, categories, competitive, status, closing_date, award_date, winner_name, winner_amount_zar, winner_points, winner_count, winner_key, is_panel_award, pricing_excluded, pricing_exclusion_reasons, bidders, bidders_source, register_columns, bidder_count, priced_bidder_count, low_bid_zar, median_bid_zar, high_bid_zar, winner_rank, winner_vs_median, lowest_bid_won, winner_match_basis, data_notes, sources, source_urls, attribution, refreshed_at";
 
 /** The per-tender numbers the benchmarks aggregate (no bidder names, no register). */
 export type OutcomeStats = Pick<
@@ -323,7 +341,7 @@ export type Benchmark = {
   sources: Record<string, number>;
 };
 
-function quantile(sorted: number[], q: number): number | null {
+export function quantile(sorted: number[], q: number): number | null {
   if (sorted.length === 0) return null;
   const pos = (sorted.length - 1) * q;
   const lo = Math.floor(pos);

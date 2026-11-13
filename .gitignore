@@ -14,3 +14,8 @@ packs/generated/
 # Claude Code's own local tooling state (e.g. isolated agent worktrees)
 .claude/
 .worktrees/
+
+# Deliberately uncommitted scratch/reference tools - never part of the
+# product, never wired into any workflow. See tools/archive/ for why each
+# one lives here instead of being deleted outright.
+/tools/archive/
