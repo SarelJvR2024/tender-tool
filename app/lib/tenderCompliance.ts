@@ -663,6 +663,18 @@ const ENGINEERING_GEOLOGIST_REQ: MinReq = { registration: "pr_sci_nat", years: 5
 const SURVEYOR_REQ: MinReq = { registration: "sagc", years: 5, label: "Registered with SAGC (SA Geomatics Council), 5 years' relevant experience", source: "assumed" };
 const PR_SCI_NAT_RE = /pr\.?\s*sci\.?\s*nat|professional\s+natural\s+scientist/i;
 const CAND_SCI_NAT_RE = /cand\.?\s*sci\.?\s*nat|cert\.?\s*sci\.?\s*nat|candidate|certificated/i;
+// Same patterns, same order, as engine/discovery/key_person_minimums.py's
+// own SPECIALISTS list (the thing that reads this tender's real C3.1.11
+// table) for the 6 specialist types specialistOf() didn't recognise before
+// Finding 416 - kept as simple, literal mirrors rather than imported (no
+// shared regex module crosses the Python/TypeScript boundary anywhere else
+// in this codebase either), same as SACNASP/SACQSP/SAGC's own comment above.
+const ENVIRONMENTAL_PRACTITIONER_POSITION_RE = /environmental/i;
+const OHS_SPECIALIST_POSITION_RE = /\bOHS\b|health\s+and\s+safety/i;
+const ROAD_SAFETY_AUDIT_POSITION_RE = /road\s+safety/i;
+const PROGRAMMER_POSITION_RE = /programmer/i;
+const MATERIALS_TECHNICIAN_POSITION_RE = /materials\s+technician/i;
+const TRAINEE_TECHNICIAN_POSITION_RE = /trainee/i;
 export const SANRAL_MIN_REQUIREMENTS: Record<string, MinReq> = {
   PL: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience", source: "assumed" },
   APL: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years", source: "assumed" },
@@ -713,11 +725,39 @@ export type PersonFacts = {
 // "Pr Sci.Nat" without the word "geolog" would correctly surface SACNASP
 // fields on the People page, but silently fall back to the generic ECSA
 // Pr Eng/Pr Tech Eng minimum here instead of the real SACNASP requirement).
+//
+// Finding 416: engine/discovery/key_person_minimums.py's own SPECIALISTS
+// list (the thing that reads THIS tender's real C3.1.11 "Minimum
+// Requirements" table) recognises 9 specialist position types - the 3 above
+// plus environmental_practitioner, ohs_specialist,
+// road_safety_audit_team_leader, programmer, materials_technician and
+// trainee_technician (confirmed real, not hypothetical: engine/discovery/
+// test_key_person_minimums.py's own fixtures read all six of these straight
+// off real SANRAL R.396/N.011 tables, with real registration codes -
+// "As required by SACPCMP" for the OHS Specialist, "Refer to sub-service
+// procurement document" for the Environmental Practitioner, and so on).
+// This function only ever recognised the first 3, so minimumRequirementFor()
+// below could never match THIS tender's own extracted row for the other 6 -
+// `own.rows.find((r) => r.specialist === spec)` always missed (spec stayed
+// null), and it fell through all the way to "No minimum requirement on file
+// for this position code - check the tender's C3.1.11 table", silently
+// discarding a real, already-read answer for e.g. a "DS6 - OHS Specialist"
+// position the exact same way a "DS1 - Engineering Geologist" position used
+// to before the 2026-10-27 fix above - just for a different 6 position
+// types instead of 1. Same real-world shape SANRAL's own SETUP sheet
+// already uses for the 3 handled types (a generic "DSn" code, specific-
+// profession description) - see this file's own tenderCompliance.test.ts.
 function specialistOf(description: string | null): string | null {
   if (!description) return null;
   if (SACNASP_POSITION_RE.test(description)) return "engineering_geologist";
   if (SACQSP_POSITION_RE.test(description)) return "quantity_surveyor";
   if (SAGC_POSITION_RE.test(description)) return "surveyor";
+  if (ENVIRONMENTAL_PRACTITIONER_POSITION_RE.test(description)) return "environmental_practitioner";
+  if (OHS_SPECIALIST_POSITION_RE.test(description)) return "ohs_specialist";
+  if (ROAD_SAFETY_AUDIT_POSITION_RE.test(description)) return "road_safety_audit_team_leader";
+  if (PROGRAMMER_POSITION_RE.test(description)) return "programmer";
+  if (MATERIALS_TECHNICIAN_POSITION_RE.test(description)) return "materials_technician";
+  if (TRAINEE_TECHNICIAN_POSITION_RE.test(description)) return "trainee_technician";
   return null;
 }
 

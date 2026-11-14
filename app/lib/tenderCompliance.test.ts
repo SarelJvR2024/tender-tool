@@ -14,7 +14,18 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { minimumRequirementFor, SANRAL_MIN_REQUIREMENTS, sanralConventionalDocumentChecks, type CompanyVault } from "./tenderCompliance.ts";
+import { minimumRequirementFor, SANRAL_MIN_REQUIREMENTS, sanralConventionalDocumentChecks, type CompanyVault, type KeyPersonMinimumRow, type KeyPersonMinimums } from "./tenderCompliance.ts";
+
+/** A minimal real-shaped KeyPersonMinimums.rows[] entry (engine/discovery/key_person_minimums.py's own output shape) for one specialist row. */
+function ownRow(overrides: Partial<KeyPersonMinimumRow>): KeyPersonMinimums {
+  const row: KeyPersonMinimumRow = {
+    position: "Occupational Health and Safety Specialist", position_code: null, specialist: null,
+    qualification: null, registration: null, bodies: [], years_text: null, years_min: null,
+    years_under: null, other: null, alternatives: [], quote: "test fixture row",
+    ...overrides,
+  };
+  return { source: "tender_document", clause: "C3.1.11(d)", rows: [row] };
+}
 
 test("a position literally naming 'Geologist' resolves to the SACNASP requirement (unchanged by the fix)", () => {
   const req = minimumRequirementFor("DS1", "Design Specialist 1 - Engineering Geologist");
@@ -47,6 +58,65 @@ test("a quantity surveyor position is still checked against SACQSP, not SACNASP 
 test("a surveyor position is still checked against SAGC, not SACNASP (ordering preserved)", () => {
   const req = minimumRequirementFor("DS5", "Design Specialist 5 - Land Surveyor");
   assert.equal(req?.registration, "sagc");
+});
+
+/**
+ * Finding 416: engine/discovery/key_person_minimums.py's own SPECIALISTS
+ * list recognises 9 specialist position types when it reads THIS tender's
+ * real C3.1.11 table - the 3 covered above (engineering_geologist,
+ * quantity_surveyor, surveyor) plus environmental_practitioner,
+ * ohs_specialist, road_safety_audit_team_leader, programmer,
+ * materials_technician and trainee_technician - confirmed real on real
+ * SANRAL tenders by that module's own test fixtures (R.396/N.011), not
+ * hypothetical. specialistOf() here only ever recognised the first 3, so
+ * minimumRequirementFor() could never match the tender's OWN already-read
+ * row for the other 6, silently falling through to the generic/assumed
+ * SANRAL table instead of the real extracted requirement - the exact same
+ * failure shape the 2026-10-27 fix above already fixed for "Natural
+ * Scientist" (a geologist description without the word "geolog"), just for
+ * 6 different position types that fix didn't touch.
+ */
+test("an OHS Specialist position resolves to THIS tender's own extracted SACPCMP requirement, not the generic fallback", () => {
+  const own = ownRow({ position: "OHS Specialist", specialist: "ohs_specialist", registration: "sacpcmp", qualification: "As required by SACPCMP", years_text: null });
+  const req = minimumRequirementFor("DS6", "Design Specialist 6 - OHS Specialist", own);
+  assert.equal(req?.registration, "sacpcmp");
+  assert.equal(req?.source, "tender_document");
+});
+
+test("an Environmental Practitioner position resolves to the tender's own row, not 'no minimum requirement on file'", () => {
+  const own = ownRow({ position: "Environmental Practitioner", specialist: "environmental_practitioner", registration: "refer", qualification: "Refer to sub-service procurement document" });
+  const req = minimumRequirementFor("DS7", "Design Specialist 7 - Environmental Practitioner", own);
+  assert.equal(req?.registration, "refer");
+  assert.equal(req?.source, "tender_document");
+});
+
+test("a Road Safety Audit Team Leader position resolves to the tender's own row", () => {
+  const own = ownRow({ position: "Road Safety Audit Team Leader", specialist: "road_safety_audit_team_leader", registration: "pr_eng_or_tech", years_min: 10, years_text: "10" });
+  const req = minimumRequirementFor("DS8", "Design Specialist 8 - Road Safety Audit Team Leader", own);
+  assert.equal(req?.registration, "pr_eng_or_tech");
+  assert.equal(req?.years, 10);
+  assert.equal(req?.source, "tender_document");
+});
+
+test("a Programmer position resolves to the tender's own row", () => {
+  const own = ownRow({ position: "Programmer", specialist: "programmer", registration: "qualification", qualification: "Bachelor's degree in construction management, Civil Engineering, or a related field.", years_min: 5, years_text: "5-10" });
+  const req = minimumRequirementFor("DS9", "Design Specialist 9 - Programmer", own);
+  assert.equal(req?.registration, "qualification");
+  assert.equal(req?.source, "tender_document");
+});
+
+test("a Materials Technician position resolves to the tender's own row", () => {
+  const own = ownRow({ position: "Materials Technician", specialist: "materials_technician", registration: "qualification", qualification: "National Diploma" });
+  const req = minimumRequirementFor("DS10", "Design Specialist 10 - Materials Technician", own);
+  assert.equal(req?.registration, "qualification");
+  assert.equal(req?.source, "tender_document");
+});
+
+test("a Trainee Technician position resolves to the tender's own row, not the generic candidate fallback", () => {
+  const own = ownRow({ position: "Trainee Technician", specialist: "trainee_technician", registration: "candidate", qualification: "Candidate Technician", years_min: 0, years_text: "0" });
+  const req = minimumRequirementFor("DS11", "Design Specialist 11 - Trainee Technician", own);
+  assert.equal(req?.registration, "candidate");
+  assert.equal(req?.source, "tender_document");
 });
 
 /**
