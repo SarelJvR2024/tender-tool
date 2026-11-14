@@ -785,10 +785,26 @@ function checkRegistration(reg: RegistrationCode | null, qualification: string |
   const unknowns: string[] = [];
   let regText = "";
   const level = person.ecsa_level ?? "";
+  // Found 2026-11-11 (QA pass): every other registration case in this switch
+  // (pr_sci_nat/SACNASP, sacpcmp, sagc, the sacqsp/sacap/sacplan/sacpvp/psira
+  // catalog family) calls registrationValidity() on its own *_expiry column
+  // before reporting "have" - this ecsa() helper, used for the most common
+  // SANRAL minimum (pr_eng_or_tech/pr_eng/pr_tech_eng/pr_techni_eng/
+  // candidate), never did, even though ecsa_expiry is a real, tracked column
+  // (migration 0035) with its own renewal reminder (watch_deadlines.py's
+  // TRACKED_PERSON_EXPIRY_FIELDS treats it exactly like sacpcmp_expiry). So a
+  // key person whose ECSA registration had already lapsed by the tender's
+  // closing date was reported "have"/met with no warning, while the
+  // identical lapsed-by-closing situation on SACPCMP/SACNASP/SAGC/the 0050
+  // catalog family already correctly reports "missing".
   const ecsa = (re: RegExp, need: string) => {
-    if (!level) unknowns.push("no ECSA registration on file");
-    else if (!re.test(level)) problems.push(`ECSA "${level}" doesn't meet "${need}"`);
-    else if (!person.ecsa_number) unknowns.push("ECSA number not on file");
+    if (!level) { unknowns.push("no ECSA registration on file"); return; }
+    if (!re.test(level)) { problems.push(`ECSA "${level}" doesn't meet "${need}"`); return; }
+    if (!person.ecsa_number) unknowns.push("ECSA number not on file");
+    const v = registrationValidity(person.ecsa_expiry, closingDate);
+    if (v && !v.ok) problems.push(`ECSA registration ${v.text}`);
+    else if (!v) unknowns.push("ECSA renewal date not on file");
+    regText = `${level}${person.ecsa_number ? ` (ECSA ${person.ecsa_number})` : ""}${v ? `, ${v.text}` : ""}`;
   };
   switch (reg) {
     case "pr_eng_or_tech":
