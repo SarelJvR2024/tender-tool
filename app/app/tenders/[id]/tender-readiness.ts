@@ -36,6 +36,25 @@ export type TenderReadiness = {
   fix: TenderWorkItem[];
   provide: TenderWorkItem[];
   verify: TenderWorkItem[];
+  /**
+   * True when at least one section's own data failed to read this pass
+   * (`section.error` set). Standing review, 2026-11-06: excluding a failed
+   * section's items from fix/provide/verify/totalCount - the only thing a
+   * PURE function can honestly do, since it has no real items to classify -
+   * has the exact same effect on every caller that gates on `fix.length`
+   * (the Submit/pack-request button's own disabledReason, and
+   * requestSubmissionPack()/requestGeneralJob()'s intended server-side
+   * re-check) as silently treating that section as "fully confirmed,
+   * nothing to fix": a real, disqualifying Fix item that happened to live
+   * in the one section that failed to load this render becomes invisible to
+   * fix.length, and `score` is computed only from the sections that DID
+   * load, so it reads higher than the true picture too. This flag lets a
+   * caller tell "fix.length is 0 because everything really is confirmed"
+   * apart from "fix.length is 0 because part of the picture didn't load" -
+   * any hard-stop gate built on this function MUST treat `hasUnreadSection`
+   * the same as "can't tell, fail closed," not as "nothing to fix."
+   */
+  hasUnreadSection: boolean;
 };
 
 /**
@@ -46,10 +65,13 @@ export type TenderReadiness = {
  * exact same section/item data the Pack Review card itself already renders,
  * so the score and the detailed card below it can never disagree.
  *
- * A section whose own data failed to load (`section.error`) contributes
- * nothing - there's nothing real to classify, and silently treating a read
- * failure as "0 items, fully ready" would be worse than leaving it out of
- * the count.
+ * A section whose own data failed to load (`section.error`) contributes no
+ * items to fix/provide/verify/totalCount - there's nothing real to classify
+ * - but sets `hasUnreadSection` so a caller can tell this apart from a
+ * genuinely clean section. See that field's own doc comment: a caller that
+ * gates anything on `fix.length === 0` without also checking
+ * `hasUnreadSection` recreates the exact "failed read reads as fully ready"
+ * shape this whole review loop watches for.
  */
 export function computeTenderReadiness(sections: ReviewSection[]): TenderReadiness {
   const fix: TenderWorkItem[] = [];
@@ -57,9 +79,13 @@ export function computeTenderReadiness(sections: ReviewSection[]): TenderReadine
   const verify: TenderWorkItem[] = [];
   let confirmedCount = 0;
   let totalCount = 0;
+  let hasUnreadSection = false;
 
   for (const section of sections) {
-    if (section.error) continue;
+    if (section.error) {
+      hasUnreadSection = true;
+      continue;
+    }
     for (const item of section.items) {
       totalCount += 1;
       const confirmed = item.status === "confirmed";
@@ -82,5 +108,5 @@ export function computeTenderReadiness(sections: ReviewSection[]): TenderReadine
   }
 
   const score = totalCount === 0 ? 100 : Math.round((confirmedCount / totalCount) * 100);
-  return { score, totalCount, confirmedCount, thingsLeft: totalCount - confirmedCount, fix, provide, verify };
+  return { score, totalCount, confirmedCount, thingsLeft: totalCount - confirmedCount, fix, provide, verify, hasUnreadSection };
 }

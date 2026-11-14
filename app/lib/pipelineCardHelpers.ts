@@ -19,9 +19,21 @@ export type PackHealth = { status: PackHealthStatus; score: number; confirmedCou
  * PIN/COID letter among others. A real disqualification risk always wins
  * over the plain percentage - a tender at 90% with one expired mandatory
  * document is "Blocked", not "nearly ready".
+ *
+ * `hasUnreadSection` (standing review, 2026-11-06): computeTenderReadiness()
+ * excludes any section whose own read failed from both `score` and
+ * `fix.length` - so a section holding a real mandatory gap that just failed
+ * to load this render can make `fixCount === 0` and `score === 100` look
+ * identical to a genuinely clean tender. Without this flag, this board's
+ * own "Pack Ready" badge - a claim stronger than a plain percentage - could
+ * show on a transient read blip. Pass it whenever the caller's own
+ * TenderReadiness has it; defaults to false only for callers that don't
+ * have a TenderReadiness to check (kept optional so this isn't a breaking
+ * change for them).
  */
-export function packHealthStatusFromReadiness(score: number, fixCount: number): PackHealthStatus {
+export function packHealthStatusFromReadiness(score: number, fixCount: number, hasUnreadSection = false): PackHealthStatus {
   if (fixCount > 0) return "blocked";
+  if (hasUnreadSection) return "in_progress";
   if (score === 100) return "ready";
   return "in_progress";
 }

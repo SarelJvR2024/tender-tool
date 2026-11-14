@@ -166,12 +166,27 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   // the workspace header's readiness score reads, so this can't disagree
   // with what the header already shows.
   const packReviewSnapshot = await loadPackReviewSnapshot(tenderId);
-  const fixCount = packReviewSnapshot.mapped ? computeTenderReadiness(packReviewSnapshot.sections).fix.length : 0;
-  const disabledReason = fixCount > 0
-    ? `Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above`
-    : !reviewed
-      ? "Confirm the Pack review above first"
-      : null;
+  // Standing review, 2026-11-06: computeTenderReadiness() silently excludes
+  // any section whose own read failed - correct for a pure function with
+  // nothing real to classify, but it means `fix.length` alone reads
+  // identically whether every Fix item is genuinely resolved OR a section
+  // holding a real Fix item just failed to load this render (NOT the same
+  // thing as packReviewSnapshot.mapped itself being false, which stays its
+  // own pre-existing fallback below - a separate, already-flagged gap).
+  // hasUnreadSection is the one signal that tells the two "0 Fix items"
+  // cases apart; failing closed on it (same "can't tell, so don't allow it"
+  // direction as every other read-failure fix in this review loop) keeps
+  // this exactly as cautious as it already is for the mapped-but-missing
+  // case.
+  const packReadinessResult = packReviewSnapshot.mapped ? computeTenderReadiness(packReviewSnapshot.sections) : null;
+  const fixCount = packReadinessResult ? packReadinessResult.fix.length : 0;
+  const disabledReason = packReadinessResult?.hasUnreadSection
+    ? "Couldn't check compliance readiness just now - refresh and try again"
+    : fixCount > 0
+      ? `Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above`
+      : !reviewed
+        ? "Confirm the Pack review above first"
+        : null;
 
   // Signed links for ready packs (private 'submission-packs' bucket, 10 min).
   const paths = jobs

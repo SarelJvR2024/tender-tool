@@ -269,8 +269,25 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   // Verify/Provide/Fix (app/AGENTS.md): same gate as SANRAL's submission-pack.tsx,
   // reusing the exact same cached snapshot GeneralPackReview itself reads.
   const generalReviewSnapshot = await loadGeneralPackReviewSnapshot(tenderId);
-  const generalFixCount = generalReviewSnapshot.mapped ? computeTenderReadiness(generalReviewSnapshot.sections).fix.length : 0;
-  const generalDisabledReason = generalFixCount > 0 ? `Fix ${generalFixCount} item${generalFixCount === 1 ? "" : "s"} first - see the Pack review above` : null;
+  // Standing review, 2026-11-06: computeTenderReadiness() silently excludes
+  // any section whose own read failed, so `fix.length` alone can't tell
+  // "genuinely nothing to fix" apart from "a section with a real Fix item
+  // just failed to load this render" (NOT the same thing as
+  // generalReviewSnapshot.mapped itself being false, which stays its own
+  // pre-existing fallback below - a separate, already-flagged gap). See
+  // tender-readiness.ts's own hasUnreadSection doc comment. The gate below
+  // now fails closed on that signal too, same direction as every other
+  // read-failure fix in this review loop; the badge count a few lines down
+  // stays the plain cosmetic number (0 on either failure) - display-only,
+  // not a gate, same already-accepted tier as every other badge/count this
+  // review loop has left alone.
+  const generalReadinessResult = generalReviewSnapshot.mapped ? computeTenderReadiness(generalReviewSnapshot.sections) : null;
+  const generalFixCount = generalReadinessResult ? generalReadinessResult.fix.length : 0;
+  const generalDisabledReason = generalReadinessResult?.hasUnreadSection
+    ? "Couldn't check compliance readiness just now - refresh and try again"
+    : generalFixCount > 0
+      ? `Fix ${generalFixCount} item${generalFixCount === 1 ? "" : "s"} first - see the Pack review above`
+      : null;
   const docsMissing = returnables.filter((r) => r.status === "missing").length;
   const autoForms = manifest.forms.filter((f) => f.status === "auto");
   const byHandForms = manifest.forms.filter((f) => f.status === "by_hand");
