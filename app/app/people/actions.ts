@@ -118,6 +118,41 @@ export async function savePerson(formData: FormData) {
     redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("Highest qualification level: choose one of SANRAL's options.")}`);
   }
 
+  // Finding 481 (standing solution-architect review): this form's own
+  // ecsa_date/sacpcmp_date/highest_graduated/initial_graduated inputs had NO
+  // server-side format check at all - unlike this exact 4-column set's own
+  // sibling writer, applyCvExtraction()'s per-field confirm loop below
+  // (`if (v && f.kind === "date" && !ISO_DATE.test(v)) back(...)`), which
+  // already refuses a malformed value for every EXTRACTED_PERSON_FIELDS
+  // entry whose `kind` is "date" - and that list (lib/cvExtraction.ts) names
+  // exactly these four people columns as "date" fields. people/[id]/page.tsx
+  // only ever renders these as `<input type="date">` (never free text) -
+  // but, per this file's own established rule for every sibling of this
+  // shape (id_number, Finding 218/432; ecsa_level/highest_level, Finding
+  // 478; projects.start_date/end_date, Finding 479), a Server Action may
+  // never trust that alone: a direct POST (or a future UI regression) can
+  // still submit any string. engine/fill_tender.py/engine/fill_conventional.py
+  // both write each of these straight onto a real SANRAL Form B2.1
+  // experience row via `wb.set_date(T, ..., q["ecsa_date"])` etc.
+  // (engine/sanral_fill.py's own `set_date()`) - which only accepts a strict
+  // YYYY-MM-DD string and raises a ValueError naming the cell and the bad
+  // value for anything else. Without this check, a garbage date typed here
+  // saved silently and only surfaced much later as a confusing real-pack-
+  // build failure instead of an immediate, actionable one at the point of
+  // entry - the same "fails, but late and unhelpfully" shape this codebase
+  // already treats as a real finding elsewhere (e.g. Finding 470).
+  for (const [key, label] of [
+    ["ecsa_date", "ECSA registration date"],
+    ["sacpcmp_date", "SACPCMP registration date"],
+    ["highest_graduated", "Date graduated (highest)"],
+    ["initial_graduated", "Date graduated (initial)"],
+  ] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) {
+      redirect(`/people/${id ?? "new"}?error=${encodeURIComponent(`${label}: "${v}" isn't a date (yyyy-mm-dd).`)}`);
+    }
+  }
+
   const row = {
     company_id: companyId,
     name,

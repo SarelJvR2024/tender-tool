@@ -397,6 +397,135 @@ describe("savePerson - ecsa_level/highest_level are validated against SANRAL's o
   });
 });
 
+// Finding 481 (standing solution-architect review): savePerson()'s own
+// manual "add/edit person" form had NO server-side format check at all on
+// ecsa_date/sacpcmp_date/highest_graduated/initial_graduated - unlike this
+// exact 4-column set's own sibling writer, applyCvExtraction()'s per-field
+// confirm loop above, which already refuses a malformed value for every
+// EXTRACTED_PERSON_FIELDS entry whose `kind` is "date" (`if (v && f.kind ===
+// "date" && !ISO_DATE.test(v)) back(...)`) - and that list names exactly
+// these four people columns as "date" fields (lib/cvExtraction.ts). People's
+// own edit page only ever renders these as `<input type="date">`
+// (people/[id]/page.tsx), but per this file's own established rule for every
+// sibling of this shape (id_number, Finding 218; ecsa_level/highest_level,
+// Finding 478; start_date/end_date, Finding 479) a Server Action may never
+// trust that alone - a direct POST can still submit any string. All four are
+// then written straight onto a real SANRAL Form B2.1 experience row via
+// engine/fill_tender.py/engine/fill_conventional.py's own
+// `wb.set_date(T, ..., q["ecsa_date"])` etc. (engine/sanral_fill.py's
+// `set_date()`), which only accepts a strict YYYY-MM-DD string and raises a
+// ValueError naming the cell and the bad value for anything else - so a
+// garbage date typed here (bypassing the date picker) used to save silently
+// and only surface much later as a confusing real-pack-build failure instead
+// of an immediate, actionable one at the point of entry.
+describe("savePerson - ecsa_date/sacpcmp_date/highest_graduated/initial_graduated are validated as real yyyy-mm-dd dates, mirroring applyCvExtraction()'s per-field check (Finding 481)", () => {
+  it("refuses a malformed ecsa_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }], // current-value read (ecsa_level/highest_level changed-value check)
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_date: "15/03/2020" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('isn\'t a date (yyyy-mm-dd)'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed sacpcmp_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", sacpcmp_date: "not a date" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('"not a date" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed highest_graduated", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", highest_graduated: "2020/01/01" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('isn\'t a date (yyyy-mm-dd)'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed initial_graduated", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // insert path (id="new") skips the current-value read
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe", initial_graduated: "garbage" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent('"garbage" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("still saves normally with genuinely valid yyyy-mm-dd dates for all four fields", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }], // insert
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({
+      id: "new",
+      name: "Jane Doe",
+      ecsa_date: "2005-04-12",
+      sacpcmp_date: "2006-05-13",
+      highest_graduated: "2000-12-01",
+      initial_graduated: "1998-11-01",
+    });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+
+  it("still allows leaving all four date fields blank", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+});
+
 // Finding 432 (standing solution-architect review, 2026-11-11): the SAME
 // column this Finding-218/219 block above already hard-gates with
 // isValidSaId() for the manual savePerson() edit path has a SECOND write
