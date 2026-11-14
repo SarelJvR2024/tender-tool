@@ -33,7 +33,33 @@
  * the same "preview promises exactly what the generator prints, but doesn't"
  * shape Finding 353 fixed for the delivery address, on the bidder block
  * instead of the addressee block.
+ *
+ * Finding 465: `engine/pack/assemble_pack.py`'s own gate right before it
+ * calls `make_outer()`/`make_inner()` - `if not (nra_ref and description and
+ * closing):` - means the real pack build produces NO cover pages at all
+ * (outer or either inner envelope) whenever any one of those three tender
+ * fields is missing; it records a `cover_reason` string
+ * ("tender record has no <missing fields> - never invented") and every
+ * cover section comes back with `pdf: None` instead. This preview had no
+ * equivalent check at all: it rendered a full fake cover with "- no X on
+ * file" placeholder text for each missing field, which looks like (and this
+ * component's own header comment claims to be) a preview of a real document
+ * that is about to be generated - when in the one case that actually
+ * matters (one of these three fields missing), the real engine generates
+ * nothing whatsoever. `coverOmittedReason()` mirrors that exact gate/message
+ * so the preview can tell the user the truth instead.
  */
+export function coverOmittedReason(input: {
+  nraReference: string | null;
+  description: string | null;
+  closingDate: string | null;
+}): string | null {
+  const missing: string[] = [];
+  if (!input.nraReference) missing.push("NRA reference");
+  if (!input.description) missing.push("description");
+  if (!input.closingDate) missing.push("closing date");
+  return missing.length > 0 ? `tender record has no ${missing.join(", ")} - never invented` : null;
+}
 export function deliveryAddressLines(deliveryAddress?: string[] | null): string[] {
   return (deliveryAddress ?? []).filter((line) => !!line && line.trim() !== "");
 }

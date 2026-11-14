@@ -120,6 +120,56 @@ def test_fail_stale_jobs_recovers_a_stuck_general_job():
           malformed_alert.get("context", {}).get("company_id") == "co-a", malformed_alert)
 
 
+class RaisingOnFirstUpdate(FakeClient):
+    """The identical shape as RaisingOnSecondUpdate below, just inverted: the
+    FIRST update() call (marking the first stale job in the sweep as failed)
+    itself raises; every later update() call succeeds normally. Models a
+    transient Supabase failure (a network blip, a 500) hitting one stale
+    row's own write, not a malformed value on the row itself - the write-side
+    gap fail_stale_jobs() never got, unlike process_job()'s own mark-failed
+    write (Finding 188's RaisingOnSecondUpdate test below)."""
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.updates = 0
+
+    def update(self, table, filters, body):
+        self.updates += 1
+        if self.updates == 1:
+            raise RuntimeError("simulated transient Supabase failure marking a stale job failed")
+        return super().update(table, filters, body)
+
+
+def test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed():
+    print("fail_stale_jobs(): a write failure (transient Supabase error) marking ONE stale general "
+          "job failed must not abort the sweep for every OTHER genuinely stale job - the write-side "
+          "half of the 2026-10-29 QA pass's own bug class, never applied to this function's own "
+          "client.update() call (only its read-side started_at parse was guarded)")
+    now = datetime.datetime(2026, 11, 12, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    stale_started = now - datetime.timedelta(minutes=90)  # past STALE_AFTER_MINUTES=60
+    rows = [
+        {"id": "job-first", "kind": "generate_pack", "status": "generating", "engine": "general",
+         "started_at": iso(stale_started), "company_id": "co-a", "tender_id": "t-a"},
+        {"id": "job-second", "kind": "generate_pack", "status": "generating", "engine": "general",
+         "started_at": iso(stale_started), "company_id": "co-b", "tender_id": "t-b"},
+    ]
+    client = RaisingOnFirstUpdate(rows)
+    alerts = []
+    real_record = pgj.system_alerts.record
+    pgj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        pgj.fail_stale_jobs(client, now=now)
+    finally:
+        pgj.system_alerts.record = real_record
+    by_id = {r["id"]: r for r in rows}
+    check("the job whose own mark-failed write failed is reported, not silently stuck forever",
+          any("Could not mark" in a[1] for a, kw in alerts), alerts)
+    check("the OTHER stale job, queued after the one whose write failed, is still reached and "
+          "marked failed - the sweep does not abort on the first row's own write failure",
+          by_id["job-second"]["status"] == "failed", by_id["job-second"])
+    check("completed_at is set on the job that was actually marked failed",
+          bool(by_id["job-second"].get("completed_at")))
+
+
 class FixedDateTime(datetime.datetime):
     """Freezes datetime.datetime.now() to a given instant, same pattern as
     engine/pack/test_pdf_merge.py / engine/cv/test_generate_cv.py's own
@@ -460,8 +510,86 @@ def test_run_pack_cleans_up_storage_when_a_later_upload_fails():
           (client.uploads, client.removed))
 
 
+class FailsOnFirstTenderDocumentUpsert(FakeClient):
+    """register_sanral_tender(): records every upload()/remove() call;
+    raises on the FIRST tender_documents upsert, simulating an ordinary
+    transient Supabase write failure immediately after that doc_type's own
+    template file already landed in the 'tender-documents' bucket."""
+
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.uploads = []
+        self.removed = []
+        self.upsert_calls = []
+
+    def upload(self, bucket, path, local, content_type):
+        self.uploads.append((bucket, path))
+
+    def remove(self, bucket, paths):
+        self.removed.append((bucket, list(paths)))
+
+    def upsert(self, table, rows, on_conflict):
+        self.upsert_calls.append(table)
+        if table == "tender_documents":
+            raise RuntimeError("simulated transient Supabase failure writing tender_documents")
+
+
+def test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_fails():
+    print("register_sanral_tender(): a template already uploaded to the 'tender-documents' bucket "
+          "is cleaned up when the tender_documents write that immediately follows it then fails")
+    # Finding 459 (standing solution-architect review, 2026-11-12): the same
+    # Storage-orphan shape Findings 396 (engine/cv/process_cv_jobs.py), 397
+    # (engine/pack/process_pack_jobs.py) and 398 (this file's own run_pack())
+    # already fixed, found here independently at a DIFFERENT call site in
+    # this same file - register_sanral_tender(), the real SANRAL-intake
+    # write path (run_extraction() -> classify_documents() route=='sanral'),
+    # never swept by Finding 398's own closing note ("third and final
+    # instance... across the three process_*_jobs.py pack/CV bridges" - that
+    # closure was scoped to the pack-BUILD upload loops, not this separate
+    # intake-registration function). Before this fix, this function's own
+    # per-doc_type loop called client.upload() then client.upsert() back to
+    # back with no try/except around either: an upsert failure (an ordinary
+    # transient Supabase write error - the exact same realistic failure mode
+    # Findings 396/397/398 already established) right after that doc_type's
+    # own upload succeeded left the file sitting in the shared
+    # 'tender-documents' bucket with no tender_documents row ever pointing
+    # at it, and the exception propagated straight out through
+    # run_extraction() into process_job()'s own blanket except, which marks
+    # the job failed - the file is never removed, since nothing else in this
+    # repo sweeps this bucket for orphans either (confirmed by grep: the
+    # only Storage-delete capability this class has, client.remove(), is
+    # Finding 398's own addition, used only by run_pack() until now).
+    real_read_setup, real_check_fingerprint = pgj.intake.read_setup, pgj.intake.check_fingerprint
+    pgj.intake.read_setup = lambda tech: {"positions": []}
+    pgj.intake.check_fingerprint = lambda tech, family: {"status": "ok"}
+    client = FailsOnFirstTenderDocumentUpsert([])
+    tender = {"id": "t-1", "slug": "t1"}
+    decision = {"family": "FAM_X", "sanral_files": {
+        "technical_xlsm": "/tmp/does-not-exist/technical.xlsm",
+        "financial_xlsm": "/tmp/does-not-exist/financial.docx",
+    }}
+    try:
+        try:
+            pgj.register_sanral_tender(client, tender, decision, {})
+            raised = False
+        except RuntimeError:
+            raised = True
+    finally:
+        pgj.intake.read_setup, pgj.intake.check_fingerprint = real_read_setup, real_check_fingerprint
+
+    check("the original exception still propagates unchanged (process_job()'s own failure-marking logic is untouched)",
+          raised)
+    check("only the FIRST doc_type's template was ever uploaded - the loop stopped there, nothing to clean up for the second",
+          len(client.uploads) == 1 and client.uploads[0][1] == "t1/technical_xlsm.xlsm", client.uploads)
+    check("only one tender_documents write was attempted before the exception stopped the loop",
+          client.upsert_calls == ["tender_documents"], client.upsert_calls)
+    check("the already-uploaded technical_xlsm template was cleaned up (the bug this test guards)",
+          client.removed == [(pgj.TENDER_DOCS_BUCKET, ["t1/technical_xlsm.xlsm"])], client.removed)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
+    test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
     test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
     test_within_real_closing_date_uses_its_own_sast_day_not_a_naive_utc_slice()
@@ -470,6 +598,7 @@ def main():
     test_gather_pack_inputs_signatory_fallback()
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_run_pack_cleans_up_storage_when_a_later_upload_fails()
+    test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_fails()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

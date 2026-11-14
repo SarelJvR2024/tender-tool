@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { ConfirmSubmitButton } from "../_components/ConfirmSubmitButton";
 import { saveMyDetails, uploadMyCv, applyMyCvExtraction, discardMyCvExtraction } from "./actions";
-import { EXTRACTED_PERSON_FIELDS } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, needsSelectFallbackOption, personFieldDefaultTick, QUALIFICATION_LEVELS } from "@/lib/cvExtraction";
 
 export const instant = false;
 
@@ -56,6 +56,37 @@ function Field({ name, label, defaultValue, type = "text" }: { name: string; lab
   );
 }
 
+// Finding 467: ecsa_level/highest_level on this page's own separate manual
+// "My details" form used to be plain Field() <input>s, same gap Finding 466
+// closed on people/[id]/page.tsx's manual edit form, and the exact helper
+// that fix introduced (needsSelectFallbackOption) to keep a pre-existing
+// non-canonical stored value round-tripping unchanged on save instead of
+// being silently swapped for the <select>'s first real option.
+function SelectField({
+  name,
+  label,
+  defaultValue,
+  options,
+}: {
+  name: string;
+  label: string;
+  defaultValue: string | null;
+  options: readonly string[];
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-[11.5px] font-semibold text-foreground">{label}</label>
+      <select name={name} defaultValue={defaultValue ?? ""} className={inputClass}>
+        <option value="">- not recorded -</option>
+        {needsSelectFallbackOption(defaultValue, options) && (
+          <option value={defaultValue!}>{defaultValue} (not a SANRAL option - please update)</option>
+        )}
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function fmtDate(d: string | null) {
   return d ? new Date(d).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "—";
 }
@@ -74,7 +105,13 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
   const { data: person, error: personError } = companyId
     ? await supabase.from("people").select(
-        "id, name, phone, email, ecsa_level, ecsa_number, ecsa_expiry, sacpcmp_number, sacpcmp_expiry, highest_level, highest_description, highest_institution, highest_graduated",
+        // Finding 445: id_number/role/ecsa_date/sacpcmp_date/initial_* added
+        // so the review card below (same data cv-review.tsx's `current`
+        // prop already gets from a plain `select("*")`) can tell a verified
+        // CV value apart from one that would silently replace a different
+        // value already on file - this page had no "current" value at all
+        // for those columns before, so it couldn't make that check either.
+        "id, name, id_number, role, phone, email, ecsa_level, ecsa_number, ecsa_date, ecsa_expiry, sacpcmp_number, sacpcmp_date, sacpcmp_expiry, highest_level, highest_description, highest_institution, highest_graduated, initial_description, initial_institution, initial_graduated",
       ).eq("company_id", companyId).eq("linked_user_id", user.id).maybeSingle()
     : { data: null, error: null };
   if (personError) console.error("my-cv: people read failed", personError);
@@ -155,12 +192,12 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
             <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
               <Field name="phone" label="Phone" defaultValue={person.phone} />
               <Field name="email" label="Email" defaultValue={person.email} />
-              <Field name="ecsa_level" label="ECSA level" defaultValue={person.ecsa_level} />
+              <SelectField name="ecsa_level" label="ECSA level" defaultValue={person.ecsa_level} options={ECSA_LEVELS} />
               <Field name="ecsa_number" label="ECSA number" defaultValue={person.ecsa_number} />
               <Field name="ecsa_expiry" label="ECSA expiry" type="date" defaultValue={person.ecsa_expiry} />
               <Field name="sacpcmp_number" label="SACPCMP number" defaultValue={person.sacpcmp_number} />
               <Field name="sacpcmp_expiry" label="SACPCMP expiry" type="date" defaultValue={person.sacpcmp_expiry} />
-              <Field name="highest_level" label="Highest qualification level" defaultValue={person.highest_level} />
+              <SelectField name="highest_level" label="Highest qualification level" defaultValue={person.highest_level} options={QUALIFICATION_LEVELS} />
               <Field name="highest_description" label="Qualification" defaultValue={person.highest_description} />
               <Field name="highest_institution" label="Institution" defaultValue={person.highest_institution} />
               <Field name="highest_graduated" label="Graduated" type="date" defaultValue={person.highest_graduated} />
@@ -174,7 +211,7 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
         </Card>
 
         {(extractions ?? []).map((ex) => {
-          const proposal = (ex.proposed as { person?: Record<string, { value: string | null; evidence?: string }> }).person ?? {};
+          const proposal = (ex.proposed as { person?: Record<string, { value: string | null; evidence: string | null; verified: boolean; warnings: string[] }> }).person ?? {};
           // Finding 431: was a hand-typed subset of 10 keys, out of step with
           // lib/cvExtraction.ts's own canonical EXTRACTED_PERSON_FIELDS (17) -
           // see actions.ts applyMyCvExtraction()'s own header for the full
@@ -184,39 +221,72 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
           const fields = EXTRACTED_PERSON_FIELDS.filter((f) => proposal[f.key]);
           return (
             <Card key={ex.id} title="Review your AI-extracted CV">
+              <p className="mb-2 text-[11.5px] text-muted-foreground">
+                A field already ticked was traced to the CV&apos;s own text and nothing on file would be overwritten. A field
+                marked <strong className="text-warning">check this</strong> starts UNTICKED - AI couldn&apos;t confirm it, or
+                saving it would replace what&apos;s on file - look at it before ticking it yourself.
+              </p>
               <form action={applyMyCvExtraction}>
                 <input type="hidden" name="extraction_id" value={ex.id} />
-                {fields.map((f) => (
-                  <div key={f.key} className="flex items-center gap-2.5 py-1.5">
-                    <input type="checkbox" name={`use_${f.key}`} defaultChecked />
-                    <div className="w-40 shrink-0 text-xs text-muted-foreground">{f.key.replace(/_/g, " ")}</div>
-                    {/* Finding 432: used to be one plain text <input> for
-                        every field regardless of kind - a "select" field
-                        (ecsa_level/highest_level) could be retyped to any
-                        string at all, even though SANRAL's own form only
-                        accepts its exact dropdown label
-                        (engine/fill_conventional.py refuses any other one)
-                        and applyMyCvExtraction() now enforces that same
-                        option list server-side. Mirrors
-                        people/[id]/cv-review.tsx's own ValueInput: a real
-                        <select> for "select", password-masked for "secret",
-                        a date input for "date", plain text otherwise. */}
-                    {f.kind === "select" ? (
-                      <select className={`${inputClass} min-h-9`} name={`f_${f.key}`} defaultValue={proposal[f.key]?.value ?? ""}>
-                        <option value="">- choose -</option>
-                        {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    ) : (
-                      <input
-                        name={`f_${f.key}`}
-                        defaultValue={proposal[f.key]?.value ?? ""}
-                        type={f.kind === "date" ? "date" : f.kind === "secret" ? "password" : "text"}
-                        autoComplete="off"
-                        className={`${inputClass} min-h-9`}
-                      />
-                    )}
-                  </div>
-                ))}
+                {fields.map((f) => {
+                  const p = proposal[f.key];
+                  // Finding 445: this checkbox used to be unconditionally
+                  // `defaultChecked` - every proposed value, verified or not,
+                  // and with no check at all against what's already on file,
+                  // started ticked to save. people/[id]/cv-review.tsx's own
+                  // identical review card (the full People page, reviewing
+                  // the exact same cv_extraction_results row shape) already
+                  // guarded this with a verified+not-replacing check - this
+                  // self-service page silently had none of it, so an
+                  // employee who just clicked "Save ticked fields" (the
+                  // obvious action, with nothing here to suggest otherwise)
+                  // would save every low-confidence/unverified AI guess
+                  // straight into their own record, including one that
+                  // silently overwrote a different, possibly correct, value
+                  // already on file. Now shares cv-review.tsx's own formula
+                  // (lib/cvExtraction.ts personFieldDefaultTick()).
+                  const now = (person as unknown as Record<string, string | null>)[f.key] ?? null;
+                  const defaultTick = personFieldDefaultTick(p, now);
+                  const replaces = now != null && now !== "" && now !== (p.value ?? "");
+                  const reasons = [...(replaces ? ["Would replace what's on file."] : []), ...p.warnings];
+                  return (
+                    <div key={f.key} className="flex flex-col gap-0.5 border-t border-border py-1.5 first:border-t-0">
+                      <div className="flex items-center gap-2.5">
+                        <input type="checkbox" name={`use_${f.key}`} defaultChecked={defaultTick} aria-label={`Save ${f.label}`} />
+                        <div className="w-40 shrink-0 text-xs text-muted-foreground">{f.key.replace(/_/g, " ")}</div>
+                        {/* Finding 432: used to be one plain text <input> for
+                            every field regardless of kind - a "select" field
+                            (ecsa_level/highest_level) could be retyped to any
+                            string at all, even though SANRAL's own form only
+                            accepts its exact dropdown label
+                            (engine/fill_conventional.py refuses any other one)
+                            and applyMyCvExtraction() now enforces that same
+                            option list server-side. Mirrors
+                            people/[id]/cv-review.tsx's own ValueInput: a real
+                            <select> for "select", password-masked for "secret",
+                            a date input for "date", plain text otherwise. */}
+                        {f.kind === "select" ? (
+                          <select className={`${inputClass} min-h-9`} name={`f_${f.key}`} defaultValue={p.value ?? ""}>
+                            <option value="">- choose -</option>
+                            {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        ) : (
+                          <input
+                            name={`f_${f.key}`}
+                            defaultValue={p.value ?? ""}
+                            type={f.kind === "date" ? "date" : f.kind === "secret" ? "password" : "text"}
+                            autoComplete="off"
+                            className={`${inputClass} min-h-9`}
+                          />
+                        )}
+                        {!p.verified && <span className="text-[11px] font-semibold whitespace-nowrap text-warning">check this</span>}
+                      </div>
+                      {reasons.map((r, i) => (
+                        <div key={i} className="pl-[26px] text-[11px] text-warning">{r}</div>
+                      ))}
+                    </div>
+                  );
+                })}
                 <div className="mt-2.5 flex gap-2.5">
                   <button type="submit" className="min-h-10 cursor-pointer rounded-lg border-none bg-accent px-4 text-[13px] font-semibold text-accent-foreground">
                     Save ticked fields

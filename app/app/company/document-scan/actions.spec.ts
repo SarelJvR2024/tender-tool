@@ -212,6 +212,71 @@ describe("confirmVaultDocument - real update still succeeds", () => {
   });
 });
 
+const pendingPiResult = {
+  data: {
+    id: "result-4",
+    company_id: "company-1",
+    onboarding_upload_id: "upload-4",
+    document_kind: "pi_insurance_certificate",
+    fields: {},
+    review_status: "pending_review",
+    onboarding_uploads: { storage_path: "company-1/onboarding/raw-pi.pdf", original_filename: "pi.pdf" },
+  },
+  error: null,
+};
+
+// Standing solution-architect review (Finding 474): confirmVaultDocument()'s
+// generic VAULT_FIELD_COLUMNS loop used to write `cover_zar`
+// (pi_insurance_certificate -> companies.pi_insurance_cover_zar) as the raw,
+// unparsed form string straight onto a real numeric column - no Number()
+// conversion, no bound at all, unlike lib/companyProfileUpdate.ts's
+// buildCompanyUpdate() (the manual-edit/onboarding-wizard sibling writer for
+// this same column), which already refuses a negative value.
+describe("confirmVaultDocument - pi_insurance cover_zar must be a non-negative number", () => {
+  it("refuses a negative cover amount (reviewer typo) without writing or filing it", async () => {
+    const { client, removeCalls, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingPiResult], // loadPendingResult
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmVaultDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-4", use_cover_zar: "on", f_cover_zar: "-5000000" });
+    const url = await expectRedirect(confirmVaultDocument(fd));
+
+    expect(url).toContain("/company/document-scan?error=");
+    expect(decodeURIComponent(url)).toContain("must be a number of 0 or more");
+    // Rejected before the companies write or the storage copy/removal ran at all.
+    expect(updateCalls.length).toBe(0);
+    expect(removeCalls.length).toBe(0);
+  });
+
+  it("writes a real parsed number (not the raw string) and files normally for a valid cover amount", async () => {
+    const { client, removeCalls, updateCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingPiResult],
+        [{ data: { id: "company-1" }, error: null }], // real companies update match
+        [{ data: null, error: null }], // markApplied
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmVaultDocument } = await import("./actions");
+
+    const fd = formDataWith({ result_id: "result-4", use_cover_zar: "on", f_cover_zar: "5000000" });
+    const url = await expectRedirect(confirmVaultDocument(fd));
+
+    expect(url).toContain("saved=filed");
+    expect(updateCalls.some((c) => (c as { pi_insurance_cover_zar?: unknown }).pi_insurance_cover_zar === 5000000)).toBe(true);
+    const removedPaths = removeCalls.flat();
+    expect(removedPaths).toContain("company-1/onboarding/raw-pi.pdf");
+  });
+});
+
 const pendingIdResult = {
   data: {
     id: "result-2",

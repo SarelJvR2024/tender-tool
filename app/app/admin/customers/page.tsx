@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import { StatCard } from "@/components/tt/stat-card";
-import { buildCustomerRow, type CompanyOverviewRow } from "@/lib/customerRowData";
+import { buildCustomerRow, customerCounts, type CompanyOverviewRow } from "@/lib/customerRowData";
 import CustomerRow, { type Customer, type CustomerMember } from "./CustomerRow";
 import { impersonationConfigured } from "@/lib/impersonation";
 
@@ -39,9 +39,15 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
     buildCustomerRow(c, memberLists[i] as { data: CustomerMember[] | null; error: unknown }, readinessRows[i]),
   );
 
-  const testCount = customers.filter((c) => c.is_test_company).length;
-  const trialCount = customers.filter((c) => !c.is_test_company && c.subscription_status === "trialing").length;
-  const payingCount = customers.filter((c) => !c.is_test_company && c.subscription_status === "active").length;
+  // Finding (standing review, 2026-11-12): these counts used to be a raw
+  // `subscription_status === "trialing"/"active"` filter here - the exact
+  // never-rewritten column Finding 317 already found and fixed for this
+  // SAME `Customer` object's own status chip (CustomerRow.tsx), by reading
+  // `effectiveSubscriptionStatus` instead. That fix never reached this
+  // second, page-level consumer of the identical raw field, so a trial
+  // that lapsed with no payment on file still counted as an "Active trial"
+  // here forever - see customerCounts()'s own header for the full account.
+  const { testCount, trialCount, payingCount } = customerCounts(customers);
 
   return (
     <AppShell>

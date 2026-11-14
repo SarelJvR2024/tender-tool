@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   answerStatus,
+  designatedSignatoryFallback,
   localityStatus,
   matchStrengthStatus,
   roleStatus,
@@ -76,6 +77,74 @@ test("signatureAnswerStatus: chosen person has no signatory capacity on file is 
 test("signatureAnswerStatus: chosen person with a signatory capacity is confirmed", () => {
   const r = signatureAnswerStatus({ chosenId: "p1", chosenPerson: { name: "Jane Soap", signatory_capacity: "Director" }, optional: false });
   assert.deepEqual(r, { reviewStatus: "confirmed", checklistStatus: "included", value: "Jane Soap - Director", note: null });
+});
+
+// Finding (this pass): nobody chosen for THIS tender, but the company has a
+// real designated signatory on file - engine/general/process_general_jobs.py's
+// own gather_pack_inputs() falls back to exactly that (first person with a
+// signatory_capacity, oldest first), so the pack will NOT, in fact, come out
+// blank. Before this fix, this screen had no `fallback` parameter at all and
+// unconditionally reported "missing" here (see the "nobody chosen, required,
+// is missing" test above, which still passes unchanged because it passes no
+// fallback) - wrongly telling a reviewer to pick a signatory "before
+// generating the pack" even when the real pack generation would succeed via
+// the company's own default, same shape as pack-review-logic.ts's own
+// signatureStatus() already handles for SANRAL.
+test("signatureAnswerStatus: nobody chosen for this tender, but a company fallback signatory exists - needs_input, never missing", () => {
+  const r = signatureAnswerStatus({
+    chosenId: null,
+    chosenPerson: null,
+    optional: false,
+    fallback: { name: "Thabo Director", signatory_capacity: "Director" },
+  });
+  assert.equal(r.reviewStatus, "needs_input");
+  assert.equal(r.checklistStatus, "included_warning");
+  assert.equal(r.value, "Thabo Director - Director");
+  assert.match(r.note ?? "", /will default to Thabo Director/);
+});
+
+test("signatureAnswerStatus: nobody chosen and no fallback either (nobody on file has a signatory_capacity) is still missing", () => {
+  const r = signatureAnswerStatus({ chosenId: null, chosenPerson: null, optional: false, fallback: null });
+  assert.equal(r.reviewStatus, "missing");
+  assert.equal(r.checklistStatus, "not_included");
+});
+
+test("signatureAnswerStatus: a fallback existing doesn't matter once someone has actually been chosen", () => {
+  const r = signatureAnswerStatus({
+    chosenId: "p1",
+    chosenPerson: { name: "Jane Soap", signatory_capacity: "Director" },
+    optional: false,
+    fallback: { name: "Thabo Director", signatory_capacity: "Director" },
+  });
+  assert.deepEqual(r, { reviewStatus: "confirmed", checklistStatus: "included", value: "Jane Soap - Director", note: null });
+});
+
+// --- designatedSignatoryFallback --------------------------------------------
+
+test("designatedSignatoryFallback: nobody on file has a signatory_capacity returns null", () => {
+  assert.equal(
+    designatedSignatoryFallback([
+      { name: "A", signatory_capacity: null, created_at: "2026-01-01T00:00:00Z" },
+      { name: "B", signatory_capacity: null, created_at: "2026-01-02T00:00:00Z" },
+    ]),
+    null,
+  );
+});
+
+test("designatedSignatoryFallback: picks the OLDEST person with a signatory_capacity, not the first in array order or alphabetically", () => {
+  const r = designatedSignatoryFallback([
+    { name: "Zola (newer)", signatory_capacity: "Director", created_at: "2026-05-01T00:00:00Z" },
+    { name: "Amos (older)", signatory_capacity: "Financial Director", created_at: "2026-01-01T00:00:00Z" },
+  ]);
+  assert.deepEqual(r, { name: "Amos (older)", signatory_capacity: "Financial Director" });
+});
+
+test("designatedSignatoryFallback: skips a person with no signatory_capacity even if they're older", () => {
+  const r = designatedSignatoryFallback([
+    { name: "No capacity (oldest)", signatory_capacity: null, created_at: "2025-01-01T00:00:00Z" },
+    { name: "Has capacity", signatory_capacity: "Director", created_at: "2026-01-01T00:00:00Z" },
+  ]);
+  assert.deepEqual(r, { name: "Has capacity", signatory_capacity: "Director" });
 });
 
 test("localityStatus: matched is confirmed / included", () => {

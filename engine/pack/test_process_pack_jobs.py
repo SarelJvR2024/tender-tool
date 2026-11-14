@@ -570,6 +570,56 @@ def test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id():
           nested is not None and nested["context"].get("company_id") == "c-nested", alerts)
 
 
+class RaisingOnFirstUpdate(FakeClient):
+    """The identical shape as RaisingOnSecondUpdate above, just inverted: the
+    FIRST update() call (marking the first stale job in the sweep as failed)
+    itself raises; every later update() call succeeds normally. Models a
+    transient Supabase failure (a network blip, a 500) hitting one stale
+    row's own write, not a malformed value on the row itself - the write-side
+    gap fail_stale_jobs() never got, unlike process_job()'s own mark-failed
+    write above (Finding 188's RaisingOnSecondUpdate test)."""
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.updates = 0
+
+    def update(self, table, filters, body):
+        self.updates += 1
+        if self.updates == 1:
+            raise RuntimeError("simulated transient Supabase failure marking a stale job failed")
+        return super().update(table, filters, body)
+
+
+def test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed():
+    print("fail_stale_jobs(): a write failure (transient Supabase error) marking ONE stale job "
+          "failed must not abort the sweep for every OTHER genuinely stale job - the write-side "
+          "half of the 2026-10-29 QA pass's own bug class, never applied to this function's own "
+          "client.update() call (only its read-side started_at parse was guarded)")
+    now = datetime.datetime(2026, 11, 12, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    stale_started = now - datetime.timedelta(minutes=90)  # past STALE_AFTER_MINUTES=60
+    rows = [
+        {"id": "job-first", "status": "generating", "engine": "sanral",
+         "started_at": iso(stale_started), "company_id": "co-a", "tender_id": "t-a"},
+        {"id": "job-second", "status": "generating", "engine": "sanral",
+         "started_at": iso(stale_started), "company_id": "co-b", "tender_id": "t-b"},
+    ]
+    client = RaisingOnFirstUpdate(rows)
+    alerts = []
+    real_record = ppj.system_alerts.record
+    ppj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        ppj.fail_stale_jobs(client, now=now)
+    finally:
+        ppj.system_alerts.record = real_record
+    by_id = {r["id"]: r for r in rows}
+    check("the job whose own mark-failed write failed is reported, not silently stuck forever",
+          any("Could not mark" in a[1] or "could not mark" in a[1] for a, kw in alerts), alerts)
+    check("the OTHER stale job, queued after the one whose write failed, is still reached and "
+          "marked failed - the sweep does not abort on the first row's own write failure",
+          by_id["job-second"]["status"] == "failed", by_id["job-second"])
+    check("completed_at is set on the job that was actually marked failed",
+          bool(by_id["job-second"].get("completed_at")))
+
+
 def test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id():
     print("Finding 188: sync_tender_requirements()/sync_b7_setup()'s own 'could not read "
           "SETUP sheet' alerts carry company_id, read straight off the same row they already use")
@@ -777,6 +827,7 @@ def main():
     test_process_job_cleans_up_storage_when_a_later_upload_fails()
     test_suggested_person_label_flags_a_real_override_even_when_unresolved()
     test_could_not_mark_a_failed_pack_job_as_failed_alert_carries_company_id()
+    test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
     test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id()
     test_sync_tender_requirements_mid_batch_insert_failure_does_not_strand_a_tender_on_a_partial_position_list()
     test_cv_download_target_uses_the_safe_storage_path_not_the_raw_original_filename()

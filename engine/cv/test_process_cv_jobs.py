@@ -180,6 +180,59 @@ def test_fail_stale_jobs_survives_a_malformed_claimed_at():
           by_severity.get("corrupt", {}).get("company_id") == "c-corrupt", by_severity.get("corrupt"))
 
 
+class RaisingOnFirstStaleWrite(FakeQueue):
+    """The identical shape as RaisingOnSecondPatch above, just inverted and
+    scoped to fail_stale_jobs() instead of process_job(): the FIRST
+    mark-failed PATCH (for the first stale job the sweep reaches) itself
+    raises; every later PATCH succeeds normally. Models a transient
+    Supabase failure (a network blip, a 500) hitting one stale row's own
+    write, not a malformed value on the row itself - the write-side gap
+    fail_stale_jobs() never got, unlike process_job()'s own mark-failed
+    write above (Finding 188's RaisingOnSecondPatch test)."""
+    def __init__(self, rows):
+        super().__init__(rows)
+        self.patches = 0
+
+    def __call__(self, url, key, method, path, body=None):
+        if method == "PATCH":
+            self.patches += 1
+            if self.patches == 1:
+                raise RuntimeError("simulated transient Supabase failure marking a stale job failed")
+        return super().__call__(url, key, method, path, body)
+
+
+def test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed():
+    print("fail_stale_jobs(): a write failure (transient Supabase error) marking ONE stale CV job "
+          "failed must not abort the sweep for every OTHER genuinely stale job - the write-side "
+          "half of the 2026-10-29 QA pass's own bug class, never applied to this function's own "
+          "mark-failed PATCH call")
+    now = datetime.datetime(2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    stale = (now - datetime.timedelta(minutes=90)).isoformat()  # past STALE_AFTER_MINUTES=60
+    rows = [
+        {"id": "job-first", "company_id": "co-a", "person_id": "p-a", "status": "generating", "claimed_at": stale},
+        {"id": "job-second", "company_id": "co-b", "person_id": "p-b", "status": "generating", "claimed_at": stale},
+    ]
+    queue = RaisingOnFirstStaleWrite(rows)
+    alerts = []
+    original_request, original_record = pcj.supabase_request, pcj.system_alerts.record
+    pcj.supabase_request = queue
+    pcj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        pcj.fail_stale_jobs("https://x", "key", now=now)
+    finally:
+        pcj.supabase_request = original_request
+        pcj.system_alerts.record = original_record
+
+    by_id = {r["id"]: r for r in rows}
+    check("the job whose own mark-failed write failed is reported, not silently stuck forever",
+          any("Could not mark" in a[1] for a, kw in alerts), alerts)
+    check("the OTHER stale job, queued after the one whose write failed, is still reached and "
+          "marked failed - the sweep does not abort on the first row's own write failure",
+          by_id["job-second"]["status"] == "failed", by_id["job-second"])
+    check("completed_at is set on the job that was actually marked failed",
+          bool(by_id["job-second"].get("completed_at")))
+
+
 def test_adapt_person_row_carries_sacpcmp_date_through():
     print("adapt_person_row: a person's own confirmed SACPCMP registration date reaches "
           "generate_cv.py's profile dict, not just the number")
@@ -359,6 +412,7 @@ def test_process_job_cleans_up_storage_when_a_later_upload_fails():
 
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
+test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
 test_could_not_mark_a_failed_cv_job_as_failed_alert_carries_company_id()
 test_adapt_person_row_carries_sacpcmp_date_through()
 test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()

@@ -36,6 +36,31 @@ Covers:
      no absolute-URL resolution at all) is recorded as a 'failed' row with
      a reason, not an uncaught ValueError taking out the whole run - and the
      OTHER documents in the same run are still processed normally.
+  9/10. the final `client.insert(TABLE, row)` after a successful
+     download+upload can itself fail. A genuine, non-duplicate failure (DB
+     connectivity, a constraint this table doesn't actually have, etc.) must
+     be visible exactly like a download/upload failure - counted in
+     `failed`/`failures` and raising the run's one summary system_alerts
+     entry - not silently swallowed as a console-only NOTE, which is what
+     this function used to do for EVERY insert exception alike, with no
+     check of the error at all (Finding, 2026-11-11: the inline comment
+     above the `except` only ever explained the one case - a concurrent
+     run's own 23505 unique-constraint race, a real, expected, harmless
+     case this exact codebase already has an established way to recognise
+     - process_pack_jobs.py's claim_job()/record-provenance retries and
+     process_narrative_jobs.py's claim_job() both check for '23505' /
+     'duplicate key value violates unique constraint' before treating an
+     insert's own RuntimeError as benign - but the code here never actually
+     checked for it, so a 23505 and a genuinely different failure (a typo'd
+     column, a dropped connection, RLS misconfigured for the service role)
+     were handled identically: logged to the console only, in a background
+     job nobody watches (this module's own docstring: "no human needing to
+     prompt"), and then silently retried - and silently swallowed again -
+     on every future run, forever, with the already-downloaded file sitting
+     orphaned in Storage each time and NO record of why. Case 9 proves a
+     genuine failure is now surfaced; case 10 proves the original, correct
+     23505 case still stays silent (not a false alarm on every concurrent
+     run).
 
 Run: python3 engine/discovery/test_download_discovered_documents.py
 """
@@ -323,6 +348,75 @@ def main():
     fake.stop()
     fake2.stop()
     fake3.stop()
+
+    # --- case 9: a genuine (non-duplicate) insert failure after a real
+    # download+upload must be surfaced like any other failure, not silently
+    # swallowed -----------------------------------------------------------
+    class FailingInsertClient:
+        """Wraps a real client; insert() raises the given RuntimeError
+        message for one document_url, passes everything else (select,
+        upload, and inserts for other rows) straight through unchanged."""
+        def __init__(self, inner, fail_url, message):
+            self._inner, self._fail_url, self._message = inner, fail_url, message
+
+        def select(self, *a, **kw):
+            return self._inner.select(*a, **kw)
+
+        def upload(self, *a, **kw):
+            return self._inner.upload(*a, **kw)
+
+        def insert(self, table, row):
+            if row.get("document_url") == self._fail_url:
+                raise RuntimeError(self._message)
+            return self._inner.insert(table, row)
+
+    fake6 = Fake()
+    client6 = company_profiles.RestClient(fake6.url, "test-key")
+    failing_client = FailingInsertClient(
+        client6, url_a,
+        'POST discovered_opportunity_documents failed: 500 '
+        '{"code":"XX000","message":"connection to server lost"}')
+    ALERTS.clear()
+    summary7 = ddd.download_for_releases(
+        [{"ocid": "ocds-insert-fail", "contract_number": "RFQ-09/2026", "buyer": "City of Cape Town",
+          "title": "Insert failure case", "source": "capetown_procurement",
+          "documents": [{"url": url_a, "title": "Notice.pdf"}]}],
+        failing_client)
+    check("case 9: a genuine insert failure is counted as failed, not silently swallowed",
+          summary7["failed"] == 1, summary7)
+    check("case 9: the file was still actually uploaded to storage (only the DB row failed)",
+          fake6.storage_posts == 1)
+    check("case 9: no row ended up in the table at all for it (insert genuinely failed)",
+          not any(r["document_url"] == url_a for r in fake6.rows(ddd.TABLE)))
+    check("case 9: the insert failure is in `failures`, with its own reason, for alerting",
+          any(f["document_url"] == url_a and "connection to server lost" in f["error"] for f in summary7["failures"]),
+          summary7["failures"])
+    check("case 9: a summary system_alerts entry was raised for it - not just a console NOTE",
+          any(a["p_source"] == "discovery" and "failed to download" in a["p_message"] for a in ALERTS),
+          ALERTS)
+    fake6.stop()
+
+    # --- case 10: the original, correct behaviour for a REAL 23505 duplicate
+    # -key race (another concurrent run's own row winning first) must stay
+    # silent - this is not a false alarm every time two runs overlap --------
+    fake7 = Fake()
+    client7 = company_profiles.RestClient(fake7.url, "test-key")
+    duplicate_client = FailingInsertClient(
+        client7, url_b,
+        'POST discovered_opportunity_documents failed: 409 '
+        '{"code":"23505","message":"duplicate key value violates unique constraint '
+        '\\"discovered_opportunity_documents_release_key_document_url_key\\""}')
+    ALERTS.clear()
+    summary8 = ddd.download_for_releases(
+        [{"ocid": "ocds-dup-race", "contract_number": "RFQ-10/2026", "buyer": "City of Cape Town",
+          "title": "Duplicate race case", "source": "capetown_procurement",
+          "documents": [{"url": url_b, "title": "Book1.xlsx"}]}],
+        duplicate_client)
+    check("case 10: a genuine 23505 duplicate-key race stays NOT counted as failed",
+          summary8["failed"] == 0, summary8)
+    check("case 10: no system_alerts entry fires for the benign duplicate race",
+          len(ALERTS) == 0, ALERTS)
+    fake7.stop()
 
     print(f"\n{len(FAILS)} failure(s)" if FAILS else "\nAll checks passed.")
     if FAILS:

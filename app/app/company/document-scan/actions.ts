@@ -214,7 +214,42 @@ export async function confirmVaultDocument(formData: FormData) {
   for (const [field, column] of Object.entries(columns)) {
     if (!ticked(formData, field)) continue;
     const raw = str(formData, `f_${field}`);
-    update[column] = field === "bee_level" ? parseBeeLevel(raw) : raw;
+    if (field === "bee_level") {
+      update[column] = parseBeeLevel(raw);
+    } else if (field === "cover_zar") {
+      // Standing solution-architect review (Finding 474): `cover_zar`
+      // (pi_insurance_certificate -> companies.pi_insurance_cover_zar) is
+      // the one NUMBER_FIELDS entry this generic loop writes - every other
+      // VAULT_FIELD_COLUMNS field (grade_class, pin, bank_name, insurer,
+      // ...) is genuinely free text, so unlike those, this value was being
+      // written as the RAW STRING straight onto a real numeric column with
+      // no Number() conversion and no bound at all - not even the
+      // NaN-only check this file's own confirmExperienceReferenceLetter()
+      // sibling applies to its own value_rm field. review.tsx renders this
+      // as a type="number" input with no `min`, so a reviewer can freely
+      // retype a negative cover amount before confirming.
+      // companies.pi_insurance_cover_zar has exactly one other real writer
+      // - lib/companyProfileUpdate.ts's buildCompanyUpdate() (shared by the
+      // manual company-edit form and the onboarding wizard) - whose
+      // COMPANY_NUMERIC_FIELDS loop already refuses it outright on
+      // n < 0/non-finite (no FIELD_MAX entry: pi_insurance_cover_zar has no
+      // upper bound). Mirrored here. Unlike bee_level (Finding 473), this
+      // value is never written onto a real document - engine/fill_a_forms.py's
+      // only reference (f"R{pi['limit_of_indemnity_zar']:,} ...") feeds its
+      // own field_provenance/ACTIONS_TO_SIGN.md checklist log, not the
+      // signed A17 form text - but a negative value still shows up there
+      // and on the Company page's own display (formatZAR), and a
+      // non-numeric string sent straight to this column (bypassing the
+      // browser's own type="number" input) fails the write outright with
+      // a generic "Could not file this document" error instead of this
+      // check's own clear message.
+      const n = raw === null ? null : Number(raw);
+      if (n !== null && !Number.isFinite(n)) fail("PI insurance cover amount (R): must be a number.");
+      if (n !== null && n < 0) fail("PI insurance cover amount (R): must be a number of 0 or more.");
+      update[column] = n;
+    } else {
+      update[column] = raw;
+    }
     appliedFields.push(field);
   }
   if (result.document_kind === "bbbee_certificate" && ticked(formData, "bee_level")) {

@@ -309,6 +309,132 @@ def test_fail_stale_uploads_alerts_carry_company_id():
           by_upload.get("dead", {}).get("company_id") == "c-dead", by_upload.get("dead"))
 
 
+class RaisingOnFirstMatchingCall(FakeDB):
+    """Raises a simulated transient Supabase failure on the FIRST call whose
+    (method, path, body) matches `match`; every other call (including later
+    ones that also match) behaves normally. Models a transient Supabase
+    failure (a network blip, a 500) hitting exactly ONE of
+    fail_stale_uploads()'s own three read/write sites for one stuck row -
+    its self-heal check's own GET, the self-heal PATCH, or the mark-failed
+    PATCH - none of which had any try/except around them at all (unlike the
+    read-side started_at/claimed_at parse right above them, already guarded
+    by the 2026-10-29 QA pass)."""
+    def __init__(self, rows, match):
+        super().__init__(rows)
+        self._match = match
+        self._raised = False
+
+    def __call__(self, url, key, method, path, body=None):
+        if not self._raised and self._match(method, path, body):
+            self._raised = True
+            raise RuntimeError("simulated transient Supabase failure")
+        return super().__call__(url, key, method, path, body)
+
+
+def test_fail_stale_uploads_survives_a_read_failure_checking_for_an_existing_result():
+    print("fail_stale_uploads(): a read failure (transient Supabase error) checking ONE stale row's "
+          "own self-heal condition must not abort the sweep for every OTHER genuinely stale row - this "
+          "GET, and the two PATCH writes below it, had no try/except at all, unlike the read-side "
+          "classification_claimed_at parse right above them")
+    import datetime
+    now = datetime.datetime(2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=30)).isoformat()  # past STALE_AFTER_MINUTES=10
+    db = RaisingOnFirstMatchingCall(
+        [
+            {"id": "row-a", "company_id": "co-a", "status": "classifying", "classification_claimed_at": old},
+            {"id": "row-b", "company_id": "co-b", "status": "classifying", "classification_claimed_at": old},
+        ],
+        match=lambda method, path, body: method == "GET" and path.startswith("onboarding_document_results"),
+    )
+    alerts = []
+    original, original_record = poj.supabase_request, poj.system_alerts.record
+    poj.supabase_request = db
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        poj.fail_stale_uploads("url", "key", now=now)
+    finally:
+        poj.supabase_request = original
+        poj.system_alerts.record = original_record
+    rows = {r["id"]: r for r in db.tables["onboarding_uploads"]}
+    check("the row whose own self-heal check failed to read is reported, not silently stuck forever",
+          any("Could not check" in a[1] for a, kw in alerts), alerts)
+    check("that row is left 'classifying' (untouched), not wrongly marked anything",
+          rows["row-a"]["status"] == "classifying", rows["row-a"])
+    check("the OTHER stale row, queued after it, is still reached and marked failed - the sweep does "
+          "not abort on the first row's own read failure",
+          rows["row-b"]["status"] == "classification_failed", rows["row-b"])
+
+
+def test_fail_stale_uploads_survives_a_self_heal_write_failure():
+    print("fail_stale_uploads(): a write failure (transient Supabase error) self-healing ONE stale row "
+          "(whose result was already written) must not abort the sweep for every OTHER genuinely stale row")
+    import datetime
+    now = datetime.datetime(2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=30)).isoformat()
+    db = RaisingOnFirstMatchingCall(
+        [
+            {"id": "row-a", "company_id": "co-a", "status": "classifying", "classification_claimed_at": old},
+            {"id": "row-b", "company_id": "co-b", "status": "classifying", "classification_claimed_at": old},
+        ],
+        match=lambda method, path, body: method == "PATCH" and (body or {}).get("status") == "classified",
+    )
+    db.tables["onboarding_document_results"] = [
+        {"id": "r1", "onboarding_upload_id": "row-a", "review_status": "pending_review"},
+        {"id": "r2", "onboarding_upload_id": "row-b", "review_status": "pending_review"},
+    ]
+    alerts = []
+    original, original_record = poj.supabase_request, poj.system_alerts.record
+    poj.supabase_request = db
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        poj.fail_stale_uploads("url", "key", now=now)
+    finally:
+        poj.supabase_request = original
+        poj.system_alerts.record = original_record
+    rows = {r["id"]: r for r in db.tables["onboarding_uploads"]}
+    check("the row whose own self-heal write failed is reported, not silently stuck forever",
+          any("Could not self-heal" in a[1] for a, kw in alerts), alerts)
+    check("that row is left 'classifying' (untouched), not wrongly marked failed either",
+          rows["row-a"]["status"] == "classifying", rows["row-a"])
+    check("the OTHER stale row, with its own result already written too, is still reached and "
+          "self-healed to classified - the sweep does not abort on the first row's own write failure",
+          rows["row-b"]["status"] == "classified", rows["row-b"])
+
+
+def test_fail_stale_uploads_survives_a_mark_failed_write_failure():
+    print("fail_stale_uploads(): a write failure (transient Supabase error) marking ONE stale row "
+          "failed (no result on file) must not abort the sweep for every OTHER genuinely stale row - "
+          "the write-side half of the 2026-10-29 QA pass's own bug class, never applied to this "
+          "function's own mark-failed PATCH")
+    import datetime
+    now = datetime.datetime(2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=30)).isoformat()
+    db = RaisingOnFirstMatchingCall(
+        [
+            {"id": "row-a", "company_id": "co-a", "status": "classifying", "classification_claimed_at": old},
+            {"id": "row-b", "company_id": "co-b", "status": "classifying", "classification_claimed_at": old},
+        ],
+        match=lambda method, path, body: method == "PATCH" and (body or {}).get("status") == "classification_failed",
+    )
+    alerts = []
+    original, original_record = poj.supabase_request, poj.system_alerts.record
+    poj.supabase_request = db
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        poj.fail_stale_uploads("url", "key", now=now)
+    finally:
+        poj.supabase_request = original
+        poj.system_alerts.record = original_record
+    rows = {r["id"]: r for r in db.tables["onboarding_uploads"]}
+    check("the row whose own mark-failed write failed is reported, not silently stuck forever",
+          any("Could not mark" in a[1] for a, kw in alerts), alerts)
+    check("that row is left 'classifying' (untouched), not left in some half-updated state",
+          rows["row-a"]["status"] == "classifying", rows["row-a"])
+    check("the OTHER stale row, queued after it, is still reached and marked failed - the sweep does "
+          "not abort on the first row's own write failure",
+          rows["row-b"]["status"] == "classification_failed", rows["row-b"])
+
+
 def test_safe_update_alert_carries_company_id():
     # Finding 188 (2026-11-07): same gap, same fix shape, found independently
     # in this file's own _safe_update() - identical to extract_cv_fields.py's
@@ -498,6 +624,9 @@ def main():
     test_fail_stale_uploads_marks_old_classifying_rows_failed_and_leaves_fresh_ones_alone()
     test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
     test_fail_stale_uploads_alerts_carry_company_id()
+    test_fail_stale_uploads_survives_a_read_failure_checking_for_an_existing_result()
+    test_fail_stale_uploads_survives_a_self_heal_write_failure()
+    test_fail_stale_uploads_survives_a_mark_failed_write_failure()
     test_safe_update_alert_carries_company_id()
     test_process_upload_happy_path_writes_classified_with_every_result_field()
     test_process_upload_setup_error_releases_and_reraises_but_transient_error_releases_quietly()

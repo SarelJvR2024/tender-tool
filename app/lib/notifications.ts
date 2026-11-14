@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "./dates";
-import { DEADLINE_REMINDER_EXCLUDED_STAGES, DEADLINE_WINDOW_DAYS } from "./deadlineReminders";
+import {
+  DEADLINE_REMINDER_EXCLUDED_STAGES,
+  DEADLINE_WINDOW_DAYS,
+  tendersWithCancellationNotice,
+  type DeadlineWatchedDocRow,
+} from "./deadlineReminders";
 import { COMPANY_EXPIRY_FIELDS } from "./companyExpiryFields";
 
 export type AppNotification = {
@@ -104,6 +109,7 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
     { data: typeRows, error: typeRowsErr },
     { data: peopleRows, error: peopleRowsErr },
     { data: tenderRows, error: tenderRowsErr },
+    { data: cancellationDocs, error: cancellationDocsErr },
   ] = await Promise.all([
     supabase.from("companies").select(companyFields).maybeSingle(),
     supabase
@@ -118,6 +124,15 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
       .select("id, contract_no, description, closing_date, tender_packs!inner(id, pipeline_stage)")
       .not("closing_date", "is", null)
       .order("closing_date", { ascending: true }),
+    // QA finding (2026-11-12): feeds tendersWithCancellationNotice() below -
+    // the same helper scripts/send-deadline-reminders.ts's own
+    // filterCancelledTenders() uses (Finding 449) - so the bell stops
+    // nagging "Closes in N days" for a tender the buyer has already
+    // cancelled outright, right alongside the Tender Workspace's own
+    // "Cancellation notice" card and the corrigendum-alert email that
+    // already told these same recipients. See tendersWithCancellationNotice()'s
+    // own header (deadlineReminders.ts) for the full reasoning.
+    supabase.from("tender_watched_documents").select("tender_id, kind").eq("kind", "cancellation"),
   ]);
   // Standing review, 2026-11-06: 4th sweep blind spot (array/tuple
   // Promise.all destructures never match "const { data"). Real finding,
@@ -137,6 +152,18 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
     console.error("a notifications read failed", { companyErr, heldRowsErr, typeRowsErr, peopleRowsErr, tenderRowsErr });
     throw new Error(`getNotifications: a read failed (${err.message})`);
   }
+  // Deliberately NOT folded into the throw-on-error set above: unlike those
+  // 5 reads (a false "all clear" bug class, see this function's own header),
+  // a failure here only means the cancellation check below is skipped -
+  // same fail-OPEN choice scripts/send-deadline-reminders.ts's own
+  // filterCancelledTenders() makes for the identical secondary query
+  // (deadlineReminders.ts's own header for the full reasoning). Losing the
+  // cancellation exclusion for one page load is cosmetic staleness, not a
+  // missed deadline; crashing the whole bell over it would be worse.
+  if (cancellationDocsErr) {
+    console.error("tender_watched_documents read failed for notifications bell", cancellationDocsErr);
+  }
+  const cancelledTenderIds = tendersWithCancellationNotice((cancellationDocs ?? []) as unknown as DeadlineWatchedDocRow[]);
 
   const typeLabelById = new Map(((typeRows ?? []) as { id: string; label: string }[]).map((t) => [t.id, t.label]));
 
@@ -203,6 +230,12 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
     // bell kept nagging "Closes in N days" for a tender already dealt with.
     const stage = t.tender_packs[0]?.pipeline_stage;
     if (stage && (DEADLINE_REMINDER_EXCLUDED_STAGES as readonly string[]).includes(stage)) continue;
+    // QA finding (2026-11-12): same stale-signal shape as Finding 449 (the
+    // deadline-reminder email) - nothing clears tenders.closing_date, or
+    // this loop's own notion of it, once the buyer cancels the tender
+    // outright, so without this a cancelled tender kept nagging "Closes in
+    // N days" right up to its original, now-meaningless closing date.
+    if (cancelledTenderIds.has(t.id)) continue;
     const left = daysUntil(t.closing_date);
     if (!withinWindow(left, DEADLINE_WINDOW_DAYS) || left < 0) continue;
     notifications.push({

@@ -100,9 +100,53 @@ jobs:
           python-version: "3.13"
 
       - name: Install LibreOffice (for the .docx -> .pdf step) and Python deps
+        # System-Status item 83 (standing review, 2026-11-12): this step never
+        # installed `python3-uno` - the Debian package print_reports.py's own
+        # `import uno` (line 19) needs, and the one engine/worker/Dockerfile
+        # (the real worker image) already installs for exactly that reason
+        # (see its own comment: "python3-uno installs for Debian's own
+        # python3; expose it to this image's python3 too"). Nothing here ever
+        # exposed it to actions/setup-python's own, separately-built CPython
+        # either - that interpreter has its own, empty site-packages dir, so
+        # even having the apt package on the runner's SYSTEM python3 was never
+        # enough. Net effect: any test reaching assemble_pack.py's lazy
+        # `import print_reports` (build_submission_pack(), the real pack-build
+        # path) crashed with `ModuleNotFoundError: No module named 'uno'`,
+        # deterministically, on every run - confirmed live: engine/pack/test_b7_hard_stop.py
+        # failed with exactly that trace (reproduced in a disposable venv
+        # mirroring actions/setup-python's own isolated interpreter) until
+        # this fix, and passed clean once the package + shim lines below were
+        # added.
+        #
+        # Deliberately NOT the Dockerfile's own `.pth`-the-whole-dist-packages-dir
+        # trick, and NOT a bare `PYTHONPATH=/usr/lib/python3/dist-packages`
+        # either - both were tried first and both broke other, unrelated
+        # imports on this specific interpreter/pip combination: that one apt
+        # directory also carries Debian's own PyYAML/cryptography/etc builds
+        # (confirmed by listing it), compiled against the runner's SYSTEM
+        # python3, not this job's actions/setup-python 3.13 - exposing it
+        # pre-`pip install` made pip's own resolver see an already-"importable"
+        # `cryptography` on sys.path and skip installing pypdf's real,
+        # ABI-matching dependency, so the very next `import pypdf` (several
+        # steps later, inside assemble_pack.py/pdf_merge.py) crashed with a
+        # PyO3 Rust-extension ABI panic instead of the clean ModuleNotFoundError
+        # this fix exists to remove - confirmed directly by reproducing both
+        # the pip-skip and the resulting panic in a disposable venv. Exposing
+        # ONLY the two actual files `uno` needs (`uno.py`/`unohelper.py` -
+        # `uno.py` itself appends LibreOffice's own program dir to sys.path
+        # for the compiled pyuno.so it loads under the hood, so nothing else
+        # is needed) through a dedicated shim directory with no other
+        # package's name in it has no such collision: confirmed directly in
+        # the same disposable venv that every one of engine/worker/requirements.txt's
+        # own pinned packages (including a transitively-pulled `cryptography`)
+        # still resolves to pip's own, correct install, and `uno` still
+        # resolves to the shim.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libreoffice-writer
+          sudo apt-get install -y --no-install-recommends libreoffice-writer python3-uno
+          mkdir -p /tmp/uno-shim
+          ln -sf /usr/lib/python3/dist-packages/uno.py /usr/lib/python3/dist-packages/unohelper.py /tmp/uno-shim/
+          echo /tmp/uno-shim > "$(python3 -c 'import site; print(site.getsitepackages()[0])')/debian-uno.pth"
           pip install -r engine/worker/requirements.txt
 
       - name: Python dependency audit (pip-audit) - requirements.txt must carry zero known vulnerabilities

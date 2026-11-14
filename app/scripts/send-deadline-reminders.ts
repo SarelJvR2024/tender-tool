@@ -47,7 +47,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
-import { deadlineReminderCandidates, type DeadlineReminderCandidate, type DeadlineReminderTenderRow } from "../lib/deadlineReminders.ts";
+import { deadlineReminderCandidates, tendersWithCancellationNotice, type DeadlineReminderCandidate, type DeadlineReminderTenderRow, type DeadlineWatchedDocRow } from "../lib/deadlineReminders.ts";
 import { deadlineReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
@@ -134,6 +134,47 @@ export async function processDeadlineReminderCandidates(
   return { sent, skippedAlreadySent, skippedNoMembers };
 }
 
+/**
+ * QA finding (2026-11-12, this track's own pass): drops every candidate
+ * whose tender has at least one `tender_watched_documents` row with
+ * `kind === "cancellation"` - see `tendersWithCancellationNotice()`'s own
+ * header (`lib/deadlineReminders.ts`) for the full reasoning (the same
+ * shape Finding 448 fixed for `briefingReminders.ts`, a different signal
+ * and a different consumer). Scoped to just the tender ids already in
+ * play (typically a handful per run, not a full-table scan) - same shape
+ * as `runBriefingReminders()`'s own identical secondary query
+ * (`scripts/send-operational-alerts.ts`). Split out so this ordering is
+ * independently testable with a mocked Supabase client, same convention as
+ * `processDeadlineReminderCandidates()` above. Read-only - never writes
+ * `tenders.closing_date` or `tender_watched_documents` itself. Fails OPEN
+ * on a read error: logs and returns every candidate unfiltered, same
+ * behaviour as before this fix existed, rather than risk silently losing a
+ * real "closing in 3 days" warning over a flaky secondary query.
+ */
+export async function filterCancelledTenders(
+  supabase: SupabaseService,
+  candidates: DeadlineReminderCandidate[],
+): Promise<DeadlineReminderCandidate[]> {
+  if (candidates.length === 0) return candidates;
+  const tenderIds = Array.from(new Set(candidates.map((c) => c.tender.id)));
+  const { rows: docRows, error } = await fetchAllRows<DeadlineWatchedDocRow>(
+    (from, to) =>
+      supabase
+        .from("tender_watched_documents")
+        .select("tender_id, kind")
+        .in("tender_id", tenderIds)
+        .eq("kind", "cancellation")
+        .range(from, to),
+    20_000,
+  );
+  if (error) {
+    console.error("deadline reminders: could not read tender_watched_documents for cancellation check", error);
+    return candidates;
+  }
+  const cancelledTenderIds = tendersWithCancellationNotice(docRows);
+  return candidates.filter((c) => !cancelledTenderIds.has(c.tender.id));
+}
+
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -198,10 +239,20 @@ async function main() {
     return;
   }
 
-  const { sent, skippedAlreadySent, skippedNoMembers } = await processDeadlineReminderCandidates(supabase, candidates, appUrl);
+  // QA finding (2026-11-12): drop any candidate whose tender the buyer has
+  // already cancelled outright - see filterCancelledTenders()'s own header.
+  const liveCandidates = await filterCancelledTenders(supabase, candidates);
+  if (liveCandidates.length === 0) {
+    console.log(
+      `No tenders at a 3-day or 24-hour reminder threshold today (${candidates.length} candidate(s) suppressed - every one was for a tender with a cancellation notice on file).`
+    );
+    return;
+  }
+
+  const { sent, skippedAlreadySent, skippedNoMembers } = await processDeadlineReminderCandidates(supabase, liveCandidates, appUrl);
 
   console.log(
-    `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoMembers} with no registered company member, out of ${candidates.length} candidate tender/company/threshold pair(s).`
+    `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoMembers} with no registered company member, out of ${liveCandidates.length} candidate tender/company/threshold pair(s) (${candidates.length - liveCandidates.length} suppressed for a cancelled tender).`
   );
 }
 

@@ -22,6 +22,41 @@ describe("changesForDoc - mapping tender_watched_documents.changes into TenderCh
     ]);
   });
 
+  // Finding 446: engine/discovery/tender_updates.py's classify_document()
+  // writes changes.briefing = {date: null, cancelled: true, quote: ...} for
+  // a briefing cancelled or made non-compulsory (BRIEFING_CANCELLED_RE) - a
+  // real, deliberate sentinel, not "no briefing change at all". The old code
+  // only ever checked `briefing?.date`, which is falsy for this sentinel by
+  // design, so this fact was silently dropped from the corrigendum email.
+  it("maps a CANCELLED briefing even though its date is null (Finding 446)", () => {
+    const doc: WatchedDocRow = {
+      id: "d2b", kind: "addendum", title: null, summary: null,
+      changes: { briefing: { date: null, previous_date: null, cancelled: true, quote: "the compulsory briefing session is hereby cancelled" } },
+    };
+    expect(changesForDoc(doc)).toEqual([
+      { kind: "briefing", date: null, previousDate: null, quote: "the compulsory briefing session is hereby cancelled", cancelled: true },
+    ]);
+  });
+
+  // The exact real-world shape this bug mattered for: the SAME addendum both
+  // moves the closing date AND cancels the briefing. Before this fix,
+  // out.length was already > 0 from the closing_date change alone, so the
+  // "no structured change at all" fallback (doc.summary) never ran either -
+  // the cancellation had no path left to reach the email at all.
+  it("keeps a cancelled briefing alongside a closing_date change in the same document (Finding 446)", () => {
+    const doc: WatchedDocRow = {
+      id: "d2c", kind: "addendum", title: null, summary: null,
+      changes: {
+        closing_date: { date: "2026-12-01", previous_on_file: "2026-11-15", quote: "closing moved" },
+        briefing: { date: null, cancelled: true, quote: "briefing cancelled" },
+      },
+    };
+    expect(changesForDoc(doc)).toEqual([
+      { kind: "closing_date", date: "2026-12-01", previousDate: "2026-11-15", quote: "closing moved" },
+      { kind: "briefing", date: null, previousDate: null, quote: "briefing cancelled", cancelled: true },
+    ]);
+  });
+
   it("maps other_changes entries with a human label from the known kind vocabulary", () => {
     // QA pass, 2026-11-11 (Finding 415): this used to use kind: "clarification"
     // here - a DOCUMENT-level kind (DOC_KIND_LABEL) that find_other_changes()

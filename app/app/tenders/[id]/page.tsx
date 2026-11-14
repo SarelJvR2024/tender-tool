@@ -55,6 +55,7 @@ import { SubmissionLogisticsForm } from "./submission-logistics-form";
 import { DispatchStatusButton } from "@/components/tt/dispatch-status-button";
 import { TenderDocumentsMenu } from "./tender-documents-menu";
 import { TENDER_DOCS_BUCKET } from "@/lib/manualTender";
+import { scopeNeedsHumanReview } from "@/lib/tenderScope";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -424,9 +425,9 @@ export default async function TenderWorkspacePage({
   // today: that enrichment script isn't wired into the production fan-out,
   // so these columns are null for almost every tender. Shown only when this
   // tender genuinely has a value - never a fabricated number.
-  type ScopeRecordDetail = { scope_summary: string | null; pricing_model: string | null; value_band: string | null; confidence: string | null };
+  type ScopeRecordDetail = { scope_summary: string | null; pricing_model: string | null; value_band: string | null; confidence: string | null; source_note: string | null };
   const { data: scopeRecord } = tenderFacts
-    ? await supabase.from("tender_scope_records").select("scope_summary, pricing_model, value_band, confidence").eq("tender_id", id).maybeSingle()
+    ? await supabase.from("tender_scope_records").select("scope_summary, pricing_model, value_band, confidence, source_note").eq("tender_id", id).maybeSingle()
     : { data: null };
   const scopeRecordDetail = scopeRecord as ScopeRecordDetail | null;
   const valueEstimate = scopeRecordDetail?.value_band ?? null;
@@ -1419,6 +1420,13 @@ export default async function TenderWorkspacePage({
                           </div>
                           {scopeRecordDetail.confidence === "heuristic" && (
                             <div className="mt-0.5 text-[10px] text-muted-foreground">Keyword-matched from the listing text, not document-confirmed - treat as a starting point.</div>
+                          )}
+                          {/* source_note's own "NEEDS HUMAN REVIEW" stamp - see
+                              @/lib/tenderScope.ts's scopeNeedsHumanReview()
+                              header comment for the full
+                              AI-Call-Quality-Standard.md reasoning. */}
+                          {scopeNeedsHumanReview(scopeRecordDetail.source_note) && (
+                            <div className="mt-0.5 text-[10px] font-semibold text-destructive">AI-extracted summary still needs human review - treat as unverified.</div>
                           )}
                         </div>
                       )}

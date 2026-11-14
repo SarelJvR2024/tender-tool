@@ -54,7 +54,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
 import { printCutoffCandidates, type PrintCutoffTenderPackRow, type PrintCutoffTenderRow } from "../lib/printCutoffReminders.ts";
-import { briefingReminderCandidates, type BriefingReminderTenderRow } from "../lib/briefingReminders.ts";
+import { briefingReminderCandidates, tendersWithCancelledBriefing, type BriefingReminderTenderRow, type BriefingWatchedDocRow } from "../lib/briefingReminders.ts";
 import { clarificationWindowCandidates, type ClarificationTaskRow } from "../lib/clarificationWindowReminders.ts";
 import { printCutoffEmail, briefingReminderEmail } from "../lib/emailTemplates.ts";
 import { clarificationWindowReminderEmail } from "../lib/emailTemplatesTier1.ts";
@@ -244,6 +244,34 @@ export async function runBriefingReminders(supabase: SupabaseService, appUrl: st
   // claimed or sent for a filtered-out candidate, it's just discarded from
   // this in-memory list before any action is taken on it.
   if (opts.scopeCompanyId) candidates = candidates.filter((c) => c.companyId === opts.scopeCompanyId);
+  // Finding 448: tenders.briefing_date is never cleared when a briefing is
+  // cancelled (see tendersWithCancelledBriefing()'s own header) - without
+  // this, a cancelled briefing's 5-day/24-hour reminder would still fire
+  // for every candidate above. Scoped to just the tender ids already in
+  // play (typically a handful per run), not every pursued tender, to keep
+  // the extra query small. Read-only - never writes `changes` or any
+  // stored date; a failed read here fails OPEN (keeps every candidate,
+  // same as before this fix existed) rather than silently dropping a real
+  // reminder over a flaky secondary query.
+  if (candidates.length > 0) {
+    const tenderIds = Array.from(new Set(candidates.map((c) => c.tender.id)));
+    const { rows: briefingDocRows, error: docsError } = await fetchAllRows<BriefingWatchedDocRow>(
+      (from, to) =>
+        supabase
+          .from("tender_watched_documents")
+          .select("tender_id, first_seen_at, changes")
+          .in("tender_id", tenderIds)
+          .not("changes->briefing", "is", null)
+          .range(from, to),
+      20_000,
+    );
+    if (docsError) {
+      console.error("briefing: could not read tender_watched_documents for cancellation check", docsError);
+    } else {
+      const cancelledTenderIds = tendersWithCancelledBriefing(briefingDocRows);
+      candidates = candidates.filter((c) => !cancelledTenderIds.has(c.tender.id));
+    }
+  }
   let sent = 0;
   for (const { tender, companyId, daysLeft, threshold } of candidates) {
     // Same recipients-before-claim fix as runPrintCutoff() above, for the

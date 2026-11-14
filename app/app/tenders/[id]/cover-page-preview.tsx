@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatClosingDateTime } from "@/lib/dates";
 import { PrintPreviewButton } from "./print-preview-button";
-import { buildOuterEnvelopeLines, deliveryAddressLines } from "./cover-page-lines";
+import { buildOuterEnvelopeLines, coverOmittedReason, deliveryAddressLines } from "./cover-page-lines";
 
 /**
  * Cover-page preview (prompt 10, item 3). Read-only: shows exactly what
@@ -20,6 +20,18 @@ import { buildOuterEnvelopeLines, deliveryAddressLines } from "./cover-page-line
  * and/or CIPC number already on file (both ordinary /company fields most
  * companies set) saw a preview missing content that genuinely prints on
  * every real cover.
+ *
+ * Finding 465: `engine/pack/assemble_pack.py` only calls `make_outer()`/
+ * `make_inner()` at all when the tender's own NRA reference, description AND
+ * closing date are ALL on file - otherwise it produces NO cover pages
+ * whatsoever (`cover_reason`, logged, zero `pdf` for every cover section).
+ * This component had no equivalent check and always rendered a full fake
+ * cover with "- no X on file" placeholders for any missing field, directly
+ * contradicting its own "shows exactly what engine/make_envelope_covers.py
+ * prints" promise above in the one case that matters most. Now checks
+ * `coverOmittedReason()` first and, when any of the three is missing, shows
+ * an honest "no cover pages will be generated" notice instead of the fake
+ * preview box.
  *
  * Deliberately NOT editable. Sarel's spec asked for two user-editable
  * fields here (title wording, contact person) - checked `make_outer`/
@@ -78,6 +90,13 @@ export async function CoverPagePreview({
     company = data;
   }
 
+  // Finding 465: the real engine (engine/pack/assemble_pack.py) refuses to
+  // generate ANY of the three covers at all when one of these is missing -
+  // see cover-page-lines.ts's own header comment for the full incident.
+  // Checked first, before building the (otherwise-misleading) fake preview
+  // lines below.
+  const omittedReason = coverOmittedReason({ nraReference, description, closingDate });
+
   const closingText = closingDate ? (formatClosingDateTime(closingDate) ?? "—") : "- no closing date on file";
   const tendererLine = `TENDERER: ${company?.legal_name ?? "No company name on file"}`;
   const registeredAddress = company?.registered_address ?? null;
@@ -100,52 +119,73 @@ export async function CoverPagePreview({
     <div id="cover-page" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
       <div className="mb-0.5 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[15px] font-bold text-foreground">Cover page preview</div>
-        <PrintPreviewButton lines={printLines} />
+        {!omittedReason && <PrintPreviewButton lines={printLines} />}
       </div>
-      <div className="mb-3 text-xs text-muted-foreground">
-        What the Outer Envelope and Envelope covers will print, generated fresh with the pack - read-only; see below for
-        why.
-      </div>
-      {/* Anonymous/blind-submission check (System Admin/Tender Workspace
-          brief, 2026-10-25): no part of this app's extraction pipeline
-          (engine/general/requirements.py, the SANRAL manifest reader)
-          currently detects a "do not identify the bidder on the outer
-          envelope" clause - there is no schema column and no engine rule
-          to read this from, so there's nothing real to check yet. Shown as
-          an honest "not checked" note rather than a fabricated Yes/No -
-          same rule this file's own header comment already follows for its
-          two unbuilt editable fields. The real TENDERER line keeps showing
-          unconditionally below until this is actually built. */}
-      <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-warning">
-        Anonymous-submission check: not available yet - nothing in this tender&apos;s extracted requirements currently
-        flags whether the RFP forbids identifying your company on the outer envelope. Read the RFP&apos;s own submission
-        instructions by hand before relying on the tenderer line below.
-      </div>
-      <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
-        <div className="mb-2.5 text-[11px] text-muted-foreground">
-          {company?.logo_storage_path ? "Company logo" : "No logo on file"}
+      {omittedReason ? (
+        <>
+          <div className="mb-3 text-xs text-muted-foreground">
+            What the Outer Envelope and Envelope covers will print, generated fresh with the pack - read-only.
+          </div>
+          {/* Finding 465: matches assemble_pack.py's own cover_reason exactly
+              - the real pack build makes NO cover pages at all in this case,
+              so showing the fake "- no X on file" preview below would be a
+              false promise that a document is about to exist. */}
+          <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-warning">
+            No cover pages will be generated with this pack: {omittedReason}. Fill in the missing tender field(s) above
+            before generating - the real pack build never invents them, and will produce no Outer Envelope or Envelope 1/2
+            cover sheets at all until they&apos;re on file.
+          </div>
+        </>
+      ) : (
+        <div className="mb-3 text-xs text-muted-foreground">
+          What the Outer Envelope and Envelope covers will print, generated fresh with the pack - read-only; see below for
+          why.
         </div>
-        <div className="text-[13px] font-bold text-foreground">OUTER ENVELOPE</div>
-        <div className="mt-2.5 text-xs text-foreground">The South African National Roads Agency SOC Limited</div>
-        {addressLines.map((line, i) => (
-          <div key={i} className="text-xs text-foreground">{line}</div>
-        ))}
-        <div className="mt-2.5 text-xs font-bold text-foreground">CONTRACT {contractNo ?? "- no contract number on file"}</div>
-        {nraReference && <div className="text-xs font-bold text-foreground">{nraReference}</div>}
-        <div className="text-xs font-bold text-foreground uppercase">{description ?? "- no description on file"}</div>
-        <div className="mt-2.5 text-xs font-bold text-foreground">
-          TENDER CLOSES: {closingText}
-        </div>
-        <div className="mt-2.5 text-[11px] text-muted-foreground">Client: {buyer ?? "No client on file"}</div>
-        <div className="mt-1.5 text-[11px] text-muted-foreground">{tendererLine}</div>
-        {registeredAddress && <div className="text-[11px] text-muted-foreground">{registeredAddress}</div>}
-        {cipcRegistrationNumber && (
-          <div className="text-[11px] text-muted-foreground">CIPC Registration No: {cipcRegistrationNumber}</div>
-        )}
-      </div>
-      <div className="mt-2.5 text-[11px] text-muted-foreground">
-        Everything above comes from this tender and your company record - nothing here can be typed over yet.
-      </div>
+      )}
+      {!omittedReason && (
+        <>
+          {/* Anonymous/blind-submission check (System Admin/Tender Workspace
+              brief, 2026-10-25): no part of this app's extraction pipeline
+              (engine/general/requirements.py, the SANRAL manifest reader)
+              currently detects a "do not identify the bidder on the outer
+              envelope" clause - there is no schema column and no engine rule
+              to read this from, so there's nothing real to check yet. Shown as
+              an honest "not checked" note rather than a fabricated Yes/No -
+              same rule this file's own header comment already follows for its
+              two unbuilt editable fields. The real TENDERER line keeps showing
+              unconditionally below until this is actually built. */}
+          <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-warning">
+            Anonymous-submission check: not available yet - nothing in this tender&apos;s extracted requirements currently
+            flags whether the RFP forbids identifying your company on the outer envelope. Read the RFP&apos;s own submission
+            instructions by hand before relying on the tenderer line below.
+          </div>
+          <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
+            <div className="mb-2.5 text-[11px] text-muted-foreground">
+              {company?.logo_storage_path ? "Company logo" : "No logo on file"}
+            </div>
+            <div className="text-[13px] font-bold text-foreground">OUTER ENVELOPE</div>
+            <div className="mt-2.5 text-xs text-foreground">The South African National Roads Agency SOC Limited</div>
+            {addressLines.map((line, i) => (
+              <div key={i} className="text-xs text-foreground">{line}</div>
+            ))}
+            <div className="mt-2.5 text-xs font-bold text-foreground">CONTRACT {contractNo ?? "- no contract number on file"}</div>
+            {nraReference && <div className="text-xs font-bold text-foreground">{nraReference}</div>}
+            <div className="text-xs font-bold text-foreground uppercase">{description ?? "- no description on file"}</div>
+            <div className="mt-2.5 text-xs font-bold text-foreground">
+              TENDER CLOSES: {closingText}
+            </div>
+            <div className="mt-2.5 text-[11px] text-muted-foreground">Client: {buyer ?? "No client on file"}</div>
+            <div className="mt-1.5 text-[11px] text-muted-foreground">{tendererLine}</div>
+            {registeredAddress && <div className="text-[11px] text-muted-foreground">{registeredAddress}</div>}
+            {cipcRegistrationNumber && (
+              <div className="text-[11px] text-muted-foreground">CIPC Registration No: {cipcRegistrationNumber}</div>
+            )}
+          </div>
+          <div className="mt-2.5 text-[11px] text-muted-foreground">
+            Everything above comes from this tender and your company record - nothing here can be typed over yet.
+          </div>
+        </>
+      )}
     </div>
   );
 }

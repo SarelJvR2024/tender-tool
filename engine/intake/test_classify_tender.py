@@ -280,6 +280,39 @@ def test_read_setup_against_the_real_fixture():
           and all(p["managerial"] is False for p in setup["positions"]), setup)
 
 
+def test_read_setup_managerial_flag_accepts_the_same_wordings_as_the_sync_job(tmp_path="/tmp"):
+    """QA pass, standing solution-architect review (2026-11-12): read_setup()'s
+    own managerial check used to be `== "man"` after strip/lower only - never
+    "managerial"/"yes"/"y" - while process_pack_jobs.sync_tender_requirements()
+    (the SANRAL-discovery path's own writer of this exact column, reading the
+    SAME raw cell through this file's own shared read_required_positions())
+    already accepted all four. test_process_pack_jobs.py's own fixture already
+    treats "Y"/"N" as realistic SETUP cell wording, so this is reproduced
+    against a copy of the real fixture with its own PL position's Man/Non-Man
+    cell (SETUP!B8) changed from "Non-Man" to "Y" - the exact same real
+    workbook/cell read_setup() already reads everything else from in the test
+    above, one cell edited."""
+    print("read_setup: a Man/Non-Man cell worded 'Y' (not literally 'Man') is still read as managerial")
+    import shutil
+    import tempfile
+    store = tempfile.mkdtemp(prefix=f"managerial_wording_{os.getpid()}_")
+    copy_path = os.path.join(store, "managerial_wording.xlsm")
+    shutil.copy(TECH_WORKBOOK, copy_path)
+    wb = ct.Workbook(copy_path)
+    check("sanity: the real fixture's own PL managerial cell (SETUP!B8) is 'Non-Man' before this edit",
+          wb.cached("SETUP", "B8") == "Non-Man", wb.cached("SETUP", "B8"))
+    wb.set_value("SETUP", "B8", "Y")
+    wb.save(copy_path)
+
+    setup = ct.read_setup(copy_path)
+    pl = next(p for p in setup["positions"] if p["code"] == "PL")
+    check("PL is read as managerial=True for a 'Y' cell, same acceptance as the sync job's own writer",
+          pl["managerial"] is True, pl)
+    check("its sibling DS1 (still 'Non-Man', untouched) stays managerial=False - no over-widening",
+          next(p for p in setup["positions"] if p["code"] == "DS1")["managerial"] is False, setup)
+    shutil.rmtree(store, ignore_errors=True)
+
+
 def test_read_setup_closing_date_typed_as_text_is_still_read(tmp_path="/tmp"):
     """QA Finding, 2026-10-30: SETUP!C3 stores a genuine Excel date as a plain
     numeric serial (date FORMATTING is only a display style, not part of the
@@ -539,6 +572,7 @@ def main():
     test_classify_workbook_real_technical_financial_and_corrupt()
     test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline()
     test_read_setup_against_the_real_fixture()
+    test_read_setup_managerial_flag_accepts_the_same_wordings_as_the_sync_job()
     test_read_setup_closing_date_typed_as_text_is_still_read()
     test_find_nra_reference_single_ambiguous_and_none()
     test_find_closing_time_single_ambiguous_and_formats()

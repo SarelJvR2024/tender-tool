@@ -22,11 +22,11 @@ function daysFromNow(n: number): string {
 
 // A tender from the shared catalog this company has never pursued - the
 // realistic shape of most rows in `rows`, not an edge case.
-const UNPURSUED: DashboardTenderRow = { closing_date: daysFromNow(2), tender_packs: [] };
-const MY_FOUND: DashboardTenderRow = { closing_date: daysFromNow(3), tender_packs: [{ status: "draft", pipeline_stage: "found" }] };
-const MY_BIDDING: DashboardTenderRow = { closing_date: daysFromNow(10), tender_packs: [{ status: "draft", pipeline_stage: "bidding" }] };
-const MY_SUBMITTED: DashboardTenderRow = { closing_date: daysFromNow(1), tender_packs: [{ status: "confirmed", pipeline_stage: "submitted" }] };
-const MY_READY: DashboardTenderRow = { closing_date: daysFromNow(5), tender_packs: [{ status: "filled", pipeline_stage: "bidding" }] };
+const UNPURSUED: DashboardTenderRow = { id: "unpursued", closing_date: daysFromNow(2), tender_packs: [] };
+const MY_FOUND: DashboardTenderRow = { id: "my-found", closing_date: daysFromNow(3), tender_packs: [{ status: "draft", pipeline_stage: "found" }] };
+const MY_BIDDING: DashboardTenderRow = { id: "my-bidding", closing_date: daysFromNow(10), tender_packs: [{ status: "draft", pipeline_stage: "bidding" }] };
+const MY_SUBMITTED: DashboardTenderRow = { id: "my-submitted", closing_date: daysFromNow(1), tender_packs: [{ status: "confirmed", pipeline_stage: "submitted" }] };
+const MY_READY: DashboardTenderRow = { id: "my-ready", closing_date: daysFromNow(5), tender_packs: [{ status: "filled", pipeline_stage: "bidding" }] };
 
 test("stageOf: falls back to 'found' only because that's the correct default for a real pursued tender, not a generic 'no data' value", () => {
   assert.equal(stageOf(UNPURSUED), "found");
@@ -68,20 +68,20 @@ test("computeDashboardStats: counts only this company's own pursued tenders, ign
 });
 
 test("computeDashboardStats: 'closing this week' only ever counts MY tenders, even when unpursued rows close sooner", () => {
-  const closingSoonButNotMine: DashboardTenderRow = { closing_date: daysFromNow(1), tender_packs: [] };
+  const closingSoonButNotMine: DashboardTenderRow = { id: "not-mine", closing_date: daysFromNow(1), tender_packs: [] };
   const rows: DashboardTenderRow[] = [closingSoonButNotMine, MY_FOUND];
   const stats = computeDashboardStats(rows, 7);
   assert.equal(stats.closingThisWeekCount, 1); // only MY_FOUND (3 days out), not the unpursued one closing tomorrow
 });
 
 test("computeDashboardStats: a tender closing further out than the action window doesn't count, even when it's mine", () => {
-  const myFarOut: DashboardTenderRow = { closing_date: daysFromNow(30), tender_packs: [{ status: "draft", pipeline_stage: "found" }] };
+  const myFarOut: DashboardTenderRow = { id: "far-out", closing_date: daysFromNow(30), tender_packs: [{ status: "draft", pipeline_stage: "found" }] };
   const stats = computeDashboardStats([myFarOut], 7);
   assert.equal(stats.closingThisWeekCount, 0);
 });
 
 test("computeDashboardStats: a null closing_date never counts as 'closing this week' (missing is not zero days away)", () => {
-  const myUnknownClose: DashboardTenderRow = { closing_date: null, tender_packs: [{ status: "draft", pipeline_stage: "found" }] };
+  const myUnknownClose: DashboardTenderRow = { id: "unknown-close", closing_date: null, tender_packs: [{ status: "draft", pipeline_stage: "found" }] };
   const stats = computeDashboardStats([myUnknownClose], 7);
   assert.equal(stats.closingThisWeekCount, 0);
 });
@@ -99,10 +99,10 @@ test("computeDashboardStats: a null closing_date never counts as 'closing this w
 // needs action this week.
 test("computeDashboardStats: 'closing this week' excludes submitted/briefing_shortlisted/won/lost stages, even though they're still mine and still closing soon", () => {
   const myDoneButClosingSoon: Record<string, DashboardTenderRow> = {
-    submitted: { closing_date: daysFromNow(1), tender_packs: [{ status: "confirmed", pipeline_stage: "submitted" }] },
-    briefing_shortlisted: { closing_date: daysFromNow(2), tender_packs: [{ status: "confirmed", pipeline_stage: "briefing_shortlisted" }] },
-    won: { closing_date: daysFromNow(3), tender_packs: [{ status: "confirmed", pipeline_stage: "won" }] },
-    lost: { closing_date: daysFromNow(4), tender_packs: [{ status: "confirmed", pipeline_stage: "lost" }] },
+    submitted: { id: "s1", closing_date: daysFromNow(1), tender_packs: [{ status: "confirmed", pipeline_stage: "submitted" }] },
+    briefing_shortlisted: { id: "s2", closing_date: daysFromNow(2), tender_packs: [{ status: "confirmed", pipeline_stage: "briefing_shortlisted" }] },
+    won: { id: "s3", closing_date: daysFromNow(3), tender_packs: [{ status: "confirmed", pipeline_stage: "won" }] },
+    lost: { id: "s4", closing_date: daysFromNow(4), tender_packs: [{ status: "confirmed", pipeline_stage: "lost" }] },
   };
   for (const [stage, row] of Object.entries(myDoneButClosingSoon)) {
     const stats = computeDashboardStats([row], 7);
@@ -110,6 +110,46 @@ test("computeDashboardStats: 'closing this week' excludes submitted/briefing_sho
   }
   // A still-open stage closing in the same window must still be counted -
   // this isn't a blanket "never count mine", only the done stages.
-  const stillOpen: DashboardTenderRow = { closing_date: daysFromNow(1), tender_packs: [{ status: "draft", pipeline_stage: "bidding" }] };
+  const stillOpen: DashboardTenderRow = { id: "still-open", closing_date: daysFromNow(1), tender_packs: [{ status: "draft", pipeline_stage: "bidding" }] };
   assert.equal(computeDashboardStats([stillOpen], 7).closingThisWeekCount, 1);
+});
+
+// QA finding (2026-11-12, this track's own pass): the Dashboard's own
+// "Closing this week" stat read `tenders.closing_date` with no knowledge
+// at all of a whole-tender cancellation notice on file
+// (`tender_watched_documents.kind === "cancellation"`) - the exact same
+// stale-signal gap Finding 449 fixed for the "closing in 3 days/24 hours"
+// deadline-reminder EMAIL (`lib/deadlineReminders.ts`'s own
+// `tendersWithCancellationNotice()`), left explicitly open in that
+// finding's own write-up as a named, not-yet-investigated lead for this
+// exact stat card (and the topbar bell, fixed separately in
+// `lib/notifications.ts`). Still "mine" (myTenderRows keeps it, same as
+// the already-excluded pipeline stages above) and still nominally closing
+// within the window, but there is nothing left to action - a Partner
+// reading this card to decide what needs attention this week must not be
+// told a cancelled tender still needs attention.
+test("computeDashboardStats: 'closing this week' excludes a tender with a cancellation notice on file, even though it's mine and still closing soon", () => {
+  const cancelledButClosingSoon: DashboardTenderRow = {
+    id: "cancelled-1",
+    closing_date: daysFromNow(1),
+    tender_packs: [{ status: "draft", pipeline_stage: "bidding" }],
+  };
+  const stillOpen: DashboardTenderRow = {
+    id: "open-1",
+    closing_date: daysFromNow(2),
+    tender_packs: [{ status: "draft", pipeline_stage: "bidding" }],
+  };
+  const cancelledTenderIds = new Set(["cancelled-1"]);
+  const stats = computeDashboardStats([cancelledButClosingSoon, stillOpen], 7, cancelledTenderIds);
+  assert.equal(stats.closingThisWeekCount, 1); // only the still-open one
+  // myRows/activeBidsCount/packsReadyCount are untouched by this - a
+  // cancelled tender is still "mine" for every other stat, only the
+  // closing-soon signal (the one that goes stale on cancellation) changes.
+  assert.equal(stats.myRows.length, 2);
+  assert.equal(stats.activeBidsCount, 2);
+});
+
+test("computeDashboardStats: with no cancelledTenderIds argument at all, behaves exactly as before (back-compat default)", () => {
+  const row: DashboardTenderRow = { id: "x", closing_date: daysFromNow(1), tender_packs: [{ status: "draft", pipeline_stage: "bidding" }] };
+  assert.equal(computeDashboardStats([row], 7).closingThisWeekCount, 1);
 });

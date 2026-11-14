@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { buildCustomerRow, type CompanyOverviewRow } from "./customerRowData";
+import { buildCustomerRow, customerCounts, type CompanyOverviewRow } from "./customerRowData";
+import type { Customer } from "@/app/admin/customers/CustomerRow";
 import type { CustomerMember } from "@/app/admin/customers/CustomerRow";
 
 const COMPANY: CompanyOverviewRow = {
@@ -146,5 +147,47 @@ describe("buildCustomerRow()", () => {
   it("effectiveSubscriptionStatus is null when there is no subscription row at all", () => {
     const noSub = buildCustomerRow({ ...COMPANY, subscription_status: null }, { data: REAL_MEMBERS, error: null }, NO_READINESS);
     expect(noSub.effectiveSubscriptionStatus).toBeNull();
+  });
+});
+
+// A previously-missed sibling of Finding 317: /admin/customers's own
+// "Active trials"/"Paying subscribers" stat cards used to filter on each
+// Customer's RAW `subscription_status` (never rewritten once a trial lapses
+// with no payment) instead of `effectiveSubscriptionStatus` (the same fix
+// Finding 317 already applied to this exact object's own status chip, just
+// never reached this second consumer). customerCounts() is the fix,
+// extracted so the page-level aggregate is itself unit-testable.
+function customer(overrides: Partial<Pick<Customer, "is_test_company" | "subscription_status" | "effectiveSubscriptionStatus">>): Pick<Customer, "is_test_company" | "effectiveSubscriptionStatus"> {
+  return {
+    is_test_company: false,
+    effectiveSubscriptionStatus: null,
+    ...overrides,
+  };
+}
+
+describe("customerCounts()", () => {
+  it("a lapsed trial (raw status still 'trialing', effective status 'past_due') is NOT counted as an active trial", () => {
+    const lapsedTrial = customer({ subscription_status: "trialing", effectiveSubscriptionStatus: "past_due" });
+    const stillTrialing = customer({ subscription_status: "trialing", effectiveSubscriptionStatus: "trialing" });
+    const counts = customerCounts([lapsedTrial, stillTrialing]);
+    // The bug: filtering on the raw `subscription_status` field (both rows
+    // above are "trialing") would have read trialCount as 2 - this proves
+    // the fix reads the reconciled field instead, counting only the one
+    // trial that is genuinely still running.
+    expect(counts.trialCount).toBe(1);
+  });
+
+  it("counts a real paying company and excludes test companies from every count", () => {
+    const paying = customer({ effectiveSubscriptionStatus: "active" });
+    const testCompany = customer({ is_test_company: true, effectiveSubscriptionStatus: "active" });
+    const counts = customerCounts([paying, testCompany]);
+    expect(counts).toEqual({ testCount: 1, trialCount: 0, payingCount: 1 });
+  });
+
+  it("a cancelled/past_due company counts toward neither trialCount nor payingCount", () => {
+    const cancelled = customer({ effectiveSubscriptionStatus: "cancelled" });
+    const pastDue = customer({ effectiveSubscriptionStatus: "past_due" });
+    const counts = customerCounts([cancelled, pastDue]);
+    expect(counts).toEqual({ testCount: 0, trialCount: 0, payingCount: 0 });
   });
 });

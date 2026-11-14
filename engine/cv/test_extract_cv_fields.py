@@ -646,6 +646,57 @@ def test_fail_stale_uploads_alerts_carry_company_id():
           f"the genuinely-failed alert carries the upload's own company_id ({by_upload.get('dead')})")
 
 
+class RaisingOnOneGet(MemoryDb):
+    """Raises once, on the self-heal GET for exactly one named cv_upload id -
+    then behaves like a normal MemoryDb for every other call, including a
+    SECOND stale row's own GET/PATCH queued right after it."""
+    def __init__(self, files, raise_for_upload_id):
+        super().__init__(files)
+        self.raise_for_upload_id = raise_for_upload_id
+        self.raised = False
+
+    def request(self, url, key, method, path, body=None):
+        if (method == "GET" and not self.raised
+                and path.startswith(f"cv_extraction_results?cv_upload_id=eq.{self.raise_for_upload_id}")):
+            self.raised = True
+            raise RuntimeError("simulated transient Supabase failure reclaiming a stale upload")
+        return super().request(url, key, method, path, body)
+
+
+def test_fail_stale_uploads_survives_a_write_failure_reclaiming_one_stale_upload():
+    print("5d. fail_stale_uploads(): a transient failure reclaiming one stale upload doesn't "
+          "abort the sweep for a later stale upload (Finding 461)")
+    # Same unguarded-write shape Findings 454-457 just fixed in the 4 sibling stale-reclaim
+    # sweeps (process_pack_jobs/process_general_jobs/process_cv_jobs/process_onboarding_jobs) -
+    # this function's own self-heal GET and both PATCH calls sat outside any try/except, so a
+    # transient Supabase/PostgREST failure reclaiming ONE stuck cv_upload raised straight out of
+    # the loop, aborting the sweep for every OTHER genuinely-stuck row queued after it that cycle.
+    db = RaisingOnOneGet({}, raise_for_upload_id="first")
+    now = datetime.datetime(2026, 11, 12, 12, 0, tzinfo=datetime.timezone.utc)
+    old = (now - datetime.timedelta(minutes=x.STALE_AFTER_MINUTES * 3)).isoformat()
+    db.tables["cv_uploads"] = [
+        {"id": "first", "company_id": "c-first", "status": "extracting", "extraction_claimed_at": old},
+        {"id": "second", "company_id": "c-second", "status": "extracting", "extraction_claimed_at": old},
+    ]
+    alerts = []
+    real_request, real_record = x.supabase_request, x.system_alerts.record
+    x.supabase_request = db.request
+    x.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        x.fail_stale_uploads("u", "k", now=now)
+    finally:
+        x.supabase_request = real_request
+        x.system_alerts.record = real_record
+    rows = {r["id"]: r for r in db.tables["cv_uploads"]}
+    check(rows["first"]["status"] == "extracting",
+          f"the row whose reclaim failed is left untouched, still 'extracting' for retry next sweep ({rows['first']})")
+    check(rows["second"]["status"] == "extraction_failed",
+          f"a later stale row is still correctly reached and failed - the sweep did not abort ({rows['second']})")
+    check(any(a[0][0] == "cv_extract" and a[0][2] == "error" and "Could not reclaim" in a[0][1]
+              and (a[1].get("context") or {}).get("cv_upload_id") == "first" for a in alerts),
+          f"the failed reclaim is reported as its own alert naming the upload it couldn't reclaim ({alerts})")
+
+
 def test_safe_update_alert_carries_company_id():
     print("5d. _safe_update(): its own 'could not {what}' alert carries company_id too")
     # Finding 188 (2026-11-07): same gap as fail_stale_uploads()'s own 3
@@ -798,6 +849,7 @@ def main():
         test_queue(docx_path, tmp)
         test_fail_stale_uploads_self_heals_a_row_whose_result_was_already_written()
         test_fail_stale_uploads_alerts_carry_company_id()
+        test_fail_stale_uploads_survives_a_write_failure_reclaiming_one_stale_upload()
         test_safe_update_alert_carries_company_id()
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()

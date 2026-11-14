@@ -101,7 +101,7 @@ for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "pack_generator"), os.path.join(E
         sys.path.insert(0, p)
 
 import confirm_pack  # noqa: E402
-from suggest_pack import read_required_positions, score_candidate  # noqa: E402
+from suggest_pack import read_required_positions, score_candidate, is_managerial  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
 import sanral_b7  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
@@ -966,20 +966,38 @@ def fail_stale_jobs(client, now=None):
                                                       "started_at": started})
             continue
         if started_dt < cutoff:
-            client.update("pack_generation_jobs", {"id": job["id"], "status": "generating"}, {
-                "status": "failed", "completed_at": _ts(),
-                "error_message": f"The pack builder stopped mid-job (no result after {STALE_AFTER_MINUTES} "
-                                 "minutes). Nothing was produced - request the pack again."})
+            # Standing review, 2026-11-12: the write below used to sit outside
+            # any try/except - a write failure marking THIS stale job failed
+            # (a transient Supabase error, a 500, same realistic failure mode
+            # already guarded for process_job()'s own mark-failed write,
+            # Finding 188's RaisingOnSecondUpdate test) raised straight out of
+            # this loop, aborting the stale-reclaim sweep for every OTHER
+            # genuinely stale job queued after it, AND - since fail_stale_
+            # jobs() is process_pending()'s own first call, with no
+            # try/except around it either - the entire per-job pack-build
+            # loop for that whole poll cycle, repeatedly, every cycle, until
+            # a human fixed it by hand. The read-side guard immediately above
+            # (the malformed started_at ValueError) already protects the
+            # PARSE; this protects the WRITE the same way.
+            try:
+                client.update("pack_generation_jobs", {"id": job["id"], "status": "generating"}, {
+                    "status": "failed", "completed_at": _ts(),
+                    "error_message": f"The pack builder stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                     "minutes). Nothing was produced - request the pack again."})
+            except Exception as e:
+                system_alerts.record("pack", f"Could not mark a stuck SANRAL pack job as failed "
+                                             f"({type(e).__name__}: {e}) - it is still stuck 'generating' and will "
+                                             "be retried on the next stale-reclaim sweep.", "error", exc=e,
+                                     context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                              "tender_id": job.get("tender_id"), "started_at": started})
+                print(f"[skipped] {job['id']}: could not mark stale job failed ({type(e).__name__}: {e}) - "
+                      "the rest of this sweep continues")
+                continue
             print(f"[failed] {job['id']}: stale 'generating' since {started}")
             system_alerts.record("pack", f"A SANRAL pack job was stuck in 'generating' for over {STALE_AFTER_MINUTES} "
                                          "minutes (the worker died mid-job) and was marked failed", "error",
                                  context={"job_id": job["id"], "company_id": job.get("company_id"),
                                           "tender_id": job.get("tender_id"), "started_at": started})
-
-
-def _managerial(v):
-    s = str(v or "").strip().lower().replace("-", "").replace(" ", "")
-    return s in ("man", "managerial", "yes", "y")
 
 
 def sync_tender_requirements(client, work_root):
@@ -1034,7 +1052,7 @@ def sync_tender_requirements(client, work_root):
                     client.insert("tender_requirements", [{
                         "tender_id": d["tender_id"], "company_id": d.get("company_id"), "position_code": p["code"],
                         "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
-                        "managerial": _managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
+                        "managerial": is_managerial(p.get("managerial")), "is_alternate": alt} for p, alt in rows])
                 except Exception as e:
                     # QA pass, 2026-11-09: a hosted worker and a hand-run
                     # --once CAN overlap (Automated-Fulfillment-Deployment.md's

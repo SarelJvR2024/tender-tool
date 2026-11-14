@@ -154,11 +154,44 @@ def fail_stale_uploads(url, key, now=None):
             # reviewing a result never touches the upload row's own status.
             # Found 2026-11-01 (worker/job-queue rotation). Self-heal instead:
             # a result already exists means the work actually finished.
-            existing = supabase_request(url, key, "GET",
-                                        f"onboarding_document_results?onboarding_upload_id=eq.{up['id']}&select=id")
+            # Standing review, 2026-11-12 (Finding 454's own write-side sibling
+            # lead): all three calls below (this self-heal check's own GET,
+            # the self-heal PATCH, and the mark-failed PATCH) used to sit
+            # outside any try/except - a transient Supabase failure (a
+            # network blip, a 500) hitting ANY one of them for one stuck row
+            # raised straight out of this loop, aborting the stale-reclaim
+            # sweep for every OTHER genuinely stuck upload queued after it.
+            # The read-side guard above (the malformed claimed_at ValueError)
+            # already protects the PARSE; this protects all three WRITES
+            # (the GET included - it round-trips through the same REST layer
+            # and can fail the identical way) the same way.
+            try:
+                existing = supabase_request(url, key, "GET",
+                                            f"onboarding_document_results?onboarding_upload_id=eq.{up['id']}&select=id")
+            except Exception as e:
+                system_alerts.record("onboarding_scan", f"Could not check whether a stuck onboarding "
+                                                         f"classification already had a result written "
+                                                         f"({type(e).__name__}: {e}) - it is still stuck "
+                                                         "'classifying' and will be retried on the next "
+                                                         "stale-reclaim sweep.", "error", exc=e,
+                                     context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id")})
+                print(f"[skipped] onboarding_upload {up['id']}: could not check for an existing result "
+                      f"({type(e).__name__}: {e}) - the rest of this sweep continues")
+                continue
             if existing:
-                supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
-                    "status": "classified", "classification_completed_at": _now_iso(), "classification_error": None})
+                try:
+                    supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
+                        "status": "classified", "classification_completed_at": _now_iso(), "classification_error": None})
+                except Exception as e:
+                    system_alerts.record("onboarding_scan", f"Could not self-heal a stuck onboarding "
+                                                             f"classification to 'classified' ({type(e).__name__}: "
+                                                             f"{e}) even though its result was already written - "
+                                                             "it is still stuck 'classifying' and will be retried "
+                                                             "on the next stale-reclaim sweep.", "error", exc=e,
+                                         context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id")})
+                    print(f"[skipped] onboarding_upload {up['id']}: could not self-heal to classified "
+                          f"({type(e).__name__}: {e}) - the rest of this sweep continues")
+                    continue
                 print(f"[recovered] onboarding_upload {up['id']}: stale 'classifying' since {claimed}, but its "
                       "result was already written - marked classified, not failed")
                 system_alerts.record("onboarding_scan", f"An onboarding document classification was stuck "
@@ -168,10 +201,20 @@ def fail_stale_uploads(url, key, now=None):
                                                          "failed", "warning",
                                      context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id")})
                 continue
-            supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
-                "status": "classification_failed", "classification_completed_at": _now_iso(),
-                "classification_error": f"The classification worker stopped mid-job (no result after "
-                                        f"{STALE_AFTER_MINUTES} minutes). Upload this file again."})
+            try:
+                supabase_request(url, key, "PATCH", f"onboarding_uploads?id=eq.{up['id']}&status=eq.classifying", {
+                    "status": "classification_failed", "classification_completed_at": _now_iso(),
+                    "classification_error": f"The classification worker stopped mid-job (no result after "
+                                            f"{STALE_AFTER_MINUTES} minutes). Upload this file again."})
+            except Exception as e:
+                system_alerts.record("onboarding_scan", f"Could not mark a stuck onboarding classification as "
+                                                         f"failed ({type(e).__name__}: {e}) - it is still stuck "
+                                                         "'classifying' and will be retried on the next "
+                                                         "stale-reclaim sweep.", "error", exc=e,
+                                     context={"onboarding_upload_id": up["id"], "company_id": up.get("company_id")})
+                print(f"[skipped] onboarding_upload {up['id']}: could not mark stale upload failed "
+                      f"({type(e).__name__}: {e}) - the rest of this sweep continues")
+                continue
             print(f"[failed] onboarding_upload {up['id']}: stale 'classifying' since {claimed}")
             system_alerts.record("onboarding_scan", f"An onboarding document classification was stuck for over "
                                                      f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and "

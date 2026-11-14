@@ -396,11 +396,29 @@ def fail_stale_jobs(url, key, now=None):
                                                       "claimed_at": claimed})
             continue
         if claimed_dt < cutoff:
-            supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.generating", {
-                "status": "failed", "completed_at": _now_iso(),
-                "error_message": f"The CV builder stopped mid-job (no result after {STALE_AFTER_MINUTES} "
-                                 "minutes). Nothing was produced - request the CV again.",
-            })
+            # Standing review, 2026-11-12 (Finding 454's own write-side sibling
+            # lead): this write used to sit outside any try/except - a write
+            # failure marking THIS stale job failed (a transient Supabase
+            # error, a 500) raised straight out of this loop, aborting the
+            # stale-reclaim sweep for every OTHER genuinely stale job queued
+            # after it. The read-side guard immediately above (the malformed
+            # claimed_at ValueError) already protects the PARSE; this
+            # protects the WRITE the same way.
+            try:
+                supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.generating", {
+                    "status": "failed", "completed_at": _now_iso(),
+                    "error_message": f"The CV builder stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                     "minutes). Nothing was produced - request the CV again.",
+                })
+            except Exception as e:
+                system_alerts.record("cv", f"Could not mark a stuck CV job as failed ({type(e).__name__}: {e}) - "
+                                           "it is still stuck 'generating' and will be retried on the next "
+                                           "stale-reclaim sweep.", "error", exc=e,
+                                     context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                              "person_id": job.get("person_id"), "claimed_at": claimed})
+                print(f"[skipped] {job['id']}: could not mark stale job failed ({type(e).__name__}: {e}) - "
+                      "the rest of this sweep continues")
+                continue
             print(f"[failed] {job['id']}: stale 'generating' since {claimed}")
             system_alerts.record("cv", f"A CV job was stuck in 'generating' for over {STALE_AFTER_MINUTES} minutes "
                                        "(the worker died mid-job) and was marked failed", "error",

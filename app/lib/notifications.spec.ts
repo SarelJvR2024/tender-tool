@@ -17,6 +17,7 @@ function stubSupabase(opts: {
   types?: Record<string, unknown>[];
   people?: Record<string, unknown>[];
   tenders?: Record<string, unknown>[];
+  watchedDocs?: Record<string, unknown>[];
   /** Table name whose read should come back with a real Supabase error, e.g. "held_registrations". */
   erroringTable?: string;
 }) {
@@ -25,6 +26,7 @@ function stubSupabase(opts: {
     registration_types: opts.types ?? [],
     people: opts.people ?? [],
     tenders: opts.tenders ?? [],
+    tender_watched_documents: opts.watchedDocs ?? [],
   };
   const errFor = (table: string) => (table === opts.erroringTable ? { message: `${table} read failed` } : null);
   return {
@@ -220,5 +222,85 @@ describe("getNotifications - tender deadlines exclude stages already past the de
     });
     const notifications = await getNotifications(supabase);
     expect(notifications.map((n) => n.id)).toContain("deadline:t3");
+  });
+});
+
+// QA finding (2026-11-12, this track's own pass): the bell's "closing soon"
+// deadline loop read `tenders.closing_date` with no knowledge at all of a
+// whole-tender cancellation notice on file
+// (`tender_watched_documents.kind === "cancellation"`) - the exact same
+// stale-signal shape Finding 449 fixed for the "closing in 3 days/24 hours"
+// deadline-reminder EMAIL (`lib/deadlineReminders.ts`'s own
+// `tendersWithCancellationNotice()`), left explicitly open in that
+// finding's own write-up as a named, not-yet-investigated lead for this
+// exact surface (the bell is shown on every signed-in page - the most
+// likely place a stale warning is actually seen). Real effect pre-fix: the
+// SAME recipients already told via a "Cancellation notice" card on the
+// Tender Workspace page, and via the corrigendum-alert email the moment the
+// notice was first seen, would keep seeing "Closes in N days"/"Closes
+// today" on the topbar bell right up to the original, now-meaningless
+// closing date.
+describe("getNotifications - a cancelled tender no longer surfaces a stale closing-soon bell notification", () => {
+  it("does NOT surface a closing-soon notification once a cancellation notice is on file", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      tenders: [
+        {
+          id: "t4",
+          contract_no: "C4",
+          description: "Tender 4",
+          closing_date: daysFromNow(2),
+          tender_packs: [{ id: "p4", pipeline_stage: "bidding" }],
+        },
+      ],
+      watchedDocs: [{ tender_id: "t4", kind: "cancellation" }],
+    });
+    const notifications = await getNotifications(supabase);
+    expect(notifications.map((n) => n.id)).not.toContain("deadline:t4");
+  });
+
+  it("still surfaces a closing-soon notification for a DIFFERENT tender that is still genuinely open", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      tenders: [
+        {
+          id: "t5",
+          contract_no: "C5",
+          description: "Tender 5 (cancelled)",
+          closing_date: daysFromNow(1),
+          tender_packs: [{ id: "p5", pipeline_stage: "bidding" }],
+        },
+        {
+          id: "t6",
+          contract_no: "C6",
+          description: "Tender 6 (open)",
+          closing_date: daysFromNow(2),
+          tender_packs: [{ id: "p6", pipeline_stage: "bidding" }],
+        },
+      ],
+      watchedDocs: [{ tender_id: "t5", kind: "cancellation" }],
+    });
+    const notifications = await getNotifications(supabase);
+    const ids = notifications.map((n) => n.id);
+    expect(ids).not.toContain("deadline:t5");
+    expect(ids).toContain("deadline:t6");
+  });
+
+  it("ignores a non-cancellation document kind (e.g. an addendum) - only 'cancellation' suppresses the deadline", async () => {
+    const supabase = stubSupabase({
+      company: blankCompany,
+      tenders: [
+        {
+          id: "t7",
+          contract_no: "C7",
+          description: "Tender 7",
+          closing_date: daysFromNow(2),
+          tender_packs: [{ id: "p7", pipeline_stage: "bidding" }],
+        },
+      ],
+      watchedDocs: [{ tender_id: "t7", kind: "addendum" }],
+    });
+    const notifications = await getNotifications(supabase);
+    expect(notifications.map((n) => n.id)).toContain("deadline:t7");
   });
 });

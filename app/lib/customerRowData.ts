@@ -141,3 +141,36 @@ export function buildCustomerRow(
     effectiveSubscriptionStatus: effectiveSubscriptionStatusValue,
   };
 }
+
+/**
+ * The 3 headline counts /admin/customers shows above the table (standing
+ * review, 2026-11-12, a previously-missed sibling of Finding 317). `page.tsx`
+ * used to compute `trialCount`/`payingCount` itself, straight off each
+ * `Customer`'s own RAW `subscription_status` - the exact same "stays
+ * 'trialing' forever once a trial lapses with no payment ever on file"
+ * column Finding 317 already found and fixed for THIS SAME `Customer`
+ * object's own status chip (`CustomerRow.tsx`), by switching that one
+ * consumer to `effectiveSubscriptionStatus` instead. Finding 317's own fix
+ * never touched this second, page-level consumer of the identical raw
+ * field - confirmed by reading that finding's own write-up, which only
+ * ever discusses the chip's tone - so a lapsed, non-paying trial still
+ * counted toward "Active trials" here forever, inflating the one number on
+ * this page a platform admin would actually use to judge the trial
+ * pipeline's health (which accounts need chasing before they go stale).
+ * `payingCount` is included here too for the same reason even though
+ * `effectiveSubscriptionStatus()` never remaps a raw "active" row to
+ * anything else today (so this one's current output is unchanged) - this
+ * is the one canonical place that reads a `Customer`'s own subscription
+ * state for a count, not a second, independently-drifting copy of the
+ * same filter.
+ */
+export function customerCounts(
+  customers: Pick<Customer, "is_test_company" | "effectiveSubscriptionStatus">[],
+): { testCount: number; trialCount: number; payingCount: number } {
+  const nonTest = customers.filter((c) => !c.is_test_company);
+  return {
+    testCount: customers.filter((c) => c.is_test_company).length,
+    trialCount: nonTest.filter((c) => c.effectiveSubscriptionStatus === "trialing").length,
+    payingCount: nonTest.filter((c) => c.effectiveSubscriptionStatus === "active").length,
+  };
+}

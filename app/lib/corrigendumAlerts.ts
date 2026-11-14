@@ -54,9 +54,31 @@ export function changesForDoc(doc: WatchedDocRow): TenderChange[] {
   if (closing?.date) {
     out.push({ kind: "closing_date", date: closing.date, previousDate: closing.previous_on_file ?? null, quote: closing.quote ?? "" });
   }
-  const briefing = changes.briefing as { date?: string; previous_date?: string; quote?: string } | undefined;
+  const briefing = changes.briefing as { date?: string | null; previous_date?: string | null; quote?: string; cancelled?: boolean } | undefined;
   if (briefing?.date) {
     out.push({ kind: "briefing", date: briefing.date, previousDate: briefing.previous_date ?? null, quote: briefing.quote ?? "" });
+  } else if (briefing?.cancelled) {
+    // Finding 446: classify_document() (engine/discovery/tender_updates.py)
+    // writes changes.briefing = {date: null, cancelled: true, quote: ...}
+    // for a briefing CANCELLED or made non-compulsory (BRIEFING_CANCELLED_RE)
+    // - a real, deliberate sentinel shape, not "no briefing change at all".
+    // The `briefing?.date` check above (the only branch that used to exist)
+    // is falsy for this sentinel (date is null by design), so a cancelled
+    // briefing was silently dropped from this array whenever the SAME
+    // addendum also moved the closing date or matched an other_changes
+    // pattern (out.length > 0, so the "no structured change" fallback in
+    // changesForDoc()'s caller, which uses doc.summary and DOES mention the
+    // cancellation via classify_document()'s own `bits` text, never runs
+    // either) - exactly the scenario a real SANRAL/CIDB addendum often is
+    // ("closing date moved to X; the compulsory briefing is hereby
+    // cancelled"). app/app/tenders/[id]/tender-updates.tsx's own live
+    // Tender Workspace reader already handles this correctly (`briefing &&
+    // ... briefing.cancelled ? "Briefing session cancelled or no longer
+    // compulsory." : ...` - truthy-object check, never `briefing.date`), so
+    // this was specifically the corrigendum EMAIL's own gap: a company could
+    // receive "Closing Date Changed (Addendum)" with no mention at all that
+    // the briefing they were planning to attend no longer exists.
+    out.push({ kind: "briefing", date: null, previousDate: null, quote: briefing.quote ?? "", cancelled: true });
   }
   const other = (changes.other_changes as { kind?: string; quote?: string }[] | undefined) ?? [];
   for (const c of other) {

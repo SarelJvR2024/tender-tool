@@ -24,6 +24,12 @@
 // excludes submitted/briefing_shortlisted/won/lost, so this never fires on
 // a bid that's already handed in or decided.
 //
+// Cancellation: filterCancelledTenders() (below) drops any candidate whose
+// tender already has a `tender_watched_documents` cancellation notice on
+// file - see that function's own header for the full reasoning (Finding
+// 451, reusing Findings 448/449/450's tendersWithCancellationNotice()
+// unchanged).
+//
 // Idempotency: claim_notification()/record_notification_sent() (migration
 // 0093) - the GENERALISED engine every notification type since Tier 0-3
 // uses, not a new one-off claim table (that migration's own header warns
@@ -37,16 +43,80 @@
 //
 // Run: node --experimental-strip-types scripts/send-returnables-digest.ts
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@supabase/supabase-js";
 import { formatDate } from "../lib/dates.ts";
 import { businessDaysBetween, sastToday } from "../lib/publicHolidays.ts";
-import { returnablesWindowCandidates, returnablesMissingMandatoryItems, type ReturnablesWindowTenderRow } from "../lib/returnablesDigestCandidates.ts";
+import { returnablesWindowCandidates, returnablesMissingMandatoryItems, type ReturnablesWindowCandidate, type ReturnablesWindowTenderRow } from "../lib/returnablesDigestCandidates.ts";
+import { tendersWithCancellationNotice, type DeadlineWatchedDocRow } from "../lib/deadlineReminders.ts";
 import { returnablesDigestEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { criticalBidRecipients } from "../lib/notificationRecipients.ts";
 import { fetchAllRows } from "../lib/supabasePaging.ts";
 
+type SupabaseService = SupabaseClient;
+
 const NOTIFICATION_TYPE = "returnables_digest";
+
+/**
+ * QA finding (2026-11-12, this track's own pass, Finding 451): drops every
+ * candidate whose tender has at least one `tender_watched_documents` row
+ * with `kind === "cancellation"` - the same whole-tender-cancellation signal
+ * Findings 448/449/450 already wired into `send-deadline-reminders.ts`'s
+ * closing-date email, the topbar bell (`lib/notifications.ts`) and the
+ * Dashboard's `closingThisWeekCount` (`lib/dashboardStats.ts`), via the
+ * identical, reused `tendersWithCancellationNotice()`
+ * (`lib/deadlineReminders.ts`) - never duplicated, never reimplemented.
+ *
+ * Without this, a cancelled tender keeps its (now meaningless) real
+ * `closing_date`, nothing clears `tender_packs.pipeline_stage` on
+ * cancellation either (confirmed by reading `engine/discovery/
+ * tender_updates.py`'s `classify_document()` in full - it only ever writes
+ * `tender_watched_documents`, never touches `tender_packs`), so a tracked,
+ * still-"building" pack for a tender the buyer has already cancelled
+ * outright would keep entering `returnablesWindowCandidates()`'s 3-5
+ * business day window and fire a "you're missing a mandatory returnable"
+ * nudge for a bid that was never going to be submitted - the same recipients
+ * who were already told, via the Tender Workspace page's own "Cancellation
+ * notice" card and `send-corrigendum-alerts.ts`'s one-time alert, that the
+ * tender is dead. Reachable and real, not contrived: this digest's own
+ * `RETURNABLES_EXCLUDED_STAGES` check (submitted/briefing_shortlisted/won/
+ * lost) does nothing here - a cancelled tender's pack is routinely still
+ * `found`/`assessing`/`building` right up to its original closing date,
+ * since nothing in this codebase ever auto-advances or auto-abandons a
+ * pipeline stage on a buyer-side cancellation.
+ *
+ * Scoped to just the tender ids already in play (typically a handful per
+ * run), same shape as `send-deadline-reminders.ts`'s own identical
+ * `filterCancelledTenders()`. Read-only - never writes `tenders.closing_date`
+ * or `tender_watched_documents` itself. Fails OPEN on a read error: logs and
+ * returns every candidate unfiltered, same behaviour as before this fix
+ * existed, rather than risk silently losing a real "missing returnable"
+ * nudge over a flaky secondary query.
+ */
+export async function filterCancelledTenders(
+  supabase: SupabaseService,
+  candidates: ReturnablesWindowCandidate[],
+): Promise<ReturnablesWindowCandidate[]> {
+  if (candidates.length === 0) return candidates;
+  const tenderIds = Array.from(new Set(candidates.map((c) => c.tender.id)));
+  const { rows: docRows, error } = await fetchAllRows<DeadlineWatchedDocRow>(
+    (from, to) =>
+      supabase
+        .from("tender_watched_documents")
+        .select("tender_id, kind")
+        .in("tender_id", tenderIds)
+        .eq("kind", "cancellation")
+        .range(from, to),
+    20_000,
+  );
+  if (error) {
+    console.error("returnables digest: could not read tender_watched_documents for cancellation check", error);
+    return candidates;
+  }
+  const cancelledTenderIds = tendersWithCancellationNotice(docRows);
+  return candidates.filter((c) => !cancelledTenderIds.has(c.tender.id));
+}
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -98,7 +168,13 @@ async function main() {
     process.exit(1);
   }
 
-  const candidates = returnablesWindowCandidates(tenderRows, todayStr, businessDaysBetween);
+  const windowCandidates = returnablesWindowCandidates(tenderRows, todayStr, businessDaysBetween);
+
+  // Drops any candidate whose tender has already been cancelled outright -
+  // see filterCancelledTenders()'s own header above for the full reasoning
+  // (Finding 451, the returnablesDigestCandidates.ts analogue of Findings
+  // 448/449/450).
+  const candidates = await filterCancelledTenders(supabase, windowCandidates);
 
   if (candidates.length === 0) {
     console.log("No tenders at the 3-5 business day returnables-digest window today.");
@@ -190,7 +266,8 @@ async function main() {
 
   console.log(
     `Returnables digest: ${sent} sent, ${skippedNotMapped} not mapped for this family yet, ${skippedNothingMissing} with nothing mandatory missing, ` +
-      `${skippedAlreadyClaimed} already sent for this tender/company, ${skippedNoMembers} with no registered company member, out of ${candidates.length} candidate tender/company pair(s).`
+      `${skippedAlreadyClaimed} already sent for this tender/company, ${skippedNoMembers} with no registered company member, out of ${candidates.length} candidate tender/company pair(s) ` +
+      `(${windowCandidates.length - candidates.length} suppressed for a cancelled tender).`
   );
 }
 

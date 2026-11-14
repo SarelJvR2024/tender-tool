@@ -896,23 +896,48 @@ def fail_stale_uploads(url, key, now=None):
             # (process_onboarding_jobs.py's own fail_stale_uploads()) -
             # ported here, 2026-11-02 (CV rotation). Self-heal instead: a
             # result already exists means the work actually finished.
-            existing = supabase_request(url, key, "GET",
-                                        f"cv_extraction_results?cv_upload_id=eq.{up['id']}&select=id")
-            if existing:
+            #
+            # Finding 461 (standing QA/robustness review, 2026-11-12): all
+            # three real network calls below used to sit outside any
+            # try/except - the same write-side (and, here, read-side too)
+            # unguarded-per-row shape Findings 454-457 just fixed in the
+            # four sibling stale-reclaim sweeps (process_pack_jobs.py,
+            # process_general_jobs.py, process_cv_jobs.py,
+            # process_onboarding_jobs.py's own fail_stale_jobs()/
+            # fail_stale_uploads()) - a transient Supabase/PostgREST failure
+            # on the self-heal GET or either PATCH for ONE stuck row raised
+            # straight out of this loop, aborting the stale-reclaim sweep for
+            # every OTHER genuinely-stuck cv_upload queued after it that
+            # cycle. The read-side guard immediately above (the malformed
+            # extraction_claimed_at ValueError) already protects the PARSE;
+            # this protects the actual WRITE/self-heal-GET the same way.
+            try:
+                existing = supabase_request(url, key, "GET",
+                                            f"cv_extraction_results?cv_upload_id=eq.{up['id']}&select=id")
+                if existing:
+                    supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
+                        "status": "extracted", "extraction_completed_at": _now_iso(), "extraction_error": None})
+                    print(f"[recovered] cv_upload {up['id']}: stale 'extracting' since {claimed}, but its result "
+                          "was already written - marked extracted, not failed")
+                    system_alerts.record("cv_extract", f"A CV extraction was stuck 'extracting' for over "
+                                                       f"{STALE_AFTER_MINUTES} minutes after the worker died, but its "
+                                                       "result had already been written - self-healed to extracted "
+                                                       "rather than wrongly failed", "warning",
+                                         context={"cv_upload_id": up["id"], "company_id": up.get("company_id")})
+                    continue
                 supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
-                    "status": "extracted", "extraction_completed_at": _now_iso(), "extraction_error": None})
-                print(f"[recovered] cv_upload {up['id']}: stale 'extracting' since {claimed}, but its result "
-                      "was already written - marked extracted, not failed")
-                system_alerts.record("cv_extract", f"A CV extraction was stuck 'extracting' for over "
-                                                   f"{STALE_AFTER_MINUTES} minutes after the worker died, but its "
-                                                   "result had already been written - self-healed to extracted "
-                                                   "rather than wrongly failed", "warning",
-                                     context={"cv_upload_id": up["id"], "company_id": up.get("company_id")})
+                    "status": "extraction_failed", "extraction_completed_at": _now_iso(),
+                    "extraction_error": f"The extraction worker stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                        "minutes). Nothing was proposed - upload the CV again."})
+            except Exception as e:
+                system_alerts.record("cv_extract", f"Could not reclaim a stuck CV extraction "
+                                                   f"({type(e).__name__}: {e}) - it is still stuck 'extracting' and "
+                                                   "will be retried on the next stale-reclaim sweep.", "error", exc=e,
+                                     context={"cv_upload_id": up["id"], "company_id": up.get("company_id"),
+                                              "claimed_at": claimed})
+                print(f"[skipped] cv_upload {up['id']}: could not reclaim stale upload ({type(e).__name__}: {e}) - "
+                      "the rest of this sweep continues")
                 continue
-            supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
-                "status": "extraction_failed", "extraction_completed_at": _now_iso(),
-                "extraction_error": f"The extraction worker stopped mid-job (no result after {STALE_AFTER_MINUTES} "
-                                    "minutes). Nothing was proposed - upload the CV again."})
             print(f"[failed] cv_upload {up['id']}: stale 'extracting' since {claimed}")
             system_alerts.record("cv_extract", f"A CV extraction was stuck in 'extracting' for over "
                                                f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "

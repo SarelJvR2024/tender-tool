@@ -10,7 +10,7 @@ import {
 } from "@/lib/generalTender";
 import { COMPANY_VAULT_COLUMNS } from "@/lib/tenderCompliance";
 import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
-import { answerStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
+import { answerStatus, designatedSignatoryFallback, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
 import { reviewStatusToBidTask } from "./pack-review-logic";
 import { returnableReviewStatus } from "./general-pack-review-data";
 import type { BidTaskStatus } from "./bid-task-status";
@@ -93,7 +93,7 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
   ] = await Promise.all([
     supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
     supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
-    supabase.from("people").select("id, name, signatory_capacity").order("name"),
+    supabase.from("people").select("id, name, signatory_capacity, created_at").order("name"),
     supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
     supabase.from("person_role_eligibility").select("person_id, role_code"),
   ]);
@@ -104,9 +104,12 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
   if (tagRowsErr) console.error("person_role_eligibility select failed (submission plan)", tagRowsErr);
   const company = (companyRow as unknown as GeneralCompany | null) ?? null;
   const answers = (answerRows ?? []) as TenderAnswer[];
-  const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null }[];
+  const people = (peopleRows ?? []) as { id: string; name: string; signatory_capacity: string | null; created_at: string }[];
   const roleCatalog = (roleCatalogRows ?? []) as TenderRole[];
   const tags = (tagRows ?? []) as { person_id: string; role_code: string }[];
+  // Same fallback this pass added to general-pack-review-data.ts - see
+  // signatureAnswerStatus()'s own doc comment (general-pack-review-logic.ts).
+  const signatoryFallback = designatedSignatoryFallback(people);
 
   // --- Returnables ------------------------------------------------------------
   try {
@@ -137,7 +140,7 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
       if (q.type === "person") {
         const chosenId = value;
         const chosenPerson = chosenId ? (people.find((p) => p.id === chosenId) ?? null) : null;
-        const sig = signatureAnswerStatus({ chosenId, chosenPerson, optional: q.optional ?? false });
+        const sig = signatureAnswerStatus({ chosenId, chosenPerson, optional: q.optional ?? false, fallback: signatoryFallback });
         steps.push({
           category: "question",
           id: `question:${q.key}`,
@@ -174,7 +177,7 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
       const taggedIds = tags.filter((t) => t.role_code === role.role_code).map((t) => t.person_id);
       const taggedPeople = taggedIds
         .map((id) => people.find((p) => p.id === id))
-        .filter((p): p is { id: string; name: string; signatory_capacity: string | null } => !!p);
+        .filter((p): p is (typeof people)[number] => !!p);
       let withCv = 0;
       if (taggedIds.length > 0) {
         const [{ data: gen, error: genErr }, { data: up, error: upErr }] = await Promise.all([

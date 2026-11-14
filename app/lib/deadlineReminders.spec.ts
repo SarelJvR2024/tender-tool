@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { deadlineReminderCandidates, reminderThresholdFor, DEADLINE_REMINDER_EXCLUDED_STAGES, type DeadlineReminderTenderRow } from "./deadlineReminders";
+import {
+  deadlineReminderCandidates,
+  reminderThresholdFor,
+  tendersWithCancellationNotice,
+  DEADLINE_REMINDER_EXCLUDED_STAGES,
+  type DeadlineReminderTenderRow,
+  type DeadlineWatchedDocRow,
+} from "./deadlineReminders";
 
 describe("reminderThresholdFor", () => {
   it("matches 3 days and 1 day (24 hours) exactly", () => {
@@ -94,5 +101,54 @@ describe("deadlineReminderCandidates", () => {
     const candidates = deadlineReminderCandidates([tender], () => 2);
     expect(candidates.map((c) => c.companyId).sort()).toEqual(["company-a", "company-b"]);
     expect(candidates.every((c) => c.daysLeft === 2 && c.threshold === 3)).toBe(true);
+  });
+});
+
+// QA finding (2026-11-12): nothing ever clears/marks stale tenders.closing_date
+// when the buyer cancels a tender outright, so deadlineReminderCandidates()
+// above - reading tenders.closing_date alone - would keep firing the "closing
+// in 3 days"/"24 hours" email for a tender already shown as cancelled on the
+// Tender Workspace page (and already announced once by send-corrigendum-alerts.ts).
+// Same shape as Finding 448's tendersWithCancelledBriefing(), a different
+// signal (whole-tender cancellation, tender_watched_documents.kind) feeding a
+// different consumer (this deadline email, not the briefing one).
+describe("tendersWithCancellationNotice", () => {
+  it("returns the tender id when a watched document's kind is cancellation", () => {
+    const docs: DeadlineWatchedDocRow[] = [{ tender_id: "tender-1", kind: "cancellation" }];
+    expect(tendersWithCancellationNotice(docs)).toEqual(new Set(["tender-1"]));
+  });
+
+  it("ignores documents of any other kind", () => {
+    const docs: DeadlineWatchedDocRow[] = [
+      { tender_id: "tender-1", kind: "addendum" },
+      { tender_id: "tender-2", kind: "clarification" },
+      { tender_id: "tender-3", kind: "revised_document" },
+      { tender_id: "tender-4", kind: "supporting_document" },
+      { tender_id: "tender-5", kind: null }, // a baseline row - watch_tender_updates.py never sets `kind` on one
+    ];
+    expect(tendersWithCancellationNotice(docs)).toEqual(new Set());
+  });
+
+  it("a tender with no watched documents at all yields nothing (not a crash)", () => {
+    expect(tendersWithCancellationNotice([])).toEqual(new Set());
+  });
+
+  // Deliberately NOT "latest wins" (unlike tendersWithCancelledBriefing()) -
+  // classify_document() has no "un-cancel"/reinstatement regex at all, so a
+  // later, unrelated document must not silently reinstate a real cancellation.
+  it("a later, unrelated document does not un-suppress a real cancellation", () => {
+    const docs: DeadlineWatchedDocRow[] = [
+      { tender_id: "tender-1", kind: "cancellation" },
+      { tender_id: "tender-1", kind: "supporting_document" }, // uploaded after the cancellation notice
+    ];
+    expect(tendersWithCancellationNotice(docs)).toEqual(new Set(["tender-1"]));
+  });
+
+  it("keeps each tender independent - a cancellation on one tender never suppresses another", () => {
+    const docs: DeadlineWatchedDocRow[] = [
+      { tender_id: "tender-1", kind: "cancellation" },
+      { tender_id: "tender-2", kind: "addendum" },
+    ];
+    expect(tendersWithCancellationNotice(docs)).toEqual(new Set(["tender-1"]));
   });
 });

@@ -170,6 +170,51 @@ describe("runBriefingReminders", () => {
     await runBriefingReminders(supabase as never, "https://app.example", baseOpts, []);
     expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(true);
   });
+
+  // Finding 448: tenders.briefing_date is never cleared when a briefing is
+  // cancelled by an addendum (watch_tender_updates.py never applies the
+  // cancelled sentinel, and accept_tender_update_date() refuses to accept
+  // one) - so without a separate check, this candidate would still fire a
+  // reminder for a briefing the Tender Workspace page already correctly
+  // tells the same person was cancelled.
+  it("never claims or sends when the tender's latest watched document says the briefing was cancelled", async () => {
+    const supabase = mockSupabase({
+      fromResponses: {
+        tenders: [tender],
+        tender_watched_documents: [{ tender_id: tender.id, first_seen_at: "2026-06-01T00:00:00Z", changes: { briefing: { cancelled: true } } }],
+      },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    const result = await runBriefingReminders(supabase as never, "https://app.example", baseOpts, []);
+    expect(result.sent).toBe(0);
+    expect(result.candidates).toBe(0);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(false);
+  });
+
+  // A later addendum that moves the briefing to a new date (no `cancelled`
+  // key on the newest document) is not still "cancelled" - the reminder
+  // must still fire, same as before this fix.
+  it("still fires when an earlier cancellation was superseded by a later, real briefing-date change", async () => {
+    const supabase = mockSupabase({
+      fromResponses: {
+        tenders: [tender],
+        tender_watched_documents: [
+          { tender_id: tender.id, first_seen_at: "2026-06-01T00:00:00Z", changes: { briefing: { cancelled: true } } },
+          { tender_id: tender.id, first_seen_at: "2026-06-05T00:00:00Z", changes: { briefing: { cancelled: false } } },
+        ],
+      },
+      rpcResponses: {
+        company_notification_recipients: { data: [{ email: "bids@reviewer-civils.co.za", daily_digest_opt_in: true }], error: null },
+        record_operational_alert_sent: { data: true, error: null },
+      },
+    });
+    const result = await runBriefingReminders(supabase as never, "https://app.example", baseOpts, []);
+    expect(result.candidates).toBe(1);
+    expect(supabase.calls.some((c) => c.name === "record_operational_alert_sent")).toBe(true);
+  });
 });
 
 describe("runClarificationWindow", () => {
