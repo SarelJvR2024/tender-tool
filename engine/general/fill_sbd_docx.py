@@ -478,11 +478,11 @@ def fill_sbd_document(doc, ctx, log, forms):
         if name:  # MBD 4 / older SBD 4 3.1 "Full Name of bidder or his or her representative: ......"
             if fill_blank_paragraphs(doc, r"Full\s+Name\s+of\s+bidder\s+or\s+his\s+or\s+her\s+representative", name):
                 log.confirmed("sbd4.representative_full_name", name)
-        n = fill_dotted_paragraph_count(doc, "Name of bidder", legal)
-        _log_fill(log, "sbd4.name_of_bidder_footer", legal, n, None)
-        if sig.get("capacity"):
-            n = fill_dotted_paragraph_count(doc, "Designation", sig["capacity"])
-            _log_fill(log, "sbd4.designation_footer", sig["capacity"], n, None)
+        cap = sig.get("capacity")
+        pos_n, bidder_n = fill_footer_designation_and_bidder(doc, r"Designation|Position", cap, legal)
+        _log_fill(log, "sbd4.name_of_bidder_footer", legal, bidder_n, None)
+        if cap:
+            _log_fill(log, "sbd4.designation_footer", cap, pos_n, None)
         log.missing("sbd4.signature_and_date", "Needs a real signature and date - never typed in advance.")
 
     if "6.1" in forms:
@@ -560,10 +560,78 @@ def fill_sbd_document(doc, ctx, log, forms):
     return doc
 
 
+def fill_footer_designation_and_bidder(doc, position_label_re, position_value, bidder_value):
+    """SBD4's (and identically-shaped SBD6.1/8/9) declaration footer: ONE
+    blank line - '…………………\t…………………' (the signatory's Designation/Position,
+    then the company's own Name of bidder, tab-separated) - with its OWN
+    caption directly on the paragraph below, naming each blank in the same
+    left-to-right order ('Designation'/'Position' then 'Name of bidder').
+    Exactly the same "dotted line above, caption below" shape
+    fill_line_above_caption() already handles for SBD9's single-blank
+    captions - just with two blanks on one line instead of one.
+
+    Until this fix, fill_dotted_paragraph_count() was called directly on the
+    CAPTION paragraph instead (it does contain the label text, after all).
+    Since that caption paragraph ends right after "Name of bidder" with
+    nothing further, it satisfied fill_dotted_paragraph_count()'s own
+    end-of-string lookahead (meant for a bare label with no blank at all,
+    not a caption for a blank line elsewhere) and silently spliced BOTH
+    values onto the CAPTION TEXT ITSELF - e.g. "Designation Director   Name
+    of bidder Acme (Pty) Ltd" printed as the caption - while the REAL blank
+    line one paragraph above was never touched and still prints as bare
+    dots/underscores on the real submission. Both fields were then logged
+    "confirmed" in the provenance report, so nothing told anyone to check.
+
+    Confirmed live in 5 of the 9 real general-tender templates sampled
+    (Treasury SBD4/RT83, Tourism SBD4/NB143, DSTI's bundled SBD FORMS, SSA's
+    and Mthashana's own tender documents) - the caption reads "Designation"
+    in some editions, "Position" in others, hence the alternation. Found by
+    the same method that found Findings 361/362 in fill_a_forms.py: checking
+    every regex/table-shape match against real template content, not a
+    synthetic fixture alone (fill_dotted_paragraph_count()'s own existing
+    test used a paragraph with the dots INLINE after the label - a real but
+    much rarer shape - and never exercised the caption-below-a-blank-line
+    shape that is what every one of these 5 real documents actually uses).
+
+    Returns (position_filled_count, bidder_filled_count).
+    """
+    paras = doc.paragraphs
+    rx = re.compile(r"^\s*(?:" + position_label_re + r")\s*(?:Name\s+of\s+[Bb]idder)\s*$", re.IGNORECASE)
+    pos_n = bidder_n = 0
+    for i, p in enumerate(paras):
+        if not rx.match(p.text):
+            continue
+        j = i - 1
+        while j >= 0 and not paras[j].text.strip():
+            j -= 1
+        if j < 0:
+            continue
+        above = paras[j]
+        runs = list(re.finditer(r"_{5,}|[.…]{5,}", above.text))
+        if len(runs) < 2:
+            continue
+        new = above.text
+        # right-to-left, so the first run's own offsets stay valid
+        if _has_value(bidder_value):
+            new = new[:runs[1].start()] + f" {bidder_value} " + new[runs[1].end():]
+            bidder_n += 1
+        if _has_value(position_value):
+            new = new[:runs[0].start()] + f" {position_value} " + new[runs[0].end():]
+            pos_n += 1
+        if new != above.text:
+            _replace_paragraph_text(above, new)
+    return pos_n, bidder_n
+
+
 def fill_dotted_paragraph_count(doc, label_substr, value):
-    """fill_dotted_paragraph()'s whitespace-or-dots convention (Treasury SBD 4
-    footer 'Designation ... Name of bidder'), applied to EVERY occurrence and
-    without logging - the caller logs once. Skips paragraphs that are prose."""
+    """fill_dotted_paragraph()'s whitespace-or-dots convention, applied to
+    EVERY occurrence and without logging - the caller logs once. For a label
+    followed by its OWN inline dots in the same paragraph (e.g. "Full Name of
+    bidder or his or her representative: ............") - NOT for a caption
+    on its own line naming a blank that lives on the paragraph above (SBD4's
+    "Designation ... Name of bidder" footer is that shape; see
+    fill_footer_designation_and_bidder() instead, Finding 363). Skips
+    paragraphs that are prose."""
     if not _has_value(value):
         return 0
     # the label must be followed by its blank (dots, a tab, or line end) - not
