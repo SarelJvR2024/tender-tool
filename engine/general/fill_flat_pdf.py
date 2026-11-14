@@ -187,6 +187,14 @@ FORMS = {
             {"key": "sbd9.name_of_institution", "caption": r"\(\s*Name\s+of\s+(?:Municipality|Institution|Municipal)[^)]*\)|\(\s*[A-Z][A-Za-z ]+(?:Municipality|Municipal\s+Entity)\s*\)",
              "v": "buyer"},
             {"key": "sbd9.name_of_bidder", "caption": r"\(\s*Name\s+of\s+Bidder\s*\)", "v": "legal_name"},
+            # Finding 393: the real signature-block pair "Position   Name of
+            # Bidder" (no parens - a plain caption, unlike the page-1
+            # "(Name of Bidder)" caption above, which is a DIFFERENT blank)
+            # only had a "position_footer" entry below; this twin footer
+            # caption, the one sibling SBD4's own captions list already has
+            # both halves of ("sbd4.name_of_bidder_footer"/".designation_footer"
+            # above), was missing entirely - see that Finding's own writeup.
+            {"key": "sbd9.name_of_bidder_footer", "caption": r"Name\s+of\s+(?:Bidder|bidder)", "v": "legal_name"},
             {"key": "sbd9.position_footer", "caption": r"^Position$", "v": "signatory_capacity"},
         ],
     },

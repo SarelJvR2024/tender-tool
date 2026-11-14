@@ -147,6 +147,69 @@ check("the real en dash (–) is on the printed page, not a '?' placeholder",
 check("no '?' placeholder leaked into the printed page in place of the real punctuation",
       "?" not in page_text, repr(page_text))
 
+# --- Finding 393: SBD9's own footer signature block ("Position   Name of ---
+#     Bidder", both plain captions on one line) only had a caption entry for
+#     "Position" (-> sbd9.position_footer); the sibling "Name of Bidder"
+#     caption at the SAME location had no entry at all, so the company's own
+#     legal name never got typed there, on two real, committed buyer samples
+#     (SALB's own SBD9.pdf, Dawid Kruiper's TN051.pdf) - against the earlier,
+#     already-defined "sbd9.name_of_bidder" caption entry, which exists but is
+#     parenthesised ("(Name of Bidder)") and only ever matches the page-1
+#     "I certify, on behalf of: ... (Name of Bidder)" blank (already filled via
+#     the "fields" list's own "on behalf of" label match, which runs first and
+#     marks that key done) - never the plain, unparenthesised footer caption.
+SAMPLES = os.path.join(HERE, "..", "..", "templates", "general_samples")
+SALB_SBD9 = os.path.join(SAMPLES, "salb_15-10-2026", "SBD9.pdf")
+DAWID_KRUIPER_TN051 = os.path.join(SAMPLES, "dawid_kruiper_tn051", "TN051.pdf")
+
+
+def _sbd9_footer_fields(sample_path):
+    ctx = {"company": {"legal_name": "Test Supplier (Pty) Ltd"},
+           "signatory": {"name": "Jane Doe", "capacity": "Director"},
+           "answers": {}, "tender": {"contract_no": "TN-123", "description": "Some works",
+                                      "buyer": "Some Buyer Municipality", "closing_date": "2026-12-01"}}
+    out = os.path.join(TMP, f"sbd9_out_{len(os.listdir(TMP))}.pdf")
+    report = ffp.fill_flat_pdf(sample_path, out, ctx, ["9"])
+    return report["forms"]["9"]["fields"], out
+
+
+if os.path.exists(SALB_SBD9):
+    print("Finding 393: SBD9's footer 'Name of Bidder' caption, real SALB sample")
+    fields, out = _sbd9_footer_fields(SALB_SBD9)
+    check("the footer 'Name of Bidder' caption (sbd9.name_of_bidder_footer) is placed",
+          fields.get("sbd9.name_of_bidder_footer", {}).get("status") == "placed", fields.get("sbd9.name_of_bidder_footer"))
+    check("...with the company's real legal name, not left blank",
+          fields.get("sbd9.name_of_bidder_footer", {}).get("value") == "Test Supplier (Pty) Ltd",
+          fields.get("sbd9.name_of_bidder_footer"))
+    # Its true sibling on the same signature-block line must still be placed too -
+    # this fix must not regress the field that already worked.
+    check("the sibling 'Position' footer caption (sbd9.position_footer) is still placed",
+          fields.get("sbd9.position_footer", {}).get("status") == "placed", fields.get("sbd9.position_footer"))
+    # And the separate, page-1 "(Name of Bidder)"/"on behalf of" blank (a DIFFERENT
+    # occurrence, same key as the pre-existing captions-list entry) must be unaffected.
+    check("the separate page-1 'on behalf of' sbd9.name_of_bidder field is still placed",
+          fields.get("sbd9.name_of_bidder", {}).get("status") == "placed", fields.get("sbd9.name_of_bidder"))
+    # Dotted-leader characters interleave with the typed text in extract_text()'s
+    # own reading order (documented above for the smart-quote check) - check the
+    # real characters are present on the page at all, not an exact substring.
+    with pdfplumber.open(out) as pdf:
+        all_text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    check("the real written legal name's own characters actually appear on the real output PDF",
+          all(ch in all_text for ch in "Test Supplier (Pty) Ltd" if ch != " "), None)
+else:
+    check("SALB SBD9 sample exists (skipped - file not found)", False, SALB_SBD9)
+
+if os.path.exists(DAWID_KRUIPER_TN051):
+    print("Finding 393: SBD9's footer 'Name of Bidder' caption, real Dawid Kruiper TN051 sample")
+    fields, _ = _sbd9_footer_fields(DAWID_KRUIPER_TN051)
+    check("the footer 'Name of Bidder' caption is placed on a second, independent real sample",
+          fields.get("sbd9.name_of_bidder_footer", {}).get("status") == "placed", fields.get("sbd9.name_of_bidder_footer"))
+    check("...with the company's real legal name",
+          fields.get("sbd9.name_of_bidder_footer", {}).get("value") == "Test Supplier (Pty) Ltd",
+          fields.get("sbd9.name_of_bidder_footer"))
+else:
+    check("Dawid Kruiper TN051 sample exists (skipped - file not found)", False, DAWID_KRUIPER_TN051)
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)
