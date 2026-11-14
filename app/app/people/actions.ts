@@ -141,11 +141,39 @@ export async function savePerson(formData: FormData) {
   // build failure instead of an immediate, actionable one at the point of
   // entry - the same "fails, but late and unhelpfully" shape this codebase
   // already treats as a real finding elsewhere (e.g. Finding 470).
+  //
+  // Finding 483 (standing solution-architect review): Finding 481's own
+  // loop above swept only 4 of this form's 8 real `<input type="date">`
+  // fields that write straight onto `people` - it missed
+  // ecsa_expiry/sacpcmp_expiry (people/[id]/page.tsx lines ~541/547) and
+  // sacnasp_expiry/sagc_expiry (the same file's ConditionalRegistration
+  // component, `name={`${key}_expiry`}`, line ~224), all four rendered as
+  // `type="date"` exactly like their siblings above and written the same
+  // unchecked way in `row` below. None of these four has a CV-extraction
+  // sibling at all (lib/cvExtraction.ts's EXTRACTED_PERSON_FIELDS has no
+  // entry for any of them - applyCvExtraction() never writes them), so
+  // there was no validation anywhere on any real writer. Confirmed real and
+  // reachable, not theoretical: engine/cv/generate_cv.py prints each one
+  // verbatim onto the person's generated CV ("ECSA registration expiry:",
+  // "SACPCMP registration expiry:", the SACNASP/SAGC registration lines -
+  // `q.get("ecsa_expiry") or "MISSING"` etc., no date parsing or formatting
+  // at all), and app/lib/tenderCompliance.ts's checkRegistration() feeds
+  // sacpcmp_expiry/sacnasp_expiry/sagc_expiry straight into
+  // registrationValidity() for the real SACPCMP/SACNASP/SAGC compliance
+  // check shown on Pack Review/Submission Plan. So a garbage value typed
+  // here (bypassing the date picker) doesn't just fail late at pack-build
+  // time like the sibling four above - it saves silently and then prints
+  // verbatim, unformatted, on an actual generated CV document issued as
+  // part of a real tender submission.
   for (const [key, label] of [
     ["ecsa_date", "ECSA registration date"],
     ["sacpcmp_date", "SACPCMP registration date"],
     ["highest_graduated", "Date graduated (highest)"],
     ["initial_graduated", "Date graduated (initial)"],
+    ["ecsa_expiry", "ECSA registration expiry"],
+    ["sacpcmp_expiry", "SACPCMP registration expiry"],
+    ["sacnasp_expiry", "SACNASP registration expiry"],
+    ["sagc_expiry", "SAGC registration expiry"],
   ] as const) {
     const v = str(formData, key);
     if (v && !ISO_DATE.test(v)) {

@@ -93,10 +93,35 @@ export async function saveMyDetails(formData: FormData) {
   // at data entry. ecsa_date/sacpcmp_date/initial_graduated are NOT part of
   // this manual form at all (only highest_graduated is - see the `row`
   // object below), so there is nothing else of this shape to check here.
-  const highestGraduated = str(formData, "highest_graduated");
-  if (highestGraduated && !ISO_DATE.test(highestGraduated)) {
-    fail(`Date graduated (highest): "${highestGraduated}" isn't a date (yyyy-mm-dd).`);
+  //
+  // Finding 483 (standing solution-architect review): that last sentence was
+  // wrong - re-checked against the CURRENT my-cv/page.tsx and found this
+  // exact form ALSO renders ecsa_expiry/sacpcmp_expiry as `type="date"`
+  // inputs (lines ~197/200), both named in this function's own `row` object
+  // just below, and NEITHER had any format check either - unlike
+  // highest_graduated above, these two have no CV-extraction sibling at all
+  // (lib/cvExtraction.ts's EXTRACTED_PERSON_FIELDS has no "date"-kind entry
+  // for either), so nothing anywhere ever validated them. Confirmed real and
+  // reachable: engine/cv/generate_cv.py prints both straight onto the
+  // person's generated CV verbatim - `("ECSA registration expiry:",
+  // q.get("ecsa_expiry") or "MISSING")` and the SACPCMP line right below it -
+  // with no date parsing or formatting, so a garbage value typed here
+  // (bypassing the date picker) doesn't fail at all, it just shows up
+  // unformatted on an actual generated CV used in a real tender submission.
+  // app/lib/tenderCompliance.ts's checkRegistration() also feeds
+  // sacpcmp_expiry into registrationValidity() for the real SACPCMP
+  // compliance check shown on Pack Review/Submission Plan.
+  for (const [key, label] of [
+    ["highest_graduated", "Date graduated (highest)"],
+    ["ecsa_expiry", "ECSA registration expiry"],
+    ["sacpcmp_expiry", "SACPCMP registration expiry"],
+  ] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) {
+      fail(`${label}: "${v}" isn't a date (yyyy-mm-dd).`);
+    }
   }
+  const highestGraduated = str(formData, "highest_graduated");
 
   const row = {
     phone: str(formData, "phone"),
