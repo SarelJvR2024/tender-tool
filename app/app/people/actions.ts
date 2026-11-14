@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
-import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, ISO_DATE, QUALIFICATION_LEVELS, type Proposal } from "@/lib/cvExtraction";
 import { safeFileName } from "@/lib/safeFileName";
 import { sastToday } from "@/lib/publicHolidays";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
@@ -72,6 +72,52 @@ export async function savePerson(formData: FormData) {
     redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("That ID number isn't a valid 13-digit South African ID number.")}`);
   }
 
+  // Finding 466 switched this page's own ecsa_level/highest_level inputs to
+  // a <select> constrained to ECSA_LEVELS/QUALIFICATION_LEVELS (SANRAL's own
+  // Form B2.1 dropdown labels - engine/sanral_fill.py's set_dropdown_for()
+  // refuses any other label when a pack is built) - but deliberately left
+  // savePerson() itself with NO server-side check, reasoning that a hard
+  // write-side rejection would also have to reject an UNCHANGED legacy
+  // value's own round-trip (the fallback <option> the select renders for a
+  // pre-existing non-canonical value, exactly so saving the form for any
+  // unrelated reason doesn't silently wipe it) - and treated building that
+  // distinction as out of scope for that pass. Finding 467 then added the
+  // very server-side check Finding 466 skipped to this function's own
+  // self-service twin, saveMyDetails() (my-cv/actions.ts) - without the
+  // unchanged-value carve-out, because that page's own select has no
+  // fallback option to protect. Neither pass closed the gap on THIS
+  // function: a direct POST to this Server Action (the browser's own
+  // <select> is not something a Server Action may ever trust - the same
+  // rule Finding 468's write-up states explicitly for this file's sibling,
+  // document-scan's confirmVaultDocument()) can still set either column to
+  // any arbitrary string, which a later real pack build then hard-fails on
+  // with a FieldError. Fixed here with the exact carve-out Finding 466's own
+  // write-up described but didn't build: only a CHANGED value is checked
+  // against the canonical list; resubmitting the SAME value already on file
+  // (including a pre-existing non-canonical one) still round-trips
+  // unchanged, so this closes the real gap without Finding 466's own
+  // documented reason for leaving it open.
+  let currentEcsaLevel: string | null = null;
+  let currentHighestLevel: string | null = null;
+  if (id && id !== "new") {
+    const { data: existing } = await supabase
+      .from("people")
+      .select("ecsa_level, highest_level")
+      .eq("id", id)
+      .maybeSingle();
+    currentEcsaLevel = (existing?.ecsa_level as string | null) ?? null;
+    currentHighestLevel = (existing?.highest_level as string | null) ?? null;
+  }
+
+  const ecsaLevel = str(formData, "ecsa_level");
+  if (ecsaLevel && ecsaLevel !== currentEcsaLevel && !(ECSA_LEVELS as readonly string[]).includes(ecsaLevel)) {
+    redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("ECSA level: choose one of SANRAL's options.")}`);
+  }
+  const highestLevel = str(formData, "highest_level");
+  if (highestLevel && highestLevel !== currentHighestLevel && !(QUALIFICATION_LEVELS as readonly string[]).includes(highestLevel)) {
+    redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("Highest qualification level: choose one of SANRAL's options.")}`);
+  }
+
   const row = {
     company_id: companyId,
     name,
@@ -86,7 +132,7 @@ export async function savePerson(formData: FormData) {
     ),
     phone: str(formData, "phone"),
     email: str(formData, "email"),
-    ecsa_level: str(formData, "ecsa_level"),
+    ecsa_level: ecsaLevel,
     ecsa_number: str(formData, "ecsa_number"),
     ecsa_date: str(formData, "ecsa_date"),
     sacpcmp_number: str(formData, "sacpcmp_number"),
@@ -102,7 +148,7 @@ export async function savePerson(formData: FormData) {
     sagc_category: str(formData, "sagc_category"),
     sagc_number: str(formData, "sagc_number"),
     sagc_expiry: str(formData, "sagc_expiry"),
-    highest_level: str(formData, "highest_level"),
+    highest_level: highestLevel,
     highest_description: str(formData, "highest_description"),
     highest_institution: str(formData, "highest_institution"),
     highest_graduated: str(formData, "highest_graduated"),

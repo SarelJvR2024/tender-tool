@@ -190,6 +190,7 @@ describe("savePerson - edit path, membership revoked mid-request (update matches
   it("does not report success when the update matches zero rows", async () => {
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }], // current-value read (ecsa_level/highest_level changed-value check)
       [{ data: null, error: null }], // people update().select("id").maybeSingle() - 0 rows
     ]);
     supabaseState.current = client;
@@ -208,6 +209,7 @@ describe("savePerson - edit path, real update still succeeds", () => {
   it("saves normally and redirects to the person's page", async () => {
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }], // current-value read (ecsa_level/highest_level changed-value check)
       [{ data: { id: "person-1" }, error: null }], // real match
     ]);
     supabaseState.current = client;
@@ -289,6 +291,109 @@ describe("savePerson - id_number is validated the same way its sibling savePrinc
 
     expect(url).toBe("/people/person-1");
     expect(insertCalls).toHaveLength(1);
+  });
+});
+
+// Finding 478 (standing solution-architect review): Finding 466 switched
+// people/[id]/page.tsx's ecsa_level/highest_level inputs to a <select>
+// constrained to ECSA_LEVELS/QUALIFICATION_LEVELS, but deliberately left
+// savePerson() itself with no server-side check at all (documented reason:
+// a hard rejection would also break an UNCHANGED legacy non-canonical
+// value's own fallback-option round-trip). Finding 467 then added the
+// server-side check to savePerson()'s own self-service twin,
+// saveMyDetails(), but never back to this function. A direct POST (a
+// Server Action may never trust the browser's own <select>) could still
+// set either column to any string, which engine/sanral_fill.py's
+// set_dropdown_for() later hard-fails a real pack build on. Fixed with the
+// same changed-value carve-out Finding 466's write-up described but never
+// built, so the legacy round-trip Finding 466 was protecting still works.
+describe("savePerson - ecsa_level/highest_level are validated against SANRAL's own option lists for a CHANGED value, mirroring saveMyDetails() (Finding 478)", () => {
+  it("refuses a changed, non-canonical ecsa_level (direct POST bypassing the <select>)", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { ecsa_level: "Professional Engineer", highest_level: null }, error: null }], // current-value read
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_level: "Pr Eng" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("ECSA level: choose one of SANRAL's options."));
+  });
+
+  it("refuses a changed, non-canonical highest_level (direct POST bypassing the <select>)", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: "Masters Degree" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", highest_level: "Honours degree-ish" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("Highest qualification level: choose one of SANRAL's options."));
+  });
+
+  it("still allows resubmitting the SAME non-canonical ecsa_level already on file (the fallback-option round-trip Finding 466 protects)", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: "Pr Eng", highest_level: null }, error: null }], // legacy, non-canonical, already stored
+      [{ data: { id: "person-1" }, error: null }], // update succeeds
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    // Same value as currently on file (what the <select>'s own fallback
+    // <option> re-submits when the admin edits this form for an unrelated
+    // field, e.g. just a phone number) - must not be rejected.
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_level: "Pr Eng" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+  });
+
+  it("still saves normally for a genuinely canonical new ecsa_level/highest_level", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({
+      id: "person-1",
+      name: "Jane Doe",
+      ecsa_level: "Professional Engineer",
+      highest_level: "Masters Degree",
+    });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+  });
+
+  it("validates a brand-new person's ecsa_level too (no legacy value to protect)", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId - insert path skips the current-value read entirely
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe", ecsa_level: "Pr Eng" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent("ECSA level: choose one of SANRAL's options."));
+    expect(insertCalls).toHaveLength(0);
   });
 });
 
