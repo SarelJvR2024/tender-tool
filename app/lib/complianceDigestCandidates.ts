@@ -59,8 +59,32 @@ type PersonExpiryRow = {
   sagc_expiry: string | null;
 };
 
-function thresholdFor(daysLeft: number): ComplianceDigestThreshold | null {
-  return COMPLIANCE_DIGEST_THRESHOLDS.find((t) => t === daysLeft) ?? null;
+// Finding 476 (standing QA/robustness review, 2026-11-14): this used to match
+// ONLY the exact day daysLeft === 30/14/7 (COMPLIANCE_DIGEST_THRESHOLDS.find),
+// so a missed, late or failed daily cron run (compliance-alerts.yml, same
+// GitHub Actions scheduler whose own unreliability this file's workflow
+// header already warns about: "GitHub's scheduled runs are at best every 5
+// minutes and can be delayed or dropped") permanently lost that threshold's
+// one-shot reminder for SARS Tax PIN/COID/B-BBEE/CIDB/ECSA/SACPCMP/held
+// registrations - exactly the facts this file's own header says "can
+// disqualify an active bid outright." The real send is still gated by
+// claim_notification()'s own one-time-ever claim, keyed on (company, item,
+// threshold) with no day component at all (complianceDigestIdempotencyKey())
+// - so widening the match to a non-overlapping range below each threshold,
+// floored just above the next-lower one, is safe: the first run to reach an
+// item within its own window claims and sends; every later run that same
+// window just finds it already claimed and no-ops. Same bug class and same
+// fix shape as clarificationThresholdFor() (Finding 401) and
+// trialDay7Candidates() (Finding 387).
+const COMPLIANCE_DIGEST_30_DAY_FLOOR = 14;
+const COMPLIANCE_DIGEST_14_DAY_FLOOR = 7;
+const COMPLIANCE_DIGEST_7_DAY_FLOOR = 0;
+
+export function thresholdFor(daysLeft: number): ComplianceDigestThreshold | null {
+  if (daysLeft <= 30 && daysLeft > COMPLIANCE_DIGEST_30_DAY_FLOOR) return 30;
+  if (daysLeft <= 14 && daysLeft > COMPLIANCE_DIGEST_14_DAY_FLOOR) return 14;
+  if (daysLeft <= 7 && daysLeft > COMPLIANCE_DIGEST_7_DAY_FLOOR) return 7;
+  return null;
 }
 
 /** Every compliance-digest candidate for ONE company, explicitly filtered - never relies on RLS. */

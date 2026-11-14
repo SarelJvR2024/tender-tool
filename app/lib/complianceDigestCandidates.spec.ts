@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { complianceDigestCandidatesForCompany, complianceDigestIdempotencyKey, COMPLIANCE_DIGEST_THRESHOLDS } from "./complianceDigestCandidates";
+import { complianceDigestCandidatesForCompany, complianceDigestIdempotencyKey, thresholdFor, COMPLIANCE_DIGEST_THRESHOLDS } from "./complianceDigestCandidates";
 import { SARS_PIN_RISK_NOTE } from "./emailTemplatesTier2";
 
 // Frozen, unambiguous instant - safely mid-day in both UTC and SAST (SAST =
@@ -49,6 +49,42 @@ function stubSupabase(opts: { company: Record<string, unknown> | null; held: Rec
   } as any;
 }
 
+describe("thresholdFor", () => {
+  it("matches exactly on each threshold day", () => {
+    expect(thresholdFor(30)).toBe(30);
+    expect(thresholdFor(14)).toBe(14);
+    expect(thresholdFor(7)).toBe(7);
+  });
+
+  // Finding 476 (standing QA/robustness review, 2026-11-14): same bug class
+  // and same fix shape as clarificationThresholdFor() (Finding 401) and
+  // trialDay7Candidates() (Finding 387) - a missed/late daily cron run can
+  // still catch up on a later day instead of permanently losing a
+  // bid-disqualifying compliance-expiry reminder.
+  it("still matches the 30-day threshold on a catch-up day between the two windows", () => {
+    expect(thresholdFor(29)).toBe(30);
+    expect(thresholdFor(20)).toBe(30);
+    expect(thresholdFor(15)).toBe(30);
+  });
+
+  it("still matches the 14-day threshold on a catch-up day between the two windows", () => {
+    expect(thresholdFor(13)).toBe(14);
+    expect(thresholdFor(10)).toBe(14);
+    expect(thresholdFor(8)).toBe(14);
+  });
+
+  it("still matches the 7-day threshold on a catch-up day below it", () => {
+    expect(thresholdFor(6)).toBe(7);
+    expect(thresholdFor(1)).toBe(7);
+  });
+
+  it("never matches outside any window", () => {
+    expect(thresholdFor(31)).toBeNull();
+    expect(thresholdFor(0)).toBeNull();
+    expect(thresholdFor(-1)).toBeNull();
+  });
+});
+
 describe("complianceDigestCandidatesForCompany", () => {
   it("fires a company field expiry exactly at the 14-day threshold", async () => {
     const supabase = stubSupabase({
@@ -62,12 +98,26 @@ describe("complianceDigestCandidatesForCompany", () => {
     expect(candidates[0].item.riskNote).toBe(SARS_PIN_RISK_NOTE);
   });
 
-  it("does not fire a field that is not exactly on a threshold day", async () => {
+  it("does not fire a field more than 30 days out - too early for any threshold yet", async () => {
+    const supabase = stubSupabase({
+      company: { id: "co1", legal_name: "Acme", sars_tcs_pin_expiry: daysFromNow(31), coid_letter_of_good_standing_expiry: null, cidb_expiry: null, pi_insurance_expiry: null, iso_9001_expiry: null, bank_confirmation_letter_valid_until: null, bee_proof_expiry: null },
+      held: [], types: [], people: [],
+    });
+    expect(await complianceDigestCandidatesForCompany(supabase, "co1")).toHaveLength(0);
+  });
+
+  // Finding 476 (standing QA/robustness review, 2026-11-14): day 20 is NOT
+  // exactly on the 30/14/7-day boundary, but a missed/late cron run that
+  // first reaches this item on day 20 (inside the 30-day threshold's own
+  // catch-up window, 15..30) must still catch it, not permanently lose it.
+  it("fires a company field expiry on a catch-up day, same as a missed cron run self-healing on the next one", async () => {
     const supabase = stubSupabase({
       company: { id: "co1", legal_name: "Acme", sars_tcs_pin_expiry: daysFromNow(20), coid_letter_of_good_standing_expiry: null, cidb_expiry: null, pi_insurance_expiry: null, iso_9001_expiry: null, bank_confirmation_letter_valid_until: null, bee_proof_expiry: null },
       held: [], types: [], people: [],
     });
-    expect(await complianceDigestCandidatesForCompany(supabase, "co1")).toHaveLength(0);
+    const candidates = await complianceDigestCandidatesForCompany(supabase, "co1");
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].threshold).toBe(30);
   });
 
   it("fires a held registration at the 30-day threshold with the registration type's own label", async () => {
