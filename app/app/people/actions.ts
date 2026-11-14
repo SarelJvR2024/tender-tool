@@ -308,6 +308,35 @@ export async function saveProject(formData: FormData) {
   if (value !== null && (Number.isNaN(value) || value < 0)) {
     redirect(`/people/${personId}?error=${encodeURIComponent("Project value (R million) must be a number of 0 or more.")}`);
   }
+
+  // Finding 479 (standing solution-architect review): this form's own
+  // start_date/end_date inputs had NO server-side format check at all -
+  // unlike this exact pair's sibling writer, applyCvExtraction()'s own
+  // per-project confirm loop below (`if (v && !ISO_DATE.test(v)) back(...)`),
+  // which already refuses a malformed date for the SAME two
+  // projects.start_date/end_date columns. people/[id]/page.tsx only ever
+  // renders these as `<input type="date">` (never free text) - but, per
+  // this file's own established rule for every sibling of this shape
+  // (savePerson()'s ecsa_level/highest_level, Finding 478; id_number,
+  // Finding 218/432), a Server Action may never trust that alone: a direct
+  // POST (or a future UI regression) can still submit any string.
+  // engine/fill_tender.py/engine/fill_conventional.py both write a
+  // confirmed project's start date straight onto a real SANRAL Form B1/B2
+  // experience row via `wb.set_date(T, f"P{r}", pr["start"])`
+  // (engine/sanral_fill.py's own `set_date()`) - which only accepts a
+  // strict YYYY-MM-DD string and raises a FieldError-shaped ValueError for
+  // anything else, naming the cell and the bad value. Without this check, a
+  // garbage date typed here (bypassing the date picker) saves silently and
+  // only surfaces much later, as a confusing real-pack-build failure
+  // instead of an immediate, actionable one at the point of entry - the
+  // same "fails, but late and unhelpfully" shape this codebase already
+  // treats as a real finding elsewhere (e.g. Finding 470).
+  for (const [key, label] of [["start_date", "Start date"], ["end_date", "End date"]] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) {
+      redirect(`/people/${personId}?error=${encodeURIComponent(`${label}: "${v}" isn't a date (yyyy-mm-dd).`)}`);
+    }
+  }
   const row = {
     company_id: companyId,
     person_id: personId,

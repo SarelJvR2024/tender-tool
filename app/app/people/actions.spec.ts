@@ -629,6 +629,86 @@ describe("retryCvExtraction - real update still succeeds", () => {
   });
 });
 
+// Finding 479 (standing solution-architect review): saveProject()'s own
+// manual "add project" form had NO server-side format check on start_date/
+// end_date at all - unlike this exact column pair's sibling writer,
+// applyCvExtraction()'s own per-project confirm loop, which already refuses
+// a malformed date for the SAME two projects.start_date/end_date columns
+// (ISO_DATE.test()). people/[id]/page.tsx only ever renders these as
+// `<input type="date">`, but a Server Action may never trust that alone -
+// the same rule already established for this file's other sibling gaps
+// (id_number, ecsa_level/highest_level).
+describe("saveProject - start_date/end_date are validated as real yyyy-mm-dd dates, mirroring applyCvExtraction()'s per-project check (Finding 479)", () => {
+  it("refuses a malformed start_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", client_and_number: "Client A/123", start_date: "15/03/2020" });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('isn\'t a date (yyyy-mm-dd)'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed end_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", client_and_number: "Client A/123", end_date: "not a date" });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('"not a date" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("still saves normally with genuinely valid yyyy-mm-dd dates", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: null, error: null }], // projects insert
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({
+      person_id: "person-1",
+      client_and_number: "Client A/123",
+      start_date: "2020-01-01",
+      end_date: "2021-06-30",
+    });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+
+  it("still allows leaving both dates blank", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: null, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", client_and_number: "Client A/123" });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+});
+
 // deleteProject() used to check NOTHING at all on the delete - not even
 // `error` (the same "worst instance" shape experience/actions.ts's
 // deleteExperience() had before its own fix). No destructive consequence
