@@ -15,6 +15,7 @@ import { expandDisciplines, loadDisciplineTaxonomy } from "@/lib/disciplineTaxon
 import { findMatchingExperience, isScoreableEvidence, type ExperienceItem } from "@/lib/experience";
 import { chooseEvidenceRule, evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { TENDER_ROLE_COLUMNS, roleCodeForPosition, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
+import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
 import { CONDITIONAL_REGISTRATION_COLUMNS, loadHeldCatalogRegistrations } from "@/lib/personCredentials";
 import { REQUIRED_TENDER_TEMPLATES } from "@/lib/tenderTemplates";
@@ -29,7 +30,7 @@ import { REQUIRED_TENDER_TEMPLATES } from "@/lib/tenderTemplates";
  */
 
 type Requirement = { position_code: string; position_description: string | null; managerial: boolean; is_alternate: boolean };
-type Assignment = { position_code: string; confirmed_person_id: string | null; suggested_person_id: string | null; specialism_warning: boolean };
+type Assignment = { position_code: string; confirmed_person_id: string | null; suggested_person_id: string | null; specialism_warning: boolean; candidate_scores: CandidateScore[] | null };
 type PersonRow = PersonFacts & { id: string };
 type ProjectRow = SanralProject & { person_id: string };
 type CvUpload = { person_id: string; mode: "as_is" | "ai_extract"; original_filename: string; created_at: string };
@@ -119,7 +120,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
       supabase.from("field_provenance").select("field_key, status").eq("tender_pack_id", packId),
       supabase
         .from("tender_pack_assignments")
-        .select("position_code, confirmed_person_id, suggested_person_id, specialism_warning")
+        .select("position_code, confirmed_person_id, suggested_person_id, specialism_warning, candidate_scores")
         .eq("tender_pack_id", packId)
         .order("position_code", { ascending: true }),
     ]);
@@ -135,10 +136,25 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   // CLI pack, while tender_requirements isn't seeded by anything yet).
   const positionCodes = Array.from(new Set([...requirements.map((r) => r.position_code), ...assignments.map((a) => a.position_code)]));
 
+  // Finding 477: `suggested_person_id` only reflects "whoever the page was
+  // suggesting at the moment someone last clicked confirm/clear" for THIS
+  // position (pack-inputs-actions.ts's own confirmPositionPerson()) -
+  // sync_position_suggestions() (process_pack_jobs.py) only ever writes
+  // candidate_scores/scored_at, never this column. A position nobody has
+  // ever confirmed/cleared keeps suggested_person_id null forever, even
+  // once candidate_scores holds a real, current ranking - unlike page.tsx's
+  // own Key Positions card, which always recomputes the suggestion fresh
+  // from candidate_scores via suggestForPosition() rather than trusting
+  // this column. Below, every candidate_scores person_id is included here
+  // too (not just confirmed/suggested/role-tagged), so this same recompute
+  // can run against the full ranking, not just whoever happened to already
+  // be fetched.
+  const candidateScorePersonIds = assignments.flatMap((a) => (a.candidate_scores ?? []).map((c) => c.person_id));
   const personIds = Array.from(
     new Set([
       ...assignments.flatMap((a) => [a.confirmed_person_id, a.suggested_person_id]).filter((x): x is string => !!x),
       ...roleTags.map((t) => t.person_id), // people tagged for a role, to name them on unfilled positions
+      ...candidateScorePersonIds,
     ]),
   );
   let people: PersonRow[] = [];
@@ -244,11 +260,29 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   });
 
   const personById = new Map(people.map((p) => [p.id, p]));
+  // Who among candidate_scores is actually still on file (same "still on
+  // file" use page.tsx's own assignablePeople set serves) - here, people
+  // already fetched above covers it, since candidateScorePersonIds (just
+  // above) was folded into the same personIds batch read.
+  const peopleIds = new Set(people.map((p) => p.id));
   const positionRows = positionCodes.map((code) => {
     const req = requirements.find((r) => r.position_code === code) ?? null;
     const asg = assignments.find((a) => a.position_code === code) ?? null;
     const person = asg?.confirmed_person_id ? personById.get(asg.confirmed_person_id) ?? null : null;
-    const suggested = !person && asg?.suggested_person_id ? personById.get(asg.suggested_person_id) ?? null : null;
+    // Recomputed fresh from candidate_scores (see the personIds comment
+    // above) rather than trusted from the raw suggested_person_id column -
+    // the same self-healing read page.tsx's own Key Positions card already
+    // uses, so this report never falls back to "No key person confirmed"
+    // for a position that genuinely has a ranked, named suggestion on file.
+    const suggested = !person
+      ? suggestForPosition({
+          positionCode: code,
+          description: req?.position_description ?? null,
+          candidateScores: asg?.candidate_scores ?? null,
+          tags: roleTags,
+          peopleIds,
+        }).suggestion
+      : null;
     // THIS tender's own C3.1.11 table when it has been read (audit Q5),
     // else R.396's table labelled as an assumption (tenderCompliance.ts).
     const min = checkMinimumRequirement(code, person, closingDate, req?.position_description ?? null, keyPersonMinimums);
