@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { fetchCompanySubscription } from "@/lib/companySubscription";
@@ -317,13 +316,21 @@ function CheckoutLink({
       </Button>
     );
   }
+  // A same-origin POST form, not a GET <Link> (standing review finding,
+  // 2026-11-10): /api/billing/checkout's own handler mutates this company's
+  // live billing row (start_payfast_checkout()) as its very first real
+  // step, before PayFast is ever involved - see that route's own header
+  // comment for why a GET on an endpoint with that side effect is a real,
+  // externally-triggerable risk (a crafted link's plain top-level
+  // navigation still carries this app's own SameSite=Lax session cookie).
+  // POST does not.
   return (
-    <Link
-      href={`/api/billing/checkout?plan=${plan}&interval=${interval}`}
-      className={buttonVariants({ variant, className: sharedClassName })}
-      aria-label={fullLabel}
-    >
-      {content}
-    </Link>
+    <form action="/api/billing/checkout" method="post" className="w-full">
+      <input type="hidden" name="plan" value={plan} />
+      <input type="hidden" name="interval" value={interval} />
+      <Button type="submit" variant={variant} className={cn(sharedClassName, "w-full")} aria-label={fullLabel}>
+        {content}
+      </Button>
+    </form>
   );
 }
