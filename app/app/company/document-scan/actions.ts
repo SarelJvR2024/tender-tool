@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { safeRedirectPath } from "@/lib/safeRedirect";
 import { sastToday } from "@/lib/publicHolidays";
+import { ISO_DATE } from "@/lib/cvExtraction";
 import {
   ONBOARDING_BUCKET,
   VAULT_DOCUMENT_COLUMN,
@@ -324,6 +325,20 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
   const valueRm = ticked(formData, "project_value_rm") ? num(formData, "f_project_value_rm") : null;
   if (valueRm !== null && valueRm < 0) fail("Project value (R million) must be a number of 0 or more.");
 
+  // Finding 480 (standing solution-architect review): this review screen's
+  // own `f_completion_date` box is a third, independent writer of
+  // experience_items.completion_date (0012) alongside
+  // app/app/experience/actions.ts's saveExperienceTags() - its manual-
+  // tagging twin - and neither had any date-format check at all, the same
+  // gap Finding 479 closed on this codebase's OTHER date-pair writer
+  // (people/actions.ts's saveProject(), projects.start_date/end_date).
+  // Reviewer-editable free text here (not a date picker), so a retyped
+  // value like "15/03/2020" reaches the exact same column
+  // experience/[id]/page.tsx's own `<input type="date">` can't render back
+  // correctly, and the same sinceYearOk()/yearsAgo() readers silently drop.
+  const completionDate = ticked(formData, "completion_date") ? str(formData, "f_completion_date") : null;
+  if (completionDate && !ISO_DATE.test(completionDate)) fail(`Completion date: "${completionDate}" isn't a date (yyyy-mm-dd).`);
+
   const destPath = `${companyId}/experience/${randomUUID()}-${safeFileName(upload!.original_filename)}`;
   const copyErr = await copyBetweenBuckets(supabase, ONBOARDING_BUCKET, upload!.storage_path, "experience-documents", destPath, "application/octet-stream");
   if (copyErr) fail(copyErr);
@@ -337,7 +352,7 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
     client_name: clientName,
     contract_number: contractNumber,
     value_rm: valueRm,
-    completion_date: ticked(formData, "completion_date") ? str(formData, "f_completion_date") : null,
+    completion_date: completionDate,
     reference_contact_name: ticked(formData, "referee_name") ? str(formData, "f_referee_name") : null,
     reference_contact_phone: ticked(formData, "referee_phone") ? str(formData, "f_referee_phone") : null,
     reference_contact_email: ticked(formData, "referee_email") ? str(formData, "f_referee_email") : null,
