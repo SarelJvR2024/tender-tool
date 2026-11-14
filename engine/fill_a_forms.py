@@ -192,9 +192,35 @@ def fill_declaration_blanks(doc, name, position, company, log):
 def fill_footer(doc, name, position, company, log):
     """Fills the Name:/Position/Tenderer: footer repeated at the bottom of every
     form. Deliberately leaves Signed:/Date:/SIGNATURE: dotted blanks untouched -
-    those need a real signing event, never text."""
+    those need a real signing event, never text.
+
+    Standing review, 2026-11-10 (Finding 362): position_re's trailing colon is
+    deliberately OPTIONAL - the real footer label in all 6 real SANRAL
+    A_Forms.docx templates on file is "Position" followed directly by dotted
+    blanks, with no colon at all (confirmed: "Name:...Position..."). But with
+    no colon required, the bare word "Position" (case-insensitive, no \\b)
+    matched as a SUBSTRING of any unrelated word containing it too - found by
+    walking every real template, not reasoned from the code: "...information
+    provided by candidates proposed for the specified key positions."
+    (present in all 6 templates) and "...the individual positions of the key
+    personnel..." (R.352-020 only) both matched on "position" inside
+    "positions", and the outer per-paragraph guard two lines below (gated on
+    "Name" or "Tenderer" being anywhere in the paragraph) let both through
+    because the first sentence contains "Tenderers" and the real "Name"/
+    "Tenderer:" footer line never appears near either sentence. The result
+    was confirmed by actually running this function against all 6 real
+    templates: the signatory's own capacity (e.g. "Managing Director") was
+    spliced into the middle of the word "positions" in a real SANRAL
+    boilerplate declaration sentence - "...specified key position Managing
+    Director   s." - on every single real submission this pipeline has ever
+    built. The \\b after "Position" (inside the capture group, so m.group(1)
+    is unchanged) blocks the match whenever "Position" is immediately
+    followed by another word character, while every real template's actual
+    "Position" footer label is followed by a non-word character (an ellipsis
+    or dot) and still matches exactly as before.
+    """
     name_pos_re = re.compile(r"(Name\s*:)" + DOTS_RE, re.IGNORECASE)
-    position_re = re.compile(r"(Position\s*:?)" + DOTS_RE, re.IGNORECASE)
+    position_re = re.compile(r"(Position\b\s*:?)" + DOTS_RE, re.IGNORECASE)
     # Negative lookbehinds exclude "Name of Tenderer:" (A17, filled separately via
     # append_after_label - a real field) and "Note(s) to Tenderer:" (a section
     # heading, not a fill point) - both contain the literal substring "Tenderer:"
