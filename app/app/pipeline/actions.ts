@@ -198,3 +198,42 @@ export async function recordOutcomeAndMoveStage(formData: FormData) {
   revalidatePath(`/tenders/${tenderId}`);
   redirect("/pipeline");
 }
+
+/**
+ * "Dismiss" on the Pipeline debrief banner (Claude-Brief-Awards-
+ * Intelligence_v2.md Phase 4, migration 0145) - hides the "Government
+ * outcome published" banner for this pursuit without touching
+ * pipeline_stage. Company-wide, same convention as discovered_opportunities.
+ * downgrade_acknowledged_at (0055) - see 0145's own column comment for why.
+ * A plain company-scoped update, same mechanism recordOutcomeAndMoveStage
+ * already uses for pipeline_stage - tender_packs' existing RLS ("tenant
+ * isolation", all verbs) already covers this, no new policy/RPC needed.
+ */
+export async function dismissDebriefBanner(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const { data: membership, error: membershipError } = await supabase
+    .from("company_members")
+    .select("company_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (membershipError) throw new Error("Couldn't verify your company - try again.");
+  if (!membership) redirect("/onboarding");
+
+  const tenderId = formData.get("tender_id");
+  if (typeof tenderId !== "string" || !tenderId) redirect("/pipeline");
+
+  const { error: dismissError } = await supabase
+    .from("tender_packs")
+    .update({ debrief_dismissed_at: new Date().toISOString() })
+    .eq("company_id", membership.company_id as string)
+    .eq("tender_id", tenderId);
+  if (dismissError) {
+    console.error("tender_packs update failed for debrief banner dismiss", dismissError);
+    redirect(`/pipeline?error=${encodeURIComponent("Could not dismiss this - try again. If it keeps happening, let us know.")}`);
+  }
+
+  revalidatePath("/pipeline");
+  redirect("/pipeline");
+}
