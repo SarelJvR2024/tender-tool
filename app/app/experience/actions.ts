@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { DOCUMENT_TYPES, SERVICE_STAGES, CLIENT_TYPES, PERFORMANCE_RATINGS, disciplineSlug } from "@/lib/experience";
 import { safeFileName } from "@/lib/safeFileName";
+import { ISO_DATE } from "@/lib/cvExtraction";
 
 /**
  * Company experience library (0012_experience_items.sql). Two separate steps,
@@ -148,6 +149,27 @@ export async function saveExperienceTags(formData: FormData) {
   // match_experience() RPC's >= filter (0012) - a negative value would read
   // as broken in the narrative and corrupt that filter's own comparison.
   if (value !== null && (Number.isNaN(value) || value < 0)) redirect(err(back, "Value must be a number of 0 or more (R millions)."));
+
+  // Finding 480 (standing solution-architect review): start_date/
+  // completion_date (0012_experience_items.sql) had NO server-side format
+  // check at all, the same gap Finding 479 just closed on this exact
+  // codebase's OTHER date-pair writer, people/actions.ts's saveProject()
+  // (projects.start_date/end_date) - same `<input type="date">`-but-a-
+  // Server-Action-may-never-trust-that-alone reasoning, same ISO_DATE.test()
+  // fix, just never swept to this table. experience/[id]/page.tsx renders
+  // both fields back into `<input type="date" defaultValue={...}>` - a
+  // non-ISO value stored here (reachable via a direct POST, bypassing the
+  // date picker) makes the browser silently render that input BLANK instead
+  // of showing the company's own already-recorded date, and
+  // experienceEvidence.ts's sinceYearOk()/page.tsx's yearsAgo() both read
+  // this same column by slicing/parsing the raw string, silently excluding
+  // a real evidence item from the SANRAL Form B6 "3 completed projects in
+  // the last 10 years" readiness count instead of ever surfacing the bad
+  // value as an error to fix at entry time.
+  for (const [key, label] of [["start_date", "Start date"], ["completion_date", "Completion date"]] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) redirect(err(back, `${label}: "${v}" isn't a date (yyyy-mm-dd).`));
+  }
 
   const update: Record<string, unknown> = {
     project_name: projectName,
