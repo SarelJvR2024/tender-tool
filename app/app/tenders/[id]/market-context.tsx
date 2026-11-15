@@ -22,6 +22,19 @@ import {
   type Segment,
   type TenderOutcome,
 } from "@/lib/marketPricing";
+import {
+  bidDontBidSignal,
+  buyerKey,
+  companyBbbeeLevel,
+  competitionStats,
+  dominantIncumbent,
+  loadComparableAwards,
+  priceGuide,
+  topWinningSuppliers,
+  winnerBbbeeSplit,
+  type BidSignal,
+  type WinnerCount,
+} from "@/lib/awardsIntelligence";
 
 /**
  * "Market" on the Tender Workspace (0053, docs/specs/Award-Price-Analysis-Findings.md):
@@ -44,8 +57,8 @@ export async function MarketContext({ tender }: { tender: Facts }) {
   const supabase = await createClient();
   const [{ data: pack }, { data: company }, { data: opps }, { data: tenderTags }, { data: scopeRecord }, taxonomy, outcomes] = await Promise.all([
     supabase.from("tender_packs").select("pipeline_stage, submitted_price_zar, submitted_price_incl_vat, price_sector").eq("tender_id", tender.id).maybeSingle(),
-    supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
-    supabase.from("discovered_opportunities").select("categories").eq("tender_id", tender.id).limit(1),
+    supabase.from("companies").select("legal_name, csd_trading_name, status, bee_level").maybeSingle(),
+    supabase.from("discovered_opportunities").select("categories, province").eq("tender_id", tender.id).limit(1),
     // industry_tags/discipline_tags (0060) - the tags the market trend below groups by.
     supabase.from("tenders").select("industry_tags, discipline_tags").eq("id", tender.id).maybeSingle(),
     // tender_scope_records (0060) - this tender's own value band, if the text states one,
@@ -61,6 +74,20 @@ export async function MarketContext({ tender }: { tender: Facts }) {
   const segments = segmentsFor({ buyerLabel: clientLabel(tender.buyer, tender.family), isSanral, categories: expandDisciplines(taxonomy, categories), categoryLabel });
   const segmentRows = await Promise.all(segments.map((s) => loadSegment(supabase, s)));
 
+  // Market Intelligence (Claude-Brief-Awards-Intelligence_v2.md Phase 4,
+  // Sarel 2026-11-14) - a second, SEPARATE comparison from "Similar published
+  // tenders" above: that one is all-buyers + discipline, unbounded in time.
+  // This one is the brief's own exact definition - same buyer + category in
+  // the last 36 months, widened to the same category + province (any buyer)
+  // when thin - feeding the bid/don't-bid signal, B-BBEE split, top winning
+  // suppliers and the pricing/gap numbers, none of which existed before this.
+  const province = (opps?.[0]?.province as string | null) ?? null;
+  const tenderBuyerKey = buyerKey(tender.buyer);
+  const comparable = await loadComparableAwards(supabase, {
+    buyerKey: tenderBuyerKey, province, categories: expandDisciplines(taxonomy, categories),
+  });
+  const userBbbeeLevel = companyBbbeeLevel({ status: (company?.status as string | null) ?? null, bee_level: (company?.bee_level as number | null) ?? null });
+
   const trendTags = [...new Set([...((tenderTags?.industry_tags as string[] | null) ?? []), ...((tenderTags?.discipline_tags as string[] | null) ?? [])])];
   const valueBand = (scopeRecord?.value_band as string | null) ?? null;
   const { trend, error: trendError } = await loadMarketTrend(supabase, trendTags, valueBand);
@@ -71,6 +98,7 @@ export async function MarketContext({ tender }: { tender: Facts }) {
   const stage = (pack?.pipeline_stage as string | undefined) ?? null;
 
   return (
+    <>
     <div id="market" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
       <div className="text-[15px] font-bold text-foreground">Market: published bids and awards</div>
       <div className={`mt-1 ${mutedClass}`}>
@@ -109,6 +137,163 @@ export async function MarketContext({ tender }: { tender: Facts }) {
             <MarketTrendBlock trend={trend} tags={trendTags} valueBand={valueBand} />
           ) : null}
         </>
+      )}
+    </div>
+    {categories.length > 0 && (
+      <MarketIntelligenceBlock
+        province={province}
+        comparable={comparable}
+        userBbbeeLevel={userBbbeeLevel}
+      />
+    )}
+    </>
+  );
+}
+
+const chipClass: Record<BidSignal["signal"], string> = {
+  Green: "border-success/30 bg-success/15 text-success",
+  Amber: "border-warning/20 bg-warning/10 text-warning",
+  Grey: "border-border bg-muted text-muted-foreground",
+};
+
+/**
+ * "Market Intelligence" (Claude-Brief-Awards-Intelligence_v2.md Phase 4):
+ * the bid/don't-bid signal, competition & incumbents, and the pricing guide
+ * - all computed from loadComparableAwards()'s own buyer+category(+province)
+ * comparison, a SEPARATE set from "Similar published tenders" above (that
+ * one is all-buyers, unbounded in time; this one is buyer-specific and
+ * time-bounded, per the brief's own exact spec).
+ */
+function MarketIntelligenceBlock({
+  province,
+  comparable,
+  userBbbeeLevel,
+}: {
+  province: string | null;
+  comparable: { rows: TenderOutcome[]; error: string | null; widened: boolean; widenedTo: "province" | null };
+  userBbbeeLevel: string | null;
+}) {
+  const { rows, error, widened } = comparable;
+
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="text-[15px] font-bold text-foreground">Market Intelligence</div>
+      <div className={`mt-1 ${mutedClass}`}>
+        Comparable published awards for this buyer&apos;s own category, from the last 36 months - widened to the whole
+        province when there are too few. A separate, narrower comparison from &ldquo;Similar published tenders&rdquo;
+        above.
+      </div>
+      {error && <div className="mt-2 text-xs text-destructive">Could not read comparable awards: {error}</div>}
+
+      {rows.length === 0 ? (
+        <div className={`mt-3 ${mutedClass}`}>No historical awards published by this buyer in this category.</div>
+      ) : (
+        <MarketIntelligenceContent rows={rows} widened={widened} province={province} userBbbeeLevel={userBbbeeLevel} />
+      )}
+    </div>
+  );
+}
+
+function MarketIntelligenceContent({
+  rows,
+  widened,
+  province,
+  userBbbeeLevel,
+}: {
+  rows: TenderOutcome[];
+  widened: boolean;
+  province: string | null;
+  userBbbeeLevel: string | null;
+}) {
+  const competition = competitionStats(rows);
+  const split = winnerBbbeeSplit(rows);
+  const top5 = topWinningSuppliers(rows, 5);
+  const guide = priceGuide(rows);
+  const incumbent = dominantIncumbent(rows);
+  const signal = bidDontBidSignal({ awards: rows, userBbbeeLevel });
+
+  return (
+    <div className="mt-3">
+      {widened && (
+        <div className={`mb-3 rounded-lg border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-xs text-warning`}>
+          Widened to {province ?? "the province"} due to &lt;5 local buyer awards.
+        </div>
+      )}
+
+      {/* a) Bid / Don't-Bid signal */}
+      <div className={h3Class}>Bid / don&apos;t-bid signal</div>
+      <div className="flex items-start gap-2.5">
+        <span className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-bold ${chipClass[signal.signal]}`}>
+          {signal.signal}
+        </span>
+        <ul className="list-disc space-y-0.5 pl-4 text-xs text-foreground">
+          {signal.rulesFired.map((rule, i) => (
+            <li key={i}>{rule}</li>
+          ))}
+        </ul>
+      </div>
+
+      {/* b) Competition & Incumbents */}
+      <div className={h3Class}>Competition &amp; incumbents</div>
+      <div className="text-xs text-foreground">
+        {competition.n > 0 ? (
+          <>Median bidder count: <strong>{competition.median}</strong> (range {competition.low}-{competition.high}, n={competition.n})</>
+        ) : (
+          <span className={mutedClass}>No published bidder lists in this comparison.</span>
+        )}
+      </div>
+      {incumbent.isDominant && (
+        <div className="mt-1.5 rounded-lg border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
+          Dominant incumbent: {incumbent.winnerName} won {incumbent.sharePct}% of comparable awards (n={incumbent.n}).
+        </div>
+      )}
+      {top5.length > 0 && (
+        <table className="mt-2 w-full border-collapse">
+          <thead>
+            <tr>
+              <th className={thClass}>Top winning suppliers</th>
+              <th className={thClass}>Wins</th>
+              <th className={thClass}>Total value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {top5.map((w: WinnerCount) => (
+              <tr key={w.key}>
+                <td className={tdClass}>{w.name ?? w.key}</td>
+                <td className={tdClass}>{w.wins}</td>
+                <td className={tdClass}>{formatRand(w.totalValueZar)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {split.n > 0 && (
+        <div className="mt-2 text-xs text-foreground">
+          Winner B-BBEE level ({split.n} award{split.n === 1 ? "" : "s"}): EME {split.EME} · QSE {split.QSE} · Level 1-2{" "}
+          {split["Level 1-2"]} · other {split.other}
+        </div>
+      )}
+
+      {/* c) Pricing Guide */}
+      <div className={h3Class}>Pricing guide</div>
+      {guide.n > 0 ? (
+        <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-foreground">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span>25th: <strong>{formatRand(guide.p25)}</strong></span>
+            <span>Median: <strong>{formatRand(guide.median)}</strong></span>
+            <span>75th: <strong>{formatRand(guide.p75)}</strong></span>
+          </div>
+          <div className={`mt-1 ${mutedClass}`}>n_contracts = {guide.n}</div>
+        </div>
+      ) : (
+        <div className={mutedClass}>No usable contract amounts in this comparison.</div>
+      )}
+      {guide.vsLowest.n > 0 && (
+        <div className="mt-2 text-xs text-foreground">
+          In {guide.vsLowest.n} award{guide.vsLowest.n === 1 ? "" : "s"} with published registers: Lowest price lost{" "}
+          {guide.vsLowest.lowestDidNotWinPct}% of the time
+          {guide.vsLowest.typicalGapPct !== null && ` (avg gap: ${guide.vsLowest.typicalGapPct}%)`}.
+        </div>
       )}
     </div>
   );

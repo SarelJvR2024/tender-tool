@@ -18,8 +18,107 @@
 // (migrations 0143/0144): buyer_key, winner_key, is_panel_award,
 // pricing_excluded, bidders[].bbbee_level, bidders[].price_rank.
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { median, toNumber } from "@/lib/dealEconomics";
-import { MIN_SAMPLE, normName, quantile, type Bidder, type TenderOutcome } from "@/lib/marketPricing";
+import { fetchAllRows, MIN_SAMPLE, normName, OUTCOME_COLUMNS, quantile, type Bidder, type TenderOutcome } from "@/lib/marketPricing";
+
+// ------------------------------------------------------- shared identity helpers
+
+/** TS twin of store_award_outcomes.buyer_key() (Python, migration 0143) -
+ * whitespace collapsed, upper-cased, nothing fuzzy or guessed. Must stay
+ * identical so the SAME real buyer name normalises to the SAME key
+ * whichever side computes it (this file computes it from an
+ * OpportunityRow/tender's own `buyer` text to query public_tender_outcomes
+ * by buyer_key; store_award_outcomes.py computes it once, at write time,
+ * from the award's own source data). */
+export function buyerKey(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const s = name.replace(/\s+/g, " ").trim().toUpperCase();
+  return s || null;
+}
+
+/** The company's OWN B-BBEE level, in classify_bbbee_level()'s output
+ * vocabulary (EME | QSE | "Level 1".."Level 8" | null) - the shape
+ * bidDontBidSignal()'s userBbbeeLevel and winnerBidder().bbbee_level both
+ * use, so the two sides of that comparison are never apples-to-oranges.
+ *
+ * Real SA B-BBEE codes treat enterprise-size (EME/QSE) and a QSE/Generic
+ * enterprise's own numeric contributor level as two separate things - this
+ * product's own company profile already stores them as two separate
+ * fields (`status`: free text, e.g. "EME"/"QSE"; `bee_level`: a plain 1-9
+ * number - app/company/_components/EditForm.tsx), so this reads both
+ * rather than guessing one from the other. `bee_level` 9 is not a real
+ * B-BBEE contributor level (1-8 only, per classify_bbbee_level()'s own
+ * docstring) and is never guessed into "Level 9" or anything else. */
+export function companyBbbeeLevel(company: { status: string | null; bee_level: number | null }): string | null {
+  const status = (company.status ?? "").trim().toUpperCase();
+  if (status === "EME") return "EME";
+  if (status === "QSE") return "QSE";
+  if (company.bee_level !== null && company.bee_level >= 1 && company.bee_level <= 8) return `Level ${company.bee_level}`;
+  return null;
+}
+
+// ------------------------------------------------------- loading comparable awards
+
+export type ComparableAwardsResult = {
+  rows: TenderOutcome[];
+  error: string | null;
+  /** True when the narrow (same buyer) query came back under MIN_SAMPLE and
+   * this is the WIDENED (same category + province, any buyer) result
+   * instead - the brief's own fallback order (section 3). Never silently
+   * widened without saying so. */
+  widened: boolean;
+  widenedTo: "province" | null;
+};
+
+const COMPARABLE_LOOKBACK_MONTHS = 36;
+
+function monthsAgoIso(months: number, now: Date): string {
+  const d = new Date(now.getTime());
+  d.setUTCMonth(d.getUTCMonth() - months);
+  return d.toISOString().slice(0, 10);
+}
+
+async function queryComparable(
+  supabase: SupabaseClient,
+  args: { buyerKey: string | null; province: string | null; categories: string[]; cutoff: string },
+): Promise<{ rows: TenderOutcome[]; error: string | null }> {
+  return fetchAllRows<TenderOutcome>((from, to) => {
+    let q = supabase
+      .from("public_tender_outcomes")
+      .select(OUTCOME_COLUMNS)
+      .overlaps("categories", args.categories)
+      .gte("award_date", args.cutoff);
+    if (args.buyerKey) q = q.eq("buyer_key", args.buyerKey);
+    else if (args.province) q = q.eq("province", args.province);
+    return q.range(from, to);
+  }, 5000);
+}
+
+/** Comparable awards for a bid/don't-bid-style comparison (Claude-Brief-
+ * Awards-Intelligence_v2.md section 3): same buyer + category in the last
+ * 36 months; if fewer than MIN_SAMPLE, widen to same category + province
+ * (any buyer) instead - the brief's own exact fallback order. `now` is
+ * injectable for tests; defaults to the real clock. */
+export async function loadComparableAwards(
+  supabase: SupabaseClient,
+  args: { buyerKey: string | null; province: string | null; categories: string[]; now?: Date },
+): Promise<ComparableAwardsResult> {
+  const cutoff = monthsAgoIso(COMPARABLE_LOOKBACK_MONTHS, args.now ?? new Date());
+  if (args.categories.length === 0) return { rows: [], error: null, widened: false, widenedTo: null };
+
+  if (args.buyerKey) {
+    const narrow = await queryComparable(supabase, { buyerKey: args.buyerKey, province: null, categories: args.categories, cutoff });
+    if (narrow.error || narrow.rows.length >= MIN_SAMPLE || !args.province) {
+      return { rows: narrow.rows, error: narrow.error, widened: false, widenedTo: null };
+    }
+  } else if (!args.province) {
+    return { rows: [], error: null, widened: false, widenedTo: null };
+  }
+
+  const wide = await queryComparable(supabase, { buyerKey: null, province: args.province ?? null, categories: args.categories, cutoff });
+  return { rows: wide.rows, error: wide.error, widened: true, widenedTo: "province" };
+}
 
 // ------------------------------------------------------- 1. Competition
 

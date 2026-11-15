@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   bidDontBidSignal,
   bucketBbbeeLevel,
+  buyerKey,
+  companyBbbeeLevel,
   competitionStats,
   dominantIncumbent,
+  loadComparableAwards,
   matchPursuitsToAwards,
   priceGuide,
   topWinningSuppliers,
@@ -337,5 +340,93 @@ describe("matchPursuitsToAwards", () => {
     const pursuits: Pursuit[] = [{ id: "p1", reference: "X.001-2026/1", buyer: null, title: null, companyNames: ["Winner Co"] }];
     const [result] = matchPursuitsToAwards(pursuits, awards);
     expect(Object.keys(result).sort()).toEqual(["lostTo", "matchedOn", "matchedOutcomeKey", "pursuitId", "suggestion"]);
+  });
+});
+
+// ------------------------------------------------------- shared identity helpers
+
+describe("buyerKey", () => {
+  it("collapses whitespace and upper-cases, same as the Python twin's own test", () => {
+    expect(buyerKey("Eastern Cape - Cooperative Governance  and Traditional Affairs")).toBe(
+      "EASTERN CAPE - COOPERATIVE GOVERNANCE AND TRADITIONAL AFFAIRS",
+    );
+  });
+  it("two differently-spaced/cased real names produce the same key", () => {
+    expect(buyerKey("Kwazulu Natal - Social Development ")).toBe(buyerKey("KWAZULU NATAL - SOCIAL DEVELOPMENT"));
+  });
+  it("null/empty in, null out", () => {
+    expect(buyerKey(null)).toBeNull();
+    expect(buyerKey("")).toBeNull();
+  });
+});
+
+describe("companyBbbeeLevel", () => {
+  it("reads 'EME'/'QSE' from the company's own status field", () => {
+    expect(companyBbbeeLevel({ status: "EME", bee_level: null })).toBe("EME");
+    expect(companyBbbeeLevel({ status: "qse", bee_level: 3 })).toBe("QSE"); // status wins over a numeric level when both are set
+  });
+  it("falls back to 'Level N' from bee_level (1-8) when status isn't EME/QSE", () => {
+    expect(companyBbbeeLevel({ status: null, bee_level: 4 })).toBe("Level 4");
+    expect(companyBbbeeLevel({ status: "", bee_level: 1 })).toBe("Level 1");
+  });
+  it("bee_level 9 (not a real contributor level) is never guessed into anything", () => {
+    expect(companyBbbeeLevel({ status: null, bee_level: 9 })).toBeNull();
+  });
+  it("nothing recorded at all -> null, not a guess", () => {
+    expect(companyBbbeeLevel({ status: null, bee_level: null })).toBeNull();
+  });
+});
+
+// ------------------------------------------------------- loadComparableAwards
+
+function makeComparableSupabase(responses: { data: unknown; error: { message: string } | null }[]) {
+  let call = 0;
+  const chain: Record<string, unknown> = {};
+  for (const m of ["select", "eq", "overlaps", "gte"]) chain[m] = () => chain;
+  chain.range = () => Promise.resolve(responses[Math.min(call++, responses.length - 1)]);
+  return { from: () => chain } as unknown as Parameters<typeof loadComparableAwards>[0];
+}
+
+describe("loadComparableAwards", () => {
+  const NOW = new Date("2026-11-14T00:00:00Z");
+
+  it("uses the narrow (same buyer) result when it already clears MIN_SAMPLE - never widens unnecessarily", async () => {
+    const rows = Array.from({ length: 5 }, () => award());
+    const supabase = makeComparableSupabase([{ data: rows, error: null }]);
+    const result = await loadComparableAwards(supabase, { buyerKey: "SANRAL", province: "GP", categories: ["roads"], now: NOW });
+    expect(result.rows.length).toBe(5);
+    expect(result.widened).toBe(false);
+    expect(result.widenedTo).toBeNull();
+  });
+
+  it("widens to province when the narrow result is under MIN_SAMPLE, and SAYS so", async () => {
+    const supabase = makeComparableSupabase([
+      { data: [award(), award()], error: null }, // narrow: only 2
+      { data: Array.from({ length: 8 }, () => award()), error: null }, // widened: 8
+    ]);
+    const result = await loadComparableAwards(supabase, { buyerKey: "SMALL DEPT", province: "GP", categories: ["roads"], now: NOW });
+    expect(result.rows.length).toBe(8);
+    expect(result.widened).toBe(true);
+    expect(result.widenedTo).toBe("province");
+  });
+
+  it("never widens when there is no province to widen to - returns the thin narrow result as-is", async () => {
+    const supabase = makeComparableSupabase([{ data: [award()], error: null }]);
+    const result = await loadComparableAwards(supabase, { buyerKey: "SMALL DEPT", province: null, categories: ["roads"], now: NOW });
+    expect(result.rows.length).toBe(1);
+    expect(result.widened).toBe(false);
+  });
+
+  it("no categories at all -> empty, no query attempted, nothing fabricated", async () => {
+    const supabase = makeComparableSupabase([{ data: [award()], error: null }]);
+    const result = await loadComparableAwards(supabase, { buyerKey: "X", province: "GP", categories: [], now: NOW });
+    expect(result).toEqual({ rows: [], error: null, widened: false, widenedTo: null });
+  });
+
+  it("a genuine query error on the narrow attempt is surfaced, not swallowed or silently widened", async () => {
+    const supabase = makeComparableSupabase([{ data: null, error: { message: "connection reset" } }]);
+    const result = await loadComparableAwards(supabase, { buyerKey: "X", province: "GP", categories: ["roads"], now: NOW });
+    expect(result.error).toBe("connection reset");
+    expect(result.widened).toBe(false);
   });
 });

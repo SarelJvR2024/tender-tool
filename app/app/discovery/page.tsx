@@ -41,7 +41,8 @@ import { closingCountdown, formatClosingDateTime } from "@/lib/dates";
 import { scoreOutlookChips, SCORE_CHIP_CLASS } from "@/lib/scoreOutlookChips";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
-import { MIN_SAMPLE, benchmark, loadSegment, segmentsFor, type Benchmark } from "@/lib/marketPricing";
+import { MIN_SAMPLE } from "@/lib/marketPricing";
+import { buyerKey, competitionStats, loadComparableAwards, priceGuide, type CompetitionStats, type PriceGuide } from "@/lib/awardsIntelligence";
 import { formatRand } from "@/lib/dealEconomics";
 import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
 import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
@@ -569,56 +570,50 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   }
   const scopeByTenderId = new Map(scopeRows.map((r) => [r.tender_id, r]));
 
-  // Market pricing range ("something more indicative than just the tender",
-  // Sarel 2026-10-22) - reuses the EXISTING MIN_SAMPLE-gated benchmark system
-  // (lib/marketPricing.ts, already live on the Tender Workspace's own Market
-  // tab) rather than tender_scope_records.value_band, which is unpopulated
-  // today (see SCOPE_RECORD_COLUMNS comment above). Deduped by discipline mix
-  // and capped at MAX_PRICING_LOOKUPS real queries - operates on whatever
-  // cards are in the CURRENT visibleRows window, which is fine: pagination
-  // (PR #123) already means fewer cards per page than before, so this cap
-  // will rarely if ever bind now (see the MAX_PRICING_LOOKUPS comment above -
-  // a correct, now-largely-redundant-but-harmless interaction, not something
-  // to "fix"). All-buyers segment only (not buyer-specific): a per-buyer
-  // lookup would multiply the dedup key space by every distinct buyer name
-  // on the page, defeating the cap.
-  const pricingSegments = new Map<string, string[]>();
+  // Market-award badge (Claude-Brief-Awards-Intelligence_v2.md Phase 4,
+  // Sarel 2026-11-14) - replaces the earlier all-buyers "Market size range"
+  // pill with the brief's own buyer-specific comparison (same buyer +
+  // category, last 36 months; widened to province when thin -
+  // loadComparableAwards(), lib/awardsIntelligence.ts). Deduped by
+  // (buyerKey, discipline mix) and capped at MAX_PRICING_LOOKUPS, same
+  // policy as before - buyer-specific means the dedup key space is wider
+  // than the old all-buyers-only one, so the cap can bind more often now; a
+  // card past it just shows no badge, same "additive, no fix needed" tier
+  // as a card with no matching discipline (never an error state).
+  const awardBadgeSegments = new Map<string, { buyerKey: string | null; province: string | null; categories: string[] }>();
   for (const o of visibleRows) {
     const cats = pricingCategoriesFor(o.categories);
     if (cats.length === 0) continue;
     const expanded = expandDisciplines(taxonomy, cats);
-    const key = pricingSegmentKey(expanded);
-    if (!pricingSegments.has(key) && pricingSegments.size >= MAX_PRICING_LOOKUPS) continue;
-    pricingSegments.set(key, expanded);
+    // Province is part of the key, not just the stored value: two cards can
+    // share a buyer+category but differ by province, and loadComparableAwards()
+    // widens per-province - without this, the second card iterated overwrote
+    // the first card's own stored province, and both ended up sharing one
+    // badge computed from whichever province happened to be iterated last.
+    const key = `${buyerKey(o.buyer) ?? ""}::${o.province ?? ""}::${pricingSegmentKey(expanded)}`;
+    if (!awardBadgeSegments.has(key) && awardBadgeSegments.size >= MAX_PRICING_LOOKUPS) continue;
+    awardBadgeSegments.set(key, { buyerKey: buyerKey(o.buyer), province: o.province, categories: expanded });
   }
-  const pricingByKey = new Map<string, Benchmark>();
+  type AwardBadge = { n: number; competition: CompetitionStats; guide: PriceGuide; widened: boolean };
+  const awardBadgeByKey = new Map<string, AwardBadge>();
   await Promise.all(
-    [...pricingSegments.entries()].map(async ([key, expanded]) => {
-      const segs = segmentsFor({ buyerLabel: "", isSanral: false, categories: expanded, categoryLabel: "" });
-      const allBuyersSeg = segs.find((s) => s.key === "all");
-      if (!allBuyersSeg) return;
-      const { rows: segRows, error: segError } = await loadSegment(supabase, allBuyersSeg);
-      // Additive-only (an optional per-card pricing badge, no "no data" claim
-      // ever rendered either way) - a real failure here just means the badge
-      // is missing, same as a tender with no matching discipline, so this
-      // doesn't get its own ErrorState the way Finding 158's analytics
-      // section did. But every OTHER non-critical Supabase read on this same
-      // page already logs its own error for operator visibility (see the
-      // `console.error` calls above for discovered_opportunities/
-      // open-downgrade/pursued-history/experience_items/preferences) - this
-      // one silently had none, the exact asymmetry this review tracks, just
-      // inside the "additive, no fix needed" tier instead of the
-      // "false-safe empty state" tier. Logging it costs nothing and closes
-      // that asymmetry (System-Status.md, 2026-11-07u backlog note).
-      if (segError) console.error(`pricing badge: loadSegment failed for segment ${key}`, segError);
-      const b = benchmark(segRows);
-      if (b.contractSize.n >= MIN_SAMPLE) pricingByKey.set(key, b);
+    [...awardBadgeSegments.entries()].map(async ([key, seg]) => {
+      const { rows, error, widened } = await loadComparableAwards(supabase, {
+        buyerKey: seg.buyerKey, province: seg.province, categories: seg.categories,
+      });
+      // Additive-only (an optional per-card badge, no "no data" claim ever
+      // rendered either way) - same logging-without-blocking policy the old
+      // pricing lookup already established (System-Status.md, 2026-11-07u).
+      if (error) console.error(`award badge: loadComparableAwards failed for segment ${key}`, error);
+      if (rows.length === 0) return;
+      awardBadgeByKey.set(key, { n: rows.length, competition: competitionStats(rows), guide: priceGuide(rows), widened });
     }),
   );
-  const pricingFor = (o: OpportunityRow): Benchmark | null => {
+  const awardBadgeFor = (o: OpportunityRow): AwardBadge | null => {
     const cats = pricingCategoriesFor(o.categories);
     if (cats.length === 0) return null;
-    return pricingByKey.get(pricingSegmentKey(expandDisciplines(taxonomy, cats))) ?? null;
+    const key = `${buyerKey(o.buyer) ?? ""}::${o.province ?? ""}::${pricingSegmentKey(expandDisciplines(taxonomy, cats))}`;
+    return awardBadgeByKey.get(key) ?? null;
   };
 
   return (
@@ -819,7 +814,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
             const open = isOpenDowngrade(o);
             const countdown = closingCountdown(o.closing_date);
             const similar = similarTendersBefore({ tenderId: o.tender_id, buyer: o.buyer, categories: o.categories }, doneHistory);
-            const pricing = pricingFor(o);
+            const awardBadge = awardBadgeFor(o);
             const scope = o.tender_id ? scopeByTenderId.get(o.tender_id) ?? null : null;
             // Task item 5: additive only - never hidden, just explained why
             // it sorted lower than a matching tender when this company has
@@ -1044,7 +1039,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                       - a dedicated un-paginated query), never the paginated
                       `rows` window, so a company with more history than
                       what's currently loaded is never silently undercounted. */}
-                  {(similar || pricing) && (
+                  {(similar || awardBadge) && (
                     <div className="mb-1.5 flex flex-wrap gap-1.5">
                       {similar && (
                         <span
@@ -1056,14 +1051,40 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                           {similar.sameBuyerCount > 0 && ` · ${similar.sameBuyerCount} with this buyer`}
                         </span>
                       )}
-                      {pricing && (
+                      {/* Phase 4 badge (Claude-Brief-Awards-Intelligence_v2.md):
+                          a single compact, high-density pill when there's
+                          enough to say something ("Market: 8 awards · Med
+                          R4.2M · 6 bidders"); a subtle amber tag instead of a
+                          full badge when n is under MIN_SAMPLE - "Regional
+                          data" only when loadComparableAwards() actually
+                          widened to province, "Thin sample" otherwise (a
+                          buyer with no province on file never gets widened,
+                          so the label/tooltip must say so honestly rather
+                          than always claiming province widening happened);
+                          nothing at all when n=0, same "no clutter" rule the
+                          old badge already followed. */}
+                      {awardBadge && awardBadge.n < MIN_SAMPLE ? (
                         <span
-                          title={`Across ${pricing.contractSize.n} comparable awarded tenders in this discipline (all buyers) - a size range, not a price to bid.`}
+                          title={
+                            awardBadge.widened
+                              ? `Only ${awardBadge.n} comparable award(s) for this buyer's own category in the last 36 months, widened to the whole province - too thin for a market figure.`
+                              : `Only ${awardBadge.n} comparable award(s) for this buyer's own category in the last 36 months - too thin for a market figure.`
+                          }
+                          className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning"
+                        >
+                          {awardBadge.widened ? `Regional data (n=${awardBadge.n})` : `Thin sample (n=${awardBadge.n})`}
+                        </span>
+                      ) : awardBadge ? (
+                        <span
+                          title={`${awardBadge.n} comparable awarded tender(s)${awardBadge.widened ? ", widened to this province (fewer than 5 for this buyer's own category)" : " for this buyer's own category"} in the last 36 months.`}
                           className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
                         >
-                          Market size range: {formatRand(pricing.contractSize.p25)} - {formatRand(pricing.contractSize.p75)} (median {formatRand(pricing.contractSize.median)})
+                          Market: {awardBadge.n} award{awardBadge.n === 1 ? "" : "s"}
+                          {awardBadge.guide.median !== null && ` · Med ${formatRand(awardBadge.guide.median)}`}
+                          {awardBadge.competition.median !== null && ` · ${awardBadge.competition.median} bidders`}
+                          {awardBadge.widened && " (regional)"}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   )}
 

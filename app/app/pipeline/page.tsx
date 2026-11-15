@@ -13,6 +13,8 @@ import { clientLabel, derivedSector, ECONOMICS_COLUMNS, formatRand, toNumber, ty
 import { loadDisciplineTaxonomy, taxonomyLabel, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { EconomicsForm, type CreditPerson } from "./economics-form";
 import { OutcomeForm, type Outcome } from "./outcome-form";
+import { DebriefBanner } from "./debrief-banner";
+import { bestOutcome, loadOutcomesForTenders, normName } from "@/lib/marketPricing";
 import { loadPackReviewSnapshot } from "../tenders/[id]/pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "../tenders/[id]/general-pack-review-data";
 import { computeTenderReadiness } from "../tenders/[id]/tender-readiness";
@@ -62,13 +64,14 @@ type TenderRow = {
   status: string;
   ocid: string | null;
   // Only this company's own pack comes back, via RLS (one per company per tender).
-  tender_packs: ({ pipeline_stage: PipelineStage; stage_changed_at: string; submitted_at: string | null; submission_type: string | null } & PackEconomics)[];
+  tender_packs: ({ pipeline_stage: PipelineStage; stage_changed_at: string; submitted_at: string | null; submission_type: string | null; debrief_dismissed_at: string | null } & PackEconomics)[];
 };
 
 type Card = {
   id: string;
   stage: PipelineStage;
   contractNo: string | null;
+  ocid: string | null;
   title: string;
   buyer: string;
   closingDate: string | null;
@@ -85,6 +88,13 @@ type Card = {
   outcome: Outcome;
   packHealth: PackHealth | null;
   submissionType: string | null;
+  debriefDismissed: boolean;
+  /** A published award already matched to this pursuit server-side
+   * (loadOutcomesForTenders() -> tender_market_outcomes(), 0053) - attached
+   * after the cards list is built (debrief-banner.tsx), only ever for stage
+   * 'submitted', only ever when not already dismissed. null otherwise,
+   * including for every other stage. */
+  debrief: { winnerName: string; winnerAmountZar: number | null; companyWon: boolean } | null;
 };
 
 // Same chip vocabulary as app/app/discovery/page.tsx's verdictChip() -
@@ -188,10 +198,10 @@ export default async function PipelinePage({
 }
 
 async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>, actionError: string | undefined) {
-  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows, error: peopleError }, { data: outcomeRows }, { data: preferencesRow, error: preferencesError }] = await Promise.all([
+  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows, error: peopleError }, { data: outcomeRows }, { data: preferencesRow, error: preferencesError }, { data: companyRow }] = await Promise.all([
     supabase
       .from("tenders")
-      .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, submission_type, ${ECONOMICS_COLUMNS})`)
+      .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, submission_type, debrief_dismissed_at, ${ECONOMICS_COLUMNS})`)
       .order("closing_date", { ascending: true }),
     // Discovery's fit verdict, where this tender came from the scored feed.
     // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
@@ -220,6 +230,11 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     // than failing the page - covers both a genuine read error and, until
     // Sarel applies 0088 live, the table not existing yet.
     supabase.from("company_tender_preferences").select("hide_sanral_board").maybeSingle(),
+    // Debrief banner (Claude-Brief-Awards-Intelligence_v2.md Phase 4): the
+    // company's own names, same two fields ownPosition() (lib/marketPricing.ts)
+    // already uses to recognise this company on a published register -
+    // reused here to recognise it as the WINNER of one.
+    supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
   ]);
   if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
   // Logged, not gated: a failed read here just omits the owner avatar/credit
@@ -283,6 +298,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       id: t.id,
       stage: normalizeStage(pack?.pipeline_stage ?? "found"),
       contractNo: t.contract_no,
+      ocid: t.ocid,
       title: t.title || t.description || "(untitled)",
       // Standing review, 2026-11-09: this used to be its own inline copy of
       // lib/dealEconomics.ts's clientLabel() rule, not an import of it, even
@@ -325,7 +341,44 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       outcome: outcomeByTender.get(t.id) ?? EMPTY_OUTCOME,
       packHealth: null,
       submissionType: pack?.submission_type ?? null,
+      debriefDismissed: !!pack?.debrief_dismissed_at,
+      debrief: null,
     });
+  }
+
+  // Pipeline debrief banner (Claude-Brief-Awards-Intelligence_v2.md Phase 4):
+  // only ever checked for submitted-stage, not-yet-dismissed pursuits - never
+  // a wasted lookup for a tender nobody is waiting on an outcome for.
+  //
+  // Fixed 2026-11-15: this used to re-match each outcome through
+  // matchPursuitsToAwards() with buyer/title deliberately nulled out and only
+  // the outcome's own `reference` carried over as a "self-match" trick -
+  // bestOutcome() already found the one correct, server-matched outcome for
+  // this exact tender (loadOutcomesForTenders() -> tender_market_outcomes(),
+  // 0053), so the only thing actually needed from matchPursuitsToAwards() was
+  // its Won/Lost comparison, never its (weaker) matching step. But a real,
+  // reachable case - an awarded outcome whose own `reference` is empty (a
+  // scraped SANRAL/eTenders row with no parsed reference) - made the
+  // self-match fail silently, so the banner never appeared even though the
+  // correct outcome was sitting right there. Now computes Won/Lost directly
+  // from the already-matched outcome, with no separate re-match at all.
+  const submittedCards = cards.filter((c) => c.stage === "submitted" && !c.debriefDismissed);
+  if (submittedCards.length > 0) {
+    const { byTender } = await loadOutcomesForTenders(supabase, submittedCards.map((c) => c.id));
+    const companyNames = [companyRow?.legal_name as string | null, companyRow?.csd_trading_name as string | null];
+    for (const c of submittedCards) {
+      const outcome = bestOutcome(byTender.get(c.id));
+      if (!outcome || outcome.status !== "awarded") continue;
+      const companyWon =
+        outcome.winner_count === 1 &&
+        !!outcome.winner_name &&
+        companyNames.some((name) => name && normName(name) === normName(outcome.winner_name));
+      c.debrief = {
+        winnerName: outcome.winner_name ?? "unknown winner",
+        winnerAmountZar: toNumber(outcome.winner_amount_zar ?? null),
+        companyWon,
+      };
+    }
   }
 
   // Readiness score (item 4's card spec) - bounded to "Assessing & building"
@@ -758,6 +811,18 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
       <Link href={action.href} className="mt-2.5 block min-h-7 text-xs font-semibold text-accent no-underline hover:underline">
         {action.label}
       </Link>
+
+      {/* Pipeline debrief banner (Claude-Brief-Awards-Intelligence_v2.md
+          Phase 4): only ever shown on a submitted-stage pursuit with a
+          matched, awarded outcome - see the cards-building loop above. */}
+      {card.stage === "submitted" && card.debrief && (
+        <DebriefBanner
+          tenderId={card.id}
+          winnerName={card.debrief.winnerName}
+          winnerAmountZar={card.debrief.winnerAmountZar}
+          companyWon={card.debrief.companyWon}
+        />
+      )}
 
       {/* Outcome (item 4): winning company/price, bidders, reason lost -
           see outcome-form.tsx for why these live in tender_answers. */}
