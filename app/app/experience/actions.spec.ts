@@ -125,6 +125,73 @@ afterEach(() => {
   supabaseState.current = null;
 });
 
+// Finding 480 (standing solution-architect review): saveExperienceTags()'s
+// own start_date/completion_date inputs had NO server-side format check at
+// all - the same gap Finding 479 just closed on this exact codebase's OTHER
+// date-pair writer, people/actions.ts's saveProject() (projects.start_date/
+// end_date), via `if (v && !ISO_DATE.test(v))`, never swept to this table's
+// two real writers (this one, and document-scan/actions.ts's
+// confirmExperienceReferenceLetter() - see that file's own spec).
+describe("saveExperienceTags - start_date/completion_date are validated as real yyyy-mm-dd dates (Finding 480)", () => {
+  it("refuses a malformed start_date, before any upload or write happens", async () => {
+    const { client, uploadCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId()
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveExperienceTags } = await import("./actions");
+
+    const fd = formDataWith({ id: "exp-1", project_name: "N1 upgrade", document_type: "reference_letter", start_date: "15/03/2020" });
+    fd.append("disciplines", "roads_civil");
+
+    const url = await expectRedirect(saveExperienceTags(fd));
+
+    expect(url).toContain("/experience/exp-1?error=");
+    expect(decodeURIComponent(url)).toContain('"15/03/2020" isn\'t a date');
+    expect(uploadCalls).toHaveLength(0); // rejected before any file upload or DB write
+  });
+
+  it("refuses a malformed completion_date the same way", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveExperienceTags } = await import("./actions");
+
+    const fd = formDataWith({ id: "exp-1", project_name: "N1 upgrade", document_type: "reference_letter", completion_date: "not-a-date" });
+    fd.append("disciplines", "roads_civil");
+
+    const url = await expectRedirect(saveExperienceTags(fd));
+
+    expect(url).toContain("/experience/exp-1?error=");
+    expect(decodeURIComponent(url)).toContain('"not-a-date" isn\'t a date');
+  });
+
+  it("still saves normally with a real ISO date", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [{ data: { id: "exp-1" }, error: null }], // update(...).eq("id", id) - real match, no file attached
+      ],
+    });
+    supabaseState.current = client;
+
+    const { saveExperienceTags } = await import("./actions");
+
+    const fd = formDataWith({ id: "exp-1", project_name: "N1 upgrade", document_type: "reference_letter", start_date: "2020-03-15", completion_date: "2021-06-01" });
+    fd.append("disciplines", "roads_civil");
+
+    const url = await expectRedirect(saveExperienceTags(fd));
+
+    expect(url).not.toContain("error=");
+  });
+});
+
 describe("saveExperienceTags - membership revoked mid-request (update matches zero rows)", () => {
   it("does not report success, does not leave the new upload orphaned, and does not delete the still-referenced replaced file", async () => {
     const { client, uploadCalls, removeCalls } = makeSupabase({

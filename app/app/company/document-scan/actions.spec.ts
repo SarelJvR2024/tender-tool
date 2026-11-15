@@ -162,6 +162,74 @@ const pendingVaultResult = {
   error: null,
 };
 
+const pendingExperienceResult = {
+  data: {
+    id: "result-1",
+    company_id: "company-1",
+    onboarding_upload_id: "upload-1",
+    document_kind: "experience_reference_letter",
+    fields: {},
+    review_status: "pending_review",
+    onboarding_uploads: { storage_path: "company-1/onboarding/raw-letter.pdf", original_filename: "letter.pdf" },
+  },
+  error: null,
+};
+
+// Finding 480 (standing solution-architect review): confirmExperienceReferenceLetter()'s
+// own `f_completion_date` box had NO server-side date-format check at all -
+// the same gap Finding 479 closed on this codebase's OTHER date-pair writer
+// (people/actions.ts's saveProject(), projects.start_date/end_date), and the
+// same gap also just closed on this function's own manual-tagging twin,
+// app/app/experience/actions.ts's saveExperienceTags() (see that file's own
+// spec).
+describe("confirmExperienceReferenceLetter - completion_date is validated as a real yyyy-mm-dd date (Finding 480)", () => {
+  it("refuses a malformed completion_date before copying the file or writing any row", async () => {
+    const { client, uploadCalls } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+        [pendingExperienceResult], // loadPendingResult
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmExperienceReferenceLetter } = await import("./actions");
+
+    const fd = formDataWith({
+      result_id: "result-1",
+      use_completion_date: "on",
+      f_completion_date: "15/03/2020",
+    });
+    const url = await expectRedirect(confirmExperienceReferenceLetter(fd));
+
+    expect(url).toContain("/company/document-scan?error=");
+    expect(decodeURIComponent(url)).toContain('"15/03/2020" isn\'t a date');
+    expect(uploadCalls).toHaveLength(0); // rejected before the onboarding-bucket copy even starts
+  });
+
+  it("still files the document when completion_date is a real ISO date", async () => {
+    const { client } = makeSupabase({
+      fromQueues: [
+        [{ data: { company_id: "company-1" }, error: null }],
+        [pendingExperienceResult],
+        [{ data: { id: "exp-new" }, error: null }], // experience_items insert
+        [{ data: null, error: null }], // markApplied update
+      ],
+    });
+    supabaseState.current = client;
+
+    const { confirmExperienceReferenceLetter } = await import("./actions");
+
+    const fd = formDataWith({
+      result_id: "result-1",
+      use_completion_date: "on",
+      f_completion_date: "2020-03-15",
+    });
+    const url = await expectRedirect(confirmExperienceReferenceLetter(fd));
+
+    expect(url).toContain("saved=filed");
+  });
+});
+
 describe("confirmVaultDocument - membership revoked mid-request (companies update matches zero rows)", () => {
   it("does not report success and does not delete the only remaining copy of the document", async () => {
     const { client, removeCalls } = makeSupabase({
