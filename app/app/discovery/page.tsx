@@ -585,7 +585,12 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     const cats = pricingCategoriesFor(o.categories);
     if (cats.length === 0) continue;
     const expanded = expandDisciplines(taxonomy, cats);
-    const key = `${buyerKey(o.buyer) ?? ""}::${pricingSegmentKey(expanded)}`;
+    // Province is part of the key, not just the stored value: two cards can
+    // share a buyer+category but differ by province, and loadComparableAwards()
+    // widens per-province - without this, the second card iterated overwrote
+    // the first card's own stored province, and both ended up sharing one
+    // badge computed from whichever province happened to be iterated last.
+    const key = `${buyerKey(o.buyer) ?? ""}::${o.province ?? ""}::${pricingSegmentKey(expanded)}`;
     if (!awardBadgeSegments.has(key) && awardBadgeSegments.size >= MAX_PRICING_LOOKUPS) continue;
     awardBadgeSegments.set(key, { buyerKey: buyerKey(o.buyer), province: o.province, categories: expanded });
   }
@@ -607,7 +612,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   const awardBadgeFor = (o: OpportunityRow): AwardBadge | null => {
     const cats = pricingCategoriesFor(o.categories);
     if (cats.length === 0) return null;
-    const key = `${buyerKey(o.buyer) ?? ""}::${pricingSegmentKey(expandDisciplines(taxonomy, cats))}`;
+    const key = `${buyerKey(o.buyer) ?? ""}::${o.province ?? ""}::${pricingSegmentKey(expandDisciplines(taxonomy, cats))}`;
     return awardBadgeByKey.get(key) ?? null;
   };
 
@@ -1049,17 +1054,25 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                       {/* Phase 4 badge (Claude-Brief-Awards-Intelligence_v2.md):
                           a single compact, high-density pill when there's
                           enough to say something ("Market: 8 awards · Med
-                          R4.2M · 6 bidders"); a subtle amber tag naming the
-                          thin, widened-to-province sample instead of a full
-                          badge when n is under MIN_SAMPLE even after
-                          widening; nothing at all when n=0, same "no
-                          clutter" rule the old badge already followed. */}
+                          R4.2M · 6 bidders"); a subtle amber tag instead of a
+                          full badge when n is under MIN_SAMPLE - "Regional
+                          data" only when loadComparableAwards() actually
+                          widened to province, "Thin sample" otherwise (a
+                          buyer with no province on file never gets widened,
+                          so the label/tooltip must say so honestly rather
+                          than always claiming province widening happened);
+                          nothing at all when n=0, same "no clutter" rule the
+                          old badge already followed. */}
                       {awardBadge && awardBadge.n < MIN_SAMPLE ? (
                         <span
-                          title={`Only ${awardBadge.n} comparable award(s) for this buyer's own category in the last 36 months, widened to the whole province - too thin for a market figure.`}
+                          title={
+                            awardBadge.widened
+                              ? `Only ${awardBadge.n} comparable award(s) for this buyer's own category in the last 36 months, widened to the whole province - too thin for a market figure.`
+                              : `Only ${awardBadge.n} comparable award(s) for this buyer's own category in the last 36 months - too thin for a market figure.`
+                          }
                           className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning"
                         >
-                          Regional data (n={awardBadge.n})
+                          {awardBadge.widened ? `Regional data (n=${awardBadge.n})` : `Thin sample (n=${awardBadge.n})`}
                         </span>
                       ) : awardBadge ? (
                         <span

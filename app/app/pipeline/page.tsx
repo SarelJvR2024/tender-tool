@@ -14,8 +14,7 @@ import { loadDisciplineTaxonomy, taxonomyLabel, type DisciplineTaxonomy } from "
 import { EconomicsForm, type CreditPerson } from "./economics-form";
 import { OutcomeForm, type Outcome } from "./outcome-form";
 import { DebriefBanner } from "./debrief-banner";
-import { bestOutcome, loadOutcomesForTenders } from "@/lib/marketPricing";
-import { matchPursuitsToAwards, type Pursuit } from "@/lib/awardsIntelligence";
+import { bestOutcome, loadOutcomesForTenders, normName } from "@/lib/marketPricing";
 import { loadPackReviewSnapshot } from "../tenders/[id]/pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "../tenders/[id]/general-pack-review-data";
 import { computeTenderReadiness } from "../tenders/[id]/tender-readiness";
@@ -90,10 +89,11 @@ type Card = {
   packHealth: PackHealth | null;
   submissionType: string | null;
   debriefDismissed: boolean;
-  /** A published award matched to this pursuit (matchPursuitsToAwards(),
-   * lib/awardsIntelligence.ts) - attached after the cards list is built
-   * (debrief-banner.tsx), only ever for stage 'submitted', only ever when
-   * not already dismissed. null otherwise, including for every other stage. */
+  /** A published award already matched to this pursuit server-side
+   * (loadOutcomesForTenders() -> tender_market_outcomes(), 0053) - attached
+   * after the cards list is built (debrief-banner.tsx), only ever for stage
+   * 'submitted', only ever when not already dismissed. null otherwise,
+   * including for every other stage. */
   debrief: { winnerName: string; winnerAmountZar: number | null; companyWon: boolean } | null;
 };
 
@@ -349,39 +349,35 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // Pipeline debrief banner (Claude-Brief-Awards-Intelligence_v2.md Phase 4):
   // only ever checked for submitted-stage, not-yet-dismissed pursuits - never
   // a wasted lookup for a tender nobody is waiting on an outcome for.
+  //
+  // Fixed 2026-11-15: this used to re-match each outcome through
+  // matchPursuitsToAwards() with buyer/title deliberately nulled out and only
+  // the outcome's own `reference` carried over as a "self-match" trick -
+  // bestOutcome() already found the one correct, server-matched outcome for
+  // this exact tender (loadOutcomesForTenders() -> tender_market_outcomes(),
+  // 0053), so the only thing actually needed from matchPursuitsToAwards() was
+  // its Won/Lost comparison, never its (weaker) matching step. But a real,
+  // reachable case - an awarded outcome whose own `reference` is empty (a
+  // scraped SANRAL/eTenders row with no parsed reference) - made the
+  // self-match fail silently, so the banner never appeared even though the
+  // correct outcome was sitting right there. Now computes Won/Lost directly
+  // from the already-matched outcome, with no separate re-match at all.
   const submittedCards = cards.filter((c) => c.stage === "submitted" && !c.debriefDismissed);
   if (submittedCards.length > 0) {
     const { byTender } = await loadOutcomesForTenders(supabase, submittedCards.map((c) => c.id));
     const companyNames = [companyRow?.legal_name as string | null, companyRow?.csd_trading_name as string | null];
-    const pursuits: Pursuit[] = submittedCards
-      .map((c) => {
-        const outcome = bestOutcome(byTender.get(c.id));
-        // Reference set to the OUTCOME's own reference so it trivially self-
-        // matches - the real identifier join (ocid OR SANRAL contract/NRA
-        // reference) already happened server-side, inside
-        // loadOutcomesForTenders() -> tender_market_outcomes() (0053). This
-        // only reuses matchPursuitsToAwards()'s own tested Won/Lost
-        // comparison, not its (weaker) reference/title-matching step.
-        if (!outcome || outcome.status !== "awarded") return null;
-        const pursuit: Pursuit = { id: c.id, reference: outcome.reference, buyer: null, title: null, companyNames };
-        return pursuit;
-      })
-      .filter((p): p is Pursuit => p !== null);
-    if (pursuits.length > 0) {
-      const outcomesFlat = [...byTender.values()].flatMap((list) => list.filter((o) => o.status === "awarded"));
-      const matches = matchPursuitsToAwards(pursuits, outcomesFlat);
-      const matchByTenderId = new Map(matches.map((m) => [m.pursuitId, m]));
-      for (const c of cards) {
-        const m = matchByTenderId.get(c.id);
-        if (m && m.suggestion !== "Unmatched") {
-          const outcome = bestOutcome(byTender.get(c.id));
-          c.debrief = {
-            winnerName: (outcome?.winner_name || m.lostTo) ?? "unknown winner",
-            winnerAmountZar: toNumber(outcome?.winner_amount_zar ?? null),
-            companyWon: m.suggestion === "Won",
-          };
-        }
-      }
+    for (const c of submittedCards) {
+      const outcome = bestOutcome(byTender.get(c.id));
+      if (!outcome || outcome.status !== "awarded") continue;
+      const companyWon =
+        outcome.winner_count === 1 &&
+        !!outcome.winner_name &&
+        companyNames.some((name) => name && normName(name) === normName(outcome.winner_name));
+      c.debrief = {
+        winnerName: outcome.winner_name ?? "unknown winner",
+        winnerAmountZar: toNumber(outcome.winner_amount_zar ?? null),
+        companyWon,
+      };
     }
   }
 
