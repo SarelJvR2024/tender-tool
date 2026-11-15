@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
-import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, ISO_DATE, QUALIFICATION_LEVELS, type Proposal } from "@/lib/cvExtraction";
 import { safeFileName } from "@/lib/safeFileName";
 import { sastToday } from "@/lib/publicHolidays";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
@@ -72,6 +72,115 @@ export async function savePerson(formData: FormData) {
     redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("That ID number isn't a valid 13-digit South African ID number.")}`);
   }
 
+  // Finding 466 switched this page's own ecsa_level/highest_level inputs to
+  // a <select> constrained to ECSA_LEVELS/QUALIFICATION_LEVELS (SANRAL's own
+  // Form B2.1 dropdown labels - engine/sanral_fill.py's set_dropdown_for()
+  // refuses any other label when a pack is built) - but deliberately left
+  // savePerson() itself with NO server-side check, reasoning that a hard
+  // write-side rejection would also have to reject an UNCHANGED legacy
+  // value's own round-trip (the fallback <option> the select renders for a
+  // pre-existing non-canonical value, exactly so saving the form for any
+  // unrelated reason doesn't silently wipe it) - and treated building that
+  // distinction as out of scope for that pass. Finding 467 then added the
+  // very server-side check Finding 466 skipped to this function's own
+  // self-service twin, saveMyDetails() (my-cv/actions.ts) - without the
+  // unchanged-value carve-out, because that page's own select has no
+  // fallback option to protect. Neither pass closed the gap on THIS
+  // function: a direct POST to this Server Action (the browser's own
+  // <select> is not something a Server Action may ever trust - the same
+  // rule Finding 468's write-up states explicitly for this file's sibling,
+  // document-scan's confirmVaultDocument()) can still set either column to
+  // any arbitrary string, which a later real pack build then hard-fails on
+  // with a FieldError. Fixed here with the exact carve-out Finding 466's own
+  // write-up described but didn't build: only a CHANGED value is checked
+  // against the canonical list; resubmitting the SAME value already on file
+  // (including a pre-existing non-canonical one) still round-trips
+  // unchanged, so this closes the real gap without Finding 466's own
+  // documented reason for leaving it open.
+  let currentEcsaLevel: string | null = null;
+  let currentHighestLevel: string | null = null;
+  if (id && id !== "new") {
+    const { data: existing } = await supabase
+      .from("people")
+      .select("ecsa_level, highest_level")
+      .eq("id", id)
+      .maybeSingle();
+    currentEcsaLevel = (existing?.ecsa_level as string | null) ?? null;
+    currentHighestLevel = (existing?.highest_level as string | null) ?? null;
+  }
+
+  const ecsaLevel = str(formData, "ecsa_level");
+  if (ecsaLevel && ecsaLevel !== currentEcsaLevel && !(ECSA_LEVELS as readonly string[]).includes(ecsaLevel)) {
+    redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("ECSA level: choose one of SANRAL's options.")}`);
+  }
+  const highestLevel = str(formData, "highest_level");
+  if (highestLevel && highestLevel !== currentHighestLevel && !(QUALIFICATION_LEVELS as readonly string[]).includes(highestLevel)) {
+    redirect(`/people/${id ?? "new"}?error=${encodeURIComponent("Highest qualification level: choose one of SANRAL's options.")}`);
+  }
+
+  // Finding 481 (standing solution-architect review): this form's own
+  // ecsa_date/sacpcmp_date/highest_graduated/initial_graduated inputs had NO
+  // server-side format check at all - unlike this exact 4-column set's own
+  // sibling writer, applyCvExtraction()'s per-field confirm loop below
+  // (`if (v && f.kind === "date" && !ISO_DATE.test(v)) back(...)`), which
+  // already refuses a malformed value for every EXTRACTED_PERSON_FIELDS
+  // entry whose `kind` is "date" - and that list (lib/cvExtraction.ts) names
+  // exactly these four people columns as "date" fields. people/[id]/page.tsx
+  // only ever renders these as `<input type="date">` (never free text) -
+  // but, per this file's own established rule for every sibling of this
+  // shape (id_number, Finding 218/432; ecsa_level/highest_level, Finding
+  // 478; projects.start_date/end_date, Finding 479), a Server Action may
+  // never trust that alone: a direct POST (or a future UI regression) can
+  // still submit any string. engine/fill_tender.py/engine/fill_conventional.py
+  // both write each of these straight onto a real SANRAL Form B2.1
+  // experience row via `wb.set_date(T, ..., q["ecsa_date"])` etc.
+  // (engine/sanral_fill.py's own `set_date()`) - which only accepts a strict
+  // YYYY-MM-DD string and raises a ValueError naming the cell and the bad
+  // value for anything else. Without this check, a garbage date typed here
+  // saved silently and only surfaced much later as a confusing real-pack-
+  // build failure instead of an immediate, actionable one at the point of
+  // entry - the same "fails, but late and unhelpfully" shape this codebase
+  // already treats as a real finding elsewhere (e.g. Finding 470).
+  //
+  // Finding 483 (standing solution-architect review): Finding 481's own
+  // loop above swept only 4 of this form's 8 real `<input type="date">`
+  // fields that write straight onto `people` - it missed
+  // ecsa_expiry/sacpcmp_expiry (people/[id]/page.tsx lines ~541/547) and
+  // sacnasp_expiry/sagc_expiry (the same file's ConditionalRegistration
+  // component, `name={`${key}_expiry`}`, line ~224), all four rendered as
+  // `type="date"` exactly like their siblings above and written the same
+  // unchecked way in `row` below. None of these four has a CV-extraction
+  // sibling at all (lib/cvExtraction.ts's EXTRACTED_PERSON_FIELDS has no
+  // entry for any of them - applyCvExtraction() never writes them), so
+  // there was no validation anywhere on any real writer. Confirmed real and
+  // reachable, not theoretical: engine/cv/generate_cv.py prints each one
+  // verbatim onto the person's generated CV ("ECSA registration expiry:",
+  // "SACPCMP registration expiry:", the SACNASP/SAGC registration lines -
+  // `q.get("ecsa_expiry") or "MISSING"` etc., no date parsing or formatting
+  // at all), and app/lib/tenderCompliance.ts's checkRegistration() feeds
+  // sacpcmp_expiry/sacnasp_expiry/sagc_expiry straight into
+  // registrationValidity() for the real SACPCMP/SACNASP/SAGC compliance
+  // check shown on Pack Review/Submission Plan. So a garbage value typed
+  // here (bypassing the date picker) doesn't just fail late at pack-build
+  // time like the sibling four above - it saves silently and then prints
+  // verbatim, unformatted, on an actual generated CV document issued as
+  // part of a real tender submission.
+  for (const [key, label] of [
+    ["ecsa_date", "ECSA registration date"],
+    ["sacpcmp_date", "SACPCMP registration date"],
+    ["highest_graduated", "Date graduated (highest)"],
+    ["initial_graduated", "Date graduated (initial)"],
+    ["ecsa_expiry", "ECSA registration expiry"],
+    ["sacpcmp_expiry", "SACPCMP registration expiry"],
+    ["sacnasp_expiry", "SACNASP registration expiry"],
+    ["sagc_expiry", "SAGC registration expiry"],
+  ] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) {
+      redirect(`/people/${id ?? "new"}?error=${encodeURIComponent(`${label}: "${v}" isn't a date (yyyy-mm-dd).`)}`);
+    }
+  }
+
   const row = {
     company_id: companyId,
     name,
@@ -86,7 +195,7 @@ export async function savePerson(formData: FormData) {
     ),
     phone: str(formData, "phone"),
     email: str(formData, "email"),
-    ecsa_level: str(formData, "ecsa_level"),
+    ecsa_level: ecsaLevel,
     ecsa_number: str(formData, "ecsa_number"),
     ecsa_date: str(formData, "ecsa_date"),
     sacpcmp_number: str(formData, "sacpcmp_number"),
@@ -102,7 +211,7 @@ export async function savePerson(formData: FormData) {
     sagc_category: str(formData, "sagc_category"),
     sagc_number: str(formData, "sagc_number"),
     sagc_expiry: str(formData, "sagc_expiry"),
-    highest_level: str(formData, "highest_level"),
+    highest_level: highestLevel,
     highest_description: str(formData, "highest_description"),
     highest_institution: str(formData, "highest_institution"),
     highest_graduated: str(formData, "highest_graduated"),
@@ -261,6 +370,35 @@ export async function saveProject(formData: FormData) {
   const value = valueRaw ? Number(valueRaw) : null;
   if (value !== null && (Number.isNaN(value) || value < 0)) {
     redirect(`/people/${personId}?error=${encodeURIComponent("Project value (R million) must be a number of 0 or more.")}`);
+  }
+
+  // Finding 479 (standing solution-architect review): this form's own
+  // start_date/end_date inputs had NO server-side format check at all -
+  // unlike this exact pair's sibling writer, applyCvExtraction()'s own
+  // per-project confirm loop below (`if (v && !ISO_DATE.test(v)) back(...)`),
+  // which already refuses a malformed date for the SAME two
+  // projects.start_date/end_date columns. people/[id]/page.tsx only ever
+  // renders these as `<input type="date">` (never free text) - but, per
+  // this file's own established rule for every sibling of this shape
+  // (savePerson()'s ecsa_level/highest_level, Finding 478; id_number,
+  // Finding 218/432), a Server Action may never trust that alone: a direct
+  // POST (or a future UI regression) can still submit any string.
+  // engine/fill_tender.py/engine/fill_conventional.py both write a
+  // confirmed project's start date straight onto a real SANRAL Form B1/B2
+  // experience row via `wb.set_date(T, f"P{r}", pr["start"])`
+  // (engine/sanral_fill.py's own `set_date()`) - which only accepts a
+  // strict YYYY-MM-DD string and raises a FieldError-shaped ValueError for
+  // anything else, naming the cell and the bad value. Without this check, a
+  // garbage date typed here (bypassing the date picker) saves silently and
+  // only surfaces much later, as a confusing real-pack-build failure
+  // instead of an immediate, actionable one at the point of entry - the
+  // same "fails, but late and unhelpfully" shape this codebase already
+  // treats as a real finding elsewhere (e.g. Finding 470).
+  for (const [key, label] of [["start_date", "Start date"], ["end_date", "End date"]] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) {
+      redirect(`/people/${personId}?error=${encodeURIComponent(`${label}: "${v}" isn't a date (yyyy-mm-dd).`)}`);
+    }
   }
   const row = {
     company_id: companyId,

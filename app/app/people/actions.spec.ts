@@ -190,6 +190,7 @@ describe("savePerson - edit path, membership revoked mid-request (update matches
   it("does not report success when the update matches zero rows", async () => {
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }], // current-value read (ecsa_level/highest_level changed-value check)
       [{ data: null, error: null }], // people update().select("id").maybeSingle() - 0 rows
     ]);
     supabaseState.current = client;
@@ -208,6 +209,7 @@ describe("savePerson - edit path, real update still succeeds", () => {
   it("saves normally and redirects to the person's page", async () => {
     const { client } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }], // current-value read (ecsa_level/highest_level changed-value check)
       [{ data: { id: "person-1" }, error: null }], // real match
     ]);
     supabaseState.current = client;
@@ -276,6 +278,362 @@ describe("savePerson - id_number is validated the same way its sibling savePrinc
   });
 
   it("still allows leaving id_number blank (not every person needs one on file)", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+});
+
+// Finding 478 (standing solution-architect review): Finding 466 switched
+// people/[id]/page.tsx's ecsa_level/highest_level inputs to a <select>
+// constrained to ECSA_LEVELS/QUALIFICATION_LEVELS, but deliberately left
+// savePerson() itself with no server-side check at all (documented reason:
+// a hard rejection would also break an UNCHANGED legacy non-canonical
+// value's own fallback-option round-trip). Finding 467 then added the
+// server-side check to savePerson()'s own self-service twin,
+// saveMyDetails(), but never back to this function. A direct POST (a
+// Server Action may never trust the browser's own <select>) could still
+// set either column to any string, which engine/sanral_fill.py's
+// set_dropdown_for() later hard-fails a real pack build on. Fixed with the
+// same changed-value carve-out Finding 466's write-up described but never
+// built, so the legacy round-trip Finding 466 was protecting still works.
+describe("savePerson - ecsa_level/highest_level are validated against SANRAL's own option lists for a CHANGED value, mirroring saveMyDetails() (Finding 478)", () => {
+  it("refuses a changed, non-canonical ecsa_level (direct POST bypassing the <select>)", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { ecsa_level: "Professional Engineer", highest_level: null }, error: null }], // current-value read
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_level: "Pr Eng" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("ECSA level: choose one of SANRAL's options."));
+  });
+
+  it("refuses a changed, non-canonical highest_level (direct POST bypassing the <select>)", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: "Masters Degree" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", highest_level: "Honours degree-ish" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent("Highest qualification level: choose one of SANRAL's options."));
+  });
+
+  it("still allows resubmitting the SAME non-canonical ecsa_level already on file (the fallback-option round-trip Finding 466 protects)", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: "Pr Eng", highest_level: null }, error: null }], // legacy, non-canonical, already stored
+      [{ data: { id: "person-1" }, error: null }], // update succeeds
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    // Same value as currently on file (what the <select>'s own fallback
+    // <option> re-submits when the admin edits this form for an unrelated
+    // field, e.g. just a phone number) - must not be rejected.
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_level: "Pr Eng" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+  });
+
+  it("still saves normally for a genuinely canonical new ecsa_level/highest_level", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({
+      id: "person-1",
+      name: "Jane Doe",
+      ecsa_level: "Professional Engineer",
+      highest_level: "Masters Degree",
+    });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+  });
+
+  it("validates a brand-new person's ecsa_level too (no legacy value to protect)", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId - insert path skips the current-value read entirely
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe", ecsa_level: "Pr Eng" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent("ECSA level: choose one of SANRAL's options."));
+    expect(insertCalls).toHaveLength(0);
+  });
+});
+
+// Finding 481 (standing solution-architect review): savePerson()'s own
+// manual "add/edit person" form had NO server-side format check at all on
+// ecsa_date/sacpcmp_date/highest_graduated/initial_graduated - unlike this
+// exact 4-column set's own sibling writer, applyCvExtraction()'s per-field
+// confirm loop above, which already refuses a malformed value for every
+// EXTRACTED_PERSON_FIELDS entry whose `kind` is "date" (`if (v && f.kind ===
+// "date" && !ISO_DATE.test(v)) back(...)`) - and that list names exactly
+// these four people columns as "date" fields (lib/cvExtraction.ts). People's
+// own edit page only ever renders these as `<input type="date">`
+// (people/[id]/page.tsx), but per this file's own established rule for every
+// sibling of this shape (id_number, Finding 218; ecsa_level/highest_level,
+// Finding 478; start_date/end_date, Finding 479) a Server Action may never
+// trust that alone - a direct POST can still submit any string. All four are
+// then written straight onto a real SANRAL Form B2.1 experience row via
+// engine/fill_tender.py/engine/fill_conventional.py's own
+// `wb.set_date(T, ..., q["ecsa_date"])` etc. (engine/sanral_fill.py's
+// `set_date()`), which only accepts a strict YYYY-MM-DD string and raises a
+// ValueError naming the cell and the bad value for anything else - so a
+// garbage date typed here (bypassing the date picker) used to save silently
+// and only surface much later as a confusing real-pack-build failure instead
+// of an immediate, actionable one at the point of entry.
+describe("savePerson - ecsa_date/sacpcmp_date/highest_graduated/initial_graduated are validated as real yyyy-mm-dd dates, mirroring applyCvExtraction()'s per-field check (Finding 481)", () => {
+  it("refuses a malformed ecsa_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }], // current-value read (ecsa_level/highest_level changed-value check)
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_date: "15/03/2020" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('isn\'t a date (yyyy-mm-dd)'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed sacpcmp_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", sacpcmp_date: "not a date" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('"not a date" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed highest_graduated", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", highest_graduated: "2020/01/01" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('isn\'t a date (yyyy-mm-dd)'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed initial_graduated", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // insert path (id="new") skips the current-value read
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe", initial_graduated: "garbage" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent('"garbage" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("still saves normally with genuinely valid yyyy-mm-dd dates for all four fields", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }], // insert
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({
+      id: "new",
+      name: "Jane Doe",
+      ecsa_date: "2005-04-12",
+      sacpcmp_date: "2006-05-13",
+      highest_graduated: "2000-12-01",
+      initial_graduated: "1998-11-01",
+    });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+
+  it("still allows leaving all four date fields blank", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+});
+
+// Finding 483 (standing solution-architect review): Finding 481's own loop
+// above swept only 4 of this form's 8 real `type="date"` inputs that write
+// straight onto `people` - it missed ecsa_expiry/sacpcmp_expiry
+// (people/[id]/page.tsx lines ~541/547) and sacnasp_expiry/sagc_expiry (the
+// same file's ConditionalRegistration component, `name={`${key}_expiry`}`,
+// line ~224). None of these four has a CV-extraction sibling at all
+// (lib/cvExtraction.ts's EXTRACTED_PERSON_FIELDS has no entry for any of
+// them), so nothing anywhere ever validated them. Confirmed real and
+// reachable: engine/cv/generate_cv.py prints each one verbatim onto the
+// person's generated CV ("ECSA registration expiry:", etc. -
+// `q.get("ecsa_expiry") or "MISSING"`, no date parsing at all), and
+// app/lib/tenderCompliance.ts's checkRegistration() feeds
+// sacpcmp_expiry/sacnasp_expiry/sagc_expiry straight into
+// registrationValidity() for the real compliance check shown on Pack
+// Review/Submission Plan - so a garbage value here doesn't just fail late
+// at pack-build time like the sibling four above, it saves silently and
+// then prints verbatim on an actual generated CV document.
+describe("savePerson - ecsa_expiry/sacpcmp_expiry/sacnasp_expiry/sagc_expiry are validated as real yyyy-mm-dd dates too (Finding 483)", () => {
+  it("refuses a malformed ecsa_expiry", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", ecsa_expiry: "15/03/2030" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('ECSA registration expiry: "15/03/2030" isn\'t a date (yyyy-mm-dd).'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed sacpcmp_expiry", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { ecsa_level: null, highest_level: null }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "person-1", name: "Jane Doe", sacpcmp_expiry: "not a date" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('SACPCMP registration expiry: "not a date" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed sacnasp_expiry", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe", sacnasp_expiry: "garbage" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent('SACNASP registration expiry: "garbage" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed sagc_expiry", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({ id: "new", name: "Jane Doe", sagc_expiry: "2030-13-40bad" });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toContain("/people/new?error=");
+    expect(url).toContain(encodeURIComponent('SAGC registration expiry: "2030-13-40bad" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("still saves normally with genuinely valid yyyy-mm-dd dates for all four expiry fields", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: { id: "person-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { savePerson } = await import("./actions");
+
+    const fd = formDataWith({
+      id: "new",
+      name: "Jane Doe",
+      ecsa_expiry: "2030-04-12",
+      sacpcmp_expiry: "2030-05-13",
+      sacnasp_expiry: "2030-06-01",
+      sagc_expiry: "2030-07-01",
+    });
+    const url = await expectRedirect(savePerson(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+
+  it("still allows leaving all four expiry fields blank", async () => {
     const { client, insertCalls } = makeSupabase([
       [{ data: { company_id: "company-1" }, error: null }],
       [{ data: { id: "person-1" }, error: null }],
@@ -521,6 +879,86 @@ describe("retryCvExtraction - real update still succeeds", () => {
     );
 
     expect(url).toBe("/people/person-1");
+  });
+});
+
+// Finding 479 (standing solution-architect review): saveProject()'s own
+// manual "add project" form had NO server-side format check on start_date/
+// end_date at all - unlike this exact column pair's sibling writer,
+// applyCvExtraction()'s own per-project confirm loop, which already refuses
+// a malformed date for the SAME two projects.start_date/end_date columns
+// (ISO_DATE.test()). people/[id]/page.tsx only ever renders these as
+// `<input type="date">`, but a Server Action may never trust that alone -
+// the same rule already established for this file's other sibling gaps
+// (id_number, ecsa_level/highest_level).
+describe("saveProject - start_date/end_date are validated as real yyyy-mm-dd dates, mirroring applyCvExtraction()'s per-project check (Finding 479)", () => {
+  it("refuses a malformed start_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", client_and_number: "Client A/123", start_date: "15/03/2020" });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('isn\'t a date (yyyy-mm-dd)'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("refuses a malformed end_date", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", client_and_number: "Client A/123", end_date: "not a date" });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(url).toContain(encodeURIComponent('"not a date" isn\'t a date'));
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("still saves normally with genuinely valid yyyy-mm-dd dates", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: null, error: null }], // projects insert
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({
+      person_id: "person-1",
+      client_and_number: "Client A/123",
+      start_date: "2020-01-01",
+      end_date: "2021-06-30",
+    });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+  });
+
+  it("still allows leaving both dates blank", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }],
+      [{ data: null, error: null }],
+    ]);
+    supabaseState.current = client;
+
+    const { saveProject } = await import("./actions");
+
+    const fd = formDataWith({ person_id: "person-1", client_and_number: "Client A/123" });
+    const url = await expectRedirect(saveProject(fd));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
   });
 });
 

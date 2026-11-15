@@ -243,6 +243,128 @@ describe("saveMyDetails - a 'select'-kind field must be one of SANRAL's own opti
   });
 });
 
+// Finding 482 (standing solution-architect review, 2026-11-14): saveMyDetails()
+// is this page's own manual "My details" form (app/app/my-cv/page.tsx's
+// first Card) - the self-service twin of app/app/people/actions.ts
+// savePerson(), which Finding 481 just fixed for the SAME shape on its own
+// date columns (ecsa_date/sacpcmp_date/highest_graduated/initial_graduated).
+// This form only ever submits ONE of those four columns - highest_graduated
+// (rendered as a type="date" <input> at my-cv/page.tsx line 203) -
+// ecsa_date/sacpcmp_date/initial_graduated are not part of this manual form
+// at all (only reachable here via the separate CV-extraction-review card,
+// through applyMyCvExtraction(), which already runs this exact check per
+// Finding 432). Before this fix, saveMyDetails() ran its Finding 467
+// ecsa_level/highest_level "select" check but had NO check at all on
+// highest_graduated - a direct POST (or a browser date-picker quirk) could
+// save any string straight into people.highest_graduated. Confirmed real:
+// engine/fill_tender.py and engine/fill_conventional.py both call
+// `wb.set_date(T, at(B["highest_date"], base), q["highest_graduated"])`,
+// and sanral_fill.py's own set_date() strictly requires `YYYY-MM-DD`
+// (`datetime.date.fromisoformat`), raising ValueError otherwise - so a bad
+// value saved here fails loudly, but only much later, at real pack
+// generation, instead of immediately at data entry.
+describe("saveMyDetails - highest_graduated must be a real yyyy-mm-dd date (Finding 482)", () => {
+  it("refuses a highest_graduated that isn't ISO yyyy-mm-dd", async () => {
+    const supabase = makeSupabase([...requireOwnPersonOk()]);
+    supabaseState.current = supabase;
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ highest_graduated: "23/04/2010" })));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent('Date graduated (highest): "23/04/2010" isn\'t a date (yyyy-mm-dd).'));
+  });
+
+  it("still saves normally when highest_graduated is a genuine ISO date", async () => {
+    supabaseState.current = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "person-1" }, error: null }], // real match
+    ]);
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ highest_graduated: "2010-04-23" })));
+
+    expect(url).toBe("/my-cv?saved=details");
+  });
+
+  it("still saves normally when highest_graduated is left blank (not recorded)", async () => {
+    supabaseState.current = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "person-1" }, error: null }], // real match
+    ]);
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ phone: "0821234567" })));
+
+    expect(url).toBe("/my-cv?saved=details");
+  });
+});
+
+// Finding 483 (standing solution-architect review): Finding 482's own
+// write-up said ecsa_date/sacpcmp_date/initial_graduated "are NOT part of
+// this manual form at all (only highest_graduated is)" - true, but it missed
+// that this exact form ALSO renders ecsa_expiry/sacpcmp_expiry as
+// `type="date"` inputs (my-cv/page.tsx lines ~197/200), both named in this
+// function's own `row` object, and neither had any format check either -
+// unlike highest_graduated, these two have no CV-extraction sibling at all
+// (EXTRACTED_PERSON_FIELDS has no "date"-kind entry for either), so nothing
+// anywhere ever validated them. Confirmed real and reachable:
+// engine/cv/generate_cv.py prints both straight onto the person's generated
+// CV verbatim ("ECSA registration expiry:"/"SACPCMP registration expiry:" -
+// q.get("ecsa_expiry") or "MISSING", no date parsing at all), and
+// app/lib/tenderCompliance.ts's checkRegistration() feeds sacpcmp_expiry
+// into registrationValidity() for the real SACPCMP compliance check shown on
+// Pack Review/Submission Plan.
+describe("saveMyDetails - ecsa_expiry/sacpcmp_expiry must be real yyyy-mm-dd dates too (Finding 483)", () => {
+  it("refuses an ecsa_expiry that isn't ISO yyyy-mm-dd", async () => {
+    const supabase = makeSupabase([...requireOwnPersonOk()]);
+    supabaseState.current = supabase;
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ ecsa_expiry: "23/04/2030" })));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent('ECSA registration expiry: "23/04/2030" isn\'t a date (yyyy-mm-dd).'));
+  });
+
+  it("refuses a sacpcmp_expiry that isn't ISO yyyy-mm-dd", async () => {
+    const supabase = makeSupabase([...requireOwnPersonOk()]);
+    supabaseState.current = supabase;
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ sacpcmp_expiry: "garbage" })));
+
+    expect(url).toContain("/my-cv?error=");
+    expect(url).toContain(encodeURIComponent('SACPCMP registration expiry: "garbage" isn\'t a date (yyyy-mm-dd).'));
+  });
+
+  it("still saves normally when both expiry fields are genuine ISO dates", async () => {
+    supabaseState.current = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "person-1" }, error: null }], // real match
+    ]);
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(
+      saveMyDetails(formDataWith({ ecsa_expiry: "2030-04-23", sacpcmp_expiry: "2030-05-13" })),
+    );
+
+    expect(url).toBe("/my-cv?saved=details");
+  });
+
+  it("still saves normally when both expiry fields are left blank (not recorded)", async () => {
+    supabaseState.current = makeSupabase([
+      ...requireOwnPersonOk(),
+      [{ data: { id: "person-1" }, error: null }], // real match
+    ]);
+
+    const { saveMyDetails } = await import("./actions");
+    const url = await expectRedirect(saveMyDetails(formDataWith({ phone: "0821234567" })));
+
+    expect(url).toBe("/my-cv?saved=details");
+  });
+});
+
 // Finding 432: must be one of lib/cvExtraction.ts's own ECSA_LEVELS strings
 // now that applyMyCvExtraction() validates "select"-kind fields the same
 // way its sibling applyCvExtraction() already does - "Pr Eng" (this

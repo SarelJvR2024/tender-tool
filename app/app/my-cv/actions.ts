@@ -78,6 +78,51 @@ export async function saveMyDetails(formData: FormData) {
     fail("Highest qualification level: choose one of SANRAL's options.");
   }
 
+  // Finding 482: this form also submits highest_graduated (rendered as a
+  // type="date" <input> at my-cv/page.tsx) with NO server-side format check
+  // at all, the same unguarded shape Finding 481 just fixed on this
+  // column's primary-form twin, savePerson() (app/app/people/actions.ts),
+  // and the one this form's own sibling card - applyMyCvExtraction(), via
+  // the EXTRACTED_PERSON_FIELDS loop's `f.kind === "date"` branch - already
+  // runs for the SAME column. engine/fill_tender.py and
+  // engine/fill_conventional.py both call
+  // `wb.set_date(T, at(B["highest_date"], base), q["highest_graduated"])`,
+  // and sanral_fill.py's set_date() strictly requires `YYYY-MM-DD`,
+  // raising ValueError otherwise - so a bad value saved here failed loudly,
+  // but only much later, at real pack generation, instead of immediately
+  // at data entry. ecsa_date/sacpcmp_date/initial_graduated are NOT part of
+  // this manual form at all (only highest_graduated is - see the `row`
+  // object below), so there is nothing else of this shape to check here.
+  //
+  // Finding 483 (standing solution-architect review): that last sentence was
+  // wrong - re-checked against the CURRENT my-cv/page.tsx and found this
+  // exact form ALSO renders ecsa_expiry/sacpcmp_expiry as `type="date"`
+  // inputs (lines ~197/200), both named in this function's own `row` object
+  // just below, and NEITHER had any format check either - unlike
+  // highest_graduated above, these two have no CV-extraction sibling at all
+  // (lib/cvExtraction.ts's EXTRACTED_PERSON_FIELDS has no "date"-kind entry
+  // for either), so nothing anywhere ever validated them. Confirmed real and
+  // reachable: engine/cv/generate_cv.py prints both straight onto the
+  // person's generated CV verbatim - `("ECSA registration expiry:",
+  // q.get("ecsa_expiry") or "MISSING")` and the SACPCMP line right below it -
+  // with no date parsing or formatting, so a garbage value typed here
+  // (bypassing the date picker) doesn't fail at all, it just shows up
+  // unformatted on an actual generated CV used in a real tender submission.
+  // app/lib/tenderCompliance.ts's checkRegistration() also feeds
+  // sacpcmp_expiry into registrationValidity() for the real SACPCMP
+  // compliance check shown on Pack Review/Submission Plan.
+  for (const [key, label] of [
+    ["highest_graduated", "Date graduated (highest)"],
+    ["ecsa_expiry", "ECSA registration expiry"],
+    ["sacpcmp_expiry", "SACPCMP registration expiry"],
+  ] as const) {
+    const v = str(formData, key);
+    if (v && !ISO_DATE.test(v)) {
+      fail(`${label}: "${v}" isn't a date (yyyy-mm-dd).`);
+    }
+  }
+  const highestGraduated = str(formData, "highest_graduated");
+
   const row = {
     phone: str(formData, "phone"),
     email: str(formData, "email"),
@@ -89,7 +134,7 @@ export async function saveMyDetails(formData: FormData) {
     highest_level: highestLevel,
     highest_description: str(formData, "highest_description"),
     highest_institution: str(formData, "highest_institution"),
-    highest_graduated: str(formData, "highest_graduated"),
+    highest_graduated: highestGraduated,
   };
 
   // .select("id").maybeSingle() here matters: PostgREST returns a 2xx with
