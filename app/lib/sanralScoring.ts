@@ -142,14 +142,36 @@ function heldCodeIsKnownButUntabulated(heldCode: string, rows: Record<string, nu
   return heldCode !== "" && heldCode !== "UNDEFINED" && !rows[heldCode] && SANRAL_POSITION_CODES.some((c) => normPositionCode(c.code) === heldCode);
 }
 
+// Finding 437 (standing QA/robustness review, 2026-11-11): lookup() used to
+// treat a BLANK held code (position_code never recorded on the People page
+// at all) exactly the same as a person who explicitly picked "Undefined" on
+// SANRAL's own real form - both fell straight through to `return 0`, a
+// confident point value, with no note anywhere (unlike the "known but
+// untabulated" sibling case two lines below, which DOES get a range and a
+// note). Those are not the same fact: "Undefined" is SANRAL's own real
+// dropdown answer, meaning the person's role genuinely matches none of its
+// 22 codes - 0 points is the honest SANRAL-documented score for it. A blank
+// code is a data gap, not an answer; this module's own header promises
+// "Every unknown is a range, never a guessed point value" (line 24), and a
+// field nobody has filled in yet is squarely an unknown. Confirmed live:
+// `engine/sanral_fill.py`'s real pack-build filler (`set_dropdown_for()`)
+// REFUSES to fill Form B1 at all when position_code is blank ("is not
+// recorded - fill it in on the People page") - it never silently writes
+// "Undefined" the way this estimator's old `return 0` effectively did. So a
+// company whose person simply hadn't had this optional field filled in yet
+// saw a confident, specific point value here, with nothing telling them
+// filling it in could raise their own score - the opposite of every other
+// "genuinely unknown" case in this file, which all surface a range and a
+// reason.
 function lookup(rows: Record<string, number[]>, cols: string[], held: string | null, required: string): number | null {
   const col = cols.indexOf(required);
   if (col < 0) return null;
   const heldCode = normPositionCode(held);
+  if (heldCode === "") return null; // not recorded at all - unknown, not SANRAL's own "Undefined" answer
   const row = rows[heldCode];
   if (row) return row[col];
   if (heldCodeIsKnownButUntabulated(heldCode, rows)) return null;
-  return 0; // genuinely blank/unrecognised held code = SANRAL's own "Undefined" row (0)
+  return 0; // an explicit "Undefined", or an unrecognised code = SANRAL's own "Undefined" row (0)
 }
 
 function capSum(values: Range[], cap: number): Range {
@@ -202,6 +224,10 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
   if (untabulatedTechHeld.length > 0) {
     notes.push(`Position(s) held ${untabulatedTechHeld.join(", ")} are real SANRAL codes with no transcribed position-held row - position points shown as a range, not scored as "Undefined".`);
   }
+  const missingPositionHeld = projects.some((p) => normPositionCode(p.position_code) === "");
+  if (missingPositionHeld) {
+    notes.push(`Some project(s) have no "position held" recorded on the People page - position points shown as a range, not scored as SANRAL's own "Undefined".`);
+  }
 
   const technical = add(add(capSum(typePts, 15), capSum(periodPts, 15)), capSum(posPts, 15));
 
@@ -225,6 +251,9 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
     const untabulatedManHeld = Array.from(new Set(projects.map((p) => normPositionCode(p.position_code)).filter((c) => heldCodeIsKnownButUntabulated(c, MAN_POSITION_ROWS))));
     if (untabulatedManHeld.length > 0) {
       notes.push(`Position(s) held ${untabulatedManHeld.join(", ")} are real SANRAL codes with no transcribed position-held row - management points shown as a range, not scored as "Undefined".`);
+    }
+    if (missingPositionHeld) {
+      notes.push(`Some project(s) have no "position held" recorded on the People page - management points shown as a range too, not scored as SANRAL's own "Undefined".`);
     }
   }
 
