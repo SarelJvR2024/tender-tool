@@ -1,0 +1,56 @@
+-- Standing QA/robustness review, 2026-11-16 (Finding 485). Closes the exact
+-- gap migration 0075's own header comment names and deliberately left open:
+-- "A standard (non-tender) CV request has tender_pack_id null and was never
+-- the finding this migration closes; left out of scope deliberately rather
+-- than guessing at a different dedupe rule for it." The dedupe rule for the
+-- standard path turns out to be the same family, just without the
+-- tender_pack_id/position_code columns that are always null here.
+--
+-- Real, reachable race, same TOCTOU shape as 0075/0123: queueStandardCvs()
+-- (app/lib/standardCvQueue.ts) does an app-level "any standard CV already
+-- requested/generating for this person?" SELECT, then a 4-row INSERT (one
+-- per format x detail combination) - with no database-level backstop, per
+-- that function's own header comment.
+--
+-- A person can have MORE THAN ONE cv_extraction_results row pending_review
+-- at once - nothing in uploadCv() (app/app/people/actions.ts) or the People
+-- page UI stops a second "AI-extract" CV upload while an earlier one is
+-- still awaiting confirmation (cv_extraction_results has a unique index on
+-- cv_upload_id only, not person_id; the person detail page's own
+-- `pendingExtractions` query has no .limit(1)/.maybeSingle() and its own
+-- JSX maps every pending row to its own confirm card - multiple cards for
+-- the same person, each with its own "Confirm" form, is the page's normal,
+-- intended state while more than one upload awaits review).
+--
+-- apply_cv_extraction_checked()/apply_my_cv_extraction_checked() (0123)
+-- lock and gate on p_extraction_id, correctly letting two DIFFERENT pending
+-- extractions for the SAME person apply concurrently without blocking each
+-- other - that's by design, not a bug. But queueStandardCvs() is called as
+-- a separate, unlocked statement straight after each RPC commits (not
+-- inside the same transaction, not scoped per-extraction) - so two
+-- concurrent "Confirm" submissions for two different pending extractions of
+-- the same person (two browser tabs on the same person page, the exact
+-- "same pending-review card left open in two browser tabs" pattern 0123's
+-- own header already treats as realistic, just across two different cards
+-- here instead of one) can both pass the "nothing pending" SELECT before
+-- either INSERT commits, queueing 8 standard-CV jobs instead of 4.
+--
+-- Real downstream consequence, confirmed by reading the actual consumer:
+-- app/app/people/[id]/page.tsx renders `generatedCvs.map(...)` with no
+-- dedup by format/detail, one card per row - the person's "Standard
+-- generated CVs" section would visibly show every format x detail
+-- combination twice. Also doubles load on the shared worker pool
+-- (engine/cv/process_cv_jobs.py) - the same "unlimited generation jobs on a
+-- worker pool shared across every company" abuse shape 0075's own header
+-- names as its original finding, just reached through a different gap.
+--
+-- Fix: the same index shape as 0075, scoped to the standard (tender_pack_id
+-- null) path instead of the tender-specific one. tender_pack_id and
+-- position_code are always null on this path (queueStandardCvs() never
+-- sets them), so they're dropped from the key rather than included as
+-- always-null columns.
+create unique index generated_cvs_dedupe_pending_standard_idx
+  on generated_cvs (person_id, format, detail)
+  where tender_pack_id is null and status in ('requested', 'generating');
+comment on index generated_cvs_dedupe_pending_standard_idx is
+  'Blocks a second standard (non-tender) generated_cvs row for the same (person, format, detail) while one is already requested/generating - the database-level backstop for queueStandardCvs()''s own app-level "already queued?" check (Finding 485), same shape as generated_cvs_dedupe_pending_idx (0075) for the tender-specific path. A ready/failed row never collides, so a new confirm can always queue again once the current batch finishes.';
