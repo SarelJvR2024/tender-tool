@@ -60,6 +60,32 @@ def save_state(path, state):
     json.dump(state, open(path, "w"), indent=2, sort_keys=True)
 
 
+def skip_reason(row):
+    """None if this list row has everything the rest of main()'s loop needs;
+    otherwise why it can't be monitored this run.
+
+    list_tenders._parse_row() can genuinely return a row with slug=None (and
+    detail_url=None) when SANRAL's own reference-cell markup has no <a href>
+    for that row - plausible given this module's own docstring already
+    documents SANRAL's response as inconsistent, and the one other real
+    consumer of these same rows (gov_sources.sanral_releases(), the
+    production path behind watch_new_tenders.py) explicitly already handles
+    it by falling back to a reference-derived ocid instead of dropping the
+    tender. This script's own main() loop had no such fallback - a bare
+    `if not slug: continue` with no log line at all, unlike every sibling
+    error path in this exact 3-file pipeline (list_tenders.py's own WARNING
+    for a malformed row two files over; this file's own `except Exception`
+    logging for a failed detail fetch just below). A tender that parses
+    with a real reference/province/description but no parseable link was
+    silently never added to new_state, never diffed, never downloaded,
+    never reported - indistinguishable from a tender that simply isn't
+    open, with nothing printed anywhere to say it was ever seen and
+    dropped. QA pass, 2026-11-16."""
+    if not row.get("slug"):
+        return "no detail-page link in the list response - can't fetch its detail page or track changes for it"
+    return None
+
+
 def changed(prev_entry, detail_entry):
     if prev_entry is None:
         return "new"
@@ -127,9 +153,12 @@ def main():
     new_state = {}
     to_download = []
     for i, row in enumerate(rows, 1):
-        slug = row["slug"]
-        if not slug:
+        reason = skip_reason(row)
+        if reason:
+            print(f"  WARNING: {row.get('reference') or row.get('description') or '(no reference)'}: "
+                  f"skipped - {reason}", file=sys.stderr)
             continue
+        slug = row["slug"]
         # Detail pages are fetched one at a time (a real HTTP request per tender, up to a
         # 30s timeout each) with no other output in between - on a cold run with ~137 open
         # tenders that's long enough to look exactly like a hang on a console. Print progress
