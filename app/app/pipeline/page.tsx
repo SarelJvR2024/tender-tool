@@ -14,7 +14,8 @@ import { loadDisciplineTaxonomy, taxonomyLabel, type DisciplineTaxonomy } from "
 import { EconomicsForm, type CreditPerson } from "./economics-form";
 import { OutcomeForm, type Outcome } from "./outcome-form";
 import { DebriefBanner } from "./debrief-banner";
-import { bestOutcome, loadOutcomesForTenders, normName } from "@/lib/marketPricing";
+import { bestOutcome, loadOutcomesForTenders } from "@/lib/marketPricing";
+import { isCompanyAmongWinners } from "@/lib/awardsIntelligence";
 import { loadPackReviewSnapshot } from "../tenders/[id]/pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "../tenders/[id]/general-pack-review-data";
 import { computeTenderReadiness } from "../tenders/[id]/tender-readiness";
@@ -369,10 +370,15 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     for (const c of submittedCards) {
       const outcome = bestOutcome(byTender.get(c.id));
       if (!outcome || outcome.status !== "awarded") continue;
-      const companyWon =
-        outcome.winner_count === 1 &&
-        !!outcome.winner_name &&
-        companyNames.some((name) => name && normName(name) === normName(outcome.winner_name));
+      // Finding (standing QA/robustness review, 2026-11-16): this used to
+      // require winner_count === 1 outright before checking the company's
+      // own names at all - a company that had, in fact, won its own share
+      // of a panel/split award (winner_name a semicolon-joined list of
+      // every winner - store_award_outcomes.part_from_portal()) was
+      // unconditionally told it LOST here, with its own name sitting right
+      // there inside the banner's own "Awarded to ..." text. See
+      // isCompanyAmongWinners()'s own docstring for the full fix.
+      const companyWon = !!outcome.winner_name && isCompanyAmongWinners(outcome.winner_name, companyNames);
       c.debrief = {
         winnerName: outcome.winner_name ?? "unknown winner",
         winnerAmountZar: toNumber(outcome.winner_amount_zar ?? null),
