@@ -153,6 +153,32 @@ function winnerBidder(award: Pick<TenderOutcome, "bidders">): Bidder | null {
   return award.bidders.find((b) => b.is_winner) ?? null;
 }
 
+/** True when one of the company's own names is among an AWARDED outcome's
+ * real winner(s) - a single winner (`winnerName` is one clean name,
+ * `winner_count === 1`) or a panel/split award, where
+ * store_award_outcomes.part_from_portal() joins every one of several
+ * winning suppliers' own names with "; " into the same `winner_name` field
+ * (its own docstring: "Awarded to N suppliers (a panel or split award)").
+ *
+ * Finding (standing QA/robustness review, 2026-11-16): both real callers of
+ * this comparison (this file's own matchPursuitsToAwards() and
+ * app/pipeline/page.tsx's own, independently-duplicated copy) used to
+ * require `winner_count === 1` outright before ever checking the company's
+ * own names at all - so a company that had, in fact, won its own share of
+ * a panel/split award was unconditionally told it LOST, with its own name
+ * sitting right there inside the panel's own semicolon-joined winner list
+ * (shown back to it as who it supposedly lost to). Splitting on ";" first
+ * closes that for the portal-sourced case. SANRAL's own multi-package
+ * award (store_award_outcomes.part_from_sanral(): winner_count hard-coded
+ * to the sentinel 2, `winner_name` a raw, un-split "PACKAGE 1: ... 2: ..."
+ * string with no "; " in it) still can't be parsed into individual names at
+ * all - splitting it on ";" just returns the one whole string back, which
+ * correctly still won't match any company name, rather than guessing. */
+export function isCompanyAmongWinners(winnerName: string, companyNames: readonly (string | null | undefined)[]): boolean {
+  const winners = winnerName.split(";").map((s) => s.trim()).filter(Boolean);
+  return winners.some((winner) => companyNames.some((name) => name && normName(name) === normName(winner)));
+}
+
 export type BbbeeSplit = { n: number; EME: number; QSE: number; "Level 1-2": number; other: number };
 
 /** Only single-winner AWARDED tenders count - a panel award or a register
@@ -434,10 +460,7 @@ export function matchPursuitsToAwards(
       return { pursuitId: p.id, matchedOutcomeKey: matched?.outcome_key ?? null, matchedOn, suggestion: "Unmatched", lostTo: null };
     }
 
-    const companyWon =
-      matched.winner_count === 1 &&
-      !!matched.winner_name &&
-      p.companyNames.some((name) => name && normName(name) === normName(matched!.winner_name));
+    const companyWon = !!matched.winner_name && isCompanyAmongWinners(matched.winner_name, p.companyNames);
 
     return {
       pursuitId: p.id,

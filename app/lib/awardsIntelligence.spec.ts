@@ -6,6 +6,7 @@ import {
   companyBbbeeLevel,
   competitionStats,
   dominantIncumbent,
+  isCompanyAmongWinners,
   loadComparableAwards,
   matchPursuitsToAwards,
   priceGuide,
@@ -340,6 +341,51 @@ describe("matchPursuitsToAwards", () => {
     const pursuits: Pursuit[] = [{ id: "p1", reference: "X.001-2026/1", buyer: null, title: null, companyNames: ["Winner Co"] }];
     const [result] = matchPursuitsToAwards(pursuits, awards);
     expect(Object.keys(result).sort()).toEqual(["lostTo", "matchedOn", "matchedOutcomeKey", "pursuitId", "suggestion"]);
+  });
+
+  // Finding (standing QA/robustness review, 2026-11-16): a panel/split award
+  // (winner_count > 1, winner_name a "; "-joined list of every winner -
+  // store_award_outcomes.part_from_portal()) used to be reported "Lost"
+  // unconditionally - the company's own names were never even checked
+  // against it - so a company that had, in fact, won its own share of the
+  // panel saw "Lost" with its own name sitting right there inside lostTo's
+  // own semicolon-joined list.
+  it("suggests 'Won' for a panel/split award when the company's own name is one of the joined winners", () => {
+    const panel = [award({ outcome_key: "ocid:panel1", reference: "PANEL-001", buyer: null, title: null,
+                           status: "awarded", winner_count: 3, winner_name: "Firm A; Clevapp Pty Ltd; Firm C" })];
+    const pursuits: Pursuit[] = [{ id: "p6", reference: "PANEL-001", buyer: null, title: null, companyNames: ["Clevapp Pty Ltd"] }];
+    const [result] = matchPursuitsToAwards(pursuits, panel);
+    expect(result.suggestion).toBe("Won");
+    expect(result.lostTo).toBeNull();
+  });
+
+  it("still suggests 'Lost' for a panel/split award when none of the joined winners match the company", () => {
+    const panel = [award({ outcome_key: "ocid:panel2", reference: "PANEL-002", buyer: null, title: null,
+                           status: "awarded", winner_count: 2, winner_name: "Firm A; Firm B" })];
+    const pursuits: Pursuit[] = [{ id: "p7", reference: "PANEL-002", buyer: null, title: null, companyNames: ["Some Other Co"] }];
+    const [result] = matchPursuitsToAwards(pursuits, panel);
+    expect(result.suggestion).toBe("Lost");
+    expect(result.lostTo).toBe("Firm A; Firm B");
+  });
+});
+
+describe("isCompanyAmongWinners", () => {
+  it("matches a single, clean winner name (normName-equivalent, e.g. Pty/Ltd noise stripped)", () => {
+    expect(isCompanyAmongWinners("Winner Co", ["Unrelated Firm"])).toBe(false);
+    expect(isCompanyAmongWinners("Winner Co Pty Ltd", ["Winner Co Pty Ltd"])).toBe(true);
+    expect(isCompanyAmongWinners("Winner Co", ["Winner Co Pty Ltd"])).toBe(true); // normName strips Pty/Ltd as noise
+  });
+
+  it("matches one name inside a semicolon-joined panel/split-award winner list", () => {
+    expect(isCompanyAmongWinners("Firm A; Clevapp Pty Ltd; Firm C", ["Clevapp Pty Ltd"])).toBe(true);
+    expect(isCompanyAmongWinners("Firm A; Firm B", ["Clevapp Pty Ltd"])).toBe(false);
+  });
+
+  it("SANRAL's own un-split multi-package text (no ';' in it) never falsely matches", () => {
+    // store_award_outcomes.part_from_sanral(): the raw, whole package-list
+    // string comes back as the one and only "winner" after splitting on
+    // ";" - correctly never matched, rather than guessed at.
+    expect(isCompanyAmongWinners("PACKAGE 1: Firm A PACKAGE 2: Firm B", ["Firm A"])).toBe(false);
   });
 });
 
