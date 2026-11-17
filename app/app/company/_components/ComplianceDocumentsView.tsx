@@ -9,6 +9,7 @@ import { DocumentRow, DocumentUploadAction } from "./DocumentRow";
 import { filenameFromPath } from "@/lib/vaultDocuments";
 import type { ComplianceDocEntry } from "./ComplianceDocumentsSection";
 import { formatDate } from "@/lib/dates";
+import { extraTableLines } from "./complianceTableRow-logic";
 
 const fmtDate = (d: string | null) => (d ? (formatDate(d) ?? "—") : "—");
 const EDIT_HREF = "/company?edit=1#compliance-documents";
@@ -114,11 +115,22 @@ function ViewToggleButton({
 
 function ComplianceDocTableRow({ companyId, entry }: { companyId: string; entry: ComplianceDocEntry }) {
   const filename = filenameFromPath(entry.path);
+  // Finding 488: entry.detail (lines[0]) and the Expires column (lines[1])
+  // alone used to be everything this row showed - card view (DocumentRow)
+  // already rendered every one of entry.lines, so this was the only place
+  // an entity/contractor/account-holder name mismatch silently stopped
+  // being visible once table view became the default.
+  const extraLines = extraTableLines(entry.lines);
   return (
     <div className="grid grid-cols-1 gap-2 border-t border-border py-3 first:border-t-0 sm:grid-cols-[1.6fr_1fr_0.9fr_auto] sm:items-center sm:gap-3">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-foreground">{entry.title}</div>
         <div className="mt-0.5 truncate text-xs text-muted-foreground">{entry.detail}</div>
+        {extraLines.map((l, i) => (
+          <div key={i} className="mt-0.5 truncate text-xs text-muted-foreground">
+            {l}
+          </div>
+        ))}
         {entry.url && filename && (
           <a href={entry.url} target="_blank" rel="noopener noreferrer" className="mt-0.5 block truncate text-xs font-semibold text-accent no-underline">
             {filename}
