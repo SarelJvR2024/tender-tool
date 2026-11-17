@@ -53,11 +53,17 @@ export async function clearHarnessRunReview(formData: FormData) {
  * System alerts (migration 0042): Sarel marks an engine/bridge failure
  * resolved once it is fixed (or reopens it). Same shape as the harness
  * review above: migration 0042 grants authenticated users UPDATE on only the
- * three resolution columns, and its RLS policy limits that to company owners
- * with resolved_by pinned to the signed-in user. Checked here too, since a
- * Server Action is reachable by direct POST. A resolved alert is never
- * reported again by engine/alerts/check_system_alerts.py; the same failure
- * happening later is recorded as a new alert.
+ * three resolution columns, and its RLS policy limits that to platform
+ * admins with resolved_by pinned to the signed-in user (0042's original
+ * "company owner" proxy rule was superseded by migration 0086, which found
+ * ANY company owner - not just Sarel - could read/resolve this
+ * platform-wide operational log; this comment and the error message below
+ * were never updated to match, unlike writeReview()'s own sibling message
+ * just above, which already says "platform admin" - QA pass, 2026-11-17).
+ * Checked here too, since a Server Action is reachable by direct POST. A
+ * resolved alert is never reported again by
+ * engine/alerts/check_system_alerts.py; the same failure happening later is
+ * recorded as a new alert.
  */
 async function writeAlertResolution(formData: FormData, resolved: boolean) {
   const alertId = String(formData.get("alert_id") ?? "");
@@ -87,7 +93,7 @@ async function writeAlertResolution(formData: FormData, resolved: boolean) {
     redirect(`/admin?error=${encodeURIComponent(message)}#system-alerts`);
   }
   if (!data || data.length === 0) {
-    redirect(`/admin?error=${encodeURIComponent("Only a company owner can resolve system alerts.")}#system-alerts`);
+    redirect(`/admin?error=${encodeURIComponent("Only a Tender Ready platform admin can resolve system alerts.")}#system-alerts`);
   }
   revalidatePath("/admin");
 }
