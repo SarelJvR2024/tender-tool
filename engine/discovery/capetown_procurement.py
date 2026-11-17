@@ -79,10 +79,26 @@ def normalize_rfq(cells, path, detail_id):
     )
 
 
+# Finding 489 (standing review, 2026-11-17): a row too short to parse used
+# to vanish with zero trace - unlike award_outcomes.py's own
+# fetch_portal_awarded() (the eTenders portal's sibling awards reader, same
+# file, same "a malformed row in a government table" shape), which already
+# tracks and reports a skipped-broken-record count. This source is also
+# reachable from the real scheduled pipeline (gov_sources.ALL_SOURCES ->
+# watch_new_tenders.py), not a manual-only tool, so a silently-dropped RFQ
+# here is a real missed opportunity, not just a dev-tool gap.
 def fetch_rfqs(log=print):
     page = sh.http_get(RFQ_URL, timeout=120).decode("utf-8", errors="replace")
-    rels = [normalize_rfq(*row) for row in parse_table(page) if len(row[0]) >= 4]
-    log(f"  City of Cape Town procurement portal: {len(rels)} open RFQs")
+    rels, skipped = [], 0
+    for row in parse_table(page):
+        if len(row[0]) >= 4:
+            rels.append(normalize_rfq(*row))
+        else:
+            skipped += 1
+            log(f"  WARNING: Cape Town RFQ row skipped - only {len(row[0])} cell(s), need at least 4 "
+                f"({row[0][0] if row[0] else '(no cells)'})")
+    log(f"  City of Cape Town procurement portal: {len(rels)} open RFQs"
+        + (f", {skipped} row(s) skipped (too few cells to parse)" if skipped else ""))
     return rels
 
 
@@ -102,9 +118,12 @@ def fetch_awards(limit=50, with_supplier=True, log=print):
     (one request each, paused) for the supplier's name."""
     import time
     page = sh.http_get(AWARDS_URL, timeout=120).decode("utf-8", errors="replace")
-    out = []
+    out, skipped = [], 0
     for cells, path, detail_id in parse_table(page)[:limit]:
         if len(cells) < 5:
+            skipped += 1
+            log(f"  WARNING: Cape Town award row skipped - only {len(cells)} cell(s), need at least 5 "
+                f"({cells[0] if cells else '(no cells)'})")
             continue
         rec = {"source": SOURCE, "buyer": BUYER, "reference": cells[0], "title": cells[1],
                "category": cells[2], "status": cells[3],
@@ -117,7 +136,7 @@ def fetch_awards(limit=50, with_supplier=True, log=print):
                 log(f"  WARNING: Cape Town award {cells[0]} detail failed: {e}")
             time.sleep(0.5)
         out.append(rec)
-    log(f"  City of Cape Town awards: {len(out)} read")
+    log(f"  City of Cape Town awards: {len(out)} read" + (f", {skipped} row(s) skipped (too few cells to parse)" if skipped else ""))
     return out
 
 
