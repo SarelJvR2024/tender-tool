@@ -180,9 +180,24 @@ export const DS_SPECIALISMS: { key: string; matrix: string; match: RegExp }[] = 
   { key: "engineering_geologist", matrix: "DS_ENGINEERING_GEOLOGIST", match: /geolog/i },
 ];
 
-/** "DS1" -> "DS", "CE2" -> "CE"; "PL(T)" and "PE(E)" stay. */
+/**
+ * "DS1" -> "DS", "CE2" -> "CE"; "PL(T)" and "PE(E)" stay.
+ *
+ * Finding 490 (standing review, 2026-11-18): used to strip the trailing
+ * digit AFTER only trimming the string's own leading/trailing whitespace,
+ * so a code with an internal space before that digit ("DS 1", "CE 2" - a
+ * real, plausible shape for a position code read off a tender's own SETUP
+ * sheet, the same kind of inconsistent spacing this whole engine area
+ * already works around elsewhere) left a dangling space behind ("DS ", not
+ * "DS") - silently failing every exact-match comparison against it
+ * (`code === "DS"` in matrixForPosition()/sanralRoleCodeForPosition()
+ * below), unlike this file's own sibling call `normPositionCode(baseCode(x))`
+ * (sanralScoring.ts's own `required` variable), which already strips ALL
+ * whitespace and got this right. Now strips internal whitespace too, before
+ * the trailing-digit removal, so both call shapes agree.
+ */
 export function baseCode(positionCode: string): string {
-  return positionCode.trim().toUpperCase().replace(/\d+$/, "");
+  return positionCode.trim().toUpperCase().replace(/\s+/g, "").replace(/\d+$/, "");
 }
 
 /** Book 1 matrix for a tendered position, or null when Book 1 doesn't publish one. */
