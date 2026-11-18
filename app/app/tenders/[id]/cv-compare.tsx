@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { pickTailoredCv } from "./cv-compare-logic";
 
 /**
  * "Tailored CV side-by-side with original" (prompt 10, item 3). Shows the
@@ -18,6 +19,14 @@ import { createClient } from "@/lib/supabase/server";
  * there are no "lines" to diff), and the pack engine already auto-picks
  * (newest ready generated CV, else newest as-is upload) with no per-position
  * override input anywhere to write a button's choice into.
+ *
+ * Finding 496: which "tailored" row counts as newest used to be decided by
+ * `requested_at` here, but the real pack builder (cv_download_target())
+ * decides by `completed_at` among rows with a real `storage_path_pdf` - a
+ * CV requested later can still finish generating earlier (summary vs.
+ * detailed, different render times), so this preview could show a
+ * different variant than the one the real pack would actually embed. See
+ * cv-compare-logic.ts's own header for the full reasoning.
  */
 export async function CvCompare({ tenderId, positionCode, personId }: { tenderId: string; positionCode: string; personId: string }) {
   const supabase = await createClient();
@@ -26,17 +35,15 @@ export async function CvCompare({ tenderId, positionCode, personId }: { tenderId
     supabase.from("cv_uploads").select("id, storage_path, original_filename, created_at").eq("person_id", personId).order("created_at", { ascending: false }).limit(1),
     supabase
       .from("generated_cvs")
-      .select("id, storage_path_docx, storage_path_pdf, format, detail, requested_at")
+      .select("id, storage_path_docx, storage_path_pdf, format, detail, completed_at")
       .eq("tender_id", tenderId)
       .eq("position_code", positionCode)
       .eq("person_id", personId)
-      .eq("status", "ready")
-      .order("requested_at", { ascending: false })
-      .limit(1),
+      .eq("status", "ready"),
   ]);
 
   const original = uploadRows?.[0] ?? null;
-  const tailored = genRows?.[0] ?? null;
+  const tailored = pickTailoredCv(genRows ?? []);
   if (!original && !tailored) return null;
 
   const paths = [original?.storage_path, tailored?.storage_path_pdf, tailored?.storage_path_docx].filter((p): p is string => !!p);
