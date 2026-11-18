@@ -95,6 +95,13 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       .from("pack_generation_jobs")
       .select("id, status, requested_at, started_at, completed_at, storage_path_pdf, output_files, page_count, manifest, error_message, acknowledged_gaps")
       .eq("tender_id", tenderId)
+      // Finding 494: this table also carries engine='general' extract_requirements
+      // rows for the SAME tender_id (every tender's own intake job, migration
+      // 0024/0051) - without this filter, an unrelated intake job still mid-flight
+      // falsely set `active` (blocking a real SANRAL pack request with "already
+      // queued"), and one that had already reached 'ready' falsely credited the
+      // savings counter below for a SANRAL pack that was never actually built.
+      .eq("engine", "sanral")
       .order("requested_at", { ascending: false })
       .limit(5),
     // Everyone who can sign (People page signatory capacity), oldest first -
