@@ -7,6 +7,7 @@ import { FileDropzone, validateFiles } from "../../_components/document-intake/F
 import { ACCEPTED_EXTENSIONS } from "@/lib/onboardingScan";
 import { Button } from "@/components/ui/button";
 import { chunkRowsBySize, rowsToFormData } from "./bulkCvChunking";
+import { bestPersonMatch } from "./bulkCvPersonMatch";
 
 const MAX_CV_BYTES = 4.4 * 1024 * 1024;
 
@@ -27,15 +28,6 @@ function guessNameFromFilename(filename: string): string {
     .replace(/\bcv\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function bestPersonMatch(filename: string, people: Person[]): Person | null {
-  const normalized = filename.toLowerCase();
-  for (const p of people) {
-    const parts = p.name.toLowerCase().split(/\s+/).filter((s) => s.length > 2);
-    if (parts.length > 0 && parts.every((part) => normalized.includes(part))) return p;
-  }
-  return null;
 }
 
 /**
