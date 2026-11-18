@@ -163,6 +163,11 @@ def signature(manifest, pack):
     return sig
 
 
+def unknown_only_names(samples, only):
+    """Which --only names don't match any real sample dir, in the order given."""
+    return [o for o in only if o not in samples]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--store", default=DEFAULT_STORE)
@@ -176,6 +181,17 @@ def main(argv=None):
 
     samples = sorted(d for d in os.listdir(SAMPLES) if os.path.isdir(os.path.join(SAMPLES, d)))
     if args.only:
+        # Finding 491 (standing review, 2026-11-18): a typo'd --only name used
+        # to silently filter `samples` down to [] - the loop below then simply
+        # never ran, and main() fell straight through to "0 clean, 0 flagged,
+        # 0 failed" with exit code 0, indistinguishable from a real clean run
+        # that covered every sample. The one thing this harness exists to
+        # catch - a regression nobody noticed - is exactly what a silent,
+        # misleadingly-green zero-coverage run would itself hide.
+        unknown = unknown_only_names(samples, args.only)
+        if unknown:
+            print(f"ERROR: --only names a sample that doesn't exist: {unknown} (real samples: {samples})")
+            return 1
         samples = [s for s in samples if s in args.only]
     profiles = sorted(glob.glob(os.path.join(TEST_COMPANIES, "*.json")))
     work_root = tempfile.mkdtemp(prefix="tt_general_harness_")
