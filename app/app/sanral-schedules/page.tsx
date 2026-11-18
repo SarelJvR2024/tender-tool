@@ -82,6 +82,12 @@ export default async function SanralSchedulesPage() {
         .from("pack_generation_jobs")
         .select("tender_id, status, requested_at")
         .in("tender_id", tenderIds)
+        // Finding 494: this table also carries each tender's own engine='general'
+        // extract_requirements intake job - without this filter, an intake job
+        // that already finished ('ready') outranked (by requested_at) or stood in
+        // for a real SANRAL pack job that was never requested, showing a
+        // misleading "Ready to download" badge with no pack ever actually built.
+        .eq("engine", "sanral")
         .order("requested_at", { ascending: false });
       if (jobsError) throw jobsError;
 

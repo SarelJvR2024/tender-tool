@@ -157,6 +157,12 @@ export async function requestSubmissionPack(formData: FormData) {
     .from("pack_generation_jobs")
     .select("id")
     .eq("tender_id", tenderId)
+    // Finding 494: scope to the SANRAL pack job itself - this table also
+    // carries this tender's own engine='general' extract_requirements
+    // intake job, which could still be requested/generating (e.g. re-queued
+    // by add_manual_tender_documents() on a later document upload), falsely
+    // blocking a real SANRAL pack request that was never actually queued.
+    .eq("engine", "sanral")
     .in("status", ["requested", "generating"])
     .limit(1);
   if (active && active.length > 0) fail("A submission pack is already queued for this tender.");
