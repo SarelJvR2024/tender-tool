@@ -42,6 +42,7 @@ class FakeClient:
 
     def __init__(self, rows):
         self.rows = rows
+        self.delete_calls = []
 
     def select(self, table, filters=None, order=None):
         return [r for r in self.rows if all(r.get(k) == v for k, v in (filters or {}).items())]
@@ -51,6 +52,10 @@ class FakeClient:
         for r in matched:
             r.update(body)
         return matched
+
+    def delete(self, table, filters):
+        self.delete_calls.append((table, dict(filters)))
+        self.rows = [r for r in self.rows if not all(r.get(k) == v for k, v in filters.items())]
 
 
 def iso(dt):
@@ -587,6 +592,59 @@ def test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_f
           client.removed == [(pgj.TENDER_DOCS_BUCKET, ["t1/technical_xlsm.xlsm"])], client.removed)
 
 
+def test_invalidate_stale_pack_review_on_reclassify_clears_every_companys_row_when_family_actually_changes():
+    print("invalidate_stale_pack_review_on_reclassify(): a reclassified tender's stale "
+          "pack_review_confirmations rows (for every company, not just this job's own) are cleared "
+          "- the bypass Finding 495 found, where a review given for the OLD family's own Pack Review "
+          "list kept silently satisfying the gate for the NEW family's completely different checklist")
+
+    # General -> SANRAL (a real SANRAL Technical workbook arrives after an
+    # initial read that found none): both companies pursuing this SHARED
+    # tender had already confirmed their own review of the GENERAL pack list.
+    client = FakeClient([
+        {"tender_id": "t-1", "company_id": "company-a", "reviewed_at": "2026-11-17T10:00:00Z"},
+        {"tender_id": "t-1", "company_id": "company-b", "reviewed_at": "2026-11-17T11:00:00Z"},
+        {"tender_id": "t-2", "company_id": "company-a", "reviewed_at": "2026-11-17T10:00:00Z"},  # a different tender - must survive
+    ])
+    tender = {"id": "t-1", "family": "General (non-SANRAL)"}
+    patch = {"family": "RRM Consultant Tender"}
+    pgj.invalidate_stale_pack_review_on_reclassify(client, tender, patch)
+    check("both companies' stale confirmations for the reclassified tender are gone",
+          [r for r in client.rows if r["tender_id"] == "t-1"] == [], client.rows)
+    check("a different tender's own confirmation is untouched",
+          [r for r in client.rows if r["tender_id"] == "t-2"] == [{"tender_id": "t-2", "company_id": "company-a", "reviewed_at": "2026-11-17T10:00:00Z"}],
+          client.rows)
+    check("exactly one delete call was made, scoped to the reclassified tender only",
+          client.delete_calls == [("pack_review_confirmations", {"tender_id": "t-1"})], client.delete_calls)
+
+    # SANRAL -> general (the explicit downgrade branch): same shape, opposite direction.
+    client2 = FakeClient([{"tender_id": "t-3", "company_id": "company-a", "reviewed_at": "2026-11-17T10:00:00Z"}])
+    pgj.invalidate_stale_pack_review_on_reclassify(client2, {"id": "t-3", "family": "RRM Consultant Tender"}, {"family": "General (non-SANRAL)"})
+    check("a SANRAL->general reclassification also clears the stale confirmation", client2.rows == [], client2.rows)
+
+    # No real reclassification - the same family patched again (e.g. a
+    # private-documents extraction run, or the general route's own elif
+    # finding family already correct): nothing should be deleted.
+    client3 = FakeClient([{"tender_id": "t-4", "company_id": "company-a", "reviewed_at": "2026-11-17T10:00:00Z"}])
+    pgj.invalidate_stale_pack_review_on_reclassify(client3, {"id": "t-4", "family": "General (non-SANRAL)"}, {"family": "General (non-SANRAL)"})
+    check("the same family written again does not touch any confirmation", client3.delete_calls == [], client3.delete_calls)
+
+    # patch carries no family key at all (the private-documents branch, which
+    # never patches tenders.family) - nothing should be deleted either.
+    client4 = FakeClient([{"tender_id": "t-5", "company_id": "company-a", "reviewed_at": "2026-11-17T10:00:00Z"}])
+    pgj.invalidate_stale_pack_review_on_reclassify(client4, {"id": "t-5", "family": "General (non-SANRAL)"}, {"document_requirements": {}})
+    check("a patch with no family key at all does not touch any confirmation", client4.delete_calls == [], client4.delete_calls)
+
+    # The tender's own OLD family was never set (a brand-new manual tender's
+    # very first classification) - not a reclassification, just the first
+    # real answer; nothing existed to go stale, but the guard must not raise
+    # on a None old value either.
+    client5 = FakeClient([])
+    pgj.invalidate_stale_pack_review_on_reclassify(client5, {"id": "t-6", "family": None}, {"family": "General (non-SANRAL)"})
+    check("a tender's very first classification (old family None) is not treated as a reclassification needing a delete",
+          client5.delete_calls == [], client5.delete_calls)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
@@ -599,6 +657,7 @@ def main():
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_run_pack_cleans_up_storage_when_a_later_upload_fails()
     test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_fails()
+    test_invalidate_stale_pack_review_on_reclassify_clears_every_companys_row_when_family_actually_changes()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

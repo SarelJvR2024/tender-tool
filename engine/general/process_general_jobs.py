@@ -456,6 +456,29 @@ def recent_corrections(client, limit=5):
              "verdict": r.get("verdict"), "corrected_value": r.get("corrected_value")} for r in rows]
 
 
+def invalidate_stale_pack_review_on_reclassify(client, tender, patch):
+    """pack_review_confirmations (0059) is keyed only (company_id, tender_id)
+    - no family/engine column - reused as-is by BOTH requestSubmissionPack()'s
+    (SANRAL) and requestJob()'s (general) own "a human reviewed the pack list
+    before compiling" gate, which checks only whether a row EXISTS, never
+    whether it was given for the CURRENT family. `tenders.family` can flip
+    either way on a later re-run of run_extraction() (more documents added -
+    a real SANRAL Technical workbook arriving after an initial "general"
+    read, or an initial misread workbook corrected). An already-confirmed
+    review given for the OLD family's own Pack Review list would otherwise
+    silently keep satisfying the gate for the NEW family's completely
+    different checklist - exactly the bypass the review gate was added to
+    prevent (QA finding, 2026-11-18, Finding 495). Cleared for every company
+    pursuing this tender (not just the one job that triggered the
+    reclassification), since a shared tender's family is shared too - each
+    must re-review before compiling either pack again. Guarded on the OLD
+    family being set at all, so a brand-new tender's very first
+    classification (nothing could have been confirmed yet) never issues a
+    pointless delete."""
+    if tender.get("family") and patch.get("family") and patch["family"] != tender.get("family"):
+        client.delete("pack_review_confirmations", {"tender_id": tender["id"]})
+
+
 def run_extraction(client, job, work_root, fetch=None):
     """The intake + requirements step every tender's documents go through,
     however the tender arrived (Discovery, or a manual load - 0024).
@@ -600,6 +623,7 @@ def run_extraction(client, job, work_root, fetch=None):
             "source_document": "; ".join(sorted({d["name"] for d in clean["documents"] if d["chars"] > 0}))[:500],
             "extracted_at": clean["extracted_at"],
         }
+    invalidate_stale_pack_review_on_reclassify(client, tender, patch)
     client.update("tenders", {"id": tender["id"]}, patch)
     verdict = record_fit(client, job, {**tender, **patch}, all_text, documents=manifest["documents"])
     return {"route": decision["route"], "family": patch.get("family", tender.get("family")), "verdict": verdict,
