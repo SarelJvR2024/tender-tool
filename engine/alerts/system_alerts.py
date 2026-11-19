@@ -103,6 +103,37 @@ def record(source, message, severity="error", detail=None, context=None, exc=Non
     """Record one failure. Returns the alert id, or None when it was only
     printed (no Supabase, disabled, or the write failed). Never raises."""
     try:
+        return _record_unsafe(source, message, severity, detail, context, exc, url, key)
+    except Exception as e:
+        # Standing QA finding: every print(..., file=sys.stderr) below is -
+        # or was - unguarded, so a genuinely real failure of the stream
+        # itself (a container's stdout/stderr pipe breaking - a log
+        # collector restarting, `docker logs` disconnecting mid-stream;
+        # confirmed directly with a simulated BrokenPipeError on the first
+        # print() call this function makes) raised straight out of record(),
+        # breaking this module's own stated, header-level contract ("record()
+        # NEVER raises... recording a failure must not become a second
+        # failure in the bridge that hit the first"). Reached engine/worker/
+        # run_bridges.py's BridgeRunner.run_once() (every print()-based alert
+        # call site there is inside this exact "must never itself break
+        # real work" class), which has no try/except around ITS OWN calls
+        # into record() either - so the one mechanism that exists
+        # specifically to tell Sarel about a failure could itself become a
+        # second, completely invisible failure (poll_loop.poll_forever()'s
+        # own generic per-cycle catch swallows it with zero alert, since
+        # run_bridges.py's main() never sets alert_source). Falls back to a
+        # bare best-effort stderr write, itself guarded, rather than letting
+        # a broken stream take the caller down too.
+        try:
+            sys.stderr.write(f"[system-alert] record() itself failed ({type(e).__name__}: {e}) - "
+                              f"source={source!r} message={str(message)[:200]!r}\n")
+        except Exception:
+            pass
+        return None
+
+
+def _record_unsafe(source, message, severity, detail, context, exc, url, key):
+    try:
         payload = payload_for(source, message, severity, detail, context, exc)
     except Exception as e:  # a bad context object must not break the caller
         payload = payload_for(source, f"{message} (context not serialisable: {e})", severity, detail, None, exc)

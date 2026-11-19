@@ -449,6 +449,47 @@ def test_a_bridge_that_writes_invalid_utf8_does_not_crash_the_whole_cycle():
           "character, not a crash - and the OTHER bridge in the same cycle still runs")
 
 
+def test_a_broken_log_stream_does_not_crash_the_whole_cycle():
+    # Standing QA finding: self.log() (print, in production) runs on a
+    # long-running container's own stdout/stderr - a stream that can itself
+    # break (a log collector restarting, `docker logs` disconnecting
+    # mid-stream; confirmed directly with a simulated BrokenPipeError).
+    # Before this fix, that exception raised straight out of run_once()
+    # uncaught - not guarded by any of its OSError (Popen)/TimeoutExpired/
+    # UnicodeDecodeError (communicate) branches, since it happens further
+    # down, in the self.log() calls themselves. Same consequence as every
+    # prior fix in this exact family: the whole cycle aborted (every bridge
+    # scheduled after the one that hit it got skipped too), and in --loop
+    # mode poll_loop.poll_forever()'s own generic per-cycle catch swallowed
+    # it with ZERO alert (run_bridges.py's main() passes no alert_source) -
+    # a silent loss, not just a missed one, and system_alerts.record()'s own
+    # identical unguarded-print gap is fixed separately in system_alerts.py.
+    tmp = tempfile.mkdtemp(prefix="bridge_broken_log_")
+    first_script = os.path.join(tmp, "first_bridge.py")
+    ok_script = os.path.join(tmp, "ok_bridge.py")
+    for path in (first_script, ok_script):
+        with open(path, "w") as f:
+            f.write("print('bridge ran fine')\n")
+    runner = run_bridges.BridgeRunner([("first", first_script), ("ok", ok_script)])
+    output = []
+    calls = []
+
+    def flaky_log(msg):
+        calls.append(msg)
+        if "first" in msg:
+            raise BrokenPipeError("[Errno 32] Broken pipe")
+        output.append(msg)
+    runner.log = flaky_log
+    did_something = runner.run_once()  # must not raise BrokenPipeError
+    assert len(calls) == 2, f"expected BOTH bridges' output to still be attempted, not the cycle aborting " \
+                            f"on the first one's broken log write - got {calls}"
+    assert did_something == 2, f"expected both bridges to still count as activity, got {did_something} ({output})"
+    assert any("ok" in ln and "bridge ran fine" in ln for ln in output), \
+        f"expected the SECOND bridge's own output to still be logged - got {output}"
+    print("PASS run_bridges.py: a broken log stream on one bridge's own output line doesn't crash the whole "
+          "cycle or skip the OTHER bridge scheduled in the same pass")
+
+
 if __name__ == "__main__":
     test_poll_forever_unit()
     test_max_runtime_uses_an_injectable_clock_not_the_real_one()
@@ -460,4 +501,5 @@ if __name__ == "__main__":
     test_timeout_kills_the_whole_process_group()
     test_a_bridge_that_fails_to_even_start_is_reported_not_silently_lost()
     test_a_bridge_that_writes_invalid_utf8_does_not_crash_the_whole_cycle()
+    test_a_broken_log_stream_does_not_crash_the_whole_cycle()
     print("All bridge-loop smoke tests passed.")

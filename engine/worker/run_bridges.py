@@ -115,6 +115,29 @@ class BridgeRunner:
         self.log = log
         self._missing_reported = set()
 
+    def _log_safe(self, msg):
+        """self.log() (print, in production) on a long-running container's
+        own stdout/stderr - a stream that itself can break (a log collector
+        restarting, `docker logs` disconnecting mid-stream; confirmed
+        directly with a simulated BrokenPipeError). Before this fix, that
+        exception propagated straight out of run_once() uncaught - not
+        inside any of its own OSError/TimeoutExpired try blocks below, which
+        only guard the Popen()/communicate() calls - aborting the WHOLE
+        cycle (every bridge scheduled after the one that hit it got skipped
+        too, the identical cascading-skip shape the 2026-11-03/2026-11-08
+        fixes already named for the Popen-OSError and UnicodeDecodeError
+        cases) and, in --loop mode, reaching poll_loop.poll_forever()'s own
+        generic per-cycle catch with ZERO alert recorded (main() passes it
+        no alert_source - system_alerts.record()'s own unguarded prints had
+        the identical gap, separately fixed in system_alerts.py). Logging a
+        line must never itself be allowed to break real work, the same rule
+        this file's whole try/except-per-failure-mode shape already follows
+        for everything else."""
+        try:
+            self.log(msg)
+        except Exception:
+            pass
+
     def run_once(self):
         """One pass over every bridge. Returns how many bridges produced
         output worth showing (i.e. did something). Raises if any bridge pass
@@ -123,12 +146,12 @@ class BridgeRunner:
         for label, path in self.scripts:
             if not os.path.exists(path):
                 if label not in self._missing_reported:
-                    self.log(f"{label}: {os.path.relpath(path, REPO_ROOT)} not present yet, skipping "
-                             f"(re-checked every cycle)")
+                    self._log_safe(f"{label}: {os.path.relpath(path, REPO_ROOT)} not present yet, skipping "
+                                   f"(re-checked every cycle)")
                     self._missing_reported.add(label)
                 continue
             if label in self._missing_reported:
-                self.log(f"{label}: {os.path.relpath(path, REPO_ROOT)} is now present, running it")
+                self._log_safe(f"{label}: {os.path.relpath(path, REPO_ROOT)} is now present, running it")
                 self._missing_reported.discard(label)
             # start_new_session=True + Popen (not subprocess.run's own
             # timeout=) so a timeout kill can take the WHOLE process group
@@ -214,7 +237,7 @@ class BridgeRunner:
             if meaningful:
                 did_something += 1
                 for ln in meaningful:
-                    self.log(f"{label}: {ln}")
+                    self._log_safe(f"{label}: {ln}")
             if p.returncode != 0:
                 broken.append(f"{label} exited {p.returncode}")
                 # The pass itself broke (crash, missing env, Supabase down) -
