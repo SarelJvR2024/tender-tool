@@ -158,6 +158,33 @@ export function personFieldDefaultTick(p: ProposedValue, currentValue: string | 
   return p.verified && !replaces && !same && proposed !== "";
 }
 
+/**
+ * app/app/people/actions.ts's `createPersonWithCv()` own placeholder
+ * `people.name` for a brand-new person added via "Add from a CV" with no
+ * name typed (AI-extract mode, letting the CV's own name reach this same
+ * review step instead) - never a value a human actually entered.
+ */
+export const PENDING_CV_REVIEW_NAME = "Pending CV review";
+
+/**
+ * The real "on file now" value a review screen should show/default-tick
+ * `field`'s proposed value against. Only `name` needs this: for every other
+ * field, the raw column value IS the real "on file now" fact.
+ * `PENDING_CV_REVIEW_NAME` is not that - it is this app's own synthetic
+ * stand-in for "nobody has said what this person is called yet," written so
+ * `people.name not null` doesn't block creation while AI reads the real one
+ * off the CV. Fed straight into `personFieldDefaultTick()` as-is, it reads
+ * as a real, non-empty existing value "replacing" - exactly the protection
+ * that function gives genuine data, misapplied to a value nobody ever
+ * typed, defaulting the name row to UNTICKED with "Would replace what's on
+ * file" even though there is nothing real there to replace. Nulling it out
+ * here puts a person on this exact path back on the same footing as a
+ * person who simply has no name on file at all.
+ */
+export function currentValueForReview(fieldKey: string, rawValue: string | null): string | null {
+  return fieldKey === "name" && rawValue === PENDING_CV_REVIEW_NAME ? null : rawValue;
+}
+
 export type CvExtractionResult = {
   id: string;
   cv_upload_id: string;

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
-import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, ISO_DATE, QUALIFICATION_LEVELS, type Proposal } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, EXTRACTED_PERSON_FIELDS, ISO_DATE, PENDING_CV_REVIEW_NAME, QUALIFICATION_LEVELS, type Proposal } from "@/lib/cvExtraction";
 import { safeFileName } from "@/lib/safeFileName";
 import { sastToday } from "@/lib/publicHolidays";
 import { queueStandardCvs } from "@/lib/standardCvQueue";
@@ -628,6 +628,20 @@ export async function retryCvExtraction(formData: FormData) {
  * (applyCvExtraction, below) and overwrites the placeholder once ticked.
  * Typing a name is still required for "Use as-is" (no AI step reads it) or
  * when no file is chosen at all (nothing will ever propose one).
+ *
+ * Standing QA finding: "overwrites the placeholder once ticked" assumed the
+ * name row would start ticked like any other high-confidence field - it
+ * doesn't. `lib/cvExtraction.ts`'s `personFieldDefaultTick()` sees this
+ * placeholder (`PENDING_CV_REVIEW_NAME`, defined there) as a real, non-empty
+ * value already on file and defaults the checkbox to UNTICKED with "Would
+ * replace what's on file" - exactly the protection that function exists to
+ * give genuine existing data, applied here to a value nobody ever typed.
+ * `people/[id]/page.tsx` now runs the person's name through that same
+ * module's `currentValueForReview()` before handing it to
+ * `CvExtractionReview`, so `personFieldDefaultTick()` sees no current value
+ * at all for this one sentinel - the same path a brand-new, never-named
+ * person would take - and the real extracted name defaults to ticked like
+ * it was always meant to.
  */
 export async function createPersonWithCv(formData: FormData) {
   const companyId = await requireCompanyId();
@@ -649,7 +663,7 @@ export async function createPersonWithCv(formData: FormData) {
   if (!typedName && !canSkipName) {
     redirect(`/people/new?error=${encodeURIComponent("Enter a name, or choose a CV for AI to read it from.")}`);
   }
-  const name = typedName || "Pending CV review";
+  const name = typedName || PENDING_CV_REVIEW_NAME;
 
   // Same `people` insert shape as savePerson() for a new row - only name is
   // supplied here, everything else starts null and is filled in either by

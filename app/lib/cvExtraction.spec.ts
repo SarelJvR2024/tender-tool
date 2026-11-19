@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { looksLikeExistingProject, needsSelectFallbackOption, personFieldDefaultTick, type ProposedValue } from "./cvExtraction";
+import { currentValueForReview, looksLikeExistingProject, needsSelectFallbackOption, PENDING_CV_REVIEW_NAME, personFieldDefaultTick, type ProposedValue } from "./cvExtraction";
 
 function pv(value: string | null, verified: boolean, warnings: string[] = []): ProposedValue {
   return { value, evidence: null, verified, warnings };
@@ -37,6 +37,39 @@ describe("personFieldDefaultTick", () => {
 
   it("ticks a verified value when what's on file is blank (empty string, not null) - not a 'replaces' case", () => {
     expect(personFieldDefaultTick(pv("ECSA123", true), "")).toBe(true);
+  });
+
+  // Standing QA finding: createPersonWithCv()'s own PENDING_CV_REVIEW_NAME
+  // placeholder (app/app/people/actions.ts) read straight into this
+  // function, unfiltered, is indistinguishable from a real name a human
+  // typed - it is non-null and non-empty - so it wrongly triggers the same
+  // "replaces real data" protection genuine existing data gets, leaving the
+  // real AI-extracted name UNTICKED by default. currentValueForReview()
+  // below is the fix; these two cases show the exact before/after.
+  it("WITHOUT currentValueForReview: the placeholder name is wrongly treated as real data to protect", () => {
+    expect(personFieldDefaultTick(pv("Jane Dlamini", true), PENDING_CV_REVIEW_NAME)).toBe(false);
+  });
+
+  it("WITH currentValueForReview: the placeholder is nulled out first, so the real extracted name ticks by default", () => {
+    expect(personFieldDefaultTick(pv("Jane Dlamini", true), currentValueForReview("name", PENDING_CV_REVIEW_NAME))).toBe(true);
+  });
+});
+
+describe("currentValueForReview", () => {
+  it("nulls out the name field's own PENDING_CV_REVIEW_NAME placeholder", () => {
+    expect(currentValueForReview("name", PENDING_CV_REVIEW_NAME)).toBeNull();
+  });
+
+  it("leaves a real, human-typed name on the name field untouched", () => {
+    expect(currentValueForReview("name", "Jane Dlamini")).toBe("Jane Dlamini");
+  });
+
+  it("leaves null on the name field untouched (nothing to null out)", () => {
+    expect(currentValueForReview("name", null)).toBeNull();
+  });
+
+  it("never touches any other field, even if it happened to hold the literal placeholder string", () => {
+    expect(currentValueForReview("role", PENDING_CV_REVIEW_NAME)).toBe(PENDING_CV_REVIEW_NAME);
   });
 });
 

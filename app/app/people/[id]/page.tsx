@@ -9,7 +9,7 @@ import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import { CvLedAddPerson } from "../_components/cv-led-add-person";
 import { RoleSourceInfo } from "../_components/role-source-info";
-import { ECSA_LEVELS, QUALIFICATION_LEVELS, needsSelectFallbackOption, type CvExtractionResult } from "@/lib/cvExtraction";
+import { ECSA_LEVELS, QUALIFICATION_LEVELS, currentValueForReview, needsSelectFallbackOption, type CvExtractionResult } from "@/lib/cvExtraction";
 import { EmptyState } from "@/components/tt/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -467,7 +467,12 @@ export default async function PersonDetailPage({
             result={r}
             filename={cvUploads.find((u) => u.id === r.cv_upload_id)?.original_filename ?? "uploaded CV"}
             personId={person!.id}
-            current={person as unknown as Record<string, string | null>}
+            // Standing QA finding: see currentValueForReview()'s own doc
+            // comment (lib/cvExtraction.ts) - createPersonWithCv()'s own
+            // placeholder name must never be treated as real data already
+            // on file, or the real extracted name silently defaults to
+            // UNTICKED instead of ticked.
+            current={{ ...(person as unknown as Record<string, string | null>), name: currentValueForReview("name", person!.name) }}
             existingProjects={projects.map((p) => p.client_and_number)}
           />
         ))}
