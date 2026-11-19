@@ -3,6 +3,7 @@ import { Zap, FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { SANRAL_PACK_FAMILIES } from "@/lib/pastSubmissionReuse";
+import { isActiveSanralScheduleTender } from "./sanral-schedules-logic";
 import { AppShell } from "../_components/AppShell";
 import { PageHeader } from "@/components/tt/page-header";
 import { EmptyState } from "@/components/tt/empty-state";
@@ -38,6 +39,15 @@ import { RetryButton } from "../_components/RetryButton";
  * uses SANRAL_PACK_FAMILIES (app/lib/pastSubmissionReuse.ts), the one
  * place that pairing is already named, instead of a second, narrower
  * family list.
+ *
+ * QA finding: tender_packs!inner(id) below used to select only id, with no
+ * stage check anywhere in this file - the exact Finding 434/435 gap (a
+ * tender already submitted/briefing_shortlisted/won/lost has no actionable
+ * deadline or, here, no more schedules left to fill, yet kept being
+ * listed as if it did). Now filtered through isActiveSanralScheduleTender()
+ * (sanral-schedules-logic.ts), reusing the SAME
+ * DEADLINE_REMINDER_EXCLUDED_STAGES every other "still needs action"
+ * surface in this codebase already applies - no second, hand-copied list.
  */
 export const instant = false;
 
@@ -47,7 +57,7 @@ type TenderRow = {
   title: string | null;
   buyer: string | null;
   closing_date: string | null;
-  tender_packs: { id: string }[];
+  tender_packs: { id: string; pipeline_stage: string | null }[];
 };
 
 type LatestJob = { tender_id: string; status: "requested" | "generating" | "ready" | "failed"; requested_at: string };
@@ -69,12 +79,12 @@ export default async function SanralSchedulesPage() {
   try {
     const { data: tenderRows, error: tendersError } = await supabase
       .from("tenders")
-      .select("id, contract_no, title, buyer, closing_date, tender_packs!inner(id)")
+      .select("id, contract_no, title, buyer, closing_date, tender_packs!inner(id, pipeline_stage)")
       .in("family", SANRAL_PACK_FAMILIES)
       .order("closing_date", { ascending: true });
     if (tendersError) throw tendersError;
 
-    tenders = (tenderRows ?? []) as unknown as TenderRow[];
+    tenders = ((tenderRows ?? []) as unknown as TenderRow[]).filter((t) => isActiveSanralScheduleTender(t.tender_packs));
     const tenderIds = tenders.map((t) => t.id);
 
     if (tenderIds.length > 0) {
