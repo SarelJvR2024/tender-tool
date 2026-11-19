@@ -102,6 +102,16 @@ vi.mock("next/cache", () => ({
   revalidatePath: () => {},
 }));
 
+// requestJob()'s own generate_pack gate (below) now also calls
+// loadGeneralPackReviewSnapshot() - a heavier read (6+ of its own `.from()`
+// calls across two Promise.all batches, per general-pack-review-data.ts)
+// that would make every requestJob() test in this file carry a long,
+// fragile, exact-call-order queue just to reach the two lines under test
+// here. Mocked directly instead, same as @/lib/supabase/server above - the
+// snapshot's OWN correctness (and hasReviewableItems()'s own logic) has its
+// own dedicated, DB-free coverage in general-pack-review-logic.test.ts.
+vi.mock("./general-pack-review-data", () => ({ loadGeneralPackReviewSnapshot: vi.fn() }));
+
 function formData(tenderId: string, docId: string) {
   const fd = new FormData();
   fd.set("tender_id", tenderId);
@@ -351,5 +361,78 @@ describe("saveSignatoryCapacity - people update genuinely succeeds", () => {
     );
 
     expect(url).toBe("/tenders/tender-1?saved=signatory#general-preparation");
+  });
+});
+
+function tenderOnlyFormData(tenderId: string) {
+  const fd = new FormData();
+  fd.set("tender_id", tenderId);
+  return fd;
+}
+
+const emptyReviewSnapshot = { mapped: true, sections: [], gapsCount: 0, reviewed: null };
+const reviewableSnapshot = {
+  mapped: true,
+  sections: [{ key: "general_people", title: "Roles & CVs", changeHref: "#x", changeLabel: "Change", error: null, items: [{ key: "role-PL", label: "Project Leader", value: null, status: "missing", note: null }] }],
+  gapsCount: 1,
+  reviewed: null,
+};
+
+// Standing QA/robustness finding: requestGeneralPack()'s own pre-compile
+// gate used to require a pack_review_confirmations row UNCONDITIONALLY,
+// with no awareness that general-pack-review.tsx's own "I've reviewed
+// this" card renders NOTHING (not even the button) once this exact
+// snapshot shape - every section genuinely empty - comes back, which a
+// real, sparse manually-loaded general tender's own extraction can and
+// does produce (confirmed by running the real
+// engine/general/requirements.py extractor against a one-paragraph RFQ
+// with no SBD forms, no returnables, no roles, no experience-evidence
+// rules, no locality rules - every one of those came back []). Before the
+// fix, such a tender could never generate a pack at all: the gate always
+// demanded a confirmation only the (never-rendered) card could write.
+describe("requestGeneralPack - the Pack Review snapshot has nothing in it to confirm (a sparse general tender)", () => {
+  it("does not require a pack_review_confirmations row, and queues the job anyway, when there is nothing to review", async () => {
+    const { loadGeneralPackReviewSnapshot } = await import("./general-pack-review-data");
+    vi.mocked(loadGeneralPackReviewSnapshot).mockResolvedValue(emptyReviewSnapshot as never);
+
+    const { client, fromCalls, rpcCalls } = makeSupabase(
+      [
+        [{ data: { company_id: "company-1" }, error: null }], // requireMember's company_members lookup
+        [{ data: { id: "pack-1" }, error: null }], // tender_packs lookup
+      ],
+      { data: { id: "job-1" }, error: null },
+    );
+    supabaseState.current = client;
+
+    const { requestGeneralPack } = await import("./general-actions");
+
+    const url = await expectRedirect(requestGeneralPack(tenderOnlyFormData("tender-1")));
+
+    expect(url).toBe("/tenders/tender-1?saved=pack#general-preparation");
+    expect(fromCalls).not.toContain("pack_review_confirmations");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].fn).toBe("request_general_job_checked");
+  });
+});
+
+describe("requestGeneralPack - the Pack Review snapshot has real items, none confirmed yet (regression - unchanged behaviour)", () => {
+  it("still blocks with the review-required error when there is something to review and it hasn't been confirmed", async () => {
+    const { loadGeneralPackReviewSnapshot } = await import("./general-pack-review-data");
+    vi.mocked(loadGeneralPackReviewSnapshot).mockResolvedValue(reviewableSnapshot as never);
+
+    const { client, fromCalls, rpcCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireMember's company_members lookup
+      [{ data: null, error: null }], // pack_review_confirmations - no row, nothing confirmed
+    ]);
+    supabaseState.current = client;
+
+    const { requestGeneralPack } = await import("./general-actions");
+
+    const url = await expectRedirect(requestGeneralPack(tenderOnlyFormData("tender-1")));
+
+    expect(url).toContain("/tenders/tender-1?error=");
+    expect(decodeURIComponent(url)).toContain("Review the full Pack Review list above");
+    expect(fromCalls).toContain("pack_review_confirmations");
+    expect(rpcCalls).toHaveLength(0);
   });
 });

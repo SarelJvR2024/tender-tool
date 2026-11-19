@@ -11,12 +11,14 @@ import { test } from "node:test";
 import {
   answerStatus,
   designatedSignatoryFallback,
+  hasReviewableItems,
   localityStatus,
   matchStrengthStatus,
   roleStatus,
   signatureAnswerStatus,
   specificGoalsLocalityRows,
 } from "./general-pack-review-logic.ts";
+import type { ReviewSection } from "./pack-review-data.ts";
 import { docItemStatus } from "./pack-review-logic.ts";
 import { matchLocality, type CompanyOffice, type LocalityRow } from "../../../lib/locality.ts";
 
@@ -283,4 +285,30 @@ test("scenario: missing signatory / nobody tagged for a role / no local office s
   assert.ok(statuses.includes("missing"));
   assert.ok(statuses.includes("warning"));
   assert.ok(!statuses.every((s) => s === "confirmed"));
+});
+
+function emptySection(key: string): ReviewSection {
+  return { key, title: key, changeHref: "#x", changeLabel: "Change", items: [], error: null };
+}
+
+test("hasReviewableItems: every section genuinely empty (a sparse manually-loaded tender's own extraction found nothing at all) is false", () => {
+  assert.equal(
+    hasReviewableItems([emptySection("general_answers"), emptySection("general_documents"), emptySection("general_people"), emptySection("experience"), emptySection("locality")]),
+    false,
+  );
+});
+
+test("hasReviewableItems: one section with a real item is true, even when every other section is empty", () => {
+  const sections = [emptySection("general_answers"), emptySection("general_documents")];
+  sections.push({ ...emptySection("general_people"), items: [{ key: "role-PL", label: "Project Leader", value: null, status: "missing", note: null }] });
+  assert.equal(hasReviewableItems(sections), true);
+});
+
+test("hasReviewableItems: a section that failed to load (error set, zero items) still counts as something to review, not nothing", () => {
+  const sections = [emptySection("general_answers"), { ...emptySection("general_documents"), error: "Couldn't load this section: boom" }];
+  assert.equal(hasReviewableItems(sections), true);
+});
+
+test("hasReviewableItems: an empty sections array (defensive) is false", () => {
+  assert.equal(hasReviewableItems([]), false);
 });

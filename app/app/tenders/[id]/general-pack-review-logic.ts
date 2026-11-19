@@ -61,6 +61,9 @@ import type { ChecklistStatus, ReviewStatus } from "./pack-review-logic";
 // the "./pack-review-logic" import above) - LocalityRow's own `kind` field
 // is what specificGoalsLocalityRows() below filters on.
 import type { LocalityRow } from "@/lib/locality";
+// Type-only import (erased entirely at compile/strip time, same reasoning as
+// above) - hasReviewableItems() below needs ReviewSection's own shape only.
+import type { ReviewSection } from "./pack-review-data";
 
 export type { ReviewStatus, ChecklistStatus } from "./pack-review-logic";
 
@@ -217,6 +220,37 @@ export function matchStrengthStatus(confidence: number | null | undefined): { ti
  */
 export function specificGoalsLocalityRows(rows: LocalityRow[]): LocalityRow[] {
   return rows.filter((r) => r.kind !== "functionality");
+}
+
+/**
+ * Whether a general-tender Pack Review snapshot has anything in it to
+ * confirm at all - true as soon as any section has an item or failed to
+ * load; false only when every section came back genuinely empty.
+ *
+ * Standing QA finding: this is a real, reachable shape, not a hypothetical
+ * one - a sparse manually-loaded general tender (e.g. a one-paragraph RFQ
+ * with no SBD forms, no explicit returnables/roles/experience/locality
+ * clauses) makes engine/general/requirements.py's own extract_requirements()
+ * return `forms`, `company_fields`, `questions`, `returnables`, `roles`,
+ * `experience_evidence.rules` and `locality.rows`/`mandatory_local_office`
+ * all empty at once - confirmed by running the real, unmodified extractor on
+ * a genuine minimal RFQ-shaped document, not assumed. general-pack-review.tsx
+ * used to decide on its own, inline, whether to render the "I've reviewed
+ * this" card at all for exactly this case (`allItems.length === 0 &&
+ * sections.every((s) => !s.error)` -> render nothing) - but
+ * general-actions.ts's requestJob() gate, added later for the standing QA
+ * finding that general tenders had no review step at all, unconditionally
+ * required a pack_review_confirmations row regardless, with no awareness of
+ * that same "nothing to review" case. For a tender whose manifest is this
+ * empty, the two disagreed: the card that lets a company satisfy the gate
+ * never rendered, so the gate could never be satisfied - a real, permanent
+ * dead end, not just a confusing message (compiling a pack for that tender
+ * became impossible, the error pointing at a "Pack review" section that
+ * does not exist on the page). Both call sites now share this ONE function
+ * so they can never say something different again.
+ */
+export function hasReviewableItems(sections: ReviewSection[]): boolean {
+  return sections.some((s) => s.items.length > 0 || s.error !== null);
 }
 
 /** lib/locality.ts's matchLocality() "matched"/"no_match"/"unknown" -> this screen's vocabulary. */
