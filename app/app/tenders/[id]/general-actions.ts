@@ -12,6 +12,8 @@ import { safeFileName } from "@/lib/safeFileName";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
 import { advanceFoundToAssessing } from "@/lib/pipeline";
+import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
+import { hasReviewableItems } from "./general-pack-review-logic";
 
 async function requireMember() {
   const supabase = await createClient();
@@ -175,20 +177,34 @@ export async function uploadTenderDocument(formData: FormData) {
  * finding that general tenders had no equivalent review step. Additive to
  * every existing check above (missing documents/answers still just produce
  * a draft with blanks, by design) - this only blocks an UNREVIEWED compile.
+ *
+ * Skipped entirely when hasReviewableItems() (general-pack-review-logic.ts)
+ * says this tender's own Pack Review snapshot has nothing in it - standing
+ * QA finding: general-pack-review.tsx's card doesn't render at all in that
+ * exact case (nothing to show, nothing to confirm), so a tender whose
+ * extraction found no forms/returnables/roles/experience-evidence/locality
+ * rules at all (a real, reachable shape for a sparse manually-loaded RFQ,
+ * confirmed by running the real extractor against one) could never satisfy
+ * this gate - the one UI that lets a company write the confirmation row
+ * simply never appeared. Both call sites now read the identical function so
+ * "is there anything to review" can't drift between them again.
  */
 async function requestJob(formData: FormData, kind: "extract_requirements" | "generate_pack") {
   const { supabase, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/dashboard");
   if (kind === "generate_pack") {
-    const { data: reviewRow } = await supabase
-      .from("pack_review_confirmations")
-      .select("reviewed_at")
-      .eq("tender_id", tenderId)
-      .eq("company_id", companyId)
-      .maybeSingle();
-    if (!reviewRow?.reviewed_at) {
-      redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
+    const snapshot = await loadGeneralPackReviewSnapshot(tenderId);
+    if (hasReviewableItems(snapshot.sections)) {
+      const { data: reviewRow } = await supabase
+        .from("pack_review_confirmations")
+        .select("reviewed_at")
+        .eq("tender_id", tenderId)
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (!reviewRow?.reviewed_at) {
+        redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
+      }
     }
   }
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();

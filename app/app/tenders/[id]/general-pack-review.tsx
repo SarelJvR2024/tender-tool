@@ -3,7 +3,7 @@ import { Info } from "lucide-react";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { confirmGeneralPackReview } from "./general-pack-review-actions";
 import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
-import { matchStrengthStatus } from "./general-pack-review-logic";
+import { hasReviewableItems, matchStrengthStatus } from "./general-pack-review-logic";
 import type { BidTaskStatus } from "./bid-task-status";
 import { formatDateTime } from "@/lib/dates";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -114,10 +114,18 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
     return null; // this tender's documents haven't been read yet - nothing to preview
   }
 
-  const allItems = snapshot.sections.flatMap((s) => s.items);
-  if (allItems.length === 0 && snapshot.sections.every((s) => !s.error)) {
+  // Finding (standing QA/robustness review): this used to be an inline
+  // `allItems.length === 0 && sections.every((s) => !s.error)` check, with no
+  // other caller aware of exactly what it meant - general-actions.ts's own
+  // requestJob() gate required a pack_review_confirmations row regardless,
+  // so a tender with nothing to review here could never satisfy a gate that
+  // still unconditionally demanded one. See hasReviewableItems()'s own doc
+  // comment (general-pack-review-logic.ts) for the full reasoning; both call
+  // sites now share this one function so they can't say something different.
+  if (!hasReviewableItems(snapshot.sections)) {
     return null; // nothing this tender's own forms ask for beyond documents/roles already shown elsewhere
   }
+  const allItems = snapshot.sections.flatMap((s) => s.items);
   const confirmedCount = allItems.filter((i) => i.status === "confirmed").length;
   const toLookAtCount = allItems.length - confirmedCount;
 
