@@ -261,6 +261,68 @@ def test_check_survives_a_failed_mark_reported():
           f"the two alerts whose PATCH succeeded really were marked reported, the failing one wasn't ({client.marked})")
 
 
+class BrokenStream:
+    """Stands in for a container's own broken stdout/stderr (a log
+    collector restarting, `docker logs` disconnecting mid-stream) - the
+    real, environment-level failure record()'s own unguarded print() calls
+    used to have no defence against at all."""
+
+    def write(self, *args, **kwargs):
+        raise BrokenPipeError("[Errno 32] Broken pipe")
+
+    def flush(self):
+        pass
+
+
+def test_record_never_raises_even_when_its_own_print_fails():
+    # Standing QA finding: record()'s own module header states, explicitly,
+    # "record() NEVER raises... recording a failure must not become a second
+    # failure in the bridge that hit the first" - but every print(...,
+    # file=sys.stderr) call inside it was unguarded, so a genuinely real
+    # failure of that stream itself broke this exact, stated contract.
+    print("Part 1c - record() really never raises, even when stderr itself is broken (direct, no FakeSupabase needed)")
+    real_stderr = system_alerts.sys.stderr
+    system_alerts.sys.stderr = BrokenStream()
+    try:
+        result = None
+        raised = None
+        try:
+            result = system_alerts.record("worker", "a failure while stderr itself is broken", "critical")
+        except Exception as e:
+            raised = e
+    finally:
+        system_alerts.sys.stderr = real_stderr
+    check(raised is None, f"record() must never raise, even when its own stderr print fails (raised {raised!r})")
+    check(result is None, "with stderr broken and no Supabase configured, record() falls back to returning None")
+
+    # Same failure, but with a working _sink (what a test or a real Supabase
+    # write would otherwise store through) - the FIRST print() call (which
+    # happens before _sink is ever consulted) still breaks first, so this
+    # one alert is lost either way; what matters is record() still doesn't
+    # raise, and a LATER call (stderr restored) stores normally again.
+    sink_calls = []
+    system_alerts.set_sink(lambda payload: sink_calls.append(payload) or "fake-id-1")
+    system_alerts.sys.stderr = BrokenStream()
+    try:
+        raised = None
+        try:
+            system_alerts.record("worker", "a second failure while stderr is still broken", "critical")
+        except Exception as e:
+            raised = e
+    finally:
+        system_alerts.sys.stderr = real_stderr
+        system_alerts.set_sink(None)
+    check(raised is None, f"record() must never raise even mid-way through a successful-looking store (raised {raised!r})")
+
+    system_alerts.set_sink(lambda payload: sink_calls.append(payload) or "fake-id-2")
+    try:
+        after = system_alerts.record("worker", "a third failure, stderr is fine again", "critical")
+    finally:
+        system_alerts.set_sink(None)
+    check(after == "fake-id-2" and len(sink_calls) == 1,
+          f"once stderr is healthy again, record() stores normally - unaffected by the earlier broken-stream calls ({sink_calls})")
+
+
 def part2(psql):
     print("Part 2 - the real 0042 table and record_system_alert() on a replayed scratch Postgres")
     db = PsqlAlerts(psql)
@@ -333,6 +395,7 @@ def part2(psql):
 if __name__ == "__main__":
     part1()
     test_check_survives_a_failed_mark_reported()
+    test_record_never_raises_even_when_its_own_print_fails()
     psql = os.environ.get("ALERTS_PSQL")
     if psql:
         part2(psql)
