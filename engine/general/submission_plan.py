@@ -40,6 +40,7 @@ Usage (dry run, prints the plan):
 import argparse
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -158,6 +159,34 @@ def compile_plan(manifest, company=None, tender=None):
             "category": "role", "id": "role:" + role["role_code"], "title": f"Key personnel: {role['role_code']}",
             "status": "needs_input",
             "detail": "No person is tagged for this role yet on this tender - assign someone and attach their CV.",
+            "document": role.get("document"), "quote": role.get("quote"),
+        })
+
+    # QA finding: manifest v2's extracted_roles (requirements.py's
+    # extract_dynamic_roles(), 2026-10-29) was additive by design - never a
+    # replacement for the 17 coded `roles` above, deliberately kept separate
+    # (that function's own header comment) because it catches a key-resource
+    # schedule naming a role the coded ROLE_PATTERNS list doesn't recognise -
+    # the exact same "key personnel this engine doesn't have a pattern for"
+    # gap Finding 44's own `_key_personnel_gap()` exists to flag elsewhere.
+    # This compiler never read it at all: a dynamically-extracted role was
+    # shown on the manifest display (general-workspace.tsx) but never turned
+    # into an action item here, so the one feature whose whole point is "what
+    # do I actually have to go and do" silently dropped it - confirmed live,
+    # a synthetic "Key Resource Schedule" naming an uncoded role (e.g.
+    # "Environmental Control Officer, minimum 6 years") produced a real
+    # `extracted_roles` entry but zero steps, while a coded role in the same
+    # document correctly got its own step.
+    for role in manifest.get("extracted_roles") or []:
+        certs = role.get("qualifications_and_certs") or []
+        detail = f"Found in a key-resource schedule, minimum {role['min_years']} years' experience"
+        if certs:
+            detail += f", requiring: {', '.join(certs)}"
+        detail += " - no person is tagged for this role yet on this tender. Assign someone and attach their CV."
+        slug = re.sub(r"[^a-z0-9]+", "-", role["title"].lower()).strip("-")
+        steps.append({
+            "category": "role", "id": f"role:extracted:{slug}", "title": f"Key personnel: {role['title']}",
+            "status": "needs_input", "detail": detail,
             "document": role.get("document"), "quote": role.get("quote"),
         })
 

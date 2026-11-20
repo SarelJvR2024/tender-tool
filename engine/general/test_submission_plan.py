@@ -180,6 +180,36 @@ check("Finding 42's real combined-bulletin PDF produces exactly one blocked step
 check("...and the step says why, not a generic message",
       "multiple tenders" in bulletin_plan["steps"][0]["detail"])
 
+# --- manifest v2's extracted_roles (a key-resource schedule naming a role --
+#     the 17 coded ROLE_PATTERNS don't recognise) must reach the plan as its -
+#     own action item, not just the manifest display - found 2026-11-20: ---
+#     requirements.py's own extract_dynamic_roles() is additive by design, --
+#     but compile_plan() never read it at all, so a real key-personnel ask --
+#     this engine DID find was silently missing from "what do I need to do" -
+
+KEY_RESOURCE_BUNDLE = SBD_BUNDLE + """
+ANNEXURE B: KEY RESOURCE SCHEDULE
+
+Environmental Control Officer
+Minimum 6 years relevant experience required.
+"""
+
+_, plan_with_extracted_role = _plan_for_files([KEY_RESOURCE_BUNDLE])
+
+check("a coded role (project manager) still gets its own step, unaffected by this fix",
+      any(s["category"] == "role" and s["id"] == "role:contractor.project_manager"
+          for s in plan_with_extracted_role["steps"]),
+      [s["id"] for s in plan_with_extracted_role["steps"] if s["category"] == "role"])
+
+extracted_role_step = _step(plan_with_extracted_role, "role:extracted:environmental-control-officer")
+check("a manifest-v2 dynamically-extracted role (not in the 17 coded ROLE_PATTERNS) gets its own "
+      "needs_input step in the plan, not silently dropped",
+      extracted_role_step is not None and extracted_role_step["status"] == "needs_input",
+      [s["id"] for s in plan_with_extracted_role["steps"] if s["category"] == "role"])
+check("...and its detail names the real minimum years found, not a generic message",
+      extracted_role_step is not None and "6 years" in extracted_role_step["detail"],
+      extracted_role_step)
+
 # --- summary counts always add up, every status accounted for -------------
 
 for plan in (plan_no_company, plan_with_bee, eskom_plan, bulletin_plan):
