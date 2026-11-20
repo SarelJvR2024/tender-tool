@@ -237,6 +237,45 @@ def test_fake_supabase_honours_order_requested_at_asc():
         fake.stop()
 
 
+def test_fake_supabase_escalates_severity_on_repeat_alert_like_the_real_sql_does():
+    # Finding (worker/job-queue rotation, 2026-11-20): migration 0042's real
+    # record_system_alert() SQL function escalates (never downgrades) the
+    # severity of an open alert on a repeat of the same fingerprint -
+    # array_position-ranked over ['warning', 'error', 'critical']. The fake
+    # server's own emulation used to just leave the ORIGINAL severity in
+    # place forever on every repeat, a real, demonstrable divergence from
+    # real Postgres behaviour no existing test here could have caught (no
+    # other test here reports the same fingerprint twice at different
+    # severities).
+    fake = FakeSupabase().start()
+    try:
+        # Same (source, message) -> the same fingerprint (system_alerts.py's
+        # own fingerprint() blanks ids/numbers, so this doesn't even need to
+        # match character-for-character).
+        run_bridges.system_alerts.record("worker", "transient hiccup", severity="warning",
+                                          url=fake.url, key="fake-key")
+        run_bridges.system_alerts.record("worker", "transient hiccup", severity="critical",
+                                          url=fake.url, key="fake-key")
+        rows = fake.rows("system_alerts")
+        assert len(rows) == 1, f"expected one open alert (same fingerprint), got {rows}"
+        assert rows[0]["severity"] == "critical", \
+            f"expected severity to ESCALATE to critical on the second, more severe occurrence, got {rows[0]}"
+        assert rows[0]["occurrences"] == 2, rows[0]
+
+        # Mirror case, proving this isn't just "last value wins": a LOWER
+        # severity repeat must NOT downgrade an already-escalated alert.
+        run_bridges.system_alerts.record("worker", "transient hiccup", severity="warning",
+                                          url=fake.url, key="fake-key")
+        rows = fake.rows("system_alerts")
+        assert rows[0]["severity"] == "critical", \
+            f"a later, LOWER-severity repeat must not downgrade the alert, got {rows[0]}"
+        assert rows[0]["occurrences"] == 3, rows[0]
+        print("PASS fake_supabase escalates (never downgrades) severity on a repeat alert, matching the real "
+              "record_system_alert() SQL function's own ON CONFLICT rule")
+    finally:
+        fake.stop()
+
+
 def test_runner_drives_bridges_and_stops_on_sigterm():
     fake = FakeSupabase().start()
     try:
@@ -454,6 +493,7 @@ if __name__ == "__main__":
     test_max_runtime_uses_an_injectable_clock_not_the_real_one()
     test_claim_is_atomic()
     test_fake_supabase_honours_order_requested_at_asc()
+    test_fake_supabase_escalates_severity_on_repeat_alert_like_the_real_sql_does()
     test_cv_bridge_loop_end_to_end()
     test_runner_drives_bridges_and_stops_on_sigterm()
     test_script_flag_is_additive()

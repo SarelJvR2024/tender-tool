@@ -36,6 +36,10 @@ def _parse_filters(query):
 
 IS_NULL = object()
 
+# Same ordering as migration 0042's record_system_alert() own
+# array['warning', 'error', 'critical'] rank - higher index wins on conflict.
+_SEVERITY_RANK = {"warning": 0, "error": 1, "critical": 2}
+
 
 def _parse_order(query):
     """("col.asc"/"col.desc"/bare "col") -> (column, reverse) or None - PostgREST's
@@ -152,6 +156,16 @@ class FakeSupabase:
                             hit["occurrences"] += 1
                             hit["detail"] = p.get("p_detail") or hit.get("detail")
                             hit["context"] = p.get("p_context") or {}
+                            # Finding (worker/job-queue rotation, 2026-11-20): the
+                            # real 0042 SQL function's own ON CONFLICT clause only
+                            # ever ESCALATES severity on a repeat of the same open
+                            # fingerprint (array_position-ranked, never downgrades)
+                            # - this used to just leave the original severity in
+                            # place forever, silently diverging from real
+                            # PostgREST/Postgres behaviour for any later occurrence
+                            # reported at a higher severity than the first one.
+                            if _SEVERITY_RANK.get(p.get("p_severity"), -1) > _SEVERITY_RANK.get(hit.get("severity"), -1):
+                                hit["severity"] = p["p_severity"]
                         else:
                             hit = {"id": f"alert-{len(rows) + 1}", "source": p["p_source"], "severity": p["p_severity"],
                                    "message": p["p_message"], "detail": p.get("p_detail"),
