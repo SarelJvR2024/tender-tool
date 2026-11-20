@@ -721,6 +721,12 @@ def part2(db):
         "pack_generation_jobs.tender_pack_id = B's pack": f"insert into pack_generation_jobs (company_id, tender_id, tender_pack_id) values ('{A}', '{i['tS']}', '{i['packB']}')",
         "tender_tasks on B's private tender": f"insert into tender_tasks (company_id, tender_id, description) values ('{A}', '{i['tPB']}', 't')",
         "tender_answers on B's private tender": f"insert into tender_answers (company_id, tender_id, field_key, value) values ('{A}', '{i['tPB']}', 'k', 'v')",
+        # 0125: pack_review_confirmations never got the tt_same_company tender-visibility
+        # guard every sibling (company_id, tender_id) table has (0043's original 9,
+        # tender_subcontracting_plans's own 0056 trigger, narrative_documents's own 0097
+        # retrofit) - live-repro-confirmed exploitable before 0125 (an existence oracle
+        # for a private/manual tender's id, via this table's own insert error code).
+        "pack_review_confirmations on B's private tender": f"insert into pack_review_confirmations (company_id, tender_id) values ('{A}', '{i['tPB']}')",
         "companies vault path -> B's folder": f"update companies set sars_tcs_pin_document_path = '{B}/vault/sars/t.pdf' where id = '{A}'",
         "companies logo path -> B's folder": f"update companies set logo_storage_path = '{B}/logo.png' where id = '{A}'",
         "cv_uploads.storage_path -> B's folder": f"insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values ('{A}', '{i['pA']}', '{B}/people/{i['pB']}/uploads/cv.pdf', 'cv.pdf', 'ai_extract')",
@@ -740,6 +746,7 @@ def part2(db):
         "own vault path": f"update companies set sars_tcs_pin_document_path = '{A}/vault/sars/{uuid.uuid4()}-t.pdf' where id = '{A}'",
         "own task assignee": f"insert into tender_tasks (company_id, tender_id, description, assigned_to) values ('{A}', '{i['tS']}', 't', '{i['pA']}')",
         "own pack job": f"insert into pack_generation_jobs (company_id, tender_id, tender_pack_id) values ('{A}', '{i['tS']}', '{i['packA']}')",
+        "own pack review confirmation, shared tender": f"insert into pack_review_confirmations (company_id, tender_id) values ('{A}', '{i['tS']}')",
     }
     for label, sql in own.items():
         ok, _, err = db.run(sql, uA)
