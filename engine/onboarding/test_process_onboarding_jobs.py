@@ -24,6 +24,8 @@ real LLM call or Storage download for either case.
 
 Run: python3 engine/onboarding/test_process_onboarding_jobs.py
 """
+import contextlib
+import io
 import os
 import sys
 import urllib.parse
@@ -615,6 +617,36 @@ def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
           [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
+def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
+    """run_bridges.py suppresses an idle pass only when its only output
+    starts with QUIET_PREFIXES ("No pending") - see
+    process_narrative_jobs.py's own identical regression test and its
+    header comment for the real bug this guards against (that sibling
+    bridge used to print a line QUIET_PREFIXES never matched, so a real
+    --loop worker logged it every single cycle forever). Only that one
+    sibling bridge ever got this protection; every other bridge's own idle
+    message is still unguarded against the identical regression - confirmed
+    today they all correctly start with "No pending" (none of them silently
+    drifted), but nothing would catch it if one did. Standing QA/robustness
+    review, 2026-11-21."""
+    original = poj.supabase_request
+    poj.supabase_request = lambda url, key, method, path, body=None: []
+    old_environ = dict(os.environ)
+    os.environ["NEXT_PUBLIC_SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            poj.main(["--once"])
+    finally:
+        poj.supabase_request = original
+        os.environ.clear()
+        os.environ.update(old_environ)
+    printed = out.getvalue().strip()
+    check("prints a line run_bridges.py's QUIET_PREFIXES recognises as quiet",
+          printed.startswith("No pending"), printed)
+
+
 def main():
     test_legit_double_dot_filename_is_not_rejected_by_the_guard()
     test_real_traversal_via_dotdot_segment_is_still_rejected()
@@ -634,6 +666,7 @@ def main():
     test_poll_once_does_not_abort_the_whole_pass_when_one_uploads_claim_fails()
     test_poll_once_still_propagates_setup_error()
     test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
+    test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -26,7 +26,9 @@ gitignored PII so they can't be committed as fixtures.
 
 Usage: python3 engine/cv/test_extract_cv_fields.py   (exit 0 = all passed)
 """
+import contextlib
 import datetime
+import io
 import json
 import os
 import shutil
@@ -839,6 +841,36 @@ def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
           "rows come back in order, nothing dropped or duplicated across pages")
 
 
+def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
+    """run_bridges.py suppresses an idle pass only when its only output
+    starts with QUIET_PREFIXES ("No pending") - see
+    process_narrative_jobs.py's own identical regression test and its
+    header comment for the real bug this guards against (that sibling
+    bridge used to print a line QUIET_PREFIXES never matched, so a real
+    --loop worker logged it every single cycle forever). Only that one
+    sibling bridge ever got this protection; every other bridge's own idle
+    message is still unguarded against the identical regression - confirmed
+    today they all correctly start with "No pending" (none of them silently
+    drifted), but nothing would catch it if one did. Standing QA/robustness
+    review, 2026-11-21."""
+    original = x.supabase_request
+    x.supabase_request = lambda url, key, method, path, body=None: []
+    old_environ = dict(os.environ)
+    os.environ["NEXT_PUBLIC_SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            x.main(["--once"])
+    finally:
+        x.supabase_request = original
+        os.environ.clear()
+        os.environ.update(old_environ)
+    printed = out.getvalue().strip()
+    check(printed.startswith("No pending"),
+          f"prints a line run_bridges.py's QUIET_PREFIXES recognises as quiet ({printed!r})")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cv_extract_test_")
     try:
@@ -855,6 +887,7 @@ def main():
         test_sa_id_redaction_line_break()
         test_email_verification_survives_line_wrap()
         test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
+        test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALL PASSED' if not FAILS else f'{len(FAILS)} FAILED'}")

@@ -22,7 +22,9 @@ same bug class as watch_deadlines.days_until()'s own malformed-date guard
 
 Run: python3 engine/pack/test_process_pack_jobs.py
 """
+import contextlib
 import datetime
+import io
 import json
 import os
 import shutil
@@ -815,6 +817,39 @@ def test_cv_download_target_uses_the_safe_storage_path_not_the_raw_original_file
         shutil.rmtree(work, ignore_errors=True)
 
 
+def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
+    """run_bridges.py suppresses an idle pass only when its only output
+    starts with QUIET_PREFIXES ("No pending") - see
+    process_narrative_jobs.py's own identical regression test and its
+    header comment for the real bug this guards against (that sibling
+    bridge used to print a line QUIET_PREFIXES never matched, so a real
+    --loop worker logged it every single cycle forever). Only that one
+    sibling bridge ever got this protection; every other bridge's own idle
+    message is still unguarded against the identical regression - confirmed
+    today they all correctly start with "No pending" (none of them silently
+    drifted), but nothing would catch it if one did. Standing QA/robustness
+    review, 2026-11-21."""
+    original_cls = ppj.SupabaseRest
+    ppj.SupabaseRest = lambda url, key: FakeClient([])
+    old_environ = dict(os.environ)
+    old_argv = sys.argv
+    os.environ["NEXT_PUBLIC_SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+    sys.argv = ["process_pack_jobs.py", "--once"]
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            ppj.main()
+    finally:
+        ppj.SupabaseRest = original_cls
+        os.environ.clear()
+        os.environ.update(old_environ)
+        sys.argv = old_argv
+    printed = [ln for ln in out.getvalue().splitlines() if ln.strip()]
+    check("prints a line run_bridges.py's QUIET_PREFIXES recognises as quiet",
+          any(ln.startswith("No pending") for ln in printed), printed)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_sanral_job_and_survives_a_malformed_one()
     test_adapt_person_carries_sacnasp_and_sagc_through()
@@ -831,6 +866,7 @@ def main():
     test_sync_tender_requirements_and_b7_setup_alerts_carry_company_id()
     test_sync_tender_requirements_mid_batch_insert_failure_does_not_strand_a_tender_on_a_partial_position_list()
     test_cv_download_target_uses_the_safe_storage_path_not_the_raw_original_filename()
+    test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
