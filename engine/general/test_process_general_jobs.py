@@ -13,7 +13,9 @@ select()/update() shape) rather than a full pipeline test.
 
 Run: python3 engine/general/test_process_general_jobs.py
 """
+import contextlib
 import datetime
+import io
 import json
 import os
 import shutil
@@ -587,6 +589,36 @@ def test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_f
           client.removed == [(pgj.TENDER_DOCS_BUCKET, ["t1/technical_xlsm.xlsm"])], client.removed)
 
 
+def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
+    """run_bridges.py suppresses an idle pass only when its only output
+    starts with QUIET_PREFIXES ("No pending") - see
+    process_narrative_jobs.py's own identical regression test and its
+    header comment for the real bug this guards against (that sibling
+    bridge used to print a line QUIET_PREFIXES never matched, so a real
+    --loop worker logged it every single cycle forever). Only that one
+    sibling bridge ever got this protection; every other bridge's own idle
+    message is still unguarded against the identical regression - confirmed
+    today they all correctly start with "No pending" (none of them silently
+    drifted), but nothing would catch it if one did. Standing QA/robustness
+    review, 2026-11-21."""
+    original_cls = pgj.Supabase
+    pgj.Supabase = lambda url, key: FakeClient([])
+    old_environ = dict(os.environ)
+    os.environ["NEXT_PUBLIC_SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            pgj.main(["--once"])
+    finally:
+        pgj.Supabase = original_cls
+        os.environ.clear()
+        os.environ.update(old_environ)
+    printed = out.getvalue().strip()
+    check("prints a line run_bridges.py's QUIET_PREFIXES recognises as quiet",
+          printed.startswith("No pending"), printed)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
@@ -599,6 +631,7 @@ def main():
     test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_run_pack_cleans_up_storage_when_a_later_upload_fails()
     test_register_sanral_tender_cleans_up_storage_when_the_upsert_that_follows_fails()
+    test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

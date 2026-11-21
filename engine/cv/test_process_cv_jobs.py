@@ -18,7 +18,9 @@ CV request silently never appeared in the tender's own activity feed either.
 
 Run: python3 engine/cv/test_process_cv_jobs.py
 """
+import contextlib
 import datetime
+import io
 import os
 import sys
 import urllib.parse
@@ -410,6 +412,40 @@ def test_process_job_cleans_up_storage_when_a_later_upload_fails():
           len(removed) == 1 and removed[0] == [uploads[0]], (uploads, removed))
 
 
+def test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line():
+    """run_bridges.py suppresses an idle pass only when its only output
+    starts with QUIET_PREFIXES ("No pending") - see
+    process_narrative_jobs.py's own identical regression test and its
+    header comment for the real bug this guards against (that sibling
+    bridge used to print a line QUIET_PREFIXES never matched, so a real
+    --loop worker logged it every single cycle forever). Only that one
+    sibling bridge ever got this protection; every other bridge's own
+    idle message is still unguarded against the identical regression -
+    confirmed today they all correctly start with "No pending" (none of
+    them silently drifted), but nothing would catch it if one did.
+    Standing QA/robustness review, 2026-11-21."""
+    stub = StubSupabase()
+    original = pcj.supabase_request
+    pcj.supabase_request = stub
+    old_environ = dict(os.environ)
+    old_argv = sys.argv
+    os.environ["NEXT_PUBLIC_SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+    sys.argv = ["process_cv_jobs.py", "--once"]
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            pcj.main()
+    finally:
+        pcj.supabase_request = original
+        os.environ.clear()
+        os.environ.update(old_environ)
+        sys.argv = old_argv
+    printed = out.getvalue().strip()
+    check("prints a line run_bridges.py's QUIET_PREFIXES recognises as quiet",
+          printed.startswith("No pending"), printed)
+
+
 test_crash_sets_completed_at()
 test_fail_stale_jobs_survives_a_malformed_claimed_at()
 test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
@@ -419,6 +455,7 @@ test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()
 test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
 test_process_job_cleans_up_storage_when_a_later_upload_fails()
+test_main_once_with_nothing_queued_prints_a_quiet_prefixed_line()
 
 print(f"\n{len(FAILS)} failure(s)")
 if FAILS:
