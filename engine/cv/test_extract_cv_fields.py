@@ -780,6 +780,40 @@ def test_sa_id_redaction_line_break():
     check(redacted2 == unrelated and ids2 == [], "unrelated digits split by a line break are never fused into a false ID")
 
 
+def test_sa_id_redaction_survives_an_adjacent_digit():
+    """QA pass, 2026-11-21: SA_ID_RE used to require the WHOLE 13-digit ID be
+    bounded by a non-digit on both sides - so a real, Luhn-valid ID sitting
+    right next to even just one more digit (a reference number typed with no
+    space, a second person's ID straight after the first, a phone number
+    squeezed up against it) was never matched at all and passed straight
+    through completely unredacted - the exact leak this module's own "found
+    locally and removed before the text leaves this machine" promise exists
+    to prevent, and a real CV-formatting accident, not a contrived input."""
+    print("8. SA ID redaction survives sitting right next to another digit")
+    one_more_digit = f"ID: {SYNTH_ID}9 (ref)"
+    redacted, ids = x.find_and_redact_sa_ids(one_more_digit)
+    check(ids == [SYNTH_ID] and SYNTH_ID not in redacted and "9 (ref)" in redacted,
+          "a trailing extra digit right after a real ID no longer hides it")
+
+    two_ids_no_separator = SYNTH_ID + SYNTH_ID
+    redacted2, ids2 = x.find_and_redact_sa_ids(two_ids_no_separator)
+    check(ids2 == [SYNTH_ID] and SYNTH_ID not in redacted2 and redacted2.count("[SA ID NUMBER REMOVED]") == 2,
+          "two copies of the same ID typed back to back with no separator are BOTH redacted")
+
+    leading_digit = f"Tel0{SYNTH_ID}x9"
+    redacted3, ids3 = x.find_and_redact_sa_ids(leading_digit)
+    check(ids3 == [SYNTH_ID] and SYNTH_ID not in redacted3 and redacted3.startswith("Tel0") and redacted3.endswith("x9"),
+          "a leading extra digit before a real ID no longer hides it, and the unrelated digit survives untouched")
+
+    # Mirror case, same discipline as the line-break test above: a long run
+    # of digits that never actually contains a Luhn-valid ID anywhere inside
+    # it must still pass through completely unredacted, proving the fix
+    # didn't just start blanket-redacting every long digit run.
+    long_unrelated = "Account: 12345678901234567890"
+    redacted4, ids4 = x.find_and_redact_sa_ids(long_unrelated)
+    check(redacted4 == long_unrelated and ids4 == [], "a long digit run with no real ID inside it is left completely alone")
+
+
 def test_email_verification_survives_line_wrap():
     """Finding (2026-10-31): validate_proposal()'s email check compared the
     raw value against the raw CV text with a literal substring match - no
@@ -853,6 +887,7 @@ def main():
         test_safe_update_alert_carries_company_id()
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
+        test_sa_id_redaction_survives_an_adjacent_digit()
         test_email_verification_survives_line_wrap()
         test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
     finally:

@@ -362,7 +362,27 @@ def assess_text_quality(text, pages=None):
 # unredacted - neither half is 13 digits on its own, so the whole-number
 # regex never matched at all, and the full ID reached the Anthropic API
 # verbatim, split only by a newline a reader skips straight past.
-SA_ID_RE = re.compile(r"(?<!\d)(\d{6})[\s-]?(\d{4})[\s-]?(\d{3})(?!\d)")
+# QA pass, 2026-11-21: this used to require the ENTIRE 13-digit ID be
+# bounded by a non-digit on both sides ((?<!\d) / (?!\d)), on the theory that
+# a 13-digit substring of a longer number is probably a registration/account
+# number, not an ID. That theory is wrong whenever the thing adjacent to a
+# REAL ID is itself just another digit - a page/reference number appended
+# with no space, two people's ID numbers typed back to back with no
+# separator, or an ID squeezed right up against a phone number - all of
+# which are real, ordinary CV-formatting accidents, not contrived inputs.
+# Confirmed live: `find_and_redact_sa_ids("ID: " + valid_id + "9 (ref)")`
+# left the real, Luhn-valid 13-digit ID completely unredacted and in the
+# text sent to the API, because the regex never matched there at all - the
+# one extra trailing digit, not even part of the real ID, was enough to
+# defeat the module's own stated promise ("SA ID numbers are matched and
+# removed locally before the text leaves the machine"). Fixed by matching
+# the whole loosely-formatted DIGIT RUN first (any length, still only a
+# single space/hyphen tolerated between consecutive digits - the same
+# line-break-survival fix from 2026-10-21, just not capped at exactly 13
+# digits any more), then sliding a 13-digit window across it in
+# find_and_redact_sa_ids() itself to find every valid ID inside, wherever it
+# sits relative to other digits.
+SA_ID_RUN_RE = re.compile(r"\d(?:[\s-]?\d)*")
 
 
 def _luhn_ok(digits):
@@ -406,18 +426,46 @@ def find_and_redact_sa_ids(text, redact_all_13_digit=False):
     redact_all_13_digit (OCR'd text): an ID number OCR misread by one digit
     fails the checksum but is still someone's ID - every 13-digit run is
     removed before the text leaves this machine; only checksum-valid ones are
-    proposed."""
+    proposed.
+
+    Matches the whole loosely-formatted digit run first (SA_ID_RUN_RE, any
+    length), then slides a 13-digit window across its digits ONLY - so a real
+    ID is still found and redacted wherever it sits inside a longer run,
+    whether that's one more digit from an unrelated reference number right
+    next to it, or a second ID typed straight after the first with no
+    separator at all."""
     found = []
 
     def sub(m):
-        digits = "".join(m.groups())
-        if not _plausible_sa_id(digits):
-            return "[13-DIGIT NUMBER REMOVED]" if redact_all_13_digit else m.group(0)
-        if digits not in found:
-            found.append(digits)
-        return "[SA ID NUMBER REMOVED]"
+        run = m.group(0)
+        digit_at = [i for i, ch in enumerate(run) if ch.isdigit()]
+        n = len(digit_at)
+        spans = []  # (start_char, end_char, replacement), left to right
+        i = 0
+        while i + 13 <= n:
+            start, end = digit_at[i], digit_at[i + 12] + 1
+            digits = run[start:end].replace(" ", "").replace("\t", "").replace("\n", "").replace("\r", "").replace("-", "")
+            if _plausible_sa_id(digits):
+                if digits not in found:
+                    found.append(digits)
+                spans.append((start, end, "[SA ID NUMBER REMOVED]"))
+                i += 13  # this ID's own digits are claimed - don't re-slide inside it
+            elif redact_all_13_digit:
+                spans.append((start, end, "[13-DIGIT NUMBER REMOVED]"))
+                i += 13
+            else:
+                i += 1  # try the next alignment - this window wasn't an ID
+        if not spans:
+            return run
+        out, pos = [], 0
+        for start, end, replacement in spans:
+            out.append(run[pos:start])
+            out.append(replacement)
+            pos = end
+        out.append(run[pos:])
+        return "".join(out)
 
-    return SA_ID_RE.sub(sub, text), found
+    return SA_ID_RUN_RE.sub(sub, text), found
 
 
 # ============================================================================
@@ -700,7 +748,7 @@ def validate_proposal(data, text, local_ids):
         # Whitespace-stripped on both sides, not a literal substring check -
         # pdftotext -layout can wrap a narrow contact-info cell's email across
         # a line break ("john.doe@\nexample.com"), the exact artifact that
-        # already broke SA ID redaction (SA_ID_RE's own [\s-]? groups, above)
+        # already broke SA ID redaction (SA_ID_RUN_RE's own [\s-]? groups, above)
         # and that evidence_in_text()'s "squeezed" branch already exists to
         # survive. This check used to compare the raw strings directly, so a
         # correctly-extracted, correctly-evidenced email with that one real-
