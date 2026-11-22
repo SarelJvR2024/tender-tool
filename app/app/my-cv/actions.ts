@@ -304,7 +304,12 @@ export async function applyMyCvExtraction(formData: FormData) {
   }
 
   const queueError = await queueStandardCvs(supabase, companyId, personId, userId);
-  if (queueError) fail("Fields saved, but your standard CVs could not be queued - try again. If it keeps happening, let us know.");
+  // This page has no self-service retry for a failed queue (it's
+  // deliberately read-only for generated CVs - see the "My generated
+  // CVs (read-only)" card below) - ask an owner/admin to use "Queue
+  // standard CVs" on the full People page instead, rather than implying a
+  // retry exists here that doesn't.
+  if (queueError) fail("Fields saved, but your standard CVs could not be queued - ask an owner/admin to queue them from your People page entry.");
   redirect(`${BACK}?saved=extracted`);
 }
 
