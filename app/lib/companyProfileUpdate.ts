@@ -1,4 +1,5 @@
 import { BEE_PROOF_TYPES } from "./vaultDocuments.ts";
+import { ISO_DATE } from "./cvExtraction.ts";
 
 /**
  * Fields the company edit form (app/company/page.tsx) and the onboarding
@@ -53,6 +54,27 @@ export const COMPANY_DATE_FIELDS = [
   "bee_proof_expiry",
   "cidb_expiry",
 ] as const;
+
+// QA pass, 2026-11-22: a human-readable label per date field, for the same
+// `"${label}: "${v}" isn't a date (yyyy-mm-dd)."` error shape every sibling
+// in the people/actions.ts-my-cv/actions.ts "manual form has no ISO_DATE
+// check" lineage (Findings 466/478-483) already uses - this file was never
+// swept by any of them (it isn't an *-actions.ts file, so the lineage's own
+// "list every column written by 2+ of people/actions.ts/my-cv/actions.ts/
+// experience/actions.ts/document-scan/actions.ts" closing sweeps never even
+// listed it), even though it is exactly the same shape of gap: a `type=
+// "date"` field (app/company/page.tsx's own EditForm.tsx, plus the
+// onboarding wizard's compliance step - see this file's own header comment)
+// whose Server Action trusted the browser's own constraint alone.
+const COMPANY_DATE_FIELD_LABEL: Record<(typeof COMPANY_DATE_FIELDS)[number], string> = {
+  coid_letter_of_good_standing_expiry: "COID Letter of Good Standing expiry",
+  sars_tcs_pin_expiry: "SARS TCS PIN expiry",
+  pi_insurance_expiry: "Professional indemnity insurance expiry",
+  iso_9001_expiry: "ISO 9001 certificate expiry",
+  bank_confirmation_letter_date: "Bank confirmation letter date",
+  bee_proof_expiry: "B-BBEE proof expiry",
+  cidb_expiry: "CIDB registration expiry",
+};
 
 export const COMPANY_NUMERIC_FIELDS = [
   "bee_level",
@@ -144,6 +166,9 @@ export function buildCompanyUpdate(formData: FormData): { update: CompanyUpdate;
     const raw = formData.get(field);
     if (raw === null) continue;
     const trimmed = (raw as string).trim();
+    if (trimmed !== "" && !ISO_DATE.test(trimmed)) {
+      return { update, error: `${COMPANY_DATE_FIELD_LABEL[field]}: "${trimmed}" isn't a date (yyyy-mm-dd).` };
+    }
     update[field] = trimmed === "" ? null : trimmed;
   }
 
