@@ -1196,3 +1196,55 @@ describe("bulkUploadCvs - cv_uploads insert fails after the file already uploade
     expect(removeCalls[0]).toEqual({ bucket: "cv-documents", paths: [uploadCalls[0].path] });
   });
 });
+
+describe("retryStandardCvQueue - standing QA/robustness review, 2026-11-22: the real retry queueStandardCvs()'s own error message used to promise but never actually had (review_status is already 'applied' by the time it's called, so the normal 'Apply' flow can never run again for that extraction)", () => {
+  it("queues the 4 standard CV jobs for a real person with none yet, and redirects with no error", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "person-1" }, error: null }], // people lookup, scoped to this company
+      [{ data: [], error: null }], // queueStandardCvs: nothing already pending
+      [{ data: null, error: null }], // queueStandardCvs: insert succeeds
+    ]);
+    supabaseState.current = client;
+
+    const { retryStandardCvQueue } = await import("./actions");
+
+    const url = await expectRedirect(retryStandardCvQueue(formDataWith({ person_id: "person-1" })));
+
+    expect(url).toBe("/people/person-1");
+    expect(insertCalls).toHaveLength(1);
+    expect((insertCalls[0] as { format: string }[]).length).toBe(4);
+  });
+
+  it("refuses a person not found in this caller's own company - never calls queueStandardCvs at all", async () => {
+    const { client, insertCalls } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: null, error: null }], // people lookup: no row for this company
+    ]);
+    supabaseState.current = client;
+
+    const { retryStandardCvQueue } = await import("./actions");
+
+    const url = await expectRedirect(retryStandardCvQueue(formDataWith({ person_id: "someone-elses-person" })));
+
+    expect(url).toContain("/people/someone-elses-person?error=");
+    expect(decodeURIComponent(url)).toContain("could not be found");
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("surfaces a real queueStandardCvs() failure as its own actionable error, not a silent no-op", async () => {
+    const { client } = makeSupabase([
+      [{ data: { company_id: "company-1" }, error: null }], // requireCompanyId
+      [{ data: { id: "person-1" }, error: null }], // people lookup
+      [{ data: null, error: { message: "read timed out" } }], // queueStandardCvs' own pending-check fails
+    ]);
+    supabaseState.current = client;
+
+    const { retryStandardCvQueue } = await import("./actions");
+
+    const url = await expectRedirect(retryStandardCvQueue(formDataWith({ person_id: "person-1" })));
+
+    expect(url).toContain("/people/person-1?error=");
+    expect(decodeURIComponent(url)).toContain("Could not queue standard CVs");
+  });
+});

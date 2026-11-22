@@ -988,8 +988,60 @@ export async function applyCvExtraction(formData: FormData) {
 
   const queueError = await queueStandardCvs(supabase, companyId, personId!, user?.id ?? null);
   revalidatePath(`/people/${personId}`);
-  if (queueError) back("Fields saved, but the standard CV formats could not be queued - try again. If it keeps happening, let us know.");
+  if (queueError) back("Fields saved, but the standard CV formats could not be queued - use \"Queue standard CVs\" below once this page reloads, or try again later.");
   redirect(`/people/${personId}?cv_applied=${Object.keys(personUpdate).length}-${projectRows.length}`);
+}
+
+/**
+ * Standing QA/robustness review, 2026-11-22 (Finding, this pass): the ONE
+ * real "try again" this app ever offers for a failed queueStandardCvs()
+ * call (applyCvExtraction() above, and applyMyCvExtraction()'s own copy of
+ * the same error) was never actually possible. Both callers only reach
+ * queueStandardCvs() AFTER apply_cv_extraction_checked()/
+ * apply_my_cv_extraction_checked() has already committed and flipped
+ * cv_extraction_results.review_status to 'applied' (migration 0123) - and
+ * both RPCs refuse a second call on an extraction whose review_status
+ * isn't still 'pending_review'. So a transient failure on the later,
+ * separate queueStandardCvs() call left a person with their fields saved,
+ * zero generated_cvs rows, an error message promising a retry, and no
+ * actual way to trigger one - the exact "nobody can ever retry this"
+ * dead end this whole shared module (standardCvQueue.ts's own header
+ * comment) was created to fix for the missing-call case, just reappearing
+ * one step later for the call-failed case.
+ *
+ * This is that real retry, reachable independently of review_status - it
+ * only needs company/person ownership, not the extraction row at all.
+ * Deliberately NOT exposed unconditionally: only shown (people/[id]/page.tsx)
+ * when this person has generatedCvs.length === 0, the one state
+ * queueStandardCvs()'s own in-flight dedupe check (status in (requested,
+ * generating) only - it does not look at already-completed/failed rows)
+ * can't accidentally double-queue from.
+ */
+export async function retryStandardCvQueue(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const personId = str(formData, "person_id");
+  if (!personId) redirect("/people");
+  const back = (msg: string): never => redirect(`/people/${personId}?error=${encodeURIComponent(msg)}`);
+
+  const { data: person, error: personError } = await supabase
+    .from("people")
+    .select("id")
+    .eq("id", personId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (personError) {
+    console.error("people lookup failed for standard CV retry", personError);
+    back("Couldn't verify this person - try again.");
+  }
+  if (!person) back("That person could not be found.");
+
+  const queueError = await queueStandardCvs(supabase, companyId, personId, user?.id ?? null);
+  revalidatePath(`/people/${personId}`);
+  if (queueError) back("Could not queue standard CVs - try again. If it keeps happening, let us know.");
+  redirect(`/people/${personId}`);
 }
 
 /** Reject an extraction outright: nothing is written to people/projects. */

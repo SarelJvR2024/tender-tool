@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, UserX } from "lucide-react";
 import { expiryStatus, formatDate } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, retryCvExtraction, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, retryCvExtraction, retryStandardCvQueue, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
@@ -910,6 +910,22 @@ export default async function PersonDetailPage({
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {generatedCvs.length === 0 && (
+              <div className="mb-5">
+                <div className={sectionLabelClass}>Standard generated CVs</div>
+                <div className="mb-2 text-[11px] text-muted-foreground">
+                  None generated yet. These are normally queued automatically the first time this person&apos;s CV
+                  details are saved - if that didn&apos;t happen (a one-off failure), queue them now.
+                </div>
+                <form action={retryStandardCvQueue}>
+                  <input type="hidden" name="person_id" value={person!.id} />
+                  <button type="submit" className="text-xs font-semibold text-accent">
+                    Queue standard CVs
+                  </button>
+                </form>
               </div>
             )}
 
