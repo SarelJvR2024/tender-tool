@@ -53,4 +53,46 @@ describe("buildCompanyUpdate", () => {
     expect(update.legal_name).toBe("Mzansi Roads & Civils (Pty) Ltd");
     expect("cidb_grading" in update).toBe(false);
   });
+
+  // Finding 505 (standing QA/robustness review, 2026-11-22): every one of
+  // the 7 COMPANY_DATE_FIELDS (this file's own EditForm.tsx and the
+  // onboarding wizard's compliance step both submit these as real `type=
+  // "date"` inputs) had NO server-side format check at all, unlike the
+  // identical-shaped `type="date"` fields `people/actions.ts`/`my-cv/
+  // actions.ts` already guard (Findings 466/478-483) - a Server Action must
+  // never trust the browser's own constraint alone. A non-ISO value
+  // bypassing the browser reached Postgres's own `date`-typed column
+  // unchecked, which then fails the write with a raw DB error the real
+  // Server Action (updateCompanyProfile()) shows as "Your company profile
+  // is no longer there - refresh and try again" - the exact "fails, but
+  // late and unhelpfully" shape this whole lineage already treats as worth
+  // fixing, not merely cosmetic.
+  describe("COMPANY_DATE_FIELDS format check (Finding 505)", () => {
+    it("refuses a malformed cidb_expiry instead of letting it reach the database unchecked", () => {
+      const { update, error } = buildCompanyUpdate(form({ cidb_expiry: "31/12/2027" }));
+      expect(error).toBe('CIDB registration expiry: "31/12/2027" isn\'t a date (yyyy-mm-dd).');
+      expect("cidb_expiry" in update).toBe(false);
+    });
+
+    it("refuses a malformed value on EVERY one of the 7 date fields, not just one", () => {
+      for (const field of COMPANY_DATE_FIELDS) {
+        const { error } = buildCompanyUpdate(form({ [field]: "not-a-date" }));
+        expect(error, `${field} should be refused`).toContain('isn\'t a date (yyyy-mm-dd)');
+      }
+    });
+
+    it("still accepts a genuinely valid yyyy-mm-dd date on every one of the 7 fields", () => {
+      for (const field of COMPANY_DATE_FIELDS) {
+        const { update, error } = buildCompanyUpdate(form({ [field]: "2027-06-30" }));
+        expect(error, `${field} should not be refused`).toBeNull();
+        expect(update[field]).toBe("2027-06-30");
+      }
+    });
+
+    it("still allows leaving a date field blank (written as null, same as before this fix)", () => {
+      const { update, error } = buildCompanyUpdate(form({ bank_confirmation_letter_date: "  " }));
+      expect(error).toBeNull();
+      expect(update.bank_confirmation_letter_date).toBeNull();
+    });
+  });
 });
