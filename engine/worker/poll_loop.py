@@ -65,6 +65,17 @@ def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
     """
     if interval <= 0:
         raise ValueError("interval must be > 0 seconds")
+    # QA pass, 2026-11-23: the loop below always runs poll_once() at least
+    # once before it ever checks max_cycles (the stop condition is checked
+    # AFTER each poll, not before the first one) - there is no code path
+    # that polls zero times. `max_cycles=0`/negative silently ran ONE real
+    # poll (a real job claimed and processed) and then stopped, instead of
+    # raising - the same "fails, but late and unhelpfully" shape `interval`
+    # is already guarded against above. Confirmed reachable: --max-cycles is
+    # a real, unvalidated CLI int on every bridge script (process_cv_jobs.py,
+    # run_bridges.py), not an internal-only parameter.
+    if max_cycles is not None and max_cycles < 1:
+        raise ValueError("max_cycles must be >= 1 (poll_forever always runs at least one cycle before checking it)")
     stop_event = stop_event or threading.Event()
     if sleep is None:
         # Event.wait returns early the moment a stop signal arrives, so a
