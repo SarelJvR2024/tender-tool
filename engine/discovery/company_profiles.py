@@ -42,8 +42,26 @@ def profile_from_company_rows(client, company_id, company=None):
     company = company or (client.select("companies", {"id": company_id}) or [{}])[0]
     items = client.select("experience_items", {"company_id": company_id})
     disciplines = sorted({d for i in items if i.get("tagged_at") for d in (i.get("disciplines") or [])})
-    offices = [{k: o.get(k) for k in ("province", "district_municipality", "local_municipality", "town", "office_kind")}
-               for o in client.select("company_offices", {"company_id": company_id})]
+    # QA pass, 2026-11-25: select() is called with no `order=` - PostgREST
+    # (like any SQL query with no ORDER BY) makes no guarantee about row
+    # order, which can genuinely vary between two calls for the exact same,
+    # unchanged rows (a different query plan, a row physically moved by an
+    # UPDATE/VACUUM). profile_fingerprint() hashes this list's own order, so
+    # an unsorted `offices` list meant a company with 2+ offices could get a
+    # DIFFERENT fingerprint on consecutive runs with no real data change at
+    # all - tripping watch_new_tenders.py's "its profile changed, re-score
+    # and re-report" path (rescored="profile_changed") for no real reason,
+    # exactly the "defeat the point of a 'what's new' alert" false-positive
+    # this module's own docstring says the fingerprint exists to avoid.
+    # Reproduced live: same two office rows, reversed order on the second
+    # call, produced two different sha256 fingerprints. Sorted here (a
+    # stable, deterministic tuple key) so the fingerprint only ever changes
+    # when the office rows themselves genuinely do.
+    offices = sorted(
+        ({k: o.get(k) for k in ("province", "district_municipality", "local_municipality", "town", "office_kind")}
+         for o in client.select("company_offices", {"company_id": company_id})),
+        key=lambda o: tuple(o.get(k) or "" for k in ("province", "district_municipality", "local_municipality", "town", "office_kind")),
+    )
     if not offices:
         offices = assess_tender.offices_from_company({"registered_address": company.get("registered_address")})
     return {"disciplines": disciplines, "bee_level": company.get("bee_level"),
