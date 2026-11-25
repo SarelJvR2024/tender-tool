@@ -124,6 +124,35 @@ def test_duplicate_candidates_prefer_the_more_recently_modified_file(tmp_path="/
     os.remove(new_path)
 
 
+def test_duplicate_candidates_with_a_genuine_mtime_tie_says_so_honestly(tmp_path="/tmp"):
+    print("classify_documents: two files matching the same doc_type with the IDENTICAL mtime (the "
+          "real shape of files extracted from the same zip, or uploaded in the same batch request) "
+          "- the note must not claim 'most recently modified' picked one when neither recency signal "
+          "actually distinguished them")
+    old_path = os.path.join(tmp_path, "Old_Draft_Form_Offer.docx")
+    new_path = os.path.join(tmp_path, "Zfinal_Form_Offer.docx")
+    d1 = docx.Document(); d1.add_paragraph("C1.1.1 FORM OF OFFER (Incorporating SBD7) - DRAFT")
+    d1.save(old_path)
+    d2 = docx.Document(); d2.add_paragraph("C1.1.1 FORM OF OFFER (Incorporating SBD7) - FINAL")
+    d2.save(new_path)
+    same_mtime = os.path.getmtime(old_path)
+    os.utime(new_path, (same_mtime, same_mtime))  # force a genuine tie, not a timing accident
+    entries = [_doc_entry("Old_Draft_Form_Offer.docx", old_path), _doc_entry("Zfinal_Form_Offer.docx", new_path),
+               _doc_entry("Technical Submission.xlsm", TECH_WORKBOOK, fmt="xlsm")]
+    decision = ct.classify_documents(entries, buyer="SANRAL", all_text="SANRAL tender")
+    note = next((n for n in decision["notes"] if n.startswith("AMBIGUOUS")), None)
+    check("an AMBIGUOUS note is still produced even on a genuine mtime tie", note is not None, decision["notes"])
+    if note:
+        check("the note must NOT claim 'most recently modified' picked it - mtime never distinguished the two",
+              "most recently modified" not in note, note)
+        check("the note must say plainly that the pick was arbitrary (a genuine tie), not silently imply otherwise",
+              "arbitrar" in note, note)
+        check("the note still tells a person to check, same as the distinguishable-mtime case",
+              "must check" in note, note)
+    os.remove(old_path)
+    os.remove(new_path)
+
+
 def test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used(tmp_path="/tmp"):
     print("classify_documents: two Technical Submission .xlsm candidates - the top-line 'signal' "
           "text must name the SAME file the tie-break actually picked (files/the AMBIGUOUS note), "
@@ -566,6 +595,7 @@ def main():
     test_valid_docx_is_classified_with_no_spurious_note()
     test_period_after_the_form_letter_is_also_recognized()
     test_duplicate_candidates_prefer_the_more_recently_modified_file()
+    test_duplicate_candidates_with_a_genuine_mtime_tie_says_so_honestly()
     test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()
     test_real_a_forms_heading_deep_in_the_document_is_still_found()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()

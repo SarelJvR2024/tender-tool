@@ -470,9 +470,30 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
         # must not stop the whole intake - but the wording below says
         # plainly that this was picked arbitrarily and must be checked by a
         # person, not "remove the others if wrong" (easy to skim past).
+        # QA pass, 2026-11-25: when two (or more) candidates genuinely share
+        # the same mtime - a real, reachable shape: files extracted from the
+        # same zip, or uploaded in the same batch/multipart request, routinely
+        # get an identical filesystem timestamp - sorted() has nothing to
+        # distinguish them by, so Python's own stable-sort guarantee silently
+        # falls back to `cands`' PRE-sort order (collect_documents()'s
+        # alphabetical order) - the exact same "Old_Draft... before
+        # Zfinal..." trap the 2026-10-20 fix above was written to avoid,
+        # just reachable through a different door (a genuine mtime tie
+        # instead of no mtime signal at all). Reproduced live: two files
+        # given the identical mtime, sorted(reverse=True) returns them in
+        # their original alphabetical order, unchanged. The PICK itself is
+        # unchanged here (there's no safe tie-break to prefer one arbitrarily
+        # - the note below already tells a person to check either way), but
+        # `mtime_determined` tracks whether recency genuinely distinguished
+        # the candidates, so the note never overclaims "most recently
+        # modified" picked a file when every candidate actually tied (or an
+        # OSError left the signal unavailable).
+        mtime_determined = False
         if len(cands) > 1:
             try:
-                cands = sorted(cands, key=lambda c: os.path.getmtime(c[1]), reverse=True)
+                mtimes = [os.path.getmtime(c[1]) for c in cands]
+                cands = [c for c, _ in sorted(zip(cands, mtimes), key=lambda cm: cm[1], reverse=True)]
+                mtime_determined = len(set(mtimes)) > 1
             except OSError:
                 pass  # mtime unavailable - keep collect_documents()'s own order
         files[doc_type] = cands[0][1]
@@ -480,11 +501,12 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
                                       # order) must never be used for reporting once there's more than one candidate.
         registered.append({"doc_type": doc_type, "label": SANRAL_DOC_LABEL[doc_type], "document": cands[0][0]})
         if len(cands) > 1:
+            pick_reason = ("most recently modified" if mtime_determined else
+                            "arbitrarily - every candidate shares the same modification time, or it couldn't be read")
             notes.append(f"AMBIGUOUS - more than one {SANRAL_DOC_LABEL[doc_type]} was uploaded "
-                         f"({', '.join(c[0] for c in cands)}). {cands[0][0]} was picked (most recently modified, "
-                         "if that could be determined - otherwise arbitrarily), but this was NOT confirmed as the "
-                         "correct one. A person must check which file is right and remove the others before relying "
-                         "on this tender's SANRAL pack.")
+                         f"({', '.join(c[0] for c in cands)}). {cands[0][0]} was picked ({pick_reason}), but this was "
+                         "NOT confirmed as the correct one. A person must check which file is right and remove the "
+                         "others before relying on this tender's SANRAL pack.")
 
     if tech:
         # winners["technical_xlsm"] (the SAME tie-broken pick files["technical_xlsm"] and the
