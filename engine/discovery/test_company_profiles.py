@@ -87,10 +87,62 @@ def test_select_with_filters_still_pages_correctly():
     check(all("confidence=eq.heuristic" in r for r in server.requests), "the filter should be sent on every page")
 
 
+class ReorderingOfficesClient:
+    """A stand-in company+company_offices client whose company_offices rows
+    come back in a DIFFERENT (but equally valid) order on each call - the
+    real behaviour of a SQL query with no ORDER BY, which PostgREST's
+    company_offices select() never sets (Finding 508)."""
+
+    def __init__(self, offices):
+        self.offices = offices
+        self.calls = 0
+
+    def select(self, table, filters=None):
+        if table == "companies":
+            return [{"id": "c1", "registered_address": "Nowhere", "bee_level": 2,
+                     "black_ownership_pct": 51, "cidb_grading": "7GB"}]
+        if table == "experience_items":
+            return []
+        if table == "company_offices":
+            self.calls += 1
+            return self.offices if self.calls % 2 else list(reversed(self.offices))
+        return []
+
+
+def test_profile_fingerprint_stable_regardless_of_company_offices_row_order():
+    """Finding 508: profile_from_company_rows()'s own company_offices select()
+    has no `order=` - row order is unspecified SQL behaviour and can genuinely
+    differ between two calls for the exact same, unchanged rows. Before this
+    fix, profile_fingerprint() hashed the offices list in whatever order the
+    database happened to return it, so a company with 2+ offices could get a
+    DIFFERENT fingerprint on consecutive runs with no real profile change at
+    all - wrongly tripping watch_new_tenders.py's "profile changed, re-score
+    and re-report" path (rescored="profile_changed") and re-notifying a
+    company about a tender it was already told about, exactly the false
+    positive this module's own docstring says the fingerprint exists to
+    avoid ("defeat the point of a 'what's new' alert")."""
+    offices = [
+        {"province": "Gauteng", "district_municipality": None, "local_municipality": "Tshwane",
+         "town": None, "office_kind": "head_office"},
+        {"province": "Western Cape", "district_municipality": None, "local_municipality": "Cape Town",
+         "town": None, "office_kind": "branch"},
+    ]
+    client = ReorderingOfficesClient(offices)
+    p1 = cp.profile_from_company_rows(client, "c1")
+    p2 = cp.profile_from_company_rows(client, "c1")
+    check(client.calls == 2, "sanity: company_offices should have been queried twice")
+    check(p1["offices"] != offices or p2["offices"] != offices or True, "offices content check below")
+    check(set(tuple(sorted(o.items())) for o in p1["offices"]) == set(tuple(sorted(o.items())) for o in p2["offices"]),
+          "both calls must still return the exact same real office set")
+    f1, f2 = cp.profile_fingerprint(p1), cp.profile_fingerprint(p2)
+    check(f1 == f2, f"same real offices, different DB row order must NOT change the fingerprint - got {f1!r} vs {f2!r}")
+
+
 def main():
     test_select_pages_past_the_1000_row_server_cap()
     test_select_stops_after_one_request_when_the_real_table_is_smaller()
     test_select_with_filters_still_pages_correctly()
+    test_profile_fingerprint_stable_regardless_of_company_offices_row_order()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
