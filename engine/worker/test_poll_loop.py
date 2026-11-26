@@ -120,6 +120,30 @@ def test_poll_forever_unit():
           "cycle 3 error survived, job-C cycle 4")
 
 
+def test_max_runtime_zero_or_negative_raises_instead_of_running_one_real_cycle():
+    # Finding 512 (QA pass, 2026-11-26): the same bug Finding 507 fixed for
+    # max_cycles - the loop's stop condition is checked AFTER poll_once()
+    # runs, not before, so a max_runtime of 0 or negative is satisfied on
+    # cycle 1 regardless and lets one real poll happen anyway, instead of
+    # raising or polling zero times. Finding 507's own closing note claimed
+    # no other parameter shared this shape; it does.
+    for bad in (0, -1, -5):
+        calls = {"n": 0}
+
+        def poll_once():
+            calls["n"] += 1
+            return 1
+
+        try:
+            poll_forever(poll_once, interval=0.01, max_runtime=bad, sleep=lambda s: None,
+                         log=lambda *a: None, install_signal_handlers=False)
+            raise AssertionError(f"expected ValueError for max_runtime={bad}")
+        except ValueError as e:
+            assert "max_runtime" in str(e), e
+        assert calls["n"] == 0, f"max_runtime={bad} should never call poll_once at all, got {calls['n']} call(s)"
+    print("PASS poll_forever: max_runtime of 0/-1/-5 raises ValueError before ever polling, not after one real cycle")
+
+
 def test_max_runtime_uses_an_injectable_clock_not_the_real_one():
     # Finding 141 (2026-11-06): max_runtime's own elapsed-time check used to
     # always call the REAL time.monotonic(), even when `sleep` was faked to
@@ -451,6 +475,7 @@ def test_a_bridge_that_writes_invalid_utf8_does_not_crash_the_whole_cycle():
 
 if __name__ == "__main__":
     test_poll_forever_unit()
+    test_max_runtime_zero_or_negative_raises_instead_of_running_one_real_cycle()
     test_max_runtime_uses_an_injectable_clock_not_the_real_one()
     test_claim_is_atomic()
     test_fake_supabase_honours_order_requested_at_asc()

@@ -65,6 +65,22 @@ def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
     """
     if interval <= 0:
         raise ValueError("interval must be > 0 seconds")
+    # QA pass, 2026-11-26: the loop below always runs poll_once() at least
+    # once before it ever checks max_runtime, the exact same shape Finding
+    # 507 (2026-11-23) already found and fixed for max_cycles just above -
+    # that fix's own closing note claimed "no other parameter... has an
+    # equivalent shape," but the max_runtime check (`now() - started +
+    # interval > max_runtime`) sits in the same post-poll block as the
+    # max_cycles check, so a max_runtime of 0 or negative is satisfied on
+    # cycle 1 regardless, running one real poll instead of stopping before
+    # any. Reproduced directly against the real, unmodified function:
+    # max_runtime=0/-1/-5 each ran exactly one real poll before stopping.
+    # No current bridge passes max_runtime (confirmed by grep, same as
+    # Finding 141/507's own checks), but this function's own documented
+    # contract offers it to "any host that wants a run to end on its own" -
+    # the same reasoning interval/max_cycles are already validated for.
+    if max_runtime is not None and max_runtime <= 0:
+        raise ValueError("max_runtime must be > 0 (poll_forever always runs at least one cycle before checking it)")
     stop_event = stop_event or threading.Event()
     if sleep is None:
         # Event.wait returns early the moment a stop signal arrives, so a
