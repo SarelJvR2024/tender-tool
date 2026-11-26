@@ -812,6 +812,37 @@ def test_email_verification_survives_line_wrap():
     check(not prop2["person"]["email"]["verified"], "a hallucinated email with no basis in the CV is still flagged")
 
 
+def test_normalise_date_year_only_path_validates_like_its_siblings():
+    """Finding (standing QA/robustness review, 2026-11-26): normalise_date()'s
+    three branches (day/month/year) are meant to apply the same validation -
+    that's exactly why the day branch calls datetime.date.fromisoformat() and
+    the month branch calls datetime.date(...) inside the same try/except
+    ValueError, so a calendar-impossible value ("2026-02-30", "2026-13") is
+    correctly rejected on either of those two paths. The bare 4-digit "year
+    only" branch skipped this entirely - it string-formats f"{raw}-01-01" and
+    returns it unchecked, so the one year value Python's own datetime.date
+    can't represent (year 0, MINYEAR=1) was returned as a normal, usable ISO
+    date instead of the same "isn't a date that could be read" rejection its
+    month/day siblings give an equally-impossible value. Reproduced directly:
+    the identical nonsense year "0000" is accepted bare but rejected the
+    moment a month is attached ("0000-01"), even though both describe the
+    same impossible year."""
+    print("9. normalise_date()'s bare-year path rejects an impossible year, like its month/day siblings already do")
+    iso, precision, warning = x.normalise_date("0000")
+    check(iso is None and precision is None,
+          f"a bare year of '0000' (year 0 doesn't exist) is rejected, not silently accepted (got {(iso, precision)!r})")
+    check(bool(warning) and "0000" in warning,
+          "the rejection names the actual value, same wording as the month/day paths' own rejection")
+    # Mirror case: a real, plausible bare year must still pass through exactly as before - proves this isn't over-broad.
+    iso2, precision2, warning2 = x.normalise_date("1990")
+    check(iso2 == "1990-01-01" and precision2 == "year" and warning2,
+          f"a genuine bare year is still accepted with its usual 1-January placeholder warning (got {(iso2, precision2, warning2)!r})")
+    # The month path already rejects this same impossible year - the bare-year path should agree, not disagree.
+    iso3, precision3, _ = x.normalise_date("0000-01")
+    check(iso3 is None and precision3 is None,
+          "the month-attached form of the identical impossible year is already rejected (sanity check - unchanged)")
+
+
 def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
     print("supabase_request_all(): a table with more matching rows than PostgREST's own "
           "db-max-rows cap (same bug class as Finding 252/253 - this file's own "
@@ -854,6 +885,7 @@ def main():
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
         test_email_verification_survives_line_wrap()
+        test_normalise_date_year_only_path_validates_like_its_siblings()
         test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

@@ -638,6 +638,7 @@ def normalise_date(raw):
             return f"{raw}-01", "month", (f"The CV only gives the month ({raw}). The 1st of the month is filled in "
                                           "as a placeholder - correct the day if you know it.")
         if re.fullmatch(r"\d{4}", raw):
+            datetime.date(int(raw), 1, 1)
             return f"{raw}-01-01", "year", (f"The CV only gives the year ({raw}). 1 January is filled in as a "
                                             "placeholder - correct it if you know the real date.")
     except ValueError:
