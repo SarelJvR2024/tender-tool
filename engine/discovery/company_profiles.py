@@ -127,7 +127,27 @@ class RestClient:
         Every page is read (limit/offset, PAGE rows at a time): Supabase caps
         one response at 1000 rows, and a seen store read that silently
         stopped at row 1000 would re-score and re-report everything after it.
-        Pass `order` for a stable order across pages."""
+        Pass `order` for a stable order across pages.
+
+        QA pass, 2026-11-26 (Finding 513 - the same bug class Finding 511
+        already fixed in watch_deadlines.supabase_request()): no `order` at
+        all left pagination relying on Postgres's own default row order,
+        which is explicitly undefined/unstable across repeated query
+        executions with no ORDER BY - worse than a non-unique one. And when
+        a caller DID pass an `order` of its own, it was used verbatim with
+        no tie-breaker, exactly the gap Finding 511 closed for the other
+        helper - real callers here pass genuinely non-unique columns
+        (`tender_enrichment.py`'s `order="created_at.asc"` on `tenders` -
+        many tenders discovered in the same batch run share an identical
+        timestamp; `discovery_downgrades.py`'s `order="downgraded_at.asc"`;
+        `taxonomy.py`'s `order="sort_order.asc"`/`"sort_order.desc"`).
+        Reproduced directly against the real, unmodified function: a tied
+        `created_at.asc` paged across a boundary returned rows
+        `[1, 2, 2, 4, 5]` - row 3 skipped, row 2 duplicated. `id.asc` is now
+        always the tie-breaker: appended to the caller's own order, or used
+        alone when none was given - every table read through this method
+        already assumes an `id` column (confirmed by this file's and every
+        other real caller's own `r["id"]`/`.get("id")` usage)."""
         import urllib.parse
 
         def cond(k, v):
@@ -137,8 +157,7 @@ class RestClient:
             return f"{k}=eq.{urllib.parse.quote(str(v), safe='')}"
         parts = [cond(k, v) for k, v in (filters or {}).items()]
         parts.append("select=*")
-        if order:
-            parts.append(f"order={order}")
+        parts.append(f"order={order},id.asc" if order else "order=id.asc")
         out, offset = [], 0
         while True:
             page = self._req("GET", f"{table}?{'&'.join(parts)}&limit={self.PAGE}&offset={offset}")

@@ -65,7 +65,9 @@ def test_select_pages_past_the_1000_row_server_cap():
     check(len(rows) == 2500, f"should page through all 2500 real rows past the server's 1000-row cap, got {len(rows)}")
     check(rows[0]["id"] == 0 and rows[-1]["id"] == 2499, "rows should be the full, real set, not truncated")
     check(len(server.requests) == 3, f"should take exactly 3 requests (1000+1000+500), took {len(server.requests)}")
-    check(all("order=created_at.asc" in r for r in server.requests), "the order param should be sent on every page")
+    check(all("order=created_at.asc,id.asc" in r for r in server.requests),
+          "the order param should be sent on every page, with id.asc appended as a tie-breaker "
+          "(QA pass, 2026-11-26, Finding 513) so paging a non-unique sort column can't skip/duplicate rows on a tie")
 
 
 def test_select_stops_after_one_request_when_the_real_table_is_smaller():
@@ -76,6 +78,55 @@ def test_select_stops_after_one_request_when_the_real_table_is_smaller():
     check(len(rows) == 42, f"should return all 42 rows, got {len(rows)}")
     check(len(server.requests) == 1, f"should take exactly 1 request when the table is smaller than the page size, "
                                      f"took {len(server.requests)}")
+
+
+def test_select_paging_is_stable_even_when_the_callers_own_order_column_has_ties():
+    """Finding 513 (QA pass, 2026-11-26): the same bug class Finding 511
+    already fixed in watch_deadlines.supabase_request() - RestClient.select()
+    appended no tie-breaker when the caller passed its own `order` (real
+    callers do so on genuinely non-unique columns: tender_enrichment.py's
+    `order="created_at.asc"` on `tenders`, discovery_downgrades.py's
+    `order="downgraded_at.asc"`, taxonomy.py's `order="sort_order.asc"`),
+    and added none at all when no `order` was given - relying on Postgres's
+    own undefined default row order across repeated paged executions. The
+    CappedServer above never modelled a tie at all (its fake rows are
+    already unique by `id`), so it could not have caught this.
+
+    Reproduced directly: a fake server that reads the real `order` the
+    client actually sent - stable (by id) once the `,id.asc` tie-breaker is
+    present, but free to reorder a tied group differently on each separate
+    call when it isn't, the exact legitimate PostgREST/Postgres behaviour
+    absent a secondary sort key."""
+    print("RestClient.select(): paging stays stable even when the caller's own order column has ties (Finding 513)")
+
+    class TiedServer:
+        """3 rows share created_at 'D' (ids 1/2/3), 2 share 'E' (ids 4/5)."""
+        ROWS = {1: "D", 2: "D", 3: "D", 4: "E", 5: "E"}
+        TIE_ORDERS = [[1, 2, 3], [3, 1, 2]]
+
+        def __init__(self):
+            self.calls = 0
+
+        def req(self, method, path, body=None, prefer=None):
+            _, _, qs = path.partition("?")
+            params = dict(urllib.parse.parse_qsl(qs))
+            offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+            order = params.get("order", "")
+            if order.endswith(",id.asc"):
+                ordered = [1, 2, 3, 4, 5]  # a real secondary key makes this deterministic every time
+            else:
+                ordered = self.TIE_ORDERS[self.calls % 2] + [4, 5]
+            self.calls += 1
+            return [{"id": i, "created_at": self.ROWS[i]} for i in ordered[offset:offset + limit]]
+
+    client = cp.RestClient("https://example.test", "key")
+    server = TiedServer()
+    client._req = server.req
+    client.PAGE = 2
+    rows = client.select("tenders", order="created_at.asc")
+    ids = [r["id"] for r in rows]
+    check(sorted(set(ids)) == [1, 2, 3, 4, 5] and len(ids) == len(set(ids)),
+          f"every real row is returned exactly once, none skipped or duplicated across the page boundary (got ids {ids})")
 
 
 def test_select_with_filters_still_pages_correctly():
@@ -89,6 +140,7 @@ def test_select_with_filters_still_pages_correctly():
 
 def main():
     test_select_pages_past_the_1000_row_server_cap()
+    test_select_paging_is_stable_even_when_the_callers_own_order_column_has_ties()
     test_select_stops_after_one_request_when_the_real_table_is_smaller()
     test_select_with_filters_still_pages_correctly()
     print(f"\n{len(FAILS)} failure(s)")
