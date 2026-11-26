@@ -216,9 +216,29 @@ def supabase_request(url, service_key, path):
     1000 real rows. QA pass, 2026-10-23. A stable `order=id.asc` is
     appended when the caller's own path has none, so repeated paged GETs
     can't skip or duplicate rows - every table read through this function
-    selects `id` as its first column already."""
+    selects `id` as its first column already.
+
+    QA pass, 2026-11-26 (Finding 511): that stable tie-breaker was only
+    ever added when the caller supplied NO order= of its own - but both
+    real callers that DO supply one do so on a column with no uniqueness
+    guarantee at all (find_due_person_credentials()'s `order=name.asc` -
+    two different people, or the same person at two different companies,
+    can share a name; find_due_tasks()'s `order=due_date.asc` - many tasks
+    plausibly share a due date). PostgREST/Postgres give no guarantee that
+    tied rows come back in the same relative order across two separate
+    paged query executions with no secondary sort key, so paging could
+    genuinely skip or duplicate a row on a tie - the exact failure this
+    function's own tie-breaker exists to prevent, just not closed for a
+    caller that already has an order of its own. `,id.asc` is now appended
+    to the caller's own order instead of skipping the tie-breaker outright
+    (PostgREST accepts a comma-separated multi-column order)."""
     sep = "&" if "?" in path else "?"
-    base = path if "order=" in path else f"{path}{sep}order=id.asc"
+    if "order=" in path:
+        head, _, query = path.partition("?")
+        parts = [p + ",id.asc" if p.startswith("order=") else p for p in query.split("&")]
+        base = f"{head}?{'&'.join(parts)}"
+    else:
+        base = f"{path}{sep}order=id.asc"
     out, offset = [], 0
     while True:
         page = _fetch_page(url, service_key, f"{base}&limit={PAGE}&offset={offset}")
