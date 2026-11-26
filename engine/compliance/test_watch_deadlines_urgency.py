@@ -196,8 +196,74 @@ def supabase_request_pages_past_the_1000_row_server_cap():
         wd.supabase_request("https://example.test", "key", "people?select=id,name&order=name.asc")
     finally:
         wd._fetch_page = real_fetch
-    check(all("order=name.asc" in r and "order=id.asc" not in r for r in server2.requests),
-          "a caller's own order= is kept as-is, not overridden by the default")
+    check(all("order=name.asc,id.asc" in r for r in server2.requests),
+          "a caller's own order= is kept, with id.asc appended as a tie-breaker (QA pass, 2026-11-26, Finding 511) "
+          "so paging a non-unique sort column like name.asc can't skip/duplicate rows on a tie either")
+
+
+def supabase_request_paging_is_stable_even_when_the_callers_own_order_column_has_ties():
+    """Finding 511 (QA pass, 2026-11-26): supabase_request()'s own docstring
+    says a stable order=id.asc is appended "so repeated paged GETs can't
+    skip or duplicate rows" - but that tie-breaker was only ever added when
+    the caller supplied NO order= of its own. Both real callers that DO
+    supply their own order DO so on a column with no uniqueness guarantee at
+    all - find_due_person_credentials()'s `people?...&order=name.asc` (two
+    different people, or the same person at two different companies, can
+    share a name) and find_due_tasks()'s `tender_tasks?...&order=due_date.asc`
+    (many tasks very plausibly share the identical due date). PostgREST/
+    Postgres give no guarantee that tied rows come back in the same relative
+    order across two SEPARATE query executions (no secondary sort key means
+    the tie order is whatever the query planner happens to pick each time) -
+    the textbook reason every offset-pagination guide insists on a unique
+    tie-breaker column. The existing CappedServer test double above never
+    modelled a tie at all (its fake rows are already unique by `id`), so it
+    could not have caught this.
+
+    Reproduced directly: a fake server with 5 rows that all share the
+    identical sort key, whose SECOND page response (simulating a second,
+    separate query execution with no tie-breaker) returns the tied rows in a
+    genuinely different relative order than the first page did - the exact,
+    legitimate PostgREST/Postgres behaviour absent a secondary sort key."""
+    print("supabase_request(): paging stays stable even when the caller's own order column has ties (Finding 511)")
+
+    class TiedServer:
+        """3 rows share due_date 'D' (ids 1/2/3), 2 share due_date 'E' (ids
+        4/5). Page size 2. Reads the real `order=` the caller actually sent:
+        when it ends in the ',id.asc' tie-breaker, responds like a real
+        server WOULD under a unique secondary sort - stable, correctly
+        offset/limited every time. When it doesn't (today's unfixed
+        behaviour), responds like a real server is free to under ties with
+        NO secondary key - the 3 'D'-tied rows come back in a genuinely
+        different relative order on alternating calls, exactly the
+        legitimate PostgREST/Postgres behaviour this models."""
+        ROWS = {1: "D", 2: "D", 3: "D", 4: "E", 5: "E"}
+        TIE_ORDERS = [[1, 2, 3], [3, 1, 2]]
+
+        def __init__(self):
+            self.calls = 0
+
+        def fetch(self, url, service_key, path):
+            _, _, qs = path.partition("?")
+            params = dict(urllib.parse.parse_qsl(qs))
+            offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+            order = params.get("order", "")
+            if order.endswith(",id.asc"):
+                ordered = [1, 2, 3, 4, 5]  # a real secondary key makes this deterministic every time
+            else:
+                ordered = self.TIE_ORDERS[self.calls % 2] + [4, 5]
+            self.calls += 1
+            return [{"id": i, "due_date": self.ROWS[i]} for i in ordered[offset:offset + limit]]
+
+    real_fetch, real_page = wd._fetch_page, wd.PAGE
+    server = TiedServer()
+    wd._fetch_page, wd.PAGE = server.fetch, 2
+    try:
+        rows = wd.supabase_request("https://example.test", "key", "tender_tasks?select=id,due_date&order=due_date.asc")
+    finally:
+        wd._fetch_page, wd.PAGE = real_fetch, real_page
+    ids = [r["id"] for r in rows]
+    check(sorted(set(ids)) == [1, 2, 3, 4, 5] and len(ids) == len(set(ids)),
+          f"every real row is returned exactly once, none skipped or duplicated across the page boundary (got ids {ids})")
 
 
 def closing_day_handles_a_sast_tagged_offset_correctly():
@@ -378,6 +444,7 @@ def find_person_credentials_lapsing_before_closing_scopes_to_the_real_assignment
 
 def main():
     supabase_request_pages_past_the_1000_row_server_cap()  # before supabase_request itself is replaced below
+    supabase_request_paging_is_stable_even_when_the_callers_own_order_column_has_ties()
     wd.supabase_request = fake_request
     days_until_malformed_inputs()
     closing_day_handles_a_sast_tagged_offset_correctly()
