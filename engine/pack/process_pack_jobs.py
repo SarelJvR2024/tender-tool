@@ -192,7 +192,24 @@ class SupabaseRest:
                  # unbounded, cross-tenant, growing tables. Finding 252.
 
     def select(self, table, filters=None, order=None):
-        parts = ["select=*"] + self._filters(filters) + ([f"order={order}"] if order else [])
+        # QA pass, 2026-11-26 (Finding 514 - the same bug class Findings 511/
+        # 513 already fixed in their own area's equivalent helpers, flagged
+        # explicitly by Finding 513's own write-up as worth re-checking here):
+        # no tie-breaker was appended when a caller passed its own `order`,
+        # and no order at all was added when a caller passed none - relying
+        # on Postgres's own explicitly-undefined row order across repeated
+        # paged executions. Real callers pass genuinely non-unique columns
+        # (line ~1257's own `pack_generation_jobs` job-claim read,
+        # `order="requested_at.asc"` - multiple jobs enqueued in the same
+        # bulk request/transaction can share an identical timestamp; several
+        # more below on `created_at`/`end_date`/`completed_at`). Reproduced
+        # directly against the real, unmodified function: a tied
+        # `requested_at.asc` paged across a boundary returned job rows
+        # `[1, 2, 2, 4, 5]` - job 3 silently skipped (never processed, a
+        # company's pack never generated), job 2 claimed twice. `id.asc` is
+        # now always the tie-breaker, matching Findings 511/513's own fix.
+        order = f"{order},id.asc" if order else "id.asc"
+        parts = ["select=*"] + self._filters(filters) + [f"order={order}"]
         out, offset = [], 0
         while True:
             page = json.loads(self._req(

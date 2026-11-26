@@ -264,6 +264,60 @@ def test_supabase_rest_select_paginates_past_postgrests_own_db_max_rows_cap():
           [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
+def test_supabase_rest_select_paging_is_stable_even_when_the_callers_own_order_column_has_ties():
+    """Finding 514 (QA pass, 2026-11-26): the same bug class Findings 511/513
+    already fixed in their own area's equivalent shared helpers, flagged
+    explicitly by Finding 513's own write-up as worth re-checking in
+    engine/pack/. SupabaseRest.select() appended no tie-breaker when a caller
+    passed its own `order`, and added no order at all when a caller passed
+    none - relying on Postgres's own explicitly-undefined row order across
+    repeated paged executions. Real callers pass genuinely non-unique
+    columns - most importantly the real job-claim read at the bottom of this
+    file, `client.select("pack_generation_jobs", {"status": "requested", ...},
+    order="requested_at.asc")`: multiple jobs enqueued in the same bulk
+    request/transaction can share an identical timestamp. The existing
+    pagination test above never modelled a tie at all (its fake rows are
+    already unique by `id` regardless of order), so it could not have caught
+    this - same root cause as Findings 511/513's own test gaps.
+
+    Reproduced directly: a fake server that reads the real `order` the
+    client actually sent - stable (by id) once the `,id.asc` tie-breaker is
+    present, but free to reorder a tied group differently on each separate
+    call when it isn't, the exact legitimate PostgREST/Postgres behaviour
+    absent a secondary sort key."""
+    print("SupabaseRest.select(): paging stays stable even when the caller's own order column has ties (Finding 514)")
+
+    class TiedServer:
+        """3 rows share requested_at 'D' (ids 1/2/3), 2 share 'E' (ids 4/5)."""
+        ROWS = {1: "D", 2: "D", 3: "D", 4: "E", 5: "E"}
+        TIE_ORDERS = [[1, 2, 3], [3, 1, 2]]
+
+        def __init__(self):
+            self.calls = 0
+
+        def req(self, method, path, body=None, headers=None, raw=None):
+            qs = path.split("?", 1)[1] if "?" in path else ""
+            params = dict(urllib.parse.parse_qsl(qs))
+            offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+            order = params.get("order", "")
+            if order.endswith(",id.asc"):
+                ordered = [1, 2, 3, 4, 5]  # a real secondary key makes this deterministic every time
+            else:
+                ordered = self.TIE_ORDERS[self.calls % 2] + [4, 5]
+            self.calls += 1
+            rows = [{"id": i, "requested_at": self.ROWS[i]} for i in ordered[offset:offset + limit]]
+            return json.dumps(rows).encode()
+
+    client = ppj.SupabaseRest("https://example.test", "k")
+    server = TiedServer()
+    client._req = server.req
+    client.PAGE = 2
+    rows = client.select("pack_generation_jobs", {"status": "requested"}, order="requested_at.asc")
+    ids = [r["id"] for r in rows]
+    check("every real row is returned exactly once, none skipped or duplicated across the page boundary",
+          sorted(set(ids)) == [1, 2, 3, 4, 5] and len(ids) == len(set(ids)), f"got ids {ids}")
+
+
 def test_process_job_sends_the_pack_ready_email_on_success():
     print("process_job(): on a successful SANRAL pack build, send_pack_ready_email() is now "
           "called with (client, job, page_count, APP_URL) - the Finding this pass fixed: this "
@@ -821,6 +875,7 @@ def main():
     test_process_pending_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
     test_supabase_rest_rpc_posts_to_rpc_endpoint_and_parses_the_response()
     test_supabase_rest_select_paginates_past_postgrests_own_db_max_rows_cap()
+    test_supabase_rest_select_paging_is_stable_even_when_the_callers_own_order_column_has_ties()
     test_process_job_sends_the_pack_ready_email_on_success()
     test_process_job_writes_field_provenance_to_the_db_on_success()
     test_process_job_skips_the_field_provenance_upsert_when_the_file_is_absent()
