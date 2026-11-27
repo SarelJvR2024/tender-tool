@@ -339,6 +339,61 @@ def test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap():
           [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
+def test_supabase_request_all_paging_is_stable_even_when_the_callers_own_order_column_has_ties():
+    """supabase_request_all() took the caller's own raw path string, order=
+    included, straight through with no tie-breaker of its own - same gap
+    already fixed in Findings 511/513/514/515, each its own independent
+    helper in a different engine area. This file's own real job-claim read,
+    poll_once()'s `supabase_request_all(url, key, "generated_cvs?status=eq.
+    requested&select=*&order=requested_at.asc")`, is the direct CV-generation
+    sibling of Finding 515's general-pack job-claim read (and Finding 514's
+    SANRAL one) - multiple generated_cvs rows requested in the same bulk
+    action can share an identical requested_at. The existing pagination test
+    above never modelled a tie at all (its fake rows are already unique by
+    id regardless of order), so it could not have caught this - same root
+    cause as Findings 511/513/514/515's own test gaps.
+
+    Reproduced directly: a fake single-page fetcher that reads the real
+    order the caller actually sent - stable (by id) once the ,id.asc
+    tie-breaker is present, but free to reorder a tied group differently on
+    each separate call when it isn't, the exact legitimate PostgREST/
+    Postgres behaviour absent a secondary sort key."""
+    print("supabase_request_all(): paging stays stable even when the caller's own order column has ties (Finding 516)")
+
+    class TiedServer:
+        """3 rows share requested_at 'D' (ids 1/2/3), 2 share 'E' (ids 4/5)."""
+        ROWS = {1: "D", 2: "D", 3: "D", 4: "E", 5: "E"}
+        TIE_ORDERS = [[1, 2, 3], [3, 1, 2]]
+
+        def __init__(self):
+            self.calls = 0
+
+        def req(self, url, key, method, path, body=None):
+            qs = path.split("?", 1)[1] if "?" in path else ""
+            params = dict(urllib.parse.parse_qsl(qs))
+            offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+            order = params.get("order", "")
+            if order.endswith(",id.asc"):
+                ordered = [1, 2, 3, 4, 5]  # a real secondary key makes this deterministic every time
+            else:
+                ordered = self.TIE_ORDERS[self.calls % 2] + [4, 5]
+            self.calls += 1
+            return [{"id": i, "requested_at": self.ROWS[i]} for i in ordered[offset:offset + limit]]
+
+    server = TiedServer()
+    original, original_page = pcj.supabase_request, pcj.PAGE
+    pcj.supabase_request = server.req
+    pcj.PAGE = 2
+    try:
+        rows = pcj.supabase_request_all("https://example.test", "k",
+                                         "generated_cvs?status=eq.requested&select=*&order=requested_at.asc")
+    finally:
+        pcj.supabase_request, pcj.PAGE = original, original_page
+    ids = [r["id"] for r in rows]
+    check("every real row is returned exactly once, none skipped or duplicated across the page boundary",
+          sorted(set(ids)) == [1, 2, 3, 4, 5] and len(ids) == len(set(ids)), f"got ids {ids}")
+
+
 class FakeDoc:
     """Stands in for the real python-docx Document build_sanral_keyperson()
     returns - just needs a working .save()."""
@@ -418,6 +473,7 @@ test_adapt_person_row_carries_sacpcmp_date_through()
 test_adapt_person_row_carries_ecsa_and_sacpcmp_expiry_through()
 test_poll_once_does_not_abort_the_whole_pass_when_one_jobs_claim_fails()
 test_supabase_request_all_paginates_past_postgrests_own_db_max_rows_cap()
+test_supabase_request_all_paging_is_stable_even_when_the_callers_own_order_column_has_ties()
 test_process_job_cleans_up_storage_when_a_later_upload_fails()
 
 print(f"\n{len(FAILS)} failure(s)")

@@ -130,11 +130,21 @@ PAGE = 1000  # PostgREST's own db-max-rows cap on a response with no explicit
 def supabase_request_all(url, service_key, path):
     """GET every page of `path` past PostgREST's own db-max-rows cap - same
     limit=&offset= loop as company_profiles.RestClient.select() / the
-    sibling bridges' Supabase.select()/SupabaseRest.select() (Finding 252)."""
-    sep = "&" if "?" in path else "?"
+    sibling bridges' Supabase.select()/SupabaseRest.select() (Finding 252).
+    Finding 516: always appends an id.asc tie-breaker (onto the caller's own
+    order, or alone if none was given) - without one, two paginated requests
+    across a tied page boundary can see the tied rows in a different
+    relative order and silently skip/duplicate one, the same gap already
+    fixed in watch_deadlines.py (511), company_profiles.py (513),
+    process_pack_jobs.py (514) and process_general_jobs.py (515)."""
+    if "order=" in path:
+        head, _, query = path.partition("?")
+        path = head + "?" + "&".join(p + ",id.asc" if p.startswith("order=") else p for p in query.split("&"))
+    else:
+        path = f"{path}{'&' if '?' in path else '?'}order=id.asc"
     out, offset = [], 0
     while True:
-        page = supabase_request(url, service_key, "GET", f"{path}{sep}limit={PAGE}&offset={offset}")
+        page = supabase_request(url, service_key, "GET", f"{path}&limit={PAGE}&offset={offset}")
         out += page
         if len(page) < PAGE:
             return out
