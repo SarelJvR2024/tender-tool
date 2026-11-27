@@ -428,6 +428,60 @@ def test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap():
           [r["id"] for r in got] == list(range(2500)), [r["id"] for r in got[:3]] + ["..."])
 
 
+def test_supabase_select_paging_is_stable_even_when_the_callers_own_order_column_has_ties():
+    """select() appends its own order= straight through with no tie-breaker
+    of its own (same gap already fixed in Findings 511/513/514, each its own
+    independent helper in a different engine area) - every real caller here
+    orders by a column real rows can genuinely share: requested_at/
+    completion_date, the shared pack_generation_jobs table's own general-
+    engine job-claim read included (`client.select(JOBS_TABLE, {"engine":
+    ENGINE, "status": "requested"}, order="requested_at.asc")`, this file's
+    own sibling of Finding 514's SANRAL job-claim read) - a tie there means a
+    real company's general pack is silently never built. Multiple jobs
+    enqueued in the same bulk request/transaction can share an identical
+    timestamp. The existing pagination test above never modelled a tie at
+    all (its fake rows are already unique by id regardless of order), so it
+    could not have caught this - same root cause as Findings 511/513/514's
+    own test gaps.
+
+    Reproduced directly: a fake server that reads the real order the client
+    actually sent - stable (by id) once the ,id.asc tie-breaker is present,
+    but free to reorder a tied group differently on each separate call when
+    it isn't, the exact legitimate PostgREST/Postgres behaviour absent a
+    secondary sort key."""
+    print("Supabase.select(): paging stays stable even when the caller's own order column has ties (Finding 515)")
+
+    class TiedServer:
+        """3 rows share requested_at 'D' (ids 1/2/3), 2 share 'E' (ids 4/5)."""
+        ROWS = {1: "D", 2: "D", 3: "D", 4: "E", 5: "E"}
+        TIE_ORDERS = [[1, 2, 3], [3, 1, 2]]
+
+        def __init__(self):
+            self.calls = 0
+
+        def req(self, method, path, body=None, headers=None, raw=None):
+            qs = path.split("?", 1)[1] if "?" in path else ""
+            params = dict(urllib.parse.parse_qsl(qs))
+            offset, limit = int(params.get("offset", 0)), int(params.get("limit", 1000))
+            order = params.get("order", "")
+            if order.endswith(",id.asc"):
+                ordered = [1, 2, 3, 4, 5]  # a real secondary key makes this deterministic every time
+            else:
+                ordered = self.TIE_ORDERS[self.calls % 2] + [4, 5]
+            self.calls += 1
+            rows = [{"id": i, "requested_at": self.ROWS[i]} for i in ordered[offset:offset + limit]]
+            return json.dumps(rows).encode()
+
+    client = pgj.Supabase("https://example.test", "k")
+    server = TiedServer()
+    client._req = server.req
+    client.PAGE = 2
+    rows = client.select(pgj.JOBS_TABLE, {"engine": pgj.ENGINE, "status": "requested"}, order="requested_at.asc")
+    ids = [r["id"] for r in rows]
+    check("every real row is returned exactly once, none skipped or duplicated across the page boundary",
+          sorted(set(ids)) == [1, 2, 3, 4, 5] and len(ids) == len(set(ids)), f"got ids {ids}")
+
+
 class UploadFailsOnSecondFile(FakeClient):
     """Records every upload()/remove() call in order; raises on the one
     upload whose remote path ends with 'guide.docx' (the second file
@@ -591,6 +645,7 @@ def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_fail_stale_jobs_survives_a_write_failure_marking_one_stale_job_failed()
     test_supabase_select_paginates_past_postgrests_own_db_max_rows_cap()
+    test_supabase_select_paging_is_stable_even_when_the_callers_own_order_column_has_ties()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
     test_within_real_closing_date_uses_its_own_sast_day_not_a_naive_utc_slice()
     test_within_malformed_completion_date_alert_carries_company_id()
