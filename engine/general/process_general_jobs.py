@@ -163,7 +163,13 @@ class Supabase:
                  # engine/ that already paginates this exact way). Finding 252.
 
     def select(self, table, filters=None, order=None):
-        extra = ["select=*"] + ([f"order={order}"] if order else [])
+        order = f"{order},id.asc" if order else "id.asc"  # Finding 515: without an
+        # unconditional, unique tie-breaker, two paginated requests across a
+        # tied page boundary can see the tied rows in a different relative
+        # order and silently skip/duplicate one - same gap already fixed in
+        # engine/compliance/watch_deadlines.py (511), engine/discovery/
+        # company_profiles.py (513) and engine/pack/process_pack_jobs.py (514)
+        extra = ["select=*", f"order={order}"]
         base = self._q(filters, extra)  # always "?select=*..." - extra is never empty
         out, offset = [], 0
         while True:
