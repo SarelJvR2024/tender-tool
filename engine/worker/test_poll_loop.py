@@ -237,6 +237,37 @@ def test_fake_supabase_honours_order_requested_at_asc():
         fake.stop()
 
 
+def test_fake_supabase_honours_a_compound_order_tie_breaker():
+    # Finding 517 (worker/job-queue rotation, 13th lap): _parse_order() only
+    # ever read up to the FIRST "." in the order value, so a compound order
+    # like "requested_at.asc,id.asc" - exactly what process_cv_jobs.
+    # supabase_request_all()'s real caller now always sends, since Finding
+    # 516 (this same window) added an unconditional id.asc tie-breaker to
+    # it - had its whole ",id.asc" tail swallowed into the "direction"
+    # string (which can never equal "desc"), so the secondary tie-breaker
+    # column was silently dropped rather than applied. The test above never
+    # caught this: it hand-types a bare "order=requested_at.asc" with no
+    # tie-breaker and its two rows have different requested_at values
+    # anyway, so no tie is ever modelled.
+    #
+    # Two rows share the SAME requested_at (a genuine tie), inserted id "z"
+    # FIRST then id "a" - deliberately the reverse of id-ascending order, so
+    # only a fix that actually applies the ,id.asc tie-breaker (not pure
+    # insertion order, which this fake server fell back to before this fix)
+    # can pass this.
+    import process_cv_jobs
+    fake = FakeSupabase().start()
+    try:
+        fake.insert("generated_cvs", job("z", requested_at="2026-01-01T00:00:00Z"))
+        fake.insert("generated_cvs", job("a", requested_at="2026-01-01T00:00:00Z"))
+        rows = process_cv_jobs.supabase_request_all(
+            fake.url, "fake-key", "generated_cvs?status=eq.requested&select=*&order=requested_at.asc,id.asc")
+        assert [r["id"] for r in rows] == ["a", "z"], [r["id"] for r in rows]
+        print("PASS fake_supabase honours a compound order=col.asc,id.asc tie-breaker, not just its first key")
+    finally:
+        fake.stop()
+
+
 def test_runner_drives_bridges_and_stops_on_sigterm():
     fake = FakeSupabase().start()
     try:
@@ -454,6 +485,7 @@ if __name__ == "__main__":
     test_max_runtime_uses_an_injectable_clock_not_the_real_one()
     test_claim_is_atomic()
     test_fake_supabase_honours_order_requested_at_asc()
+    test_fake_supabase_honours_a_compound_order_tie_breaker()
     test_cv_bridge_loop_end_to_end()
     test_runner_drives_bridges_and_stops_on_sigterm()
     test_script_flag_is_additive()
