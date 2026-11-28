@@ -191,6 +191,28 @@ Sarel explicitly ruled out pasting plaintext Clevapp credentials into chat. His 
 
 ---
 
+## This pass (2026-11-28, standing QA/robustness review): clean sweep - worker/job-queue rotation (14th lap), no new reachable bug found
+
+Picked worker/job-queue per the live rotation tally (`mcp__github__list_pull_requests`, re-checked immediately before starting): compliance/reminders had just pulled ahead to 14 laps via Finding 519's own PR #363; every other area (notify, discovery, SANRAL pack, non-SANRAL pack, CV/intake) sat at 13; worker/job-queue's own PR #357 (Finding 517) was the oldest-`created_at` among the 13-lap group, so it was picked next. `git fetch origin main` before starting and again immediately before pushing this commit - unchanged both times at `d85efd2753c6831df11e0cca157c41325d144059`. Confirmed the "Resume here" handover (sibling session's Clevapp pre-demo walkthrough, blocked on Sarel's own Supabase credential action) unchanged and untouched.
+
+Read `engine/worker/poll_loop.py` end to end (135 lines) looking for anything beyond the already-fixed Findings 507 (`max_cycles<=0` ran one real cycle before checking) and 512 (the same gap for `max_runtime`), both still on their own unmerged branches. Traced the `max_runtime` check's own arithmetic, the signal-handler main-thread guard, and the stop-condition ordering (signal vs. `max_cycles` vs. `max_runtime` vs. the final `sleep`) against several adversarial sequences (a signal arriving mid-sleep, `max_cycles=1` racing a slow first poll, `max_runtime` expiring exactly on an interval boundary) - all correct, nothing new.
+
+Pivoted to a different angle: every real caller of `poll_forever()`'s own `alert_source` kwarg (the parameter that routes an uncaught `poll_once()` exception into `system_alerts`, the one real failure-notification channel for a bridge's own standalone `--loop` mode - rather than being silently swallowed by `poll_forever()`'s generic per-cycle `except Exception` with only a `print()`). `grep -rn "poll_forever(" engine/ --include="*.py"` (excluding test files) to find every real call site, this time reading each one's FULL surrounding code rather than trusting a single grep line (a truncated first-line-only grep earlier in this same investigation had briefly, wrongly, suggested `process_cv_jobs.py`/`process_pack_jobs.py` might be missing it - caught and ruled out before writing anything up, by reading the actual continuation lines). Confirmed, read in full, for every real bridge:
+
+- `engine/general/process_general_jobs.py:1041` - `alert_source="general"`.
+- `engine/cv/process_cv_jobs.py:574-576` - `alert_source="cv"`.
+- `engine/pack/process_pack_jobs.py:1307` - `alert_source="pack"`.
+- `engine/narrative/process_narrative_jobs.py:435-436` - `alert_source="narrative"` (this one carries its own in-code comment dating the fix to "QA pass, 2026-11-04" - already closed, not a fresh gap).
+- `engine/onboarding/process_onboarding_jobs.py:347-348` - `alert_source="onboarding_scan"`.
+- `engine/cv/extract_cv_fields.py:1073-1074` - `alert_source="cv_extract"`.
+- `engine/worker/run_bridges.py:282-283` - deliberately and correctly OMITS it: its own in-code comments (lines ~156, ~176) explain `BridgeRunner.run_once()` already records each bridge's own failure individually, so a second, loop-level `alert_source` here would double-alert rather than cover a real gap.
+
+Every one of the six bridges that calls `poll_forever()` directly passes its own distinct `alert_source`; the one caller that doesn't (`run_bridges.py`) has a documented, correct reason not to. No missing-`alert_source` gap exists anywhere in this rotation area as of this pass.
+
+**Conclusive clean sweep for this pass.** No new reachable bug found in `poll_loop.py` or across any of its six real production callers after full, adversarial reading (not grep-only). No Finding number consumed, nothing pushed to `main` directly.
+
+---
+
 ## This pass (2026-11-14, standing solution-architect review): Finding 483 - `savePerson()`/`saveMyDetails()` both still had no server-side check on `ecsa_expiry`/`sacpcmp_expiry` (plus `sacnasp_expiry`/`sagc_expiry` on `savePerson()`) - four real `type="date"` columns Findings 481's and 482's own loops never swept, feeding an actual generated CV document, not just a late pack-build crash
 
 `git fetch origin main` - HEAD `9a30ccf` (the worker/job-queue genuine-negative pass's own commit), matching the task brief exactly; re-confirmed unchanged again immediately before pushing, no sibling-track commit landed in between. Read this file's own top section (consolidated "Standing items" list through item 95), the two immediately-preceding write-ups (Findings 482 and 481), and `app/AGENTS.md`. Open-PR count checked live via `mcp__github__list_pull_requests` -> **89** open PRs; the two highest-numbered Finding claims among them are PR #262 (Finding 477) and PR #263 (Finding 480), exactly matching the task brief's own note - nothing claims 481 or higher. Finding-number re-check, live, twice: `grep -oE "^### Finding [0-9]+" docs/specs/QA-Edge-Case-Findings.md | grep -oE "[0-9]+" | sort -n | tail` -> highest real heading on `main` **482**. **483 confirmed next-free**, both at the start of this pass and again immediately before pushing (HEAD and PR count both unchanged either time).
