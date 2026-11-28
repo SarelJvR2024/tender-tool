@@ -703,14 +703,39 @@ def run(limit=None, all_tenders=False, fetch_documents=True, max_documents=3, lo
             "confidence": result["confidence"],
             "source_note": result["source_note"],
         })
+    tagged = 0
     for upd in tender_updates:
         tid = upd.pop("id")
         upd["tags_updated_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
-        client._req("PATCH", f"tenders?id=eq.{tid}", upd)
+        # QA pass, 2026-11-28 (Finding 521): this PATCH ran unguarded inside
+        # the loop - a single tender's write failing (a transient network
+        # blip, or the tender being deleted concurrently between the
+        # earlier SELECT and this PATCH, both real in a live, long-running
+        # batch over potentially hundreds of tenders with document/LLM
+        # work in between) raised straight out of this loop. That cost
+        # every tender's own documented-expensive work twice over: every
+        # OTHER tender still left in this loop never got PATCHed either
+        # (not just the one that failed), AND the `client.upsert(...)`
+        # call below - covering every tender's own tender_scope_records
+        # row, including ones that had already been PATCHed successfully
+        # moments earlier - never ran at all, since it only runs once this
+        # loop finishes without raising. Reproduced directly: a fake
+        # client whose second of three tenders' PATCH raised lost the
+        # third tender's tag update AND the first tender's own already-
+        # succeeded tender_scope_records write. Every OTHER per-item
+        # failure in this exact module (a bad document, a missing API
+        # key, a transient LLM problem) already degrades just that one
+        # item and keeps going - this is the one place that discipline
+        # wasn't followed.
+        try:
+            client._req("PATCH", f"tenders?id=eq.{tid}", upd)
+            tagged += 1
+        except Exception as e:
+            log(f"  tender {tid}: tag update failed, will retry next run: {type(e).__name__}: {e}")
     if scope_rows:
         client.upsert("tender_scope_records", scope_rows, "tender_id")
     confirmed = sum(1 for r in scope_rows if r["confidence"] == "document_confirmed")
-    log(f"Updated tags on {len(tender_updates)} tender(s); wrote {len(scope_rows)} tender_scope_records row(s) "
+    log(f"Updated tags on {tagged} of {len(tender_updates)} tender(s); wrote {len(scope_rows)} tender_scope_records row(s) "
         f"({confirmed} document_confirmed, {len(scope_rows) - confirmed} heuristic).")
 
 

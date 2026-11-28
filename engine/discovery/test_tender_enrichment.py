@@ -422,6 +422,79 @@ def test_run_skips_a_tender_whose_document_lookup_failed():
     check(any("SKIPPED" in m and "tb-slug" in m for m in logs), f"tb's skip must be logged plainly, got logs={logs}")
 
 
+class _FakeClientPatchFailure:
+    """Three tenders, all with a genuinely empty (no error) discovered_
+    opportunities read, so all three reach the PATCH loop at the end of
+    run(). The SECOND tender's own PATCH raises - a real, reachable shape
+    (a transient network blip, or the tender being deleted concurrently
+    between the earlier SELECT and this later PATCH in a live, long-
+    running batch)."""
+
+    def __init__(self):
+        self.patched = []
+        self.upserted = []
+        self.tenders = [
+            {"id": "ta", "slug": "ta-slug", "title": "Guarding services",
+             "description": "24-hour armed guarding and access control."},
+            {"id": "tb", "slug": "tb-slug", "title": "Road rehabilitation",
+             "description": "Rehabilitation of a provincial road."},
+            {"id": "tc", "slug": "tc-slug", "title": "ERP system",
+             "description": "Cloud-hosted ERP system including financial system."},
+        ]
+
+    def select(self, table, filters=None, order=None):
+        if table == "tenders":
+            return self.tenders
+        return []
+
+    def _req(self, method, path, body=None, prefer=None):
+        if method == "PATCH":
+            if "id=eq.tb" in path:
+                raise RuntimeError("PATCH tenders failed: 404 Not Found (tender was deleted concurrently)")
+            self.patched.append((path, body))
+        return []
+
+    def upsert(self, table, rows, on_conflict):
+        self.upserted.extend(rows)
+        return rows
+
+
+def test_run_one_tenders_patch_failure_does_not_lose_the_rest_of_the_batch():
+    """Finding 521: the per-tender tags_updated_at PATCH ran unguarded
+    inside its own loop - one tender's PATCH raising used to abort the
+    whole loop, losing every OTHER tender still left in it (not just the
+    one that failed) AND the tender_scope_records upsert for every
+    tender in this run, including ones already PATCHed successfully
+    moments earlier (that upsert only runs once the PATCH loop finishes
+    without raising). Every OTHER per-item failure in this module (a bad
+    document, a missing API key, a transient LLM problem) already
+    degrades just that one item and keeps going - this closes the one
+    place that discipline wasn't followed."""
+    fake = _FakeClientPatchFailure()
+    orig_client = te._client
+    te._client = lambda: fake
+    logs = []
+    raised = False
+    try:
+        te.run(log=logs.append, fetch_documents=False)
+    except Exception:
+        raised = True
+    finally:
+        te._client = orig_client
+
+    check(not raised, "run() must not raise just because one tender's own PATCH failed")
+    patched_ids = [p[0] for p in fake.patched]
+    check("tenders?id=eq.ta" in patched_ids, f"ta (before the failure) should still be patched, got {patched_ids}")
+    check("tenders?id=eq.tc" in patched_ids,
+          f"tc (AFTER the failing tb in the loop) should still be patched - this is the fix, got {patched_ids}")
+    check(not any("id=eq.tb" in p for p in patched_ids), "tb itself is never marked - its own PATCH genuinely failed")
+    upserted_ids = [r["tender_id"] for r in fake.upserted]
+    check(set(upserted_ids) == {"ta", "tb", "tc"},
+          f"every tender's tender_scope_records row must still be written, including tb's and the ones after it, "
+          f"got {upserted_ids}")
+    check(any("tb" in m and "tag update failed" in m for m in logs), f"tb's own failure must be logged, got logs={logs}")
+
+
 def main():
     test_cross_industry_tags()
     test_gibberish_text_tags_empty_not_wrong()
@@ -442,6 +515,7 @@ def main():
     test_tender_context_no_documents_is_not_an_error()
     test_tender_context_read_failure_is_flagged_and_logged()
     test_run_skips_a_tender_whose_document_lookup_failed()
+    test_run_one_tenders_patch_failure_does_not_lose_the_rest_of_the_batch()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
