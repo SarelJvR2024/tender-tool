@@ -232,9 +232,20 @@ def load_seen_db(client, consumer=CONSUMER):
     """The reminder seen store (0041) for one consumer, in the find_*
     functions' dict shape: {seen_key: {first_seen, kind, company_id}}.
     Returns (seen, loaded) - `loaded` is the set of keys already stored, so
-    save_seen_db() writes only the new ones."""
+    save_seen_db() writes only the new ones.
+
+    tie_breaker=None (QA pass, 2026-11-28, following up on Finding 513):
+    this table's PK is (company_id, consumer, seen_key), not id - it has
+    no id column. RestClient.select()'s own Finding 513 fix always
+    appended a `,id.asc` tie-breaker; left as the default here, this read
+    would have sent PostgREST an order naming a column this table doesn't
+    have, 400ing watch_deadlines.py's entire reminder-seen read the moment
+    that fix merged. The `consumer` filter already fixes that column to
+    one value, so the order named (company_id, seen_key) is already a
+    unique, stable tie-breaker for the filtered rows on its own."""
     seen = {}
-    for row in client.select(SEEN_TABLE, {"consumer": consumer}, order="company_id.asc,seen_key.asc"):
+    for row in client.select(SEEN_TABLE, {"consumer": consumer}, order="company_id.asc,seen_key.asc",
+                             tie_breaker=None):
         seen[row["seen_key"]] = {"first_seen": row.get("first_seen"), "kind": row.get("kind"),
                                  "company_id": row["company_id"]}
     return seen, set(seen)

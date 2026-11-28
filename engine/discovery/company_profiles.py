@@ -119,7 +119,7 @@ class RestClient:
 
     PAGE = 1000  # Supabase's PostgREST returns at most 1000 rows per request (max_rows)
 
-    def select(self, table, filters=None, order=None):
+    def select(self, table, filters=None, order=None, tie_breaker="id"):
         """filters: {column: value} -> eq; {column: [values]} -> in.(...)
         (each value double-quoted, so a contract number with a comma or a
         slash is one value - PostgREST's own quoting rule).
@@ -127,7 +127,52 @@ class RestClient:
         Every page is read (limit/offset, PAGE rows at a time): Supabase caps
         one response at 1000 rows, and a seen store read that silently
         stopped at row 1000 would re-score and re-report everything after it.
-        Pass `order` for a stable order across pages."""
+        Pass `order` for a stable order across pages.
+
+        QA pass, 2026-11-26 (Finding 513 - the same bug class Finding 511
+        already fixed in watch_deadlines.supabase_request()): no `order` at
+        all left pagination relying on Postgres's own default row order,
+        which is explicitly undefined/unstable across repeated query
+        executions with no ORDER BY - worse than a non-unique one. And when
+        a caller DID pass an `order` of its own, it was used verbatim with
+        no tie-breaker, exactly the gap Finding 511 closed for the other
+        helper - real callers here pass genuinely non-unique columns
+        (`tender_enrichment.py`'s `order="created_at.asc"` on `tenders` -
+        many tenders discovered in the same batch run share an identical
+        timestamp; `discovery_downgrades.py`'s `order="downgraded_at.asc"`).
+        Reproduced directly against the real, unmodified function: a tied
+        `created_at.asc` paged across a boundary returned rows
+        `[1, 2, 2, 4, 5]` - row 3 skipped, row 2 duplicated. `id.asc` is now
+        the default tie-breaker: appended to the caller's own order, or used
+        alone when none was given.
+
+        `tie_breaker`: this method is shared across many different tables,
+        not all of which have an `id` column at all - found the SAME day
+        this default was added (still the same QA pass), before the first
+        version of this fix ever reached `main`: `digest_readiness_seen` and
+        `deadline_reminders_seen` (0041, PK `(company_id, ...)`-shaped, no
+        `id` column) and `discovery_seen_releases` (0038, PK
+        `(company_id, release_key)`) are each read through this exact
+        method (`daily_digest.py`'s `load_readiness_seen_db()`,
+        `watch_deadlines.py`'s `load_seen_db()`, `watch_new_tenders.py`'s
+        own seen-store read) - blindly appending `,id.asc` for these would
+        have sent PostgREST an `order=` naming a column that does not exist
+        on that table, 400ing every one of those three real reads the
+        moment this fix landed, not just leaving the original tie-break gap
+        half-closed. `taxonomy.py`'s two `discipline_categories` reads
+        (`order="sort_order.asc"`/`"sort_order.desc"`) are the same problem
+        with a different real fix available: that table's own PK is
+        `slug` (text), not `id` - so those two callers pass
+        `tie_breaker="slug"` instead of disabling it outright. Passing
+        `tie_breaker=None` skips the forced append entirely - for a caller
+        whose own `order` already names a column set that is unique on its
+        own (typically the table's full composite PK, as for the three
+        `company_id`-scoped seen-store reads above) there is nothing left
+        to break the tie, so forcing one in would only risk referencing a
+        column the table doesn't have. Every OTHER real caller of this
+        method passes no `tie_breaker` at all and keeps the original,
+        unchanged `id.asc` default - this is additive, not a behaviour
+        change for any table that actually has an `id` column."""
         import urllib.parse
 
         def cond(k, v):
@@ -137,7 +182,9 @@ class RestClient:
             return f"{k}=eq.{urllib.parse.quote(str(v), safe='')}"
         parts = [cond(k, v) for k, v in (filters or {}).items()]
         parts.append("select=*")
-        if order:
+        if tie_breaker:
+            parts.append(f"order={order},{tie_breaker}.asc" if order else f"order={tie_breaker}.asc")
+        elif order:
             parts.append(f"order={order}")
         out, offset = [], 0
         while True:

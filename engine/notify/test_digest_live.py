@@ -133,7 +133,7 @@ class MemClient:
     over ROWS - including the 0041 seen-store tables the digest now keeps in
     the database instead of state/seen_digest_readiness.json."""
 
-    def select(self, table, filters=None, order=None):
+    def select(self, table, filters=None, order=None, tie_breaker=None):
         rows = [dict(r) for r in ROWS.get(table, [])]
         for k, v in (filters or {}).items():
             rows = [r for r in rows if r.get(k) == v]

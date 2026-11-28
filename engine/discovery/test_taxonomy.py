@@ -150,7 +150,7 @@ def part1():
         def __init__(self, rows, fail=False):
             self.rows, self.fail = rows, fail
 
-        def select(self, table, filters=None, order=None):
+        def select(self, table, filters=None, order=None, tie_breaker=None):
             if self.fail:
                 raise RuntimeError("relation \"discipline_categories\" does not exist")
             assert table == "discipline_categories"
@@ -288,7 +288,7 @@ def part1_regression():
     # from the company's own tagged Experience Library rows
     # (company_profiles.profile_from_company_rows), then watch_new_tenders.fan_out().
     class Rows:
-        def select(self, table, filters=None, order=None):
+        def select(self, table, filters=None, order=None, tie_breaker=None):
             return {"companies": [{"id": "c1", "legal_name": "Legacy Tags Co", "registered_address": "Gauteng"}],
                     "experience_items": [{"tagged_at": "2026-10-01", "disciplines": ["roads_civil"]},
                                          {"tagged_at": "2026-10-01", "disciplines": ["professional_services"]}],
@@ -358,7 +358,7 @@ def part2(psql):
         sql(f"delete from tender_packs where id = '{pid}'")
 
     class PsqlClient:
-        def select(self, table, filters=None, order=None):
+        def select(self, table, filters=None, order=None, tie_breaker=None):
             out = sql(f"select coalesce(json_agg(t order by sort_order), '[]') from {table} t").stdout
             return json.loads(out)
 
@@ -472,7 +472,7 @@ def part3(psql):
     check(r.returncode != 0 and "already approved" in r.stderr, "approving twice is refused")
 
     class PsqlClient:
-        def select(self, table, filters=None, order=None):
+        def select(self, table, filters=None, order=None, tie_breaker=None):
             return json.loads(sql(f"select coalesce(json_agg(t order by sort_order), '[]') from {table} t").stdout)
 
     live = taxonomy.load_taxonomy(PsqlClient())

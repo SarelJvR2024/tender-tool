@@ -63,7 +63,7 @@ class FakeClient:
     def __init__(self):
         self.tables = {}
 
-    def select(self, table, filters=None, order=None):
+    def select(self, table, filters=None, order=None, tie_breaker=None):
         rows = self.tables.get(table, [])
         if not filters:
             return [dict(r) for r in rows]

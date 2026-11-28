@@ -279,7 +279,17 @@ def load_taxonomy(client=None, path=SEED_PATH):
     empty: a DB error falls back to the seed, and says so in .source."""
     if client is not None:
         try:
-            db = client.select("discipline_categories", order="sort_order.asc")
+            # tie_breaker="slug" (QA pass, 2026-11-28, following up on
+            # Finding 513): this table's PK is slug (text), not id - it has
+            # no id column at all. RestClient.select()'s own Finding 513
+            # fix always appended a `,id.asc` tie-breaker; left as the
+            # default here, every live read of this table would have
+            # raised (caught by this very try/except) and silently fallen
+            # back to the seed file forever, the moment that fix merged -
+            # any edit made to the live table would never take effect
+            # again, with nothing louder than a generic "could not read"
+            # note to say why.
+            db = client.select("discipline_categories", order="sort_order.asc", tie_breaker="slug")
             if db:
                 return Taxonomy(rows_from_db(db), "discipline_categories table")
             note = "discipline_categories table is empty"
@@ -488,7 +498,10 @@ def main():
              "exclude": [k.strip() for k in args.exclude.split(",") if k.strip()],
              "etenders": [], "l2b": [], "cidb": []}
         client = _client()
-        existing = client.select("discipline_categories", order="sort_order.desc")
+        # tie_breaker="slug" - see load_taxonomy()'s own comment above for
+        # why this table (PK slug, not id) needs it (Finding 513 follow-up,
+        # QA pass, 2026-11-28).
+        existing = client.select("discipline_categories", order="sort_order.desc", tie_breaker="slug")
         if any(e["slug"] == args.slug for e in existing):
             raise SystemExit(f"{args.slug} already exists")
         if args.parent and not any(e["slug"] == args.parent for e in existing):
