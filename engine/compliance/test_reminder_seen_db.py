@@ -88,7 +88,7 @@ class MemClient:
     def __init__(self):
         self.tables = {}
 
-    def select(self, table, filters=None, order=None):
+    def select(self, table, filters=None, order=None, tie_breaker=None):
         return [dict(r) for r in self.tables.get(table, [])
                 if all(r.get(k) == v for k, v in (filters or {}).items())]
 
