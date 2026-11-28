@@ -224,7 +224,7 @@ class MemClient:
     def _match(row, filters):
         return all(str(row.get(k)) == str(v) for k, v in (filters or {}).items())
 
-    def select(self, table, filters=None, order=None):
+    def select(self, table, filters=None, order=None, tie_breaker=None):
         return [copy.deepcopy(r) for r in self.rows(table) if self._match(r, filters)]
 
     def insert(self, table, row):

@@ -229,9 +229,20 @@ def classify_text(text, keywords):
 def load_readiness_seen_db(client):
     """digest_readiness_seen (0041) in find_readiness_changes()'s shape:
     {"prov::<field_provenance id>": status}. Returns (seen, loaded) -
-    `loaded` the same mapping as stored, so only changes are written."""
+    `loaded` the same mapping as stored, so only changes are written.
+
+    tie_breaker=None (QA pass, 2026-11-28, following up on Finding 513):
+    this table's PK is (company_id, field_provenance_id), not id - it has
+    no id column at all. RestClient.select()'s own Finding 513 fix always
+    appended a `,id.asc` tie-breaker; left as the default here, this read
+    would have sent PostgREST an order naming a column this table doesn't
+    have, 400ing every readiness-changes digest section the moment that
+    fix merged. The order already named is the table's full composite PK,
+    so it is already a unique, stable tie-breaker on its own - nothing
+    further is needed."""
     seen = {f"prov::{r['field_provenance_id']}": r["status"]
-            for r in client.select(READINESS_TABLE, order="company_id.asc,field_provenance_id.asc")}
+            for r in client.select(READINESS_TABLE, order="company_id.asc,field_provenance_id.asc",
+                                   tie_breaker=None)}
     return seen, dict(seen)
 
 

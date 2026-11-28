@@ -177,11 +177,22 @@ def load_seen_db(client, releases):
     Only the releases in this run's window are read - the table grows with
     every run, the window doesn't. Returns (seen, loaded) where `loaded` maps
     each stored (release_key, company_id) pair to its stored (verdict,
-    profile_fingerprint), so save_seen_db() writes only new or changed rows."""
+    profile_fingerprint), so save_seen_db() writes only new or changed rows.
+
+    tie_breaker=None (QA pass, 2026-11-28, following up on Finding 513):
+    this table's PK is (company_id, release_key), not id - it has no id
+    column at all. RestClient.select()'s own Finding 513 fix always
+    appended a `,id.asc` tie-breaker; left as the default here, this read
+    would have sent PostgREST an order naming a column this table doesn't
+    have, 400ing every discovery watch run the moment that fix merged.
+    The order named is already this table's full composite PK, so it is
+    already a unique, stable tie-breaker across any subset of rows on its
+    own, whatever the filter."""
     keys = sorted({k for k in (release_key(r) for r in releases) if k})
     seen, loaded = {}, {}
     for chunk in _chunks(keys):
-        for row in client.select(SEEN_TABLE, {"release_key": chunk}, order="company_id.asc,release_key.asc"):
+        for row in client.select(SEEN_TABLE, {"release_key": chunk}, order="company_id.asc,release_key.asc",
+                                 tie_breaker=None):
             k = row["release_key"]
             e = seen.setdefault(k, {"first_seen": row.get("first_seen"), "ocid": row.get("ocid"),
                                     "contract_number": row.get("contract_number"), "title": row.get("title"),

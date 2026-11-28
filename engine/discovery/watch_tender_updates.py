@@ -371,7 +371,14 @@ def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None,
     """Re-reads one tender's source, records and classifies every document not
     known before. Returns the new tender_watched_documents rows. company_ids:
     the companies actively pursuing it (for a new briefing milestone)."""
-    state = _one(client.select("tender_watch_state", {"tender_id": tender["id"]})) or {}
+    # tie_breaker=None (QA pass, 2026-11-28, following up on Finding 513):
+    # tender_watch_state's PK is tender_id itself, not id - it has no id
+    # column. RestClient.select()'s own Finding 513 fix defaults to
+    # appending `order=id.asc` even with no caller order at all, which
+    # would have 400'd this read (and every tender's own update check with
+    # it) the moment that fix merged, regardless of this filter already
+    # narrowing to at most one row.
+    state = _one(client.select("tender_watch_state", {"tender_id": tender["id"]}, tie_breaker=None)) or {}
     known = {r["doc_key"]: r for r in client.select("tender_watched_documents", {"tender_id": tender["id"]})}
     first_look = not known and not state.get("last_found_at")
     new_state = {"tender_id": tender["id"], "last_checked_at": _now()}
@@ -504,8 +511,13 @@ def notify(client, tender, packs, docs):
     to that company before. Returns {company_id: [doc rows]} newly reported."""
     out = {}
     for p in packs:
+        # tie_breaker=None - tender_update_notifications's PK is
+        # (company_id, watched_document_id), not id - see pending_digest_
+        # updates()'s own comment below for why Finding 513's default
+        # would have 400'd this read too.
         already = {n["watched_document_id"] for n in client.select("tender_update_notifications",
-                                                                   {"company_id": p["company_id"], "tender_id": tender["id"]})}
+                                                                   {"company_id": p["company_id"], "tender_id": tender["id"]},
+                                                                   tie_breaker=None)}
         fresh = [d for d in docs if not d.get("baseline") and d["id"] not in already]
         if not fresh:
             continue
@@ -601,7 +613,14 @@ def run(client, today=None, fetch_ocds_day=None, fetch_sanral=None, fetch_doc=No
 
 def pending_digest_updates(client):
     out = []
-    for n in client.select("tender_update_notifications"):
+    # tie_breaker=None (QA pass, 2026-11-28, following up on Finding 513):
+    # tender_update_notifications's PK is (company_id, watched_document_id),
+    # not id - it has no id column. RestClient.select()'s own Finding 513
+    # fix defaults to appending `order=id.asc` even with no caller order at
+    # all, which would have 400'd this read - and with it, the daily
+    # digest's entire tender_updates section, for every company, every run
+    # - the moment that fix merged.
+    for n in client.select("tender_update_notifications", tie_breaker=None):
         if n.get("digested_at"):
             continue
         doc = _one(client.select("tender_watched_documents", {"id": n["watched_document_id"]}))
